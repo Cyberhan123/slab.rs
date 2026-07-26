@@ -9,9 +9,11 @@
 //! Both services hold a cheap clone of the shared [`AgentCore`]; they do not
 //! wrap each other.
 
+pub mod compact;
 pub mod harness;
 pub mod response;
 
+pub use compact::{SummarizingCompactPort, maybe_compact_messages};
 pub use harness::HarnessService;
 pub use response::ResponseService;
 
@@ -19,6 +21,7 @@ use std::sync::Arc;
 
 use dashmap::DashSet;
 use slab_agent::AgentRuntime;
+use slab_agent::CompactPort;
 use slab_agent::config::AgentConfig;
 use slab_agent::error::AgentError;
 use slab_agent::port::{AgentStorePort, ThreadMessageRecord, ThreadSnapshot};
@@ -41,6 +44,11 @@ pub(crate) struct AgentCore {
     runtime: AgentRuntime,
     store: Arc<dyn AgentStorePort>,
     events: Arc<AgentEventHub>,
+    /// Shared compaction policy used by the harness turn loop (via
+    /// `AgentControl`), the manual `thread/compact/start` op, and the HTTP
+    /// chat/responses paths. Same `Arc` instance as the one wired into
+    /// `AgentControl` so all paths compact identically.
+    compact: Arc<dyn CompactPort>,
     /// Thread ids that already have a turn-item persistence observer running.
     /// Guards `spawn_turn_item_persistence` to one observer per thread.
     turn_item_observers: Arc<DashSet<String>>,
@@ -60,12 +68,17 @@ impl AgentCore {
         runtime: AgentRuntime,
         store: Arc<dyn AgentStorePort>,
         events: Arc<AgentEventHub>,
+        compact: Arc<dyn CompactPort>,
     ) -> Self {
-        Self { runtime, store, events, turn_item_observers: Arc::new(DashSet::new()) }
+        Self { runtime, store, events, compact, turn_item_observers: Arc::new(DashSet::new()) }
     }
 
     pub(crate) fn runtime(&self) -> AgentRuntime {
         self.runtime.clone()
+    }
+
+    pub(crate) fn compact(&self) -> &Arc<dyn CompactPort> {
+        &self.compact
     }
 
     pub(crate) fn store(&self) -> &Arc<dyn AgentStorePort> {

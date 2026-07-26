@@ -58,6 +58,7 @@ impl HarnessHost {
         router.on(method::SHUTDOWN, transform::thread_op(body::shutdown));
         router.on(method::THREAD_ARCHIVE, transform::thread_op(body::thread_archive));
         router.on(method::THREAD_ROLLBACK, transform::thread_op(body::thread_rollback));
+        router.on(method::THREAD_COMPACT_START, transform::thread_op(body::thread_compact_start));
         // establish_op: bind + fan-out centrally
         router.on_erased(method::THREAD_FORK, transform::establish_op(body::thread_fork));
         router.on_erased(method::THREAD_RESUME, transform::establish_op(body::thread_resume));

@@ -31,6 +31,8 @@ import type {
   SkillsListResult,
   ThreadArchiveParams,
   ThreadArchiveResult,
+  ThreadCompactStartParams,
+  ThreadCompactStartResult,
   ThreadForkParams,
   ThreadForkResult,
   ThreadListParams,
@@ -303,6 +305,10 @@ export class HarnessClient {
 
   threadRollback(params: ThreadRollbackParams): Promise<ThreadRollbackResult> {
     return this.sendRequest(HARNESS_METHOD.THREAD_ROLLBACK, params)
+  }
+
+  threadCompactStart(params: ThreadCompactStartParams): Promise<ThreadCompactStartResult> {
+    return this.sendRequest(HARNESS_METHOD.THREAD_COMPACT_START, params)
   }
 
   threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResult> {

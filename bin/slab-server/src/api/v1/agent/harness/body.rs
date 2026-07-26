@@ -15,11 +15,12 @@ use slab_app_core::domain::services::ModelLoadProgress;
 use slab_cloud_provider::default_models_for_provider;
 use slab_proto::harness::messages::{
     ApprovalPolicy, ApprovalResolveParams, ApprovalResolveResult, SandboxPolicy, ShutdownParams,
-    ShutdownResult, ThreadArchiveParams, ThreadArchiveResult, ThreadForkParams, ThreadForkResult,
-    ThreadListParams, ThreadListResult, ThreadResumeParams, ThreadResumeResult,
-    ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams, ThreadStartResult,
-    TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
-    WorkspaceMigrateParams, WorkspaceMigrateResult,
+    ShutdownResult, ThreadArchiveParams, ThreadArchiveResult, ThreadCompactStartParams,
+    ThreadCompactStartResult, ThreadForkParams, ThreadForkResult, ThreadListParams,
+    ThreadListResult, ThreadResumeParams, ThreadResumeResult, ThreadRollbackParams,
+    ThreadRollbackResult, ThreadStartParams, ThreadStartResult, TurnInterruptParams,
+    TurnInterruptResult, TurnStartParams, TurnStartResult, WorkspaceMigrateParams,
+    WorkspaceMigrateResult,
 };
 use slab_proto::harness::method;
 use slab_proto::harness::{
@@ -356,6 +357,23 @@ pub(crate) async fn thread_rollback(
         .await
         .map_err(|e| e.to_string())?;
     Ok(ThreadRollbackResult { thread: thread_from_snapshot(&snapshot) })
+}
+
+pub(crate) async fn thread_compact_start(
+    session: HarnessSession,
+    real_id: String,
+    params: ThreadCompactStartParams,
+) -> Result<ThreadCompactStartResult, String> {
+    let (snapshot, removed_messages, output_tokens) = session
+        .service()
+        .compact_thread(&real_id, params.model_override)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(ThreadCompactStartResult {
+        thread: thread_from_snapshot(&snapshot),
+        removed_messages,
+        output_tokens,
+    })
 }
 
 pub(crate) async fn thread_archive(

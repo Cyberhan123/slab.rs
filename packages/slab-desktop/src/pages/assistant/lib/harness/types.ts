@@ -55,6 +55,7 @@ export const HARNESS_METHOD = {
   THREAD_RESUME: "thread/resume",
   THREAD_FORK: "thread/fork",
   THREAD_ROLLBACK: "thread/rollback",
+  THREAD_COMPACT_START: "thread/compact/start",
   THREAD_ARCHIVE: "thread/archive",
   THREAD_LIST: "thread/list",
   TURN_START: "turn/start",
@@ -354,6 +355,18 @@ export interface ThreadRollbackParams {
 
 export interface ThreadRollbackResult {
   thread: Thread
+}
+
+export interface ThreadCompactStartParams {
+  threadId: string
+  /** Optional override of the summarization model. */
+  modelOverride?: string
+}
+
+export interface ThreadCompactStartResult {
+  thread: Thread
+  removedMessages: number
+  outputTokens: number
 }
 
 export interface ThreadArchiveParams {

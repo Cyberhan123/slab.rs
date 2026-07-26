@@ -4,8 +4,11 @@
 //! operations. Holds a cheap clone of the shared [`AgentCore`].
 
 use std::path::Path;
+use std::sync::Arc;
 
 use chrono::Utc;
+use slab_agent::CompactContext;
+use slab_agent::CompactOutcome;
 use slab_agent::config::AgentConfig;
 use slab_agent::port::{
     ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, TurnItemRecord, TurnStateRecord,
@@ -14,6 +17,7 @@ use slab_types::ConversationMessage;
 use slab_utils::session_snapshot::{
     build_migration_snapshot, project_id_from_root, write_session_snapshot_atomic,
 };
+use uuid::Uuid;
 
 use super::{AgentCore, RestoredAgentSession};
 use crate::error::AppCoreError;
@@ -59,6 +63,12 @@ impl HarnessService {
     /// reasoning / tool items).
     pub fn subscribe_event_msgs(&self, thread_id: &str) -> AgentEventMsgSubscription {
         self.0.subscribe_event_msgs(thread_id)
+    }
+
+    /// Shared compaction policy (the same `Arc` wired into the agent turn loop),
+    /// exposed so the HTTP chat/responses paths can reuse it for auto-compaction.
+    pub(crate) fn compact_port(&self) -> Arc<dyn slab_agent::CompactPort> {
+        Arc::clone(self.0.compact())
     }
 
     /// Restore the latest root thread for a chat session and its persisted messages.
@@ -178,6 +188,88 @@ impl HarnessService {
             .await
             .map_err(|e| AppCoreError::Internal(e.to_string()))?;
         self.0.get_thread_snapshot(thread_id).await
+    }
+
+    /// Compact a thread's persisted history via the shared compaction policy.
+    ///
+    /// Summarizes older turns into a single recap (falling back to a
+    /// trailing-window trim if the summarization LLM call fails) and keeps the
+    /// leading system prompt + a recent window verbatim. Persists the result by
+    /// clearing the thread's messages / turn states / turn items and re-inserting
+    /// the compacted set at sequential turn indexes — so the next `send_input`
+    /// resumes from `turn_index = compacted.len()` (see `append_input`). Refuses
+    /// while the thread is running; interrupt it first.
+    ///
+    /// Returns the refreshed snapshot, the number of removed messages, and the
+    /// estimated token count of the compacted set.
+    pub async fn compact_thread(
+        &self,
+        thread_id: &str,
+        model_override: Option<String>,
+    ) -> Result<(ThreadSnapshot, u32, u32), AppCoreError> {
+        let active = self.0.runtime().control().active_thread_ids().await;
+        if active.iter().any(|id| id == thread_id) {
+            return Err(AppCoreError::Internal(
+                "thread is running; interrupt it before compacting".to_owned(),
+            ));
+        }
+
+        let snapshot = self.0.get_thread_snapshot(thread_id).await?;
+        let config: AgentConfig = serde_json::from_str(&snapshot.config_json).map_err(|e| {
+            AppCoreError::Internal(format!("failed to deserialize agent config: {e}"))
+        })?;
+        let model_id = model_override.unwrap_or_else(|| config.model.clone());
+
+        let mut records = self.0.list_thread_messages(thread_id).await?;
+        records.sort_by(|left, right| {
+            left.turn_index
+                .cmp(&right.turn_index)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+        });
+        let messages: Vec<ConversationMessage> =
+            records.iter().map(|record| record.message.clone()).collect();
+
+        let ctx = CompactContext { model_id: &model_id, summary_instructions: None, force: true };
+        let outcome =
+            self.0.compact().compact(&messages, &ctx).await.map_err(AppCoreError::from)?;
+        let CompactOutcome::Replaced { messages: compacted, output_tokens, replaced_messages } =
+            outcome
+        else {
+            // Skipped: history was already minimal — nothing to persist.
+            return Ok((snapshot, 0, 0));
+        };
+
+        let store = self.0.store();
+        store
+            .delete_thread_messages_from(thread_id, 0)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))?;
+        store
+            .delete_turn_states_from(thread_id, 0)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))?;
+        store
+            .delete_turn_items_from(thread_id, 0)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))?;
+
+        let created_at = Utc::now().to_rfc3339();
+        for (index, message) in compacted.iter().enumerate() {
+            let record = ThreadMessageRecord {
+                id: format!("msg_{}_{}", Uuid::new_v4().simple(), index),
+                thread_id: thread_id.to_owned(),
+                turn_index: index as u32,
+                message: message.clone(),
+                created_at: created_at.clone(),
+            };
+            store
+                .insert_thread_message(&record)
+                .await
+                .map_err(|e| AppCoreError::Internal(e.to_string()))?;
+        }
+
+        let snapshot = self.0.get_thread_snapshot(thread_id).await?;
+        Ok((snapshot, replaced_messages as u32, output_tokens as u32))
     }
 
     /// Return a persisted thread snapshot by id (used by `thread/resume`).

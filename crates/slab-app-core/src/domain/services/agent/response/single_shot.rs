@@ -31,7 +31,7 @@ use crate::domain::models::{
     CommonChatParams, ConversationMessage, ConversationMessageContent, ConversationToolCall,
     LocalChatParams, TextGenerationUsage,
 };
-use crate::domain::services::agent::AgentCore;
+use crate::domain::services::agent::{AgentCore, maybe_compact_messages};
 use crate::domain::services::chat::ChatService;
 use crate::domain::services::chat::local::{LocalChatRequestConfig, build_local_runtime_request};
 use crate::domain::services::llm::cloud::{
@@ -570,7 +570,14 @@ pub(crate) async fn run_create_response(
 ) -> Result<Response, AppCoreError> {
     let config: AgentConfig = req.to_config_input().into();
     validate_create_response_request(req)?;
-    let input = resolve_input(core, req).await?;
+    let mut input = resolve_input(core, req).await?;
+    // Auto-compaction before the single LLM call. Non-fatal — log + continue.
+    if let Err(error) =
+        maybe_compact_messages(core.compact().as_ref(), &config.model, &mut input.messages, false)
+            .await
+    {
+        tracing::warn!(%error, "context compaction skipped before /responses create");
+    }
     let command = build_command(req, input.messages.clone(), &config);
     persist_input(core, &input, session_id, &config).await?;
 
@@ -826,7 +833,14 @@ pub(crate) async fn run_stream_response(
 ) -> Result<(String, super::StreamFrameStream), AppCoreError> {
     let config: AgentConfig = req.to_config_input().into();
     validate_create_response_request(req)?;
-    let input = resolve_input(core, req).await?;
+    let mut input = resolve_input(core, req).await?;
+    // Auto-compaction before the streaming LLM call. Non-fatal — log + continue.
+    if let Err(error) =
+        maybe_compact_messages(core.compact().as_ref(), &config.model, &mut input.messages, false)
+            .await
+    {
+        tracing::warn!(%error, "context compaction skipped before /responses stream");
+    }
     persist_input(core, &input, session_id, &config).await?;
 
     // Burst fallback: a request carrying tools may yield tool_calls, which only

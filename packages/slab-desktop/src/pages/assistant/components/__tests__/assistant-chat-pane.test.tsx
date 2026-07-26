@@ -97,6 +97,7 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     turnUsage: null,
     contextWindow: null,
     resolveApproval: vi.fn(),
+    onCompact: vi.fn(),
     ...overrides,
   }
 }

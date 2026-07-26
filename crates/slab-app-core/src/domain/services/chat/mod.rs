@@ -9,10 +9,12 @@ mod session;
 mod streaming;
 mod template;
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use futures::stream::BoxStream;
+use slab_agent::{CompactPort, NoopCompactPort};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -23,6 +25,7 @@ use crate::domain::models::{
     TextCompletionCommand, TextCompletionOutput, TextCompletionResult, TextGenerationResponse,
     TextResultChoice, assistant_message_from_text_response,
 };
+use crate::domain::services::agent::maybe_compact_messages;
 use crate::domain::services::llm::{
     build_estimated_usage, cloud::CloudChatRequestConfig, finish_reason_from_token_budget,
 };
@@ -49,18 +52,28 @@ enum GeneratedChatOutput {
 #[derive(Clone)]
 pub struct ChatService {
     state: ModelState,
+    /// Compaction policy. Defaults to [`NoopCompactPort`] for callers that
+    /// construct `ChatService::new` directly (including the summarizer's own
+    /// internal completion call — the structural recursion guard). The app
+    /// wiring injects the shared `SummarizingCompactPort` via [`Self::new_with_compact`].
+    compact: Arc<dyn CompactPort>,
 }
 
 impl ChatService {
     pub fn new(state: ModelState) -> Self {
-        Self { state }
+        Self { state, compact: Arc::new(NoopCompactPort::default()) }
+    }
+
+    /// Construct with an explicit compaction policy (the shared summarizing port).
+    pub fn new_with_compact(state: ModelState, compact: Arc<dyn CompactPort>) -> Self {
+        Self { state, compact }
     }
 
     pub async fn create_chat_completion(
         &self,
         command: ChatCompletionCommand,
     ) -> Result<ChatCompletionOutput, AppCoreError> {
-        create_chat_completion_with_state(self.state.clone(), command).await
+        create_chat_completion_with_state(self.state.clone(), self.compact.clone(), command).await
     }
 
     pub async fn create_text_completion(
@@ -93,6 +106,7 @@ pub(crate) async fn resolve_requested_model(
 
 async fn create_chat_completion_with_state(
     state: ModelState,
+    compact: Arc<dyn CompactPort>,
     command: ChatCompletionCommand,
 ) -> Result<ChatCompletionOutput, AppCoreError> {
     if command.common.stream && command.common.n > 1 {
@@ -144,8 +158,18 @@ async fn create_chat_completion_with_state(
         "chat completion request"
     );
 
-    let resolved_messages =
+    let mut resolved_messages =
         build_messages(&state, command.id.as_deref(), &command.messages).await?;
+    // Auto-compaction: summarize older history when token pressure exceeds the
+    // model's context window, before the LLM call. The summarizing port resolves
+    // the window itself from the model catalog. A compaction failure is
+    // non-fatal — log and continue with the uncompacted messages.
+    if let Err(error) =
+        maybe_compact_messages(compact.as_ref(), &resolved_model, &mut resolved_messages, false)
+            .await
+    {
+        warn!(%error, "context compaction skipped before chat completion");
+    }
     let latest_user_message = command
         .messages
         .iter()

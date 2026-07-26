@@ -359,6 +359,19 @@ pub(crate) async fn list_chat_models_from_state(
     Ok(items)
 }
 
+/// Best-effort lookup of a model's advertised context window (in tokens) by id.
+///
+/// Used by the summarizing compaction policy to decide when auto-compaction
+/// should fire. Returns `None` when the model is unknown or has no recorded
+/// window — the caller then falls back to a fixed threshold.
+pub(crate) async fn context_window_for(state: &ModelState, model_id: &str) -> Option<u32> {
+    let models = load_models_from_state(state, ListModelsFilter { capability: None }).await.ok()?;
+    models
+        .into_iter()
+        .find(|model| model.id == model_id)
+        .and_then(|model| model.spec.context_window)
+}
+
 async fn load_cloud_provider_map_for_chat(
     state: &ModelState,
 ) -> Result<BTreeMap<String, CloudProviderConfig>, AppCoreError> {

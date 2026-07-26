@@ -81,7 +81,7 @@ impl AppServices {
         Self {
             audio: AudioService::new(worker_state.clone()),
             backend: BackendService::new(model_state.clone()),
-            chat: ChatService::new(model_state.clone()),
+            chat: ChatService::new_with_compact(model_state.clone(), harness.compact_port()),
             ffmpeg: FfmpegService::new(worker_state.clone()),
             image: ImageService::new(worker_state.clone()),
             model: model.clone(),

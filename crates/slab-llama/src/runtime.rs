@@ -561,8 +561,6 @@ struct InferenceWorkerState {
     free_seq_ids: Vec<LlamaSeqId>,
     max_seq_id_exclusive: LlamaSeqId,
     context_length: usize,
-    kv_cache_can_shift: bool,
-    window_drop_chunk: usize,
     cmd_rx: mpsc::Receiver<WorkerCommand>,
 }
 
@@ -575,8 +573,6 @@ impl InferenceWorkerState {
     ) -> Self {
         let context_length = ctx.n_ctx_seq() as usize;
         let max_seq_id_exclusive = i32::try_from(ctx.n_seq_max()).unwrap_or(i32::MAX);
-        let kv_cache_can_shift = ctx.kv_cache_can_shift();
-        let window_drop_chunk = (context_length / 4).max(1);
 
         Self {
             worker_id,
@@ -587,8 +583,6 @@ impl InferenceWorkerState {
             free_seq_ids: Vec::new(),
             max_seq_id_exclusive,
             context_length,
-            kv_cache_can_shift,
-            window_drop_chunk,
             cmd_rx,
         }
     }
@@ -667,61 +661,30 @@ impl InferenceWorkerState {
     }
 
     fn ensure_window_capacity(
-        ctx: &mut LlamaContext,
-        can_shift: bool,
         context_length: usize,
-        window_drop_chunk: usize,
-        session: &mut SessionState,
+        n_past: i32,
         needed_tokens: usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), LlamaError> {
         if context_length == 0 || needed_tokens == 0 {
             return Ok(());
         }
 
         if needed_tokens > context_length {
-            return Err(format!(
-                "requested token chunk ({needed_tokens}) exceeds context length ({context_length})"
-            ));
+            return Err(LlamaError::ContextCapacityExceeded {
+                needed: needed_tokens,
+                n_past: 0,
+                context_length,
+            });
         }
 
-        let n_past = session.n_past.max(0) as usize;
-        if n_past + needed_tokens <= context_length {
-            return Ok(());
+        let n_past = n_past.max(0) as usize;
+        if n_past + needed_tokens > context_length {
+            return Err(LlamaError::ContextCapacityExceeded {
+                needed: needed_tokens,
+                n_past,
+                context_length,
+            });
         }
-
-        let overflow = n_past + needed_tokens - context_length;
-
-        if !can_shift {
-            warn!(
-                seq_id = session.seq_id,
-                context_length, "KV cache shift unsupported; clearing session cache to continue"
-            );
-            let _ = ctx.kv_cache_seq_rm(session.seq_id, 0, i32::MAX);
-            session.n_past = 0;
-            session.last_token = None;
-            return Ok(());
-        }
-
-        let mut drop = overflow.max(window_drop_chunk).min(n_past);
-        if n_past.saturating_sub(drop) + needed_tokens > context_length {
-            drop = n_past + needed_tokens - context_length;
-        }
-        if drop == 0 {
-            return Ok(());
-        }
-
-        let drop_i32 = i32::try_from(drop).map_err(|_| {
-            format!("window shift overflow: drop count {drop} does not fit into i32")
-        })?;
-
-        if !ctx.kv_cache_seq_rm(session.seq_id, 0, drop_i32) {
-            return Err(format!(
-                "failed to evict KV range [0, {drop_i32}) for seq_id={}",
-                session.seq_id
-            ));
-        }
-        ctx.kv_cache_seq_add(session.seq_id, drop_i32, -1, -drop_i32);
-        session.n_past = session.n_past.saturating_sub(drop_i32);
 
         Ok(())
     }
@@ -882,8 +845,6 @@ impl InferenceWorkerState {
         let batch_capacity = self.ctx.n_batch() as usize;
         let mut batch = LlamaBatch::new(batch_capacity);
         let context_length = self.context_length;
-        let kv_cache_can_shift = self.kv_cache_can_shift;
-        let window_drop_chunk = self.window_drop_chunk;
         let mut logit_owners: Vec<(SessionId, i32)> = Vec::new();
         let mut prefill_counts: HashMap<SessionId, usize> = HashMap::new();
         let mut gen_sessions: Vec<SessionId> = Vec::new();
@@ -919,15 +880,10 @@ impl InferenceWorkerState {
                     continue;
                 }
 
-                if let Err(error) = Self::ensure_window_capacity(
-                    &mut self.ctx,
-                    kv_cache_can_shift,
-                    context_length,
-                    window_drop_chunk,
-                    session,
-                    take_n,
-                ) {
-                    Self::fail_session_stream(session, error);
+                if let Err(error) =
+                    Self::ensure_window_capacity(context_length, session.n_past, take_n)
+                {
+                    Self::fail_session_stream(session, error.to_string());
                     continue;
                 }
 
@@ -948,15 +904,9 @@ impl InferenceWorkerState {
             } else if let Some(last_token) = session.last_token
                 && (batch.n_tokens() as usize) < batch_capacity
             {
-                if let Err(error) = Self::ensure_window_capacity(
-                    &mut self.ctx,
-                    kv_cache_can_shift,
-                    context_length,
-                    window_drop_chunk,
-                    session,
-                    1,
-                ) {
-                    Self::fail_session_stream(session, error);
+                if let Err(error) = Self::ensure_window_capacity(context_length, session.n_past, 1)
+                {
+                    Self::fail_session_stream(session, error.to_string());
                     continue;
                 }
 
@@ -1271,7 +1221,40 @@ impl LlamaRuntime {
 
 #[cfg(test)]
 mod tests {
-    use super::{Utf8FlushResult, Utf8PieceBuffer};
+    use super::{InferenceWorkerState, LlamaError, Utf8FlushResult, Utf8PieceBuffer};
+
+    #[test]
+    fn ensure_window_capacity_accepts_when_it_fits() {
+        // Fits with room to spare.
+        assert!(InferenceWorkerState::ensure_window_capacity(8192, 100, 10).is_ok());
+        // Fits exactly at the boundary (n_past + needed == context_length).
+        assert!(InferenceWorkerState::ensure_window_capacity(8192, 8182, 10).is_ok());
+    }
+
+    #[test]
+    fn ensure_window_capacity_errors_on_overflow() {
+        match InferenceWorkerState::ensure_window_capacity(8192, 8190, 10) {
+            Err(LlamaError::ContextCapacityExceeded { needed, n_past, context_length }) => {
+                assert_eq!(needed, 10);
+                assert_eq!(n_past, 8190);
+                assert_eq!(context_length, 8192);
+            }
+            other => panic!("expected ContextCapacityExceeded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ensure_window_capacity_errors_when_single_chunk_exceeds_context() {
+        assert!(matches!(
+            InferenceWorkerState::ensure_window_capacity(8192, 0, 9000),
+            Err(LlamaError::ContextCapacityExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn ensure_window_capacity_treats_zero_context_as_unbounded() {
+        assert!(InferenceWorkerState::ensure_window_capacity(0, 99_999, 99_999).is_ok());
+    }
 
     #[test]
     fn utf8_piece_buffer_waits_for_multibyte_sequence_completion() {

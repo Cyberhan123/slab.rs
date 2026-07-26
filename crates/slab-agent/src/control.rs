@@ -237,6 +237,14 @@ impl AgentControl {
         self
     }
 
+    /// Attach the context-compaction policy. When unset, a pure trailing-window
+    /// [`SlidingWindowCompactPort`] is used. Hosts that want LLM-summarizing
+    /// compaction inject their own [`CompactPort`] here.
+    pub fn with_compact(mut self, compact: Arc<dyn CompactPort>) -> Self {
+        self.compact = compact;
+        self
+    }
+
     /// Spawn a root agent thread (depth 0).
     ///
     /// Returns the new thread's unique ID.

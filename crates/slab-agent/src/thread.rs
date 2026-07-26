@@ -13,7 +13,7 @@ use slab_types::{ConversationMessage, ConversationMessageContent};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    compact::{CompactOutcome, CompactPort},
+    compact::{CompactContext, CompactOutcome, CompactPort},
     config::AgentConfig,
     error::AgentError,
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
@@ -589,33 +589,17 @@ impl AgentThread {
                 "threshold_tokens": threshold_tokens,
             }),
         );
-        if input_tokens < threshold_tokens {
-            record_json(
-                trace,
-                trace_context,
-                "slab-agent",
-                "context_compaction_skipped",
-                serde_json::json!({
-                    "input_tokens": input_tokens,
-                    "threshold_tokens": threshold_tokens,
-                    "reason": "below threshold",
-                }),
-            );
-            return;
-        }
 
-        record_json(
-            trace,
-            trace_context,
-            "slab-agent",
-            "context_compaction_started",
-            serde_json::json!({
-                "input_tokens": input_tokens,
-                "threshold_tokens": threshold_tokens,
-                "message_count": messages.len(),
-            }),
-        );
-        match compact.compact(messages).await {
+        // The threshold gate lives inside each `CompactPort` implementation
+        // (context-length-aware policies need the model id; pure-local ones use
+        // their fixed threshold). Auto-compaction from the turn loop never
+        // forces — manual `/compact` sets `force` at its own call site.
+        let ctx = CompactContext {
+            model_id: &self.config.model,
+            summary_instructions: None,
+            force: false,
+        };
+        match compact.compact(messages, &ctx).await {
             Ok(CompactOutcome::Replaced {
                 messages: compacted,
                 output_tokens,

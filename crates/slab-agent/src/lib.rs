@@ -46,7 +46,11 @@ mod turn_tool_record;
 #[cfg(test)]
 mod tests;
 
-pub use compact::{CompactOutcome, CompactPort, NoopCompactPort, SlidingWindowCompactPort};
+pub use compact::{
+    CompactContext, CompactOutcome, CompactPort, NoopCompactPort, SlidingWindowCompactPort,
+    estimate_message_chars, estimate_message_tokens, estimate_tokens,
+    remove_leading_orphan_tool_results, trailing_window, trim_to_target_after_system,
+};
 pub use config::{AgentConfig, AgentToolChoice};
 pub use control::{AgentControl, AgentControlLimits};
 pub use error::AgentError;

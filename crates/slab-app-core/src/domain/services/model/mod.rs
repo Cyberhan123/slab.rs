@@ -8,7 +8,7 @@ mod pack;
 mod quantize;
 mod runtime;
 
-pub(crate) use catalog::list_chat_models_from_state;
+pub(crate) use catalog::{context_window_for, list_chat_models_from_state};
 pub(crate) use download::MODEL_DOWNLOAD_TASK_TYPE;
 pub use load_progress::ModelLoadProgress;
 pub(crate) use runtime::{

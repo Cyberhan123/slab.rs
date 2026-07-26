@@ -264,6 +264,31 @@ pub struct ThreadRollbackResult {
     pub thread: Thread,
 }
 
+// ============ thread/compact/start ============
+
+/// Manually compact a thread's persisted history: summarize older turns into a
+/// single recap (with a trailing-window trim fallback) and keep the recent
+/// window verbatim. Refuses while the thread is running.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadCompactStartParams {
+    pub thread_id: String,
+    /// Optional override of the summarization model; defaults to the thread's
+    /// configured model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadCompactStartResult {
+    pub thread: Thread,
+    /// Number of persisted messages removed by the compaction.
+    pub removed_messages: u32,
+    /// Estimated token count of the compacted message set.
+    pub output_tokens: u32,
+}
+
 // ============ thread/archive ============
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]

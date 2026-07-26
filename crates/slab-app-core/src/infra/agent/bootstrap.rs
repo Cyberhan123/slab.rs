@@ -33,10 +33,21 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         Arc::new(super::event_hub::CompositeNotifyPort::new(vec![
             Arc::clone(&event_hub) as Arc<dyn slab_agent::AgentNotifyPort>
         ]));
-    let control =
-        build_agent_control(ctx, Arc::clone(&store), Arc::clone(&event_hub), composite_notify);
+    // One shared compaction policy (LLM-summarizing + trim fallback) for the
+    // harness turn loop, manual `thread/compact/start`, and the HTTP paths.
+    let compact: Arc<dyn slab_agent::CompactPort> = Arc::new(
+        crate::domain::services::agent::SummarizingCompactPort::new((*ctx.model_state).clone()),
+    );
+    let control = build_agent_control(
+        ctx,
+        Arc::clone(&store),
+        Arc::clone(&event_hub),
+        composite_notify,
+        Arc::clone(&compact),
+    );
     let agent_runtime = AgentRuntime::new(control);
-    let core = AgentCore::new(agent_runtime.clone(), store_for_agent, Arc::clone(&event_hub));
+    let core =
+        AgentCore::new(agent_runtime.clone(), store_for_agent, Arc::clone(&event_hub), compact);
     let runtime = AgentRuntimeReloader::new((*ctx.model_state).clone(), core.runtime());
     schedule_agent_runtime_reload(runtime.clone());
     let harness = HarnessService::new(core.clone());
@@ -63,6 +74,7 @@ fn build_agent_control(
     store: Arc<AnyStore>,
     event_hub: Arc<AgentEventHub>,
     notify_port: Arc<dyn slab_agent::AgentNotifyPort>,
+    compact: Arc<dyn slab_agent::CompactPort>,
 ) -> Arc<AgentControl> {
     let llm = Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
     let memory_store = Arc::clone(&store);
@@ -208,7 +220,8 @@ fn build_agent_control(
     .with_thread_context(thread_context)
     .with_exec_policy(exec_policy)
     // INFRA-05: FIFO wait queue for agent spawns (0 ⇒ legacy reject-at-cap).
-    .with_queue_capacity(runtime_limits.queue_capacity as usize);
+    .with_queue_capacity(runtime_limits.queue_capacity as usize)
+    .with_compact(compact);
     // INFRA-05: optional memory circuit breaker. When an RSS threshold is
     // configured, sample the host process and pause spawns while tripped.
     let control = if let Some(threshold_mb) = runtime_limits.rss_threshold_mb {

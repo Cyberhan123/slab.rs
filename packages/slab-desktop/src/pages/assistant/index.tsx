@@ -60,6 +60,7 @@ function Assistant() {
         modelLoad,
         turnUsage,
         resolveApproval,
+        compactThread,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
 
     // Context window for the usage consumption bar: prefer the runtime's
@@ -190,6 +191,7 @@ function Assistant() {
                 turnUsage={turnUsage}
                 contextWindow={usageContextWindow}
                 resolveApproval={resolveApproval}
+                onCompact={() => compactThread()}
             />
 
             <AssistantSessionSheet

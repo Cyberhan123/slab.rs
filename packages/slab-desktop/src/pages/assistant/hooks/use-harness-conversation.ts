@@ -91,6 +91,8 @@ export interface HarnessConversation {
   turnUsage: TurnUsage | null
   /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
   resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
+  /** Manually compact the current (or given) thread via `thread/compact/start`. */
+  compactThread: (threadId?: string) => Promise<void>
 }
 
 /** Highest numeric turn id in a thread (-1 when there are no turns). */
@@ -258,6 +260,26 @@ export function useHarnessConversation(
     () => Array.from(approvalMap.values()).filter((a) => a.status === "pending"),
     [approvalMap],
   )
+
+  const compactThread = useCallback(
+    async (threadId?: string) => {
+      const tid = threadId ?? client.currentThreadId
+      if (!tid) return
+      setError(null)
+      try {
+        await client.threadCompactStart({ threadId: tid })
+        // Re-resume so the pane re-renders with the compacted history.
+        const { thread } = await client.threadResume({ threadId: tid })
+        const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
+        client.lastTurnIndex = computeLastTurnIndex(thread)
+        setRestoredMessages(messages)
+        setRestoreVersion((value) => value + 1)
+      } catch (compactError) {
+        setError(compactError instanceof Error ? compactError.message : "compact failed")
+      }
+    },
+    [client],
+  )
   const approvalStatusByItemId = useMemo(() => {
     const map = new Map<string, ApprovalStatus>()
     for (const [id, req] of approvalMap) map.set(id, req.status)
@@ -354,5 +376,6 @@ export function useHarnessConversation(
     modelLoad,
     turnUsage,
     resolveApproval,
+    compactThread,
   }
 }

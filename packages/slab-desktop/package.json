@@ -143,7 +143,6 @@
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "catalog:",
     "@types/bun": "catalog:",
-    "@types/linkify-it": "^5.0.0",
     "@types/lodash-es": "catalog:",
     "@types/node": "catalog:",
     "@vitejs/plugin-react": "catalog:",

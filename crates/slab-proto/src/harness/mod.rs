@@ -21,10 +21,10 @@ pub use messages::{
     ApprovalResolveParams, ApprovalResolveResult, ApprovalScope, InitializeParams,
     InitializeResult, OperationCategory, PermissionMode, ReasoningEffort, ShutdownParams,
     ShutdownResult, SkillInfo, SkillSource, SkillsListParams, SkillsListResult,
-    ThreadArchiveParams, ThreadArchiveResult, ThreadForkParams, ThreadForkResult, ThreadListParams,
-    ThreadListResult, ThreadResumeParams, ThreadResumeResult, ThreadRollbackParams,
-    ThreadRollbackResult, ThreadStartParams, ThreadStartResult, TurnInterruptParams,
-    TurnInterruptResult, TurnStartParams, TurnStartResult,
+    ThreadArchiveParams, ThreadArchiveResult, ThreadCompactStartParams, ThreadCompactStartResult,
+    ThreadForkParams, ThreadForkResult, ThreadListParams, ThreadListResult, ThreadResumeParams,
+    ThreadResumeResult, ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams,
+    ThreadStartResult, TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
 };
 pub use model::{ModelInfo, ModelListParams, ModelListResult, ReasoningEffortOption};
 pub use notification::{
@@ -43,6 +43,7 @@ pub mod method {
     pub const THREAD_RESUME: &str = "thread/resume";
     pub const THREAD_FORK: &str = "thread/fork";
     pub const THREAD_ROLLBACK: &str = "thread/rollback";
+    pub const THREAD_COMPACT_START: &str = "thread/compact/start";
     pub const THREAD_ARCHIVE: &str = "thread/archive";
     pub const THREAD_LIST: &str = "thread/list";
     pub const TURN_START: &str = "turn/start";

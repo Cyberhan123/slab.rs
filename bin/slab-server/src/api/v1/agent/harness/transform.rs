@@ -19,8 +19,8 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use slab_jsonrpc::router::ErasedHandler;
 use slab_proto::harness::messages::{
-    ApprovalResolveParams, ShutdownParams, ThreadArchiveParams, ThreadRollbackParams,
-    TurnInterruptParams,
+    ApprovalResolveParams, ShutdownParams, ThreadArchiveParams, ThreadCompactStartParams,
+    ThreadRollbackParams, TurnInterruptParams,
 };
 
 use super::session::HarnessSession;
@@ -51,6 +51,11 @@ impl ThreadReferenced for ThreadArchiveParams {
     }
 }
 impl ThreadReferenced for ThreadRollbackParams {
+    fn thread_id(&self) -> &str {
+        &self.thread_id
+    }
+}
+impl ThreadReferenced for ThreadCompactStartParams {
     fn thread_id(&self) -> &str {
         &self.thread_id
     }

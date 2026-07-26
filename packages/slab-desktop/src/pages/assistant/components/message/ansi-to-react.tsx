@@ -1,6 +1,6 @@
 import Anser, { AnserJsonEntry } from "anser";
 import { escapeCarriageReturn } from "escape-carriage";
-import linkifyit from "linkify-it";
+import { LinkifyIt } from "linkify-it";
 import * as React from "react";
 
 /**
@@ -177,9 +177,9 @@ function linkWithLinkify(
   style: React.CSSProperties | null,
   className: string | null
 ): React.ReactElement {
-  const linker = new linkifyit({ fuzzyEmail: false }).tlds(["io"], true);
+  const linker = new LinkifyIt({ fuzzyEmail: false }).tlds(["io"], true);
 
-  if (!linker.pretest(bundle.content)) {
+  if (!linker.test(bundle.content)) {
     return React.createElement(
       "span",
       { style, key, className },

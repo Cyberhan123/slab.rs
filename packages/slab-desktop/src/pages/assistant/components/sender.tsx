@@ -347,6 +347,14 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
                 >
                   /plan
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault()
+                    setValue("/compact")
+                  }}
+                >
+                  /compact
+                </DropdownMenuItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>

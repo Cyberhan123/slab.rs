@@ -50,6 +50,8 @@ export type AssistantChatPaneProps = {
     /** Context window size for the consumption bar (null when unknown). */
     contextWindow: number | null
     resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
+    /** Manually compact the current thread (triggered by the `/compact` command). */
+    onCompact: () => Promise<void>
 }
 
 export function AssistantChatPane({
@@ -68,6 +70,7 @@ export function AssistantChatPane({
     turnUsage,
     contextWindow,
     resolveApproval,
+    onCompact,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
     const { messages, sendMessage, status, stop } = useChat({
@@ -138,6 +141,11 @@ export function AssistantChatPane({
                         <TokenUsageIndicator usage={turnUsage} contextWindow={contextWindow} />
                         <Sender
                             onSubmit={async (value, { files, effort, permissionMode }) => {
+                                // `/compact` is a control command — never reaches the model.
+                                if (value.trim() === "/compact") {
+                                    await onCompact()
+                                    return
+                                }
                                 await onBeforeSubmit(value)
                                 sendMessage({ text: value, files, metadata: { effort, permissionMode } })
                             }}
