@@ -193,7 +193,36 @@ struct NormalizedAssistantContent {
 }
 
 fn normalize_template_messages(messages: &[DomainConversationMessage]) -> Vec<Value> {
-    messages.iter().map(normalize_template_message).collect()
+    let mut result: Vec<Value> = Vec::with_capacity(messages.len() + 1);
+
+    // Local chat templates (llama.cpp / HF jinja) have no `developer` role and
+    // require `system` only at index 0 — e.g. the Qwen3.5 template raises
+    // `System message must be at the beginning` on any later system message.
+    // Coalesce every system + developer fragment into a single leading system
+    // block so the template sees exactly one system message, preserving the
+    // original order of the fragments. Trailing developer messages (e.g. hook
+    // observations appended via `append_observations`) are folded in too.
+    let system_blob: Vec<String> = messages
+        .iter()
+        .filter(|message| matches!(message.role.as_str(), "system" | "developer"))
+        .map(|message| message.rendered_text())
+        .filter(|text| !text.trim().is_empty())
+        .collect();
+    if !system_blob.is_empty() {
+        let mut object = Map::new();
+        object.insert("role".to_owned(), Value::String("system".to_owned()));
+        object.insert("content".to_owned(), Value::String(system_blob.join("\n\n")));
+        object.insert("tool_calls".to_owned(), Value::Array(Vec::new()));
+        result.push(Value::Object(object));
+    }
+
+    for message in messages {
+        if matches!(message.role.as_str(), "system" | "developer") {
+            continue;
+        }
+        result.push(normalize_template_message(message));
+    }
+    result
 }
 
 fn normalize_template_message(message: &DomainConversationMessage) -> Value {
@@ -400,6 +429,67 @@ mod tests {
 
         assert!(rendered.contains("[system] you are a coder"));
         assert!(!rendered.contains("developer"));
+    }
+
+    #[test]
+    fn coalesces_system_and_developer_into_single_leading_system() {
+        // Regression: multiple system/developer fragments must merge into a
+        // single leading `system` message so HF jinja templates that require
+        // system only at index 0 (e.g. Qwen3.5) don't raise. Trailing
+        // developer messages (e.g. hook observations) are folded in too.
+        let template =
+            "{% for message in messages %}[{{ message.role }}] {{ message.content }}\n{% endfor %}";
+        let rendered = build_prompt(
+            &[
+                message("system", "persona"),
+                message("developer", "env"),
+                message("developer", "perm"),
+                message("user", "hi"),
+                message("developer", "trailing-obs"),
+            ],
+            Some(template),
+            None,
+            &[],
+        )
+        .expect("coalesced prompt");
+
+        assert_eq!(rendered.matches("[system]").count(), 1);
+        // All system/developer text merged in original order.
+        assert!(rendered.contains("[system] persona\n\nenv\n\nperm\n\ntrailing-obs"));
+        assert!(rendered.contains("[user] hi"));
+        assert!(!rendered.contains("[developer]"));
+    }
+
+    #[test]
+    fn qwen35_template_renders_multi_fragment_context_without_system_collision() {
+        // Mirrors the ContextInstructionHook startup batch: 1 system (persona)
+        // + N developer fragments + a user turn. Before the fix this raised
+        // `System message must be at the beginning` (chat_template:85).
+        let rendered = build_prompt(
+            &[
+                message("system", "You are Slab."),
+                message("developer", "<environment_context>cwd=/x</environment_context>"),
+                message(
+                    "developer",
+                    "<permissions_instructions>mode=full</permissions_instructions>",
+                ),
+                message("user", "hello"),
+            ],
+            Some(QWEN35_TEMPLATE),
+            Some(ChatReasoningEffort::None),
+            &[],
+        )
+        .expect("qwen3.5 multi-fragment prompt should render");
+
+        assert_eq!(rendered.matches("<|im_start|>system\n").count(), 1);
+        let system_block = rendered
+            .split("<|im_start|>system\n")
+            .nth(1)
+            .and_then(|rest| rest.split("<|im_end|>").next())
+            .expect("system block present");
+        assert!(system_block.contains("You are Slab."));
+        assert!(system_block.contains("<environment_context>"));
+        assert!(system_block.contains("<permissions_instructions>"));
     }
 
     #[test]
