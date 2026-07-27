@@ -272,7 +272,7 @@
     "vitepress": "catalog:",
     "vitest": "catalog:",
     "vitest-browser-react": "catalog:",
-    "webdriverio": "^9.29.1"
+    "webdriverio": "^9.30.0"
   },
   "license": "AGPL-3.0-only"
 }
