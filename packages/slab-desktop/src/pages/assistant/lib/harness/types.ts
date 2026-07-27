@@ -87,6 +87,9 @@ export const HARNESS_NOTIFICATION = {
   // Model load lifecycle, emitted directly from the turn/start handler.
   MODEL_LOAD_DELTA: "model/load/delta",
   MODEL_LOAD_COMPLETED: "model/load/completed",
+  // Context-compaction lifecycle, emitted from the agent turn loop via EventMsg.
+  CONTEXT_COMPACTING: "context/compacting",
+  CONTEXT_COMPACTED: "context/compacted",
 } as const
 
 /** Harness-specific error codes (reserved; the dispatcher currently emits `-32000`). */
@@ -583,6 +586,28 @@ export interface ModelLoadCompletedParams {
 }
 
 /**
+ * `context/compacting` — an auto-compaction summarization has begun (after the
+ * policy threshold gate passed). Handled out-of-band by the conversation hook to
+ * show an in-progress "compacting context" indicator (NOT an AI-SDK message part).
+ */
+export interface ContextCompactingParams {
+  threadId: string
+}
+
+/**
+ * `context/compacted` — terminal compaction result. `status: "compacted"` flips
+ * the in-progress indicator to done; `"skipped"` clears it (a started compaction
+ * that did not shrink the set, so no dangling shimmer).
+ */
+export interface ContextCompactedParams {
+  threadId: string
+  /** `"compacted"` (default) or `"skipped"`. */
+  status?: "compacted" | "skipped"
+  removedMessages?: number
+  outputTokens?: number
+}
+
+/**
  * Union of every server → client notification, discriminated by `method`.
  * Matches `ServerNotification` in `slab-proto/src/harness/notification.rs`.
  */
@@ -619,6 +644,8 @@ export type ServerNotification =
   | { method: typeof HARNESS_NOTIFICATION.ACCOUNT_LOGIN_COMPLETED; params: unknown }
   | { method: typeof HARNESS_NOTIFICATION.MODEL_LOAD_DELTA; params: ModelLoadDeltaParams }
   | { method: typeof HARNESS_NOTIFICATION.MODEL_LOAD_COMPLETED; params: ModelLoadCompletedParams }
+  | { method: typeof HARNESS_NOTIFICATION.CONTEXT_COMPACTING; params: ContextCompactingParams }
+  | { method: typeof HARNESS_NOTIFICATION.CONTEXT_COMPACTED; params: ContextCompactedParams }
 
 /** A notification whose `method` we don't model explicitly. */
 export interface UnknownNotification {

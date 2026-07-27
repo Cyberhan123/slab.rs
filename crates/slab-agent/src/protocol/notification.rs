@@ -66,6 +66,35 @@ impl From<crate::port::LlmUsage> for TurnUsage {
     }
 }
 
+// ---- context compaction ----
+
+/// Emitted when an auto-compaction summarization begins — after the policy's
+/// threshold gate passes, before the summarization LLM call. The client shows an
+/// in-progress "compacting context" indicator. Carries no `turn_id` so it
+/// bypasses the client transport's turn-replay guard.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextCompactingParams {
+    pub thread_id: String,
+}
+
+/// Terminal compaction event. `status` is `"compacted"` on a successful replace
+/// (with token/removed counts populated) or `"skipped"` when a started
+/// compaction did not shrink the set — the client clears its in-progress
+/// indicator in either case (no dangling "compacting" marker).
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextCompactedParams {
+    pub thread_id: String,
+    /// `"compacted"` (default when absent) or `"skipped"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removed_messages: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u32>,
+}
+
 // ---- items ----
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

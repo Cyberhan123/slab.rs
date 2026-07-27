@@ -135,6 +135,14 @@ impl CompactPort for SummarizingCompactPort {
             .map(str::to_owned)
             .unwrap_or_else(|| SUMMARY_USER_PREFIX.to_owned());
 
+        // All skip gates have passed — a (potentially slow) summarization LLM
+        // call is about to run. Notify the host so it can surface an in-progress
+        // "compacting context" indicator. Pure-local fallback paths never reach
+        // here, so this fires exactly once per actual summarization.
+        if let Some(progress) = ctx.progress.as_ref() {
+            progress.on_compacting().await;
+        }
+
         let summary = match self.summarize(ctx.model_id, &instruction, &transcript).await {
             Ok(summary) if !summary.trim().is_empty() => summary,
             Ok(_) => {
@@ -250,7 +258,7 @@ pub async fn maybe_compact_messages(
     messages: &mut Vec<ConversationMessage>,
     force: bool,
 ) -> Result<CompactOutcome, AppCoreError> {
-    let ctx = CompactContext { model_id, summary_instructions: None, force };
+    let ctx = CompactContext { model_id, summary_instructions: None, force, progress: None };
     let outcome = compact.compact(messages, &ctx).await.map_err(AppCoreError::from)?;
     if let CompactOutcome::Replaced { messages: compacted, .. } = outcome.clone() {
         *messages = compacted;

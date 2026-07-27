@@ -22,10 +22,11 @@ pub use event::{Event, EventMsg, TurnAbortedParams};
 pub use item::{ReasoningText, TurnItem, UserMessageContent};
 pub use notification::{
     AgentMessageDeltaParams, CommandExecutionOutputDeltaParams,
-    CommandExecutionRequestApprovalParams, FileChangeApprovalChange, FileChangeOutputDeltaParams,
-    FileChangeRequestApprovalParams, ItemCompletedParams, ItemStartedParams,
-    ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams, ThreadStartedParams,
-    TurnCompletedParams, TurnStartedParams, TurnUsage,
+    CommandExecutionRequestApprovalParams, ContextCompactedParams, ContextCompactingParams,
+    FileChangeApprovalChange, FileChangeOutputDeltaParams, FileChangeRequestApprovalParams,
+    ItemCompletedParams, ItemStartedParams, ReasoningSummaryTextDeltaParams,
+    ReasoningTextDeltaParams, ThreadStartedParams, TurnCompletedParams, TurnStartedParams,
+    TurnUsage,
 };
 pub use thread::{GitInfo, Thread};
 pub use turn::{Turn, TurnError};

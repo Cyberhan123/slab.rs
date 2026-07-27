@@ -44,6 +44,12 @@ export const assistant = {
   history: {
     restored: '历史消息已经恢复',
   },
+  compaction: {
+    autoCompacting: '正在自动压缩上下文',
+    autoCompacted: '已自动压缩上下文',
+    manuallyCompacting: '正在压缩上下文',
+    manuallyCompacted: '已压缩上下文',
+  },
   modelLoad: {
     downloading: '下载模型...',
     loading: '加载模型...',

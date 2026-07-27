@@ -15,10 +15,10 @@ use serde_json::Value;
 // reference them. Consumers use `slab_agent::protocol` directly.
 use slab_agent::protocol::{
     AgentMessageDeltaParams, CommandExecutionOutputDeltaParams,
-    CommandExecutionRequestApprovalParams, FileChangeOutputDeltaParams,
-    FileChangeRequestApprovalParams, ItemCompletedParams, ItemStartedParams,
-    ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams, ThreadStartedParams,
-    TurnCompletedParams, TurnStartedParams,
+    CommandExecutionRequestApprovalParams, ContextCompactedParams, ContextCompactingParams,
+    FileChangeOutputDeltaParams, FileChangeRequestApprovalParams, ItemCompletedParams,
+    ItemStartedParams, ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams,
+    ThreadStartedParams, TurnCompletedParams, TurnStartedParams,
 };
 
 // ---- error / account ----
@@ -137,6 +137,10 @@ pub enum ServerNotification {
     TurnStarted(TurnStartedParams),
     #[serde(rename = "turn/completed")]
     TurnCompleted(TurnCompletedParams),
+    #[serde(rename = "context/compacting")]
+    ContextCompacting(ContextCompactingParams),
+    #[serde(rename = "context/compacted")]
+    ContextCompacted(ContextCompactedParams),
     #[serde(rename = "item/started")]
     ItemStarted(ItemStartedParams),
     #[serde(rename = "item/completed")]
@@ -170,6 +174,8 @@ impl ServerNotification {
             Self::ThreadStarted(_) => crate::harness::method::THREAD_STARTED,
             Self::TurnStarted(_) => crate::harness::method::TURN_STARTED,
             Self::TurnCompleted(_) => crate::harness::method::TURN_COMPLETED,
+            Self::ContextCompacting(_) => crate::harness::method::CONTEXT_COMPACTING,
+            Self::ContextCompacted(_) => crate::harness::method::CONTEXT_COMPACTED,
             Self::ItemStarted(_) => crate::harness::method::ITEM_STARTED,
             Self::ItemCompleted(_) => crate::harness::method::ITEM_COMPLETED,
             Self::AgentMessageDelta(_) => crate::harness::method::ITEM_AGENT_MESSAGE_DELTA,
@@ -236,6 +242,34 @@ mod tests {
         let json = serde_json::to_value(&n).unwrap();
         assert_eq!(json["method"], "error");
         assert_eq!(json["params"]["code"], "turn_failed");
+    }
+
+    #[test]
+    fn context_compacting_notification_round_trips() {
+        let n = ServerNotification::ContextCompacting(ContextCompactingParams {
+            thread_id: "t1".to_owned(),
+        });
+        let json = serde_json::to_value(&n).unwrap();
+        assert_eq!(json["method"], "context/compacting");
+        assert_eq!(json["params"]["threadId"], "t1");
+        let back: ServerNotification = serde_json::from_value(json).unwrap();
+        assert_eq!(n, back);
+    }
+
+    #[test]
+    fn context_compacted_notification_round_trips() {
+        let n = ServerNotification::ContextCompacted(ContextCompactedParams {
+            thread_id: "t1".to_owned(),
+            status: Some("compacted".to_owned()),
+            removed_messages: Some(12),
+            output_tokens: Some(340),
+        });
+        let json = serde_json::to_value(&n).unwrap();
+        assert_eq!(json["method"], "context/compacted");
+        assert_eq!(json["params"]["status"], "compacted");
+        assert_eq!(json["params"]["removedMessages"], 12);
+        let back: ServerNotification = serde_json::from_value(json).unwrap();
+        assert_eq!(n, back);
     }
 
     #[test]

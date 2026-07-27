@@ -254,6 +254,11 @@ export function convertNotification(
       // Model load lifecycle is consumed out-of-band by the conversation hook
       // (transient `modelLoad` state), not as AI-SDK message parts.
       return []
+    case HARNESS_NOTIFICATION.CONTEXT_COMPACTING:
+    case HARNESS_NOTIFICATION.CONTEXT_COMPACTED:
+      // Compaction lifecycle is consumed out-of-band by the conversation hook
+      // (session-scoped `compactionMarkers` state), not as AI-SDK message parts.
+      return []
     default:
       // Exhaustiveness guard for future notification variants.
       return []

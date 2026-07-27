@@ -41,6 +41,8 @@ pub fn event_msg_to_notification(msg: EventMsg) -> Option<ServerNotification> {
         EventMsg::FileChangeRequestApproval(p) => {
             Some(ServerNotification::FileChangeRequestApproval(p))
         }
+        EventMsg::ContextCompacting(p) => Some(ServerNotification::ContextCompacting(p)),
+        EventMsg::ContextCompacted(p) => Some(ServerNotification::ContextCompacted(p)),
         EventMsg::Error(_) | EventMsg::Warning(_) | EventMsg::TurnAborted(_) => None,
         // `EventMsg` is `#[non_exhaustive]`; future variants added in slab-agent
         // have no wire-notification mapping yet — drop them rather than failing
@@ -52,7 +54,9 @@ pub fn event_msg_to_notification(msg: EventMsg) -> Option<ServerNotification> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slab_agent::protocol::{AgentMessageDeltaParams, ErrorEvent};
+    use slab_agent::protocol::{
+        AgentMessageDeltaParams, ContextCompactedParams, ContextCompactingParams, ErrorEvent,
+    };
 
     #[test]
     fn delta_event_lifts_to_notification() {
@@ -70,5 +74,25 @@ mod tests {
     fn error_event_does_not_lift_to_notification() {
         let event = EventMsg::Error(ErrorEvent::new("boom"));
         assert!(event_msg_to_notification(event).is_none());
+    }
+
+    #[test]
+    fn context_compacting_event_lifts_to_notification() {
+        let event =
+            EventMsg::ContextCompacting(ContextCompactingParams { thread_id: "t".to_owned() });
+        let n = event_msg_to_notification(event).unwrap();
+        assert_eq!(n.method(), "context/compacting");
+    }
+
+    #[test]
+    fn context_compacted_event_lifts_to_notification() {
+        let event = EventMsg::ContextCompacted(ContextCompactedParams {
+            thread_id: "t".to_owned(),
+            status: Some("compacted".to_owned()),
+            removed_messages: Some(3),
+            output_tokens: Some(120),
+        });
+        let n = event_msg_to_notification(event).unwrap();
+        assert_eq!(n.method(), "context/compacted");
     }
 }

@@ -199,6 +199,8 @@ fn rewrite_thread_id(mut msg: EventMsg, harness_id: &str) -> EventMsg {
         EventMsg::FileChangeOutputDelta(p) => p.thread_id = tid.clone(),
         EventMsg::CommandExecutionRequestApproval(p) => p.thread_id = tid.clone(),
         EventMsg::FileChangeRequestApproval(p) => p.thread_id = tid.clone(),
+        EventMsg::ContextCompacting(p) => p.thread_id = tid.clone(),
+        EventMsg::ContextCompacted(p) => p.thread_id = tid.clone(),
         // Error / Warning / ThreadStarted carry no thread_id; leave unchanged.
         // `EventMsg` is `#[non_exhaustive]`: future slab-agent variants with no
         // known thread_id mapping pass through untouched.
@@ -238,7 +240,7 @@ fn push_event(notifier: &Notifier, thread_id: &str, msg: EventMsg) {
 
 #[cfg(test)]
 mod tests {
-    use slab_agent::protocol::ErrorEvent;
+    use slab_agent::protocol::{ContextCompactedParams, ContextCompactingParams, ErrorEvent};
     use slab_jsonrpc::JSONRPCMessage;
     use tokio::sync::mpsc;
 
@@ -261,5 +263,31 @@ mod tests {
         let params = n.params.expect("params");
         assert_eq!(params["threadId"], "t1");
         assert_eq!(params["code"], "turn_failed");
+    }
+
+    #[test]
+    fn rewrite_thread_id_rewrites_compaction_events() {
+        let compacting = rewrite_thread_id(
+            EventMsg::ContextCompacting(ContextCompactingParams { thread_id: "real-1".to_owned() }),
+            "hthread-1",
+        );
+        match compacting {
+            EventMsg::ContextCompacting(p) => assert_eq!(p.thread_id, "hthread-1"),
+            other => panic!("unexpected variant: {other:?}"),
+        }
+
+        let compacted = rewrite_thread_id(
+            EventMsg::ContextCompacted(ContextCompactedParams {
+                thread_id: "real-1".to_owned(),
+                status: Some("compacted".to_owned()),
+                removed_messages: Some(2),
+                output_tokens: Some(80),
+            }),
+            "hthread-1",
+        );
+        match compacted {
+            EventMsg::ContextCompacted(p) => assert_eq!(p.thread_id, "hthread-1"),
+            other => panic!("unexpected variant: {other:?}"),
+        }
     }
 }

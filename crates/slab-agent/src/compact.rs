@@ -10,7 +10,28 @@ use crate::error::AgentError;
 /// summarization LLM call and `summary_instructions` to override the default
 /// recap prompt. `force` bypasses the policy's threshold (used by manual
 /// `/compact`); auto-compaction from the turn loop leaves it `false`.
-#[derive(Debug, Clone, Copy, Default)]
+/// Progress callback fired by a compacting policy right before it begins the
+/// (potentially slow) summarization LLM call — after every skip gate has
+/// passed. The turn loop installs an impl that emits a `ContextCompacting`
+/// notification so the client can show an in-progress indicator. Pure-local
+/// policies never invoke it.
+pub trait CompactProgress: Send + Sync {
+    fn on_compacting<'a>(
+        &'a self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>;
+}
+
+/// Per-call context handed to [`CompactPort::compact`].
+///
+/// Pure-local policies (e.g. [`NoopCompactPort`], [`SlidingWindowCompactPort`])
+/// ignore every field. The summarizing policy uses `model_id` to route the
+/// summarization LLM call and `summary_instructions` to override the default
+/// recap prompt. `force` bypasses the policy's threshold (used by manual
+/// `/compact`); auto-compaction from the turn loop leaves it `false`.
+/// `progress` is fired once a summarization actually begins (auto path only).
+///
+/// Not `Copy`: `progress` holds an `Arc<dyn CompactProgress>`.
+#[derive(Clone, Default)]
 pub struct CompactContext<'a> {
     /// Model id used for summarization (ignored by pure-local policies).
     pub model_id: &'a str,
@@ -19,6 +40,19 @@ pub struct CompactContext<'a> {
     /// When `true`, compact unconditionally (manual `/compact`); otherwise the
     /// policy's threshold gates compaction (auto, from the turn loop).
     pub force: bool,
+    /// Optional in-progress callback (auto-compaction only).
+    pub progress: Option<std::sync::Arc<dyn CompactProgress + 'a>>,
+}
+
+impl<'a> std::fmt::Debug for CompactContext<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompactContext")
+            .field("model_id", &self.model_id)
+            .field("summary_instructions", &self.summary_instructions)
+            .field("force", &self.force)
+            .field("progress", &self.progress.as_ref().map(|_| "<CompactProgress>"))
+            .finish()
+    }
 }
 
 /// Estimates the token pressure of agent history and optionally compacts it.

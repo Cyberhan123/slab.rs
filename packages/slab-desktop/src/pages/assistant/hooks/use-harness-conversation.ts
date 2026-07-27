@@ -24,6 +24,8 @@ import {
   type ApprovalScope,
   type CommandExecutionOutputDeltaParams,
   type CommandExecutionRequestApprovalParams,
+  type ContextCompactedParams,
+  type ContextCompactingParams,
   type FileChangeApprovalChange,
   type FileChangeRequestApprovalParams,
   type JsonRpcNotification,
@@ -64,6 +66,24 @@ export type ModelLoadState = {
   totalBytes?: number
 } | null
 
+/** Whether a compaction marker represents an automatic or manual (`/compact`) run. */
+export type CompactionMode = "auto" | "manual"
+/** `compacting` = in-progress (rendered as a Shimmer); `compacted` = done. */
+export type CompactionPhase = "compacting" | "compacted"
+
+/**
+ * A session-scoped compaction divider rendered in the message stream. Survives
+ * the pane remount after a manual compact (state lives in this hook, above the
+ * keyed pane) but is cleared on a full reload — not persisted to the backend.
+ */
+export interface CompactionMarker {
+  /** Stable id (`${mode}:${threadId}:${nonce}`) so phase flips keep the same row. */
+  id: string
+  mode: CompactionMode
+  phase: CompactionPhase
+  threadId: string
+}
+
 export interface HarnessConversation {
   /** Transport bound to the live client (always defined; safe to pass to `useChat`). */
   transport: HarnessChatTransport<UIMessage>
@@ -89,6 +109,12 @@ export interface HarnessConversation {
   modelLoad: ModelLoadState
   /** Token usage for the most recent completed turn (null until the first turn completes). */
   turnUsage: TurnUsage | null
+  /** `thread.createdAt` (Unix ms) of the restored thread; null for fresh sessions. */
+  historyCreatedAt: number | null
+  /** Session-scoped compaction markers rendered as in-stream dividers. */
+  compactionMarkers: CompactionMarker[]
+  /** True while a manual `/compact` round-trip is in flight. */
+  isCompacting: boolean
   /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
   resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
   /** Manually compact the current (or given) thread via `thread/compact/start`. */
@@ -123,6 +149,9 @@ export function useHarnessConversation(
   const [liveOutputMap, setLiveOutputMap] = useState<Map<string, string>>(new Map())
   const [modelLoad, setModelLoad] = useState<ModelLoadState>(null)
   const [turnUsage, setTurnUsage] = useState<TurnUsage | null>(null)
+  const [historyCreatedAt, setHistoryCreatedAt] = useState<number | null>(null)
+  const [compactionMarkers, setCompactionMarkers] = useState<CompactionMarker[]>([])
+  const [isCompacting, setIsCompacting] = useState(false)
 
   const transport = useMemo(() => new HarnessChatTransport({ client, model }), [client, model])
 
@@ -162,6 +191,56 @@ export function useHarnessConversation(
       }
       if (method === HARNESS_NOTIFICATION.MODEL_LOAD_COMPLETED) {
         setModelLoad(null)
+        return
+      }
+
+      // Context-compaction lifecycle: an in-progress auto-compaction adds a
+      // "compacting" marker; the terminal event either flips it to "compacted"
+      // or removes it (status "skipped" = a started compaction that didn't shrink).
+      if (method === HARNESS_NOTIFICATION.CONTEXT_COMPACTING) {
+        const params = (notification.params ?? {}) as ContextCompactingParams
+        if (params.threadId !== client.currentThreadId) return
+        setCompactionMarkers((prev) => {
+          // Only one auto-compacting marker per thread at a time.
+          if (
+            prev.some(
+              (m) =>
+                m.mode === "auto" &&
+                m.phase === "compacting" &&
+                m.threadId === params.threadId,
+            )
+          ) {
+            return prev
+          }
+          return [
+            ...prev,
+            {
+              id: `auto:${params.threadId}:${Date.now()}`,
+              mode: "auto",
+              phase: "compacting",
+              threadId: params.threadId,
+            },
+          ]
+        })
+        return
+      }
+      if (method === HARNESS_NOTIFICATION.CONTEXT_COMPACTED) {
+        const params = (notification.params ?? {}) as ContextCompactedParams
+        if (params.threadId !== client.currentThreadId) return
+        setCompactionMarkers((prev) => {
+          if (params.status === "skipped") {
+            // Started but did not compact — drop the in-progress marker.
+            return prev.filter(
+              (m) =>
+                !(m.mode === "auto" && m.threadId === params.threadId && m.phase === "compacting"),
+            )
+          }
+          return prev.map((m) =>
+            m.mode === "auto" && m.threadId === params.threadId && m.phase === "compacting"
+              ? { ...m, phase: "compacted" }
+              : m,
+          )
+        })
         return
       }
 
@@ -266,6 +345,12 @@ export function useHarnessConversation(
       const tid = threadId ?? client.currentThreadId
       if (!tid) return
       setError(null)
+      setIsCompacting(true)
+      const markerId = `manual:${tid}:${Date.now()}`
+      setCompactionMarkers((prev) => [
+        ...prev,
+        { id: markerId, mode: "manual", phase: "compacting", threadId: tid },
+      ])
       try {
         await client.threadCompactStart({ threadId: tid })
         // Re-resume so the pane re-renders with the compacted history.
@@ -273,9 +358,18 @@ export function useHarnessConversation(
         const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
         client.lastTurnIndex = computeLastTurnIndex(thread)
         setRestoredMessages(messages)
+        // historyCreatedAt is unchanged (same thread). Flip the marker to done;
+        // it survives the restoreVersion remount because it lives in this hook.
+        setCompactionMarkers((prev) =>
+          prev.map((m) => (m.id === markerId ? { ...m, phase: "compacted" } : m)),
+        )
         setRestoreVersion((value) => value + 1)
       } catch (compactError) {
+        // Drop the marker — no compaction happened.
+        setCompactionMarkers((prev) => prev.filter((m) => m.id !== markerId))
         setError(compactError instanceof Error ? compactError.message : "compact failed")
+      } finally {
+        setIsCompacting(false)
       }
     },
     [client],
@@ -300,6 +394,8 @@ export function useHarnessConversation(
     setLiveOutputMap(new Map())
     setModelLoad(null)
     setTurnUsage(null)
+    setHistoryCreatedAt(null)
+    setCompactionMarkers([])
     if (!sessionId) {
       client.currentThreadId = null
       client.lastTurnIndex = -1
@@ -327,6 +423,7 @@ export function useHarnessConversation(
           if (cancelled) return
           setRestoredMessages(messages)
           setRestoredThreadId(thread.id)
+          setHistoryCreatedAt(thread.createdAt)
           setActiveConversation(sessionId)
         } catch (resumeError) {
           // A fresh session has no thread to resume — start empty and let the
@@ -375,6 +472,9 @@ export function useHarnessConversation(
     liveOutputByItemId: liveOutputMap,
     modelLoad,
     turnUsage,
+    historyCreatedAt,
+    compactionMarkers,
+    isCompacting,
     resolveApproval,
     compactThread,
   }

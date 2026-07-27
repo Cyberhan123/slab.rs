@@ -229,7 +229,12 @@ impl HarnessService {
         let messages: Vec<ConversationMessage> =
             records.iter().map(|record| record.message.clone()).collect();
 
-        let ctx = CompactContext { model_id: &model_id, summary_instructions: None, force: true };
+        let ctx = CompactContext {
+            model_id: &model_id,
+            summary_instructions: None,
+            force: true,
+            progress: None,
+        };
         let outcome =
             self.0.compact().compact(&messages, &ctx).await.map_err(AppCoreError::from)?;
         let CompactOutcome::Replaced { messages: compacted, output_tokens, replaced_messages } =

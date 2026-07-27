@@ -44,6 +44,12 @@ export const assistant = {
   history: {
     restored: 'History restored',
   },
+  compaction: {
+    autoCompacting: 'Compacting context…',
+    autoCompacted: 'Context compacted',
+    manuallyCompacting: 'Compacting context…',
+    manuallyCompacted: 'Context compacted',
+  },
   modelLoad: {
     downloading: 'Downloading model...',
     loading: 'Loading model...',

@@ -75,6 +75,10 @@ pub mod method {
     // projected from `EventMsg`). `<noun>/delta* → <noun>/completed` convention.
     pub const MODEL_LOAD_DELTA: &str = "model/load/delta";
     pub const MODEL_LOAD_COMPLETED: &str = "model/load/completed";
+    // Context-compaction lifecycle, emitted from the agent turn loop via
+    // `EventMsg` (projected like turn/item events). `<noun>/ing → <noun>/ed`.
+    pub const CONTEXT_COMPACTING: &str = "context/compacting";
+    pub const CONTEXT_COMPACTED: &str = "context/compacted";
 }
 
 /// Harness-scoped JSON-RPC error codes (application-errors below the standard

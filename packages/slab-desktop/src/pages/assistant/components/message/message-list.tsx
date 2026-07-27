@@ -8,24 +8,34 @@ import {
     MessageScrollerViewport,
 } from "@slab/components/message-scroller"
 import { useVirtualizer } from "@tanstack/react-virtual"
+import type { CompactionMarker } from "@/pages/assistant/hooks/use-harness-conversation"
 import type { TMessage } from "./message-item"
 import { MessageItem } from "./message-item"
+import { Shimmer } from "./shimmer"
 
 type MessageListProps = {
     messages: TMessage[]
     isBusy: boolean
-    /** When true, prepend a "history restored" separator above the messages. */
+    /** When true, render a "history restored" separator at the bottom of history. */
     showHistoryMarker?: boolean
+    /** Number of restored (pre-live) messages; the marker renders after these. Defaults to all. */
+    historyCount?: number
+    /** `thread.createdAt` (Unix ms) for the marker label; falls back to today. */
+    historyCreatedAt?: number | null
+    /** Session-scoped compaction markers rendered at the end of the stream. */
+    compactionMarkers?: CompactionMarker[]
 }
 
 /**
  * A virtualized scroller row. Either a real message, or a synthetic non-message
- * row (today: the "history restored" separator). The list renders each kind by
- * branch; meta-rows live in the SAME positioned container as messages (no nested
- * `MessageScrollerItem`, whose content-visibility rules fight the virtualizer).
+ * row (the "history restored" separator or a compaction divider). The list
+ * renders each kind by branch; meta-rows live in the SAME positioned container
+ * as messages (no nested `MessageScrollerItem`, whose content-visibility rules
+ * fight the virtualizer).
  */
 type ScrollerRow =
     | { kind: "historyMarker"; id: "__history_marker__" }
+    | { kind: "compactMarker"; id: string; marker: CompactionMarker }
     | { kind: "message"; id: string; message: TMessage }
 
 const HISTORY_MARKER_ID = "__history_marker__"
@@ -38,7 +48,14 @@ function formatMarkerDate(date: Date): string {
     return `${year}-${month}-${day}`
 }
 
-function MessageList({ messages, isBusy, showHistoryMarker = false }: MessageListProps) {
+function MessageList({
+    messages,
+    isBusy,
+    showHistoryMarker = false,
+    historyCount,
+    historyCreatedAt,
+    compactionMarkers,
+}: MessageListProps) {
     const { t } = useTranslation()
     const viewportRef = useRef<HTMLDivElement>(null)
 
@@ -48,14 +65,25 @@ function MessageList({ messages, isBusy, showHistoryMarker = false }: MessageLis
             id: message.id,
             message,
         }))
-        // Only mark restored history — never a fresh/empty session.
-        if (showHistoryMarker && messageRows.length > 0) {
-            return [{ kind: "historyMarker", id: HISTORY_MARKER_ID }, ...messageRows]
+        // The history marker sits at the BOTTOM of the restored history: after
+        // the restored slice, before any new live messages from this turn.
+        const restoredCount = historyCount ?? messages.length
+        const out: ScrollerRow[] = messageRows.slice(0, restoredCount)
+        if (showHistoryMarker && restoredCount > 0) {
+            out.push({ kind: "historyMarker", id: HISTORY_MARKER_ID })
         }
-        return messageRows
-    }, [messages, showHistoryMarker])
+        out.push(...messageRows.slice(restoredCount))
+        // Compaction markers render at the END of the stream.
+        for (const marker of compactionMarkers ?? []) {
+            out.push({ kind: "compactMarker", id: marker.id, marker })
+        }
+        return out
+    }, [messages, showHistoryMarker, historyCount, compactionMarkers])
 
-    const markerLabel = useMemo(() => formatMarkerDate(new Date()), [])
+    const markerLabel = useMemo(
+        () => formatMarkerDate(historyCreatedAt != null ? new Date(historyCreatedAt) : new Date()),
+        [historyCreatedAt],
+    )
 
     const virtualizer = useVirtualizer({
         count: rows.length,
@@ -99,6 +127,31 @@ function MessageList({ messages, isBusy, showHistoryMarker = false }: MessageLis
                                     >
                                         <MarkerContent>
                                             {markerLabel} {t("pages.assistant.history.restored")}
+                                        </MarkerContent>
+                                    </Marker>
+                                ) : row.kind === "compactMarker" ? (
+                                    <Marker
+                                        variant="separator"
+                                        data-testid={`assistant-compact-marker-${row.marker.id}`}
+                                    >
+                                        <MarkerContent>
+                                            {row.marker.phase === "compacting" ? (
+                                                <Shimmer>
+                                                    {row.marker.mode === "auto"
+                                                        ? t(
+                                                              "pages.assistant.compaction.autoCompacting",
+                                                          )
+                                                        : t(
+                                                              "pages.assistant.compaction.manuallyCompacting",
+                                                          )}
+                                                </Shimmer>
+                                            ) : (
+                                                (row.marker.mode === "auto"
+                                                    ? t("pages.assistant.compaction.autoCompacted")
+                                                    : t(
+                                                          "pages.assistant.compaction.manuallyCompacted",
+                                                      ))
+                                            )}
                                         </MarkerContent>
                                     </Marker>
                                 ) : (

@@ -63,6 +63,9 @@ pub enum EventMsg {
 
     CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams),
     FileChangeRequestApproval(FileChangeRequestApprovalParams),
+
+    ContextCompacting(ContextCompactingParams),
+    ContextCompacted(ContextCompactedParams),
 }
 
 #[cfg(test)]

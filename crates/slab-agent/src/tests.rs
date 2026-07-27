@@ -2025,7 +2025,12 @@ async fn sliding_window_compaction_drops_leading_orphan_tool_result() {
     let outcome = compact
         .compact(
             &messages,
-            &CompactContext { model_id: "test", summary_instructions: None, force: false },
+            &CompactContext {
+                model_id: "test",
+                summary_instructions: None,
+                force: false,
+                progress: None,
+            },
         )
         .await
         .expect("compact");

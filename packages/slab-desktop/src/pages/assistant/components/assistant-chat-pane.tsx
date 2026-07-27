@@ -27,6 +27,7 @@ import { useGreeting } from "../hooks/use-greeting"
 import type {
     ApprovalRequest,
     ApprovalStatus,
+    CompactionMarker,
     ModelLoadState,
 } from "../hooks/use-harness-conversation"
 import type { ApprovalScope, HarnessChatTransport, TurnUsage } from "../lib/harness"
@@ -52,6 +53,12 @@ export type AssistantChatPaneProps = {
     resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
     /** Manually compact the current thread (triggered by the `/compact` command). */
     onCompact: () => Promise<void>
+    /** `thread.createdAt` (Unix ms) for the history-restored marker label. */
+    historyCreatedAt: number | null
+    /** Session-scoped compaction markers rendered as in-stream dividers. */
+    compactionMarkers: CompactionMarker[]
+    /** True while a manual `/compact` round-trip is in flight. */
+    isCompacting: boolean
 }
 
 export function AssistantChatPane({
@@ -71,6 +78,9 @@ export function AssistantChatPane({
     contextWindow,
     resolveApproval,
     onCompact,
+    historyCreatedAt,
+    compactionMarkers,
+    isCompacting,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
     const { messages, sendMessage, status, stop } = useChat({
@@ -130,6 +140,9 @@ export function AssistantChatPane({
                                             messages={messages}
                                             isBusy={isBusy}
                                             showHistoryMarker={initialMessages.length > 0}
+                                            historyCount={initialMessages.length}
+                                            historyCreatedAt={historyCreatedAt}
+                                            compactionMarkers={compactionMarkers}
                                         />
                                     </MessageInteractionContext.Provider>
                                 )}
@@ -150,7 +163,7 @@ export function AssistantChatPane({
                                 sendMessage({ text: value, files, metadata: { effort, permissionMode } })
                             }}
                             onStop={stop}
-                            loading={disabled || isBusy}
+                            loading={disabled || isBusy || isCompacting}
                             approvals={approvals}
                             onResolveApproval={resolveApproval}
                         />

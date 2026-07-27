@@ -1,6 +1,7 @@
 //! Single agent thread lifecycle.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Utc;
 use tokio::sync::watch;
@@ -13,7 +14,7 @@ use slab_types::{ConversationMessage, ConversationMessageContent};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    compact::{CompactContext, CompactOutcome, CompactPort},
+    compact::{CompactContext, CompactOutcome, CompactPort, CompactProgress},
     config::AgentConfig,
     error::AgentError,
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
@@ -22,8 +23,8 @@ use crate::{
         ThreadStatus,
     },
     protocol::{
-        ErrorEvent, EventMsg, Turn, TurnAbortedParams, TurnCompletedParams, TurnStartedParams,
-        TurnUsage,
+        ContextCompactedParams, ContextCompactingParams, ErrorEvent, EventMsg, Turn,
+        TurnAbortedParams, TurnCompletedParams, TurnStartedParams, TurnUsage,
     },
     repetition_guard::{RepetitionDetected, RepetitionGuard},
     risk::ToolRiskAnalyzer,
@@ -75,6 +76,34 @@ async fn emit_turn_aborted(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, t
 async fn emit_turn_error(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, message: &str) {
     let msg = EventMsg::Error(ErrorEvent::new(message.to_owned()));
     notify.on_event_msg(thread_id, &msg).await;
+}
+
+/// [`CompactProgress`] impl that surfaces the auto-compaction lifecycle as
+/// harness events. `on_compacting` emits `ContextCompacting` and arms `fired`;
+/// the caller (`AgentThread::maybe_compact`) reads `fired` after `compact()`
+/// returns so it can emit a terminal `ContextCompacted` even on the rare
+/// summarize-fails→fallback-skips path (no dangling "compacting" indicator).
+struct NotifyingCompactProgress {
+    notify: Arc<dyn AgentNotifyPort>,
+    thread_id: String,
+    fired: Arc<AtomicBool>,
+}
+
+impl CompactProgress for NotifyingCompactProgress {
+    fn on_compacting<'a>(
+        &'a self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        let notify = self.notify.clone();
+        let thread_id = self.thread_id.clone();
+        let fired = self.fired.clone();
+        Box::pin(async move {
+            fired.store(true, Ordering::SeqCst);
+            let msg = EventMsg::ContextCompacting(ContextCompactingParams {
+                thread_id: thread_id.clone(),
+            });
+            notify.on_event_msg(&thread_id, &msg).await;
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -339,6 +368,7 @@ impl AgentThread {
                 &mut messages,
                 trace.as_ref(),
                 &turn_trace_context,
+                &notify,
             )
             .await;
             match execute_turn(
@@ -575,6 +605,7 @@ impl AgentThread {
         messages: &mut Vec<ConversationMessage>,
         trace: &dyn AgentTraceSink,
         trace_context: &AgentTraceContext,
+        notify: &Arc<dyn AgentNotifyPort>,
     ) {
         let input_tokens = compact.estimate_tokens(messages);
         let threshold_tokens = compact.threshold_tokens();
@@ -593,11 +624,19 @@ impl AgentThread {
         // The threshold gate lives inside each `CompactPort` implementation
         // (context-length-aware policies need the model id; pure-local ones use
         // their fixed threshold). Auto-compaction from the turn loop never
-        // forces — manual `/compact` sets `force` at its own call site.
+        // forces — manual `/compact` sets `force` at its own call site. The
+        // progress callback fires (emitting `ContextCompacting`) only once a
+        // summarization actually begins, after every skip gate has passed.
+        let fired = Arc::new(AtomicBool::new(false));
         let ctx = CompactContext {
             model_id: &self.config.model,
             summary_instructions: None,
             force: false,
+            progress: Some(Arc::new(NotifyingCompactProgress {
+                notify: notify.clone(),
+                thread_id: self.id.clone(),
+                fired: fired.clone(),
+            })),
         };
         match compact.compact(messages, &ctx).await {
             Ok(CompactOutcome::Replaced {
@@ -618,6 +657,17 @@ impl AgentThread {
                         "messages": messages,
                     }),
                 );
+                notify
+                    .on_event_msg(
+                        &self.id,
+                        &EventMsg::ContextCompacted(ContextCompactedParams {
+                            thread_id: self.id.clone(),
+                            status: Some("compacted".to_owned()),
+                            removed_messages: Some(replaced_messages as u32),
+                            output_tokens: Some(output_tokens as u32),
+                        }),
+                    )
+                    .await;
             }
             Ok(CompactOutcome::Skipped { reason }) => {
                 record_json(
@@ -631,6 +681,9 @@ impl AgentThread {
                         "reason": reason,
                     }),
                 );
+                // Clear a previously-shown "compacting" indicator on the rare
+                // path where a summarization started but ultimately skipped.
+                Self::emit_compacted_skipped(notify, &self.id, fired).await;
             }
             Err(error) => {
                 record_json(
@@ -644,8 +697,33 @@ impl AgentThread {
                         "reason": error.to_string(),
                     }),
                 );
+                Self::emit_compacted_skipped(notify, &self.id, fired).await;
             }
         }
+    }
+
+    /// Emit a terminal `ContextCompacted { status: "skipped" }` so the client
+    /// clears its in-progress indicator — but only if `ContextCompacting` was
+    /// actually emitted (the progress callback ran).
+    async fn emit_compacted_skipped(
+        notify: &Arc<dyn AgentNotifyPort>,
+        thread_id: &str,
+        fired: Arc<AtomicBool>,
+    ) {
+        if !fired.load(Ordering::SeqCst) {
+            return;
+        }
+        notify
+            .on_event_msg(
+                thread_id,
+                &EventMsg::ContextCompacted(ContextCompactedParams {
+                    thread_id: thread_id.to_owned(),
+                    status: Some("skipped".to_owned()),
+                    removed_messages: None,
+                    output_tokens: None,
+                }),
+            )
+            .await;
     }
 
     fn record_repetition_detected(

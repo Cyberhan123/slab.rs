@@ -59,6 +59,9 @@ function Assistant() {
         liveOutputByItemId,
         modelLoad,
         turnUsage,
+        historyCreatedAt,
+        compactionMarkers,
+        isCompacting,
         resolveApproval,
         compactThread,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
@@ -192,6 +195,9 @@ function Assistant() {
                 contextWindow={usageContextWindow}
                 resolveApproval={resolveApproval}
                 onCompact={() => compactThread()}
+                historyCreatedAt={historyCreatedAt}
+                compactionMarkers={compactionMarkers}
+                isCompacting={isCompacting}
             />
 
             <AssistantSessionSheet

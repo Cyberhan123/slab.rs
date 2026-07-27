@@ -210,6 +210,22 @@ describe("harness stream convertNotification", () => {
       ),
     ).toEqual([])
   })
+
+  it("treats context-compaction lifecycle as out-of-band (no message parts)", () => {
+    const state = createStreamState()
+    expect(
+      convertNotification({ method: "context/compacting", params: { threadId: THREAD } }, state),
+    ).toEqual([])
+    expect(
+      convertNotification(
+        {
+          method: "context/compacted",
+          params: { threadId: THREAD, status: "compacted", removedMessages: 4, outputTokens: 200 },
+        },
+        state,
+      ),
+    ).toEqual([])
+  })
 })
 
 describe("harness isTerminalNotification", () => {
