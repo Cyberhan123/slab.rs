@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { ReactNode } from "react"
 
-import { MessageInteractionContext } from "../message-interaction-context"
+import { MessageInteractionContext } from "../../message-interaction-context"
 import type { ToolPartLike } from "../message-tool-part"
 import MessageToolCommandPart from "../message-tool-command-part"
 

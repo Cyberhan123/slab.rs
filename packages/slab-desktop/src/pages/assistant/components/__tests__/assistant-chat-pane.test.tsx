@@ -30,7 +30,7 @@ vi.mock("../../hooks/use-greeting", () => ({
   useGreeting: () => "Hello-test",
 }))
 
-vi.mock("@/pages/assistant/components/message/index.tsx", () => ({
+vi.mock("@/pages/assistant/components/message-list", () => ({
   default: ({ messages }: { messages: UIMessage[] }) => (
     <div data-testid="message-list">{messages.length} messages</div>
   ),

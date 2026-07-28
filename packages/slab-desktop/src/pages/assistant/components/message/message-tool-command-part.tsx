@@ -1,6 +1,6 @@
 "use client"
 
-import { useMessageInteraction } from "./message-interaction-context"
+import { useMessageInteraction } from "../message-interaction-context"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
 import {

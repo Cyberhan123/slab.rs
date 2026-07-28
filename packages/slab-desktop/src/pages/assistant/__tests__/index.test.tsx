@@ -262,7 +262,7 @@ vi.mock("../hooks/use-assistant-sessions", () => ({
   })),
 }))
 
-vi.mock("@/pages/assistant/components/message/index.tsx", () => ({
+vi.mock("@/pages/assistant/components/message-list", () => ({
   default: ({ messages }: { messages: UIMessage[] }) => (
     <div data-testid="assistant-message-list">
       {messages.map((message) => (

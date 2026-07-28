@@ -18,11 +18,12 @@ import {
     MessageScrollerProvider,
 } from "@slab/components/message-scroller"
 
-import MessageList from "@/pages/assistant/components/message/index.tsx"
-import { ModelLoadIndicator } from "@/pages/assistant/components/message/model-load-indicator"
-import { TokenUsageIndicator } from "@/pages/assistant/components/message/token-usage-indicator"
+import MessageList from "@/pages/assistant/components/message-list"
+import { ModelLoadIndicator } from "@/pages/assistant/components/model-load-indicator"
+import { TokenUsageIndicator } from "@/pages/assistant/components/token-usage-indicator"
 import Sender from "@/pages/assistant/components/sender.tsx"
-import { MessageInteractionContext } from "@/pages/assistant/components/message/message-interaction-context.ts"
+import { MessageInteractionContext } from "@/pages/assistant/components/message-interaction-context"
+import { isCompactCommand } from "@/pages/assistant/lib/assistant-commands"
 import { useGreeting } from "../hooks/use-greeting"
 import type {
     ApprovalRequest,
@@ -155,7 +156,7 @@ export function AssistantChatPane({
                         <Sender
                             onSubmit={async (value, { files, effort, permissionMode }) => {
                                 // `/compact` is a control command — never reaches the model.
-                                if (value.trim() === "/compact") {
+                                if (isCompactCommand(value)) {
                                     await onCompact()
                                     return
                                 }

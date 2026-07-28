@@ -55,10 +55,10 @@ vi.mock("@slab/components/button", () => ({
   ),
 }))
 
-vi.mock("@/pages/assistant/components/message/agent-avatar", () => ({
+vi.mock("@/pages/assistant/components/agent-avatar", () => ({
   default: ({ name }: { name: string }) => <div data-testid="agent-avatar">{name}</div>,
 }))
-vi.mock("@/pages/assistant/components/message/user-avatar", () => ({
+vi.mock("@/pages/assistant/components/user-avatar", () => ({
   default: ({ name }: { name: string }) => <div data-testid="user-avatar">{name}</div>,
 }))
 

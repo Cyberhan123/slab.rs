@@ -39,7 +39,7 @@ vi.mock("../message/code-block", () => ({
   CodeBlock: ({ code }: { code: string }) => <div data-testid="code-block">{code}</div>,
 }))
 
-vi.mock("../message/message-interaction-context", () => ({
+vi.mock("../message-interaction-context", () => ({
   useMessageInteraction: () => ({
     approvalStatusByItemId: interactionState.approvalStatusByItemId,
     liveOutputByItemId: new Map<string, string>(),

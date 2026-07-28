@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { setupSlabI18nMock } from "@slab/test-utils/mocks"
 
-import MessageList from "../message/message-list"
+import MessageList from "../message-list"
 
 vi.mock("@slab/i18n", () => setupSlabI18nMock())
 
@@ -42,13 +42,13 @@ vi.mock("@slab/components/message-scroller", () => ({
   MessageScrollerButton: () => <div />,
 }))
 
-vi.mock("../message/message-item", () => ({
+vi.mock("@/pages/assistant/components/message/message-item", () => ({
   MessageItem: ({ message }: { message: { id: string; role: string } }) => (
     <div data-testid={`message-item-${message.id}`}>{message.role}</div>
   ),
 }))
 
-vi.mock("../message/shimmer", () => ({
+vi.mock("@/pages/assistant/components/message/shimmer", () => ({
   Shimmer: ({ children }: { children: ReactNode }) => <span data-testid="shimmer">{children}</span>,
 }))
 

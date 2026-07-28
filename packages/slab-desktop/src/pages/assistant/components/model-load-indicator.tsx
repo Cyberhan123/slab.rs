@@ -1,6 +1,6 @@
 import { useTranslation } from "@slab/i18n"
 import { Spinner } from "@slab/components/spinner"
-import type { ModelLoadState } from "../../hooks/use-harness-conversation"
+import type { ModelLoadState } from "../hooks/use-harness-conversation"
 
 /**
  * Transient model-load indicator driven by `model/load/delta` +

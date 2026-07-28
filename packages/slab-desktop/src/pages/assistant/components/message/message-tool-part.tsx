@@ -18,7 +18,7 @@ import {
 import { isValidElement, type ComponentProps, type ReactNode } from "react"
 
 import { CodeBlock } from "./code-block"
-import { useMessageInteraction, type ApprovalStatus } from "./message-interaction-context"
+import { useMessageInteraction, type ApprovalStatus } from "../message-interaction-context"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
 
