@@ -96,6 +96,7 @@ impl TestServer {
             transport_mode: "http".to_owned(),
             llama_grpc_endpoint: None,
             whisper_grpc_endpoint: None,
+            parakeet_grpc_endpoint: None,
             diffusion_grpc_endpoint: None,
             candle_llama_grpc_endpoint: None,
             candle_whisper_grpc_endpoint: None,

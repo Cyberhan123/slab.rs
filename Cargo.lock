@@ -15886,6 +15886,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-parakeet"
+version = "0.1.0"
+dependencies = [
+ "libloading 0.9.0",
+ "log",
+ "rand 0.10.2",
+ "serde",
+ "slab-ggml",
+ "slab-parakeet-sys",
+ "slab-utils",
+ "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
+name = "slab-parakeet-sys"
+version = "0.1.0"
+dependencies = [
+ "libloading 0.9.0",
+ "slab-build-utils",
+]
+
+[[package]]
 name = "slab-plugin"
 version = "0.1.0"
 dependencies = [
@@ -15966,6 +15989,7 @@ dependencies = [
  "slab-llama",
  "slab-mtmd",
  "slab-otel",
+ "slab-parakeet",
  "slab-proto",
  "slab-runtime-core",
  "slab-runtime-macros",

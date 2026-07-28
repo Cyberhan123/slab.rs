@@ -673,6 +673,20 @@
             "source": {}
           }
         },
+        "parakeet": {
+          "$ref": "#/$defs/RuntimeLeafConfig",
+          "default": {
+            "capacity": {},
+            "enabled": true,
+            "endpoint": {
+              "http": {},
+              "ipc": {}
+            },
+            "flash_attn": true,
+            "logging": {},
+            "source": {}
+          }
+        },
         "whisper": {
           "$ref": "#/$defs/RuntimeLeafConfig",
           "default": {
@@ -710,6 +724,17 @@
             "llama": {
               "capacity": {},
               "context_length": 2048,
+              "enabled": true,
+              "endpoint": {
+                "http": {},
+                "ipc": {}
+              },
+              "flash_attn": true,
+              "logging": {},
+              "source": {}
+            },
+            "parakeet": {
+              "capacity": {},
               "enabled": true,
               "endpoint": {
                 "http": {},
@@ -1381,6 +1406,17 @@
                 "logging": {},
                 "source": {}
               },
+              "parakeet": {
+                "capacity": {},
+                "enabled": true,
+                "endpoint": {
+                  "http": {},
+                  "ipc": {}
+                },
+                "flash_attn": true,
+                "logging": {},
+                "source": {}
+              },
               "whisper": {
                 "capacity": {},
                 "enabled": true,
@@ -1991,6 +2027,17 @@
             "llama": {
               "capacity": {},
               "context_length": 2048,
+              "enabled": true,
+              "endpoint": {
+                "http": {},
+                "ipc": {}
+              },
+              "flash_attn": true,
+              "logging": {},
+              "source": {}
+            },
+            "parakeet": {
+              "capacity": {},
               "enabled": true,
               "endpoint": {
                 "http": {},

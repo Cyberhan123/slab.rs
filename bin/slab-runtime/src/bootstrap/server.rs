@@ -118,6 +118,9 @@ fn grpc_server(grpc_service: GrpcServiceImpl) -> Router {
         .add_service(pb::ggml_whisper_service_server::GgmlWhisperServiceServer::new(
             grpc_service.clone(),
         ))
+        .add_service(pb::ggml_parakeet_service_server::GgmlParakeetServiceServer::new(
+            grpc_service.clone(),
+        ))
         .add_service(pb::ggml_diffusion_service_server::GgmlDiffusionServiceServer::new(
             grpc_service.clone(),
         ))

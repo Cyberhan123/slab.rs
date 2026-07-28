@@ -90,6 +90,9 @@ pub struct Config {
     /// Optional whisper backend gRPC endpoint used by HTTP gateway mode.
     pub whisper_grpc_endpoint: Option<String>,
 
+    /// Optional parakeet backend gRPC endpoint used by HTTP gateway mode.
+    pub parakeet_grpc_endpoint: Option<String>,
+
     /// Optional diffusion backend gRPC endpoint used by HTTP gateway mode.
     pub diffusion_grpc_endpoint: Option<String>,
 
@@ -170,6 +173,7 @@ impl Config {
             transport_mode: env_or(source, "SLAB_TRANSPORT", "http"),
             llama_grpc_endpoint: source.var("SLAB_LLAMA_GRPC_ENDPOINT"),
             whisper_grpc_endpoint: source.var("SLAB_WHISPER_GRPC_ENDPOINT"),
+            parakeet_grpc_endpoint: source.var("SLAB_PARAKEET_GRPC_ENDPOINT"),
             diffusion_grpc_endpoint: source.var("SLAB_DIFFUSION_GRPC_ENDPOINT"),
             candle_llama_grpc_endpoint: source.var("SLAB_CANDLE_LLAMA_GRPC_ENDPOINT"),
             candle_whisper_grpc_endpoint: source.var("SLAB_CANDLE_WHISPER_GRPC_ENDPOINT"),

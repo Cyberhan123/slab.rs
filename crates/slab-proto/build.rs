@@ -3,6 +3,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "proto/slab/ipc/v1/common.proto",
         "proto/slab/ipc/v1/ggml/llama.proto",
         "proto/slab/ipc/v1/ggml/whisper.proto",
+        "proto/slab/ipc/v1/ggml/parakeet.proto",
         "proto/slab/ipc/v1/ggml/diffusion.proto",
         "proto/slab/ipc/v1/candle/transformers.proto",
         "proto/slab/ipc/v1/candle/diffusion.proto",

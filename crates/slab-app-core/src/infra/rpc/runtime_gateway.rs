@@ -130,6 +130,14 @@ impl RuntimeInferenceGateway for GrpcRuntimeInferenceGateway {
                         .map_err(map_runtime_error("transcribe"))?;
                 Ok(runtime_protocol::decode_whisper_transcription_response(&response))
             }
+            RuntimeBackendId::GgmlParakeet => {
+                let channel = self.channel(backend_id)?;
+                let response =
+                    client::parakeet_transcribe(channel, pb_parakeet_request_from_runtime(request))
+                        .await
+                        .map_err(map_runtime_error("transcribe"))?;
+                Ok(runtime_protocol::decode_parakeet_transcription_response(&response))
+            }
             RuntimeBackendId::CandleWhisper => {
                 let channel = self.channel(backend_id)?;
                 let response = client::candle_transcribe(
@@ -411,6 +419,27 @@ fn pb_candle_whisper_request_from_runtime(
     request: RuntimeTranscriptionRequest,
 ) -> pb::CandleWhisperTranscribeRequest {
     pb::CandleWhisperTranscribeRequest { path: Some(request.path) }
+}
+
+fn pb_parakeet_request_from_runtime(
+    request: RuntimeTranscriptionRequest,
+) -> pb::GgmlParakeetTranscribeRequest {
+    pb::GgmlParakeetTranscribeRequest {
+        path: Some(request.path),
+        decode: request.decode.map(pb_parakeet_decode_options_from_runtime),
+    }
+}
+
+fn pb_parakeet_decode_options_from_runtime(
+    value: RuntimeTranscriptionDecodeOptions,
+) -> pb::GgmlParakeetDecodeOptions {
+    pb::GgmlParakeetDecodeOptions {
+        offset_ms: value.offset_ms,
+        duration_ms: value.duration_ms,
+        no_context: value.no_context,
+        audio_ctx: None,
+        n_threads: None,
+    }
 }
 
 fn pb_whisper_vad_options_from_runtime(

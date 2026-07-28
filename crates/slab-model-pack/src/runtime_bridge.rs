@@ -5,8 +5,9 @@ use serde_json::Value;
 use slab_types::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig, Capability,
     DiffusionLoadOptions, DriverHints, GbnfAssetRef, GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig,
-    GgmlWhisperLoadConfig, JsonOptions, ModelSource, ModelSpec, OnnxLoadConfig, RuntimeBackendId,
-    RuntimeBackendLoadSpec, RuntimeModelLoadCommand, TemplateAssetRef,
+    GgmlParakeetLoadConfig, GgmlWhisperLoadConfig, JsonOptions, ModelSource, ModelSpec,
+    OnnxLoadConfig, RuntimeBackendId, RuntimeBackendLoadSpec, RuntimeModelLoadCommand,
+    TemplateAssetRef,
 };
 
 use crate::error::ModelPackError;
@@ -193,6 +194,9 @@ impl ModelPackEngineLoadSpec {
                     model_path,
                     flash_attn: true,
                 })
+            }
+            RuntimeBackendId::GgmlParakeet => {
+                RuntimeBackendLoadSpec::GgmlParakeet(GgmlParakeetLoadConfig { model_path })
             }
             RuntimeBackendId::GgmlDiffusion => {
                 let diffusion = self.load_defaults.diffusion.clone().unwrap_or_default();

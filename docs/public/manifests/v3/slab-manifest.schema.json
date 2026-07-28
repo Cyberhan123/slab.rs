@@ -282,6 +282,7 @@
       "enum": [
         "ggml_llama",
         "ggml_whisper",
+        "ggml_parakeet",
         "ggml_diffusion",
         "candle_llama",
         "candle_whisper",

@@ -265,6 +265,33 @@ pub fn decode_whisper_transcription_response(
     }
 }
 
+pub fn decode_parakeet_transcription_response(
+    response: &pb::GgmlParakeetTranscribeResponse,
+) -> RuntimeTranscriptionResult {
+    RuntimeTranscriptionResult {
+        text: response
+            .transcription
+            .as_ref()
+            .and_then(|transcription| transcription.raw_text.clone())
+            .unwrap_or_default(),
+        segments: response
+            .transcription
+            .as_ref()
+            .map(|transcription| {
+                transcription
+                    .segments
+                    .iter()
+                    .map(|segment| TimedTextSegment {
+                        start_ms: segment.start_ms,
+                        end_ms: segment.end_ms,
+                        text: segment.text.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
 pub fn decode_candle_whisper_transcription_response(
     response: &pb::CandleWhisperTranscribeResponse,
 ) -> RuntimeTranscriptionResult {

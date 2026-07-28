@@ -10,7 +10,7 @@ pub(crate) use contracts::{
     AudioTranscriptionDecodeOptions, AudioTranscriptionOptions, AudioTranscriptionResponse,
     AudioTranscriptionVadOptions, AudioTranscriptionVadParams, GeneratedImage,
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, GgmlLlamaQuantizeInput,
-    GgmlLlamaQuantizeOutput, GgmlWhisperLoadConfig, ImageGenerationRequest,
+    GgmlLlamaQuantizeOutput, GgmlParakeetLoadConfig, GgmlWhisperLoadConfig, ImageGenerationRequest,
     ImageGenerationResponse, OnnxInferenceRequest, OnnxInferenceResponse, OnnxTensor,
     TextGenerationImagePart, TextGenerationMetadata, TextGenerationOptions, TextGenerationResponse,
     TextGenerationStreamEvent, TextGenerationUsage,

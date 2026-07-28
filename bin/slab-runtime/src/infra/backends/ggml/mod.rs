@@ -2,6 +2,7 @@
 pub mod audio_utils;
 pub mod diffusion;
 pub mod llama;
+pub mod parakeet;
 pub mod whisper;
 
 use std::path::{Path, PathBuf};
@@ -15,6 +16,7 @@ use crate::infra::backends::ggml::diffusion::{DiffusionWorker, GGMLDiffusionEngi
 use crate::infra::backends::ggml::llama::{
     GGMLLlamaEngine, KvCacheStore, spawn_backend_with_engine as spawn_ggml_llama_backend,
 };
+use crate::infra::backends::ggml::parakeet::{GGMLParakeetEngine, ParakeetWorker};
 use crate::infra::backends::ggml::whisper::{GGMLWhisperEngine, WhisperWorker};
 
 pub use slab_runtime_core::CoreError as EngineError;
@@ -26,6 +28,9 @@ pub enum GGMLEngineError {
 
     #[error("ggml/whisper/error {0}")]
     Whisper(#[from] whisper::GGMLWhisperEngineError),
+
+    #[error("ggml/parakeet/error {0}")]
+    Parakeet(#[from] parakeet::GGMLParakeetEngineError),
 
     #[error("ggml/llama/error {0}")]
     Llama(#[from] llama::GGMLLlamaEngineError),
@@ -52,6 +57,7 @@ macro_rules! impl_ggml_from {
 impl_ggml_from!(
     GGMLEngineError => "ggml",
     whisper::GGMLWhisperEngineError => "ggml.whisper",
+    parakeet::GGMLParakeetEngineError => "ggml.parakeet",
     diffusion::GGMLDiffusionEngineError => "ggml.diffusion",
 );
 
@@ -72,6 +78,7 @@ impl From<llama::GGMLLlamaEngineError> for slab_runtime_core::CoreError {
 pub struct GgmlBackendConfig {
     pub llama_lib_dir: Option<PathBuf>,
     pub whisper_lib_dir: Option<PathBuf>,
+    pub parakeet_lib_dir: Option<PathBuf>,
     pub diffusion_lib_dir: Option<PathBuf>,
     /// Root directory for the on-disk ggml.llama kv-cache (Slice D2). When
     /// `None`, persistence is disabled and only the in-process cache is used.
@@ -87,6 +94,10 @@ pub fn service_ids(config: &GgmlBackendConfig) -> Vec<&'static str> {
 
     if config.whisper_lib_dir.is_some() {
         service_ids.push("ggml.whisper");
+    }
+
+    if config.parakeet_lib_dir.is_some() {
+        service_ids.push("ggml.parakeet");
     }
 
     if config.diffusion_lib_dir.is_some() {
@@ -123,6 +134,21 @@ pub fn register(
         });
     }
 
+    if let Some(path) = config.parakeet_lib_dir.as_deref() {
+        let parakeet_engine = load_parakeet_engine(path)?;
+        resource_manager.register_backend("ggml.parakeet", move |shared_rx, control_tx| {
+            let count = worker_count.max(1);
+            let mut worker_engines: Vec<Option<GGMLParakeetEngine>> =
+                (1..count).map(|_| Some(parakeet_engine.fork_library())).collect();
+            worker_engines.insert(0, Some(parakeet_engine));
+            let mut worker_engines = worker_engines.into_iter();
+            spawn_workers(shared_rx, control_tx, count, move |peer_bus| {
+                let worker_engine = worker_engines.next().unwrap_or(None);
+                ParakeetWorker::new(worker_engine, peer_bus)
+            });
+        });
+    }
+
     if let Some(path) = config.diffusion_lib_dir.as_deref() {
         let diffusion_engine = load_diffusion_engine(path)?;
         resource_manager.register_backend("ggml.diffusion", move |shared_rx, control_tx| {
@@ -154,6 +180,10 @@ fn load_llama_engine(
 
 fn load_whisper_engine(path: &Path) -> Result<GGMLWhisperEngine, CoreError> {
     GGMLWhisperEngine::from_path(path)
+}
+
+fn load_parakeet_engine(path: &Path) -> Result<GGMLParakeetEngine, CoreError> {
+    GGMLParakeetEngine::from_path(path)
 }
 
 fn load_diffusion_engine(path: &Path) -> Result<GGMLDiffusionEngine, CoreError> {

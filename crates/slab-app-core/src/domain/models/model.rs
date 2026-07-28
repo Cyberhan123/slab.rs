@@ -70,6 +70,7 @@ fn parse_unified_model_kind_error(value: &str) -> String {
 pub enum ManagedModelBackendId {
     GgmlLlama,
     GgmlWhisper,
+    GgmlParakeet,
     GgmlDiffusion,
     CandleLlama,
     CandleWhisper,
@@ -77,9 +78,10 @@ pub enum ManagedModelBackendId {
 }
 
 impl ManagedModelBackendId {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::GgmlLlama,
         Self::GgmlWhisper,
+        Self::GgmlParakeet,
         Self::GgmlDiffusion,
         Self::CandleLlama,
         Self::CandleWhisper,
@@ -90,6 +92,7 @@ impl ManagedModelBackendId {
         match self {
             Self::GgmlLlama => RuntimeBackendId::GgmlLlama,
             Self::GgmlWhisper => RuntimeBackendId::GgmlWhisper,
+            Self::GgmlParakeet => RuntimeBackendId::GgmlParakeet,
             Self::GgmlDiffusion => RuntimeBackendId::GgmlDiffusion,
             Self::CandleLlama => RuntimeBackendId::CandleLlama,
             Self::CandleWhisper => RuntimeBackendId::CandleWhisper,
@@ -140,6 +143,7 @@ impl TryFrom<RuntimeBackendId> for ManagedModelBackendId {
         match value {
             RuntimeBackendId::GgmlLlama => Ok(Self::GgmlLlama),
             RuntimeBackendId::GgmlWhisper => Ok(Self::GgmlWhisper),
+            RuntimeBackendId::GgmlParakeet => Ok(Self::GgmlParakeet),
             RuntimeBackendId::GgmlDiffusion => Ok(Self::GgmlDiffusion),
             RuntimeBackendId::CandleLlama => Ok(Self::CandleLlama),
             RuntimeBackendId::CandleWhisper => Ok(Self::CandleWhisper),

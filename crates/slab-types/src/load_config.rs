@@ -42,6 +42,15 @@ pub struct GgmlWhisperLoadConfig {
     pub flash_attn: bool,
 }
 
+/// Typed `model.load` payload for the `ggml.parakeet` backend.
+///
+/// Parakeet's context params only expose `use_gpu` / `gpu_device` (no `flash_attn`),
+/// so the load config is a strict subset of whisper's.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct GgmlParakeetLoadConfig {
+    pub model_path: PathBuf,
+}
+
 /// Typed `model.load` payload for the `ggml.diffusion` backend.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct GgmlDiffusionLoadConfig {
@@ -135,6 +144,7 @@ fn default_execution_providers() -> Vec<String> {
 pub enum RuntimeBackendLoadSpec {
     GgmlLlama(GgmlLlamaLoadConfig),
     GgmlWhisper(GgmlWhisperLoadConfig),
+    GgmlParakeet(GgmlParakeetLoadConfig),
     GgmlDiffusion(Box<GgmlDiffusionLoadConfig>),
     CandleLlama(CandleLlamaLoadConfig),
     CandleWhisper(CandleWhisperLoadConfig),
@@ -147,6 +157,7 @@ impl RuntimeBackendLoadSpec {
         match self {
             Self::GgmlLlama(_) => crate::backend::RuntimeBackendId::GgmlLlama,
             Self::GgmlWhisper(_) => crate::backend::RuntimeBackendId::GgmlWhisper,
+            Self::GgmlParakeet(_) => crate::backend::RuntimeBackendId::GgmlParakeet,
             Self::GgmlDiffusion(_) => crate::backend::RuntimeBackendId::GgmlDiffusion,
             Self::CandleLlama(_) => crate::backend::RuntimeBackendId::CandleLlama,
             Self::CandleWhisper(_) => crate::backend::RuntimeBackendId::CandleWhisper,
@@ -159,6 +170,7 @@ impl RuntimeBackendLoadSpec {
         match self {
             Self::GgmlLlama(config) => config.model_path.as_path(),
             Self::GgmlWhisper(config) => config.model_path.as_path(),
+            Self::GgmlParakeet(config) => config.model_path.as_path(),
             Self::GgmlDiffusion(config) => config.model_path.as_path(),
             Self::CandleLlama(config) => config.model_path.as_path(),
             Self::CandleWhisper(config) => config.model_path.as_path(),

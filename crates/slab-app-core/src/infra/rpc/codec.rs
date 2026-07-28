@@ -19,6 +19,7 @@ pub enum RpcCodecError {
 pub enum ModelLoadRpcRequest {
     GgmlLlama(pb::GgmlLlamaLoadRequest),
     GgmlWhisper(pb::GgmlWhisperLoadRequest),
+    GgmlParakeet(pb::GgmlParakeetLoadRequest),
     GgmlDiffusion(pb::GgmlDiffusionLoadRequest),
     CandleLlama(pb::CandleLlamaLoadRequest),
     CandleWhisper(pb::CandleWhisperLoadRequest),
@@ -31,6 +32,7 @@ impl ModelLoadRpcRequest {
         match self {
             Self::GgmlLlama(_) => RuntimeBackendId::GgmlLlama,
             Self::GgmlWhisper(_) => RuntimeBackendId::GgmlWhisper,
+            Self::GgmlParakeet(_) => RuntimeBackendId::GgmlParakeet,
             Self::GgmlDiffusion(_) => RuntimeBackendId::GgmlDiffusion,
             Self::CandleLlama(_) => RuntimeBackendId::CandleLlama,
             Self::CandleWhisper(_) => RuntimeBackendId::CandleWhisper,
@@ -43,6 +45,7 @@ impl ModelLoadRpcRequest {
         match self {
             Self::GgmlLlama(request) => request.model_path.as_deref(),
             Self::GgmlWhisper(request) => request.model_path.as_deref(),
+            Self::GgmlParakeet(request) => request.model_path.as_deref(),
             Self::GgmlDiffusion(request) => request.model_path.as_deref(),
             Self::CandleLlama(request) => request.model_path.as_deref(),
             Self::CandleWhisper(request) => request.model_path.as_deref(),
@@ -69,6 +72,11 @@ pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> ModelLoadRpcR
             ModelLoadRpcRequest::GgmlWhisper(pb::GgmlWhisperLoadRequest {
                 model_path: Some(path_to_string(&config.model_path)),
                 flash_attn: Some(config.flash_attn),
+            })
+        }
+        RuntimeBackendLoadSpec::GgmlParakeet(config) => {
+            ModelLoadRpcRequest::GgmlParakeet(pb::GgmlParakeetLoadRequest {
+                model_path: Some(path_to_string(&config.model_path)),
             })
         }
         RuntimeBackendLoadSpec::GgmlDiffusion(config) => {

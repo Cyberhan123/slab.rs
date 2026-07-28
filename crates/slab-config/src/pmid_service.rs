@@ -152,6 +152,9 @@ fn load_config(settings: &SettingsDocument) -> PmidConfig {
                 num_workers: resolve_backend_concurrency(settings, RuntimeBackend::Whisper),
                 flash_attn: settings.runtime.ggml.backends.whisper.flash_attn,
             },
+            parakeet: RuntimeWorkerConfig {
+                num_workers: resolve_backend_concurrency(settings, RuntimeBackend::Parakeet),
+            },
             diffusion: RuntimeWorkerConfig {
                 num_workers: resolve_backend_concurrency(settings, RuntimeBackend::Diffusion),
             },
@@ -1971,6 +1974,7 @@ fn provider_registry_entry_to_cloud_provider(entry: &ProviderRegistryEntry) -> C
 enum RuntimeBackend {
     Llama,
     Whisper,
+    Parakeet,
     Diffusion,
 }
 
@@ -1980,6 +1984,9 @@ fn resolve_backend_concurrency(settings: &SettingsDocument, backend: RuntimeBack
         RuntimeBackend::Llama => settings.runtime.ggml.backends.llama.capacity.concurrent_requests,
         RuntimeBackend::Whisper => {
             settings.runtime.ggml.backends.whisper.capacity.concurrent_requests
+        }
+        RuntimeBackend::Parakeet => {
+            settings.runtime.ggml.backends.parakeet.capacity.concurrent_requests
         }
         RuntimeBackend::Diffusion => {
             settings.runtime.ggml.backends.diffusion.capacity.concurrent_requests

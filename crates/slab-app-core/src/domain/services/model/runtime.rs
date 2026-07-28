@@ -236,6 +236,7 @@ pub(super) async fn resolve_model_workers(
         match backend_id {
             RuntimeBackendId::GgmlLlama => Some(config.runtime.llama.num_workers),
             RuntimeBackendId::GgmlWhisper => Some(config.runtime.whisper.num_workers),
+            RuntimeBackendId::GgmlParakeet => Some(config.runtime.parakeet.num_workers),
             RuntimeBackendId::GgmlDiffusion => Some(config.runtime.diffusion.num_workers),
             _ => None,
         }

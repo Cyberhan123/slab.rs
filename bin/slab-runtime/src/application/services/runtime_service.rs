@@ -4,13 +4,14 @@ use crate::domain::services::ExecutionHub;
 
 use super::{
     CandleDiffusionService, CandleTransformersService, GgmlDiffusionService, GgmlLlamaService,
-    GgmlWhisperService, OnnxService, RuntimeApplicationError,
+    GgmlParakeetService, GgmlWhisperService, OnnxService, RuntimeApplicationError,
 };
 
 #[derive(Clone, Copy, Debug, Default)]
 struct RuntimeServiceAvailability {
     ggml_llama: bool,
     ggml_whisper: bool,
+    ggml_parakeet: bool,
     ggml_diffusion: bool,
     candle_llama: bool,
     candle_whisper: bool,
@@ -24,6 +25,7 @@ impl RuntimeServiceAvailability {
         Self {
             ggml_llama: backends.contains("ggml.llama"),
             ggml_whisper: backends.contains("ggml.whisper"),
+            ggml_parakeet: backends.contains("ggml.parakeet"),
             ggml_diffusion: backends.contains("ggml.diffusion"),
             candle_llama: backends.contains("candle.llama"),
             candle_whisper: backends.contains("candle.whisper"),
@@ -39,6 +41,7 @@ pub struct RuntimeApplication {
     availability: RuntimeServiceAvailability,
     ggml_llama: GgmlLlamaService,
     ggml_whisper: GgmlWhisperService,
+    ggml_parakeet: GgmlParakeetService,
     ggml_diffusion: GgmlDiffusionService,
     candle_transformers: CandleTransformersService,
     candle_diffusion: CandleDiffusionService,
@@ -53,6 +56,7 @@ impl RuntimeApplication {
             availability,
             ggml_llama: GgmlLlamaService::new(execution.clone()),
             ggml_whisper: GgmlWhisperService::new(execution.clone()),
+            ggml_parakeet: GgmlParakeetService::new(execution.clone()),
             ggml_diffusion: GgmlDiffusionService::new(execution.clone()),
             candle_transformers: CandleTransformersService::new(execution.clone()),
             candle_diffusion: CandleDiffusionService::new(execution.clone()),
@@ -82,6 +86,11 @@ impl RuntimeApplication {
     pub(crate) fn ggml_whisper(&self) -> Result<&GgmlWhisperService, RuntimeApplicationError> {
         self.require_backend(self.availability.ggml_whisper, "ggml.whisper")?;
         Ok(&self.ggml_whisper)
+    }
+
+    pub(crate) fn ggml_parakeet(&self) -> Result<&GgmlParakeetService, RuntimeApplicationError> {
+        self.require_backend(self.availability.ggml_parakeet, "ggml.parakeet")?;
+        Ok(&self.ggml_parakeet)
     }
 
     pub(crate) fn ggml_diffusion(&self) -> Result<&GgmlDiffusionService, RuntimeApplicationError> {

@@ -71,6 +71,11 @@ pub(crate) struct GgmlWhisperLoadConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct GgmlParakeetLoadConfig {
+    pub model_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct GgmlDiffusionLoadConfig {
     pub model_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]

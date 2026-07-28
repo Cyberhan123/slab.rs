@@ -963,6 +963,8 @@ pub struct GgmlRuntimeBackendsConfig {
     #[serde(default)]
     pub whisper: RuntimeLeafConfig,
     #[serde(default)]
+    pub parakeet: RuntimeLeafConfig,
+    #[serde(default)]
     pub diffusion: RuntimeLeafConfig,
 }
 

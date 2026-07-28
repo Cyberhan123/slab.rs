@@ -691,6 +691,7 @@ fn load_spec_model_path(spec: &RuntimeBackendLoadSpec) -> &Path {
     match spec {
         RuntimeBackendLoadSpec::GgmlLlama(config) => config.model_path.as_path(),
         RuntimeBackendLoadSpec::GgmlWhisper(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::GgmlParakeet(config) => config.model_path.as_path(),
         RuntimeBackendLoadSpec::GgmlDiffusion(config) => config.model_path.as_path(),
         RuntimeBackendLoadSpec::CandleLlama(config) => config.model_path.as_path(),
         RuntimeBackendLoadSpec::CandleWhisper(config) => config.model_path.as_path(),

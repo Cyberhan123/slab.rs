@@ -9,6 +9,7 @@ mod candle_diffusion;
 mod candle_transformers;
 mod ggml_diffusion;
 mod ggml_llama;
+mod ggml_parakeet;
 mod ggml_whisper;
 mod onnx;
 
@@ -31,6 +32,10 @@ pub(crate) use ggml_llama::{
     decode_ggml_llama_chat_request, decode_ggml_llama_load_request,
     decode_ggml_llama_quantize_request, encode_ggml_llama_chat_response,
     encode_ggml_llama_chat_stream_chunk, encode_ggml_llama_quantize_response,
+};
+pub(crate) use ggml_parakeet::{
+    decode_ggml_parakeet_load_request, decode_ggml_parakeet_transcribe_request,
+    encode_ggml_parakeet_transcribe_response,
 };
 pub(crate) use ggml_whisper::{
     decode_ggml_whisper_load_request, decode_ggml_whisper_transcribe_request,
@@ -311,6 +316,31 @@ pub(crate) struct GgmlWhisperTranscribeRequest {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct GgmlWhisperTranscribeResponse {
+    pub transcription: WhisperTranscription,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct GgmlParakeetDecodeOptions {
+    pub offset_ms: Option<i32>,
+    pub duration_ms: Option<i32>,
+    pub no_context: Option<bool>,
+    pub audio_ctx: Option<i32>,
+    pub n_threads: Option<i32>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct GgmlParakeetLoadRequest {
+    pub model_path: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct GgmlParakeetTranscribeRequest {
+    pub path: Option<PathBuf>,
+    pub decode: Option<GgmlParakeetDecodeOptions>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct GgmlParakeetTranscribeResponse {
     pub transcription: WhisperTranscription,
 }
 
@@ -612,6 +642,18 @@ fn decode_ggml_whisper_decode_options(
         logprob_thold: value.logprob_thold,
         no_speech_thold: value.no_speech_thold,
         tdrz_enable: value.tdrz_enable,
+    }
+}
+
+fn decode_ggml_parakeet_decode_options(
+    value: &pb::GgmlParakeetDecodeOptions,
+) -> GgmlParakeetDecodeOptions {
+    GgmlParakeetDecodeOptions {
+        offset_ms: value.offset_ms,
+        duration_ms: value.duration_ms,
+        no_context: value.no_context,
+        audio_ctx: value.audio_ctx,
+        n_threads: value.n_threads,
     }
 }
 

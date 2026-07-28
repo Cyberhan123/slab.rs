@@ -87,6 +87,7 @@ pub struct RuntimeConfig {
     pub model_cache_dir: Option<String>,
     pub llama: RuntimeLlamaConfig,
     pub whisper: RuntimeWhisperConfig,
+    pub parakeet: RuntimeWorkerConfig,
     pub diffusion: RuntimeWorkerConfig,
     pub model_auto_unload: RuntimeModelAutoUnloadConfig,
 }

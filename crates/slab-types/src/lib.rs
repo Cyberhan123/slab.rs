@@ -50,7 +50,7 @@ pub use i18n::{I18nMessageRef, I18nPayload, ServerI18nKey};
 pub use load_config::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlLlamaLoadDefaultsConfig,
-    GgmlWhisperLoadConfig, OnnxLoadConfig, RuntimeBackendLoadSpec,
+    GgmlParakeetLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig, RuntimeBackendLoadSpec,
 };
 pub use plugin::{
     PluginAgentCapabilityContribution, PluginAgentHookContribution, PluginAgentHookLifecycleEvent,

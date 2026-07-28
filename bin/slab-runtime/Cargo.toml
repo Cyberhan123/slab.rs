@@ -35,6 +35,7 @@ slab-diffusion = { workspace = true }
 slab-llama = { workspace = true }
 slab-mtmd = { workspace = true }
 slab-whisper = { workspace = true }
+slab-parakeet = { workspace = true }
 slab-types = { workspace = true }
 slab-utils = { workspace = true, optional = true }
 slab-subtitle = { workspace = true, optional = true }

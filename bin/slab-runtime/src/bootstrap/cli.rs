@@ -11,6 +11,8 @@ enum EnabledBackendArg {
     Llama,
     #[value(alias = "ggml.whisper")]
     Whisper,
+    #[value(alias = "ggml.parakeet")]
+    Parakeet,
     #[value(alias = "ggml.diffusion")]
     Diffusion,
     #[value(name = "candle.llama", alias = "candle-llama")]
@@ -62,6 +64,7 @@ impl Cli {
             let mut enabled = CliEnabledBackends {
                 llama: false,
                 whisper: false,
+                parakeet: false,
                 diffusion: false,
                 candle_llama: false,
                 candle_whisper: false,
@@ -71,6 +74,7 @@ impl Cli {
                 match backend {
                     EnabledBackendArg::Llama => enabled.llama = true,
                     EnabledBackendArg::Whisper => enabled.whisper = true,
+                    EnabledBackendArg::Parakeet => enabled.parakeet = true,
                     EnabledBackendArg::Diffusion => enabled.diffusion = true,
                     EnabledBackendArg::CandleLlama => enabled.candle_llama = true,
                     EnabledBackendArg::CandleWhisper => enabled.candle_whisper = true,
@@ -87,6 +91,7 @@ impl Cli {
         );
         let llama_lib_dir = enabled_backends.llama.then(|| base_lib_path.clone());
         let whisper_lib_dir = enabled_backends.whisper.then(|| base_lib_path.clone());
+        let parakeet_lib_dir = enabled_backends.parakeet.then(|| base_lib_path.clone());
         let diffusion_lib_dir = enabled_backends.diffusion.then(|| base_lib_path.clone());
         // Default kv-cache root = the canonical app home's `kv-cache` dir
         // (slab-utils app_home), co-located with the DB/settings/models/logs.
@@ -106,6 +111,7 @@ impl Cli {
             shutdown_on_stdin_close: self.shutdown_on_stdin_close,
             llama_lib_dir,
             whisper_lib_dir,
+            parakeet_lib_dir,
             diffusion_lib_dir,
             kv_cache_dir,
             enable_candle_llama: enabled_backends.candle_llama,
