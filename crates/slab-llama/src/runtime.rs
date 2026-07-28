@@ -131,6 +131,9 @@ pub enum LlamaRuntimeError {
     #[error("Inference worker shut down unexpectedly")]
     WorkerShutdown,
 
+    #[error("Multimodal (mtmd) prefill failed: {message}")]
+    MultimodalEval { message: String },
+
     #[error("Failed to spawn inference worker thread")]
     SpawnWorkerFailed {
         #[source]
@@ -147,6 +150,36 @@ pub enum StreamChunk {
 }
 
 pub type StreamHandle = mpsc::Receiver<StreamChunk>;
+
+/// Closure accepted by [`LlamaRuntime::run_with_context`]. Runs synchronously
+/// on the worker thread; returns an error message string on failure.
+pub type RunWithContextFn = Box<dyn FnOnce(&mut RunContext) -> Result<(), String> + Send>;
+
+/// Escape-hatch context handed to a [`LlamaRuntime::run_with_context`] closure,
+/// giving sibling crates (e.g. `slab-mtmd`) access to the worker-owned
+/// `llama_context*` plus the target session's sequence id and prefill position.
+///
+/// Built by the worker on its own thread and borrowed to the closure for a
+/// single call; it is never sent across threads, so the raw pointer is safe to
+/// dereference for the duration of the closure.
+pub struct RunContext {
+    /// Raw context pointer. Valid only for the duration of the closure call.
+    pub ctx: *mut slab_llama_sys::llama_context,
+    /// Sequence id of the target session.
+    pub seq_id: i32,
+    /// Current prefill position (tokens already committed to the KV cache).
+    pub n_past: i32,
+    new_n_past: Option<i32>,
+}
+
+impl RunContext {
+    /// Report the new prefill position after the closure advanced the context
+    /// (e.g. after mtmd image-token eval). The worker updates the session state
+    /// so subsequent generation continues from this position.
+    pub fn set_new_n_past(&mut self, n_past: i32) {
+        self.new_n_past = Some(n_past);
+    }
+}
 
 #[derive(Debug, Default)]
 struct Utf8PieceBuffer {
@@ -263,6 +296,11 @@ enum GlobalCommand {
         session_id: SessionId,
         reply_tx: oneshot::Sender<Result<(), LlamaRuntimeError>>,
     },
+    RunWithContext {
+        session_id: SessionId,
+        f: RunWithContextFn,
+        reply_tx: oneshot::Sender<Result<(), LlamaRuntimeError>>,
+    },
 }
 
 struct MasterWorkerState {
@@ -356,6 +394,38 @@ impl MasterWorkerState {
                                 .send(WorkerCommand::AppendInput {
                                     session_id,
                                     text_delta,
+                                    reply_tx: ack_tx,
+                                })
+                                .await
+                                .is_err()
+                            {
+                                let _ = reply_tx.send(Err(LlamaRuntimeError::WorkerShutdown));
+                                continue;
+                            }
+                            match ack_rx.await {
+                                Ok(result) => {
+                                    let _ = reply_tx.send(result);
+                                }
+                                Err(_) => {
+                                    let _ = reply_tx.send(Err(LlamaRuntimeError::WorkerShutdown));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                GlobalCommand::RunWithContext { session_id, f, reply_tx } => {
+                    match self.session_map.get(&session_id) {
+                        None => {
+                            let _ = reply_tx
+                                .send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+                        }
+                        Some(&worker_id) => {
+                            let (ack_tx, ack_rx) = oneshot::channel();
+                            if self.worker_txs[worker_id]
+                                .send(WorkerCommand::RunWithContext {
+                                    session_id,
+                                    f,
                                     reply_tx: ack_tx,
                                 })
                                 .await
@@ -535,6 +605,11 @@ pub(super) enum WorkerCommand {
     },
     Cancel {
         session_id: SessionId,
+        reply_tx: oneshot::Sender<Result<(), LlamaRuntimeError>>,
+    },
+    RunWithContext {
+        session_id: SessionId,
+        f: RunWithContextFn,
         reply_tx: oneshot::Sender<Result<(), LlamaRuntimeError>>,
     },
 }
@@ -747,6 +822,31 @@ impl InferenceWorkerState {
                                 session.pending_tokens.extend(tokens);
                             })
                             .map_err(|source| LlamaRuntimeError::TokenizeFailed { source });
+                        let _ = reply_tx.send(result);
+                    }
+                }
+            }
+
+            WorkerCommand::RunWithContext { session_id, f, reply_tx } => {
+                match self.sessions.get_mut(&session_id) {
+                    None => {
+                        let _ =
+                            reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+                    }
+                    Some(session) => {
+                        let mut rc = RunContext {
+                            ctx: self.ctx.as_ptr(),
+                            seq_id: session.seq_id,
+                            n_past: session.n_past,
+                            new_n_past: None,
+                        };
+                        let result = f(&mut rc)
+                            .map_err(|message| LlamaRuntimeError::MultimodalEval { message });
+                        if result.is_ok()
+                            && let Some(n_past) = rc.new_n_past
+                        {
+                            session.n_past = n_past;
+                        }
                         let _ = reply_tx.send(result);
                     }
                 }
@@ -1168,6 +1268,23 @@ impl LlamaRuntime {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
             .send(GlobalCommand::AppendInput { session_id, text_delta, reply_tx })
+            .await
+            .map_err(|_| LlamaRuntimeError::WorkerShutdown)?;
+        reply_rx.await.map_err(|_| LlamaRuntimeError::WorkerShutdown)?
+    }
+
+    /// Run `f` on the worker thread that owns `session_id`'s `llama_context`,
+    /// handing it a [`RunContext`] escape-hatch. Used by sibling crates (e.g.
+    /// `slab-mtmd`) to drive multimodal/image prefill against the live context.
+    /// The closure runs synchronously on the worker thread.
+    pub async fn run_with_context(
+        &self,
+        session_id: SessionId,
+        f: RunWithContextFn,
+    ) -> Result<(), LlamaRuntimeError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.global_tx
+            .send(GlobalCommand::RunWithContext { session_id, f, reply_tx })
             .await
             .map_err(|_| LlamaRuntimeError::WorkerShutdown)?;
         reply_rx.await.map_err(|_| LlamaRuntimeError::WorkerShutdown)?

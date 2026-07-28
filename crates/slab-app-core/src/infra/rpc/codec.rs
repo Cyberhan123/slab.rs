@@ -62,6 +62,7 @@ pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> ModelLoadRpcR
                 chat_template: non_empty_string(config.chat_template.as_deref()),
                 gbnf: non_empty_string(config.gbnf.as_deref()),
                 flash_attn: Some(config.flash_attn),
+                mmproj_path: config.mmproj_path.as_ref().map(|path| path_to_string(path)),
             })
         }
         RuntimeBackendLoadSpec::GgmlWhisper(config) => {

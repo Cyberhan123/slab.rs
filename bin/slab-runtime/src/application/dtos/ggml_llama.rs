@@ -2,8 +2,8 @@ use slab_proto::slab::ipc::v1 as pb;
 
 use super::{
     GgmlLlamaChatRequest, GgmlLlamaLoadRequest, GgmlLlamaQuantizeRequest, GgmlLlamaQuantizeResult,
-    LlamaChatResponse, LlamaChatStreamChunk, ProtoConversionError, decode_optional_path,
-    decode_optional_string_list, encode_chat_metadata, encode_usage,
+    LlamaChatImagePart, LlamaChatResponse, LlamaChatStreamChunk, ProtoConversionError,
+    decode_optional_path, decode_optional_string_list, encode_chat_metadata, encode_usage,
 };
 
 pub(crate) fn decode_ggml_llama_load_request(
@@ -16,6 +16,7 @@ pub(crate) fn decode_ggml_llama_load_request(
         chat_template: request.chat_template.clone(),
         gbnf: request.gbnf.clone(),
         flash_attn: request.flash_attn,
+        mmproj_path: decode_optional_path(request.mmproj_path.as_ref()),
     })
 }
 
@@ -42,6 +43,14 @@ pub(crate) fn decode_ggml_llama_chat_request(
             .map(serde_json::from_str)
             .transpose()
             .map_err(|_| ProtoConversionError)?,
+        image_parts: request
+            .image_parts
+            .iter()
+            .map(|part| LlamaChatImagePart {
+                data: part.data.clone(),
+                mime_type: part.mime_type.clone(),
+            })
+            .collect(),
     })
 }
 

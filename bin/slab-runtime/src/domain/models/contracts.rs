@@ -15,6 +15,10 @@ pub(crate) struct GgmlLlamaLoadConfig {
     pub chat_template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gbnf: Option<String>,
+    /// Optional multimodal vision/audio projector (mmproj) GGUF path. When set,
+    /// the engine loads an mtmd context bound to the text model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mmproj_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -176,6 +180,18 @@ pub(crate) struct TextGenerationOptions {
     pub stop_sequences: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
+    /// Encoded image bytes for a multimodal (mtmd) turn. Empty for text-only.
+    #[serde(default)]
+    pub image_parts: Vec<TextGenerationImagePart>,
+}
+
+/// An image input accompanying a multimodal text-generation turn.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct TextGenerationImagePart {
+    #[serde(default)]
+    pub data: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

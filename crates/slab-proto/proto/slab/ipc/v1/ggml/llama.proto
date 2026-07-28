@@ -21,6 +21,10 @@ message GgmlLlamaLoadRequest {
   optional string chat_template = 4;
   optional string gbnf = 5;
   optional bool flash_attn = 6;
+  // Path to the multimodal vision/audio projector (mmproj) GGUF. When set, the
+  // engine loads an mtmd context bound to the text model and enables image
+  // inputs on chat requests.
+  optional string mmproj_path = 7;
 }
 
 message GgmlLlamaChatRequest {
@@ -38,6 +42,17 @@ message GgmlLlamaChatRequest {
   optional bool ignore_eos = 12;
   optional bytes logit_bias_json = 13;
   optional string agent_trace_json = 14;
+  // Encoded image bytes (PNG/JPEG/…) accompanying the prompt for multimodal
+  // (mtmd) inference. The prompt must contain one media marker per image; the
+  // runtime substitutes the projector's marker before tokenizing. Ignored when
+  // no mmproj is loaded.
+  repeated LlamaChatImagePart image_parts = 15;
+}
+
+// A single image input for multimodal chat.
+message LlamaChatImagePart {
+  bytes data = 1;
+  optional string mime_type = 2;
 }
 
 message GgmlLlamaChatResponse {

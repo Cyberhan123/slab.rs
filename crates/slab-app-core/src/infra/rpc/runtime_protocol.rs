@@ -42,6 +42,18 @@ pub fn encode_chat_request(request: &RuntimeTextGenerationRequest) -> pb::GgmlLl
             .agent_trace
             .as_ref()
             .and_then(|context| serde_json::to_string(context).ok()),
+        image_parts: if request.image_parts.is_empty() {
+            Vec::new()
+        } else {
+            request
+                .image_parts
+                .iter()
+                .map(|part| pb::LlamaChatImagePart {
+                    data: part.data.clone(),
+                    mime_type: part.mime_type.clone(),
+                })
+                .collect()
+        },
     }
 }
 

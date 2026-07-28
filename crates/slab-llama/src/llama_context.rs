@@ -36,8 +36,11 @@ impl Drop for LlamaContext {
 impl LlamaContext {
     // ── Private helpers ─────────────────────────────────────────────────────
 
+    /// Return the raw `llama_context*` pointer for FFI interop with sibling
+    /// `-sys` crates (e.g. `slab-mtmd`'s `mtmd_helper_eval_chunks`). Valid for
+    /// the lifetime of this [`LlamaContext`]; callers must not free it.
     #[inline]
-    fn as_ptr(&self) -> *mut slab_llama_sys::llama_context {
+    pub fn as_ptr(&self) -> *mut slab_llama_sys::llama_context {
         self.ctx.expect("context pointer should always be valid until Drop").as_ptr()
     }
 

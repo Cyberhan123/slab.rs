@@ -43,6 +43,22 @@ pub struct RuntimeTextGenerationRequest {
     pub gbnf: Option<String>,
     pub stop_sequences: Vec<String>,
     pub agent_trace: Option<AgentTraceContext>,
+    /// Encoded image bytes for multimodal (mtmd) inference. The prompt is
+    /// expected to already carry one media marker sentinel per entry; the
+    /// runtime substitutes the projector's real marker before tokenizing.
+    /// Empty for text-only turns (the common path — leaves behaviour unchanged).
+    pub image_parts: Vec<RuntimeChatImagePart>,
+}
+
+/// An image input accompanying a multimodal chat turn.
+///
+/// `data` holds the raw encoded image bytes (PNG / JPEG / …); the runtime's mtmd
+/// helper decodes them via the loaded vision projector. `mime_type` is optional
+/// metadata.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeChatImagePart {
+    pub data: Vec<u8>,
+    pub mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

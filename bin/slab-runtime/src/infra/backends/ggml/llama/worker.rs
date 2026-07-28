@@ -56,6 +56,7 @@ struct InferenceOptions {
     logit_bias: Option<serde_json::Value>,
     stop_sequences: Vec<String>,
     agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
+    image_parts: Vec<crate::domain::models::TextGenerationImagePart>,
 }
 
 impl InferenceOptions {
@@ -78,6 +79,7 @@ impl InferenceOptions {
             logit_bias: params.logit_bias,
             stop_sequences: params.stop_sequences,
             agent_trace: params.agent_trace,
+            image_parts: params.image_parts,
         }
     }
 }
@@ -223,6 +225,7 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
             agent_trace,
+            image_parts,
         } = options;
         let engine = self
             .engine
@@ -244,6 +247,7 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
             agent_trace,
+            image_parts,
         };
         let LlamaDispatchOutput { text, usage, finish_reason, metadata } = engine
             .dispatch_inference(request)
@@ -292,6 +296,7 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
             agent_trace,
+            image_parts,
         } = options;
         let engine = self
             .engine
@@ -313,6 +318,7 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
             agent_trace,
+            image_parts,
         };
         engine.dispatch_inference_stream(request, cancel.0).await.map_err(
             |error: crate::infra::backends::ggml::EngineError| {

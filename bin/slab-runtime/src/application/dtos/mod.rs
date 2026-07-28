@@ -207,6 +207,7 @@ pub(crate) struct GgmlLlamaLoadRequest {
     pub chat_template: Option<String>,
     pub gbnf: Option<String>,
     pub flash_attn: Option<bool>,
+    pub mmproj_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -245,6 +246,14 @@ pub(crate) struct GgmlLlamaChatRequest {
     pub ignore_eos: Option<bool>,
     pub logit_bias_json: Option<Vec<u8>>,
     pub agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
+    pub image_parts: Vec<LlamaChatImagePart>,
+}
+
+/// Encoded image bytes for a multimodal chat turn.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LlamaChatImagePart {
+    pub data: Vec<u8>,
+    pub mime_type: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -631,6 +640,7 @@ mod tests {
             ignore_eos: Some(false),
             logit_bias_json: Some(Vec::new()),
             agent_trace_json: None,
+            image_parts: Vec::new(),
         })
         .expect("decode should succeed");
 

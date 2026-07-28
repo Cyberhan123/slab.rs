@@ -1,0 +1,21 @@
+[package]
+name = "slab-mtmd"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+slab-mtmd-sys = { workspace = true }
+slab-llama = { workspace = true }
+slab-ggml = { workspace = true }
+slab-utils = { workspace = true }
+libloading = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[features]
+live = []

@@ -23,6 +23,8 @@ members = [
     "crates/slab-libfetch",
     "crates/slab-llama",
     "crates/slab-llama-sys",
+    "crates/slab-mtmd",
+    "crates/slab-mtmd-sys",
     "crates/slab-whisper",
     "crates/slab-whisper-sys",
     "crates/slab-runtime-macros",
@@ -83,6 +85,8 @@ slab-diffusion-sys = { path = "./crates/slab-diffusion-sys", package = "slab-dif
 slab-diffusion = { path = "./crates/slab-diffusion", package = "slab-diffusion", version = "0.1.0" }
 slab-llama = { path = "./crates/slab-llama", package = "slab-llama", version = "0.1.0" }
 slab-llama-sys = { path = "./crates/slab-llama-sys", package = "slab-llama-sys", version = "0.1.0" }
+slab-mtmd = { path = "./crates/slab-mtmd", package = "slab-mtmd", version = "0.1.0" }
+slab-mtmd-sys = { path = "./crates/slab-mtmd-sys", package = "slab-mtmd-sys", version = "0.1.0" }
 slab-whisper = { path = "./crates/slab-whisper", package = "slab-whisper", version = "0.1.0" }
 slab-whisper-sys = { path = "./crates/slab-whisper-sys", package = "slab-whisper-sys", version = "0.1.0" }
 slab-libfetch = { path = "./crates/slab-libfetch", package = "slab-libfetch", version = "0.1.0" }

@@ -10,7 +10,7 @@ use slab_runtime_core::backend::{
 };
 use slab_utils::loader::load_library_from_dir;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
@@ -41,7 +41,20 @@ pub(crate) struct LlamaDispatchRequest {
     pub logit_bias: Option<serde_json::Value>,
     pub stop_sequences: Vec<String>,
     pub agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
+    /// Encoded image bytes for a multimodal turn. Empty for text-only turns
+    /// (the common path). When non-empty AND a projector is loaded, the prompt
+    /// is expected to carry one [`MTMD_MEDIA_SENTINEL`] per image.
+    pub image_parts: Vec<crate::domain::models::TextGenerationImagePart>,
 }
+
+/// Stable sentinel substituted for each image by the app-core prompt renderer.
+/// The engine replaces every occurrence with the loaded projector's real media
+/// marker before handing the prompt to `mtmd_tokenize`. Must match the constant
+/// in `slab-app-core` (`domain::services::chat::local::MTMD_MEDIA_SENTINEL`).
+const MTMD_MEDIA_SENTINEL: &str = "<<SLAB_MTMD_MEDIA>>";
+
+/// Tokens decoded per `mtmd_helper_eval_chunks` internal `llama_decode` step.
+const MM_BATCH_TOKENS: i32 = 512;
 
 #[derive(Debug, Clone)]
 pub(crate) struct LlamaDispatchOutput {
@@ -349,6 +362,13 @@ pub struct GGMLLlamaEngine {
     /// Fingerprint of the currently loaded model (computed at load); used as the
     /// top-level kv-cache directory. `None` until a model is loaded.
     model_fp: Mutex<Option<ModelFingerprint>>,
+    /// Runtime library directory (where llama.dll / mtmd.dll live). Retained so
+    /// the mtmd projector can be loaded on demand.
+    lib_dir: PathBuf,
+    /// Optional multimodal (mtmd) projector loaded when `mmproj_path` is set on
+    /// the model load config. `None` for text-only models. Holds the `Mtmd`
+    /// library handle (kept resident) and the bound `MtmdContext`.
+    mmproj: Mutex<Option<(Arc<slab_mtmd::Mtmd>, Arc<slab_mtmd::MtmdContext>)>>,
 }
 
 // # Safety
@@ -411,6 +431,8 @@ impl GGMLLlamaEngine {
                 session_bindings: Mutex::new(HashMap::new()),
                 kv_cache: Mutex::new(None),
                 model_fp: Mutex::new(None),
+                lib_dir: lib_dir.to_path_buf(),
+                mmproj: Mutex::new(None),
             }))
         })
     }
@@ -551,12 +573,83 @@ impl GGMLLlamaEngine {
             }
         }
 
-        self.load_model_with_workers(
+        let metadata = self.load_model_with_workers(
             &config.model_path,
             LlamaModelParams::default(),
             ctx_params,
             config.engine_workers,
+        )?;
+
+        // Load the multimodal projector when an mmproj path is configured. Best
+        // effort: a null init (wrong file / unsupported projector) logs a
+        // warning and downgrades to text-only rather than failing the model load.
+        if let Some(mmproj_path) = config.mmproj_path.as_ref() {
+            match self.load_mmproj(mmproj_path) {
+                Ok(supports_vision) => {
+                    info!(
+                        mmproj = %mmproj_path.display(),
+                        supports_vision, "multimodal projector loaded"
+                    );
+                }
+                Err(error) => {
+                    warn!(
+                        mmproj = %mmproj_path.display(),
+                        error = %error,
+                        "failed to load multimodal projector; falling back to text-only"
+                    );
+                    if let Ok(mut guard) = self.mmproj.lock() {
+                        *guard = None;
+                    }
+                }
+            }
+        } else if let Ok(mut guard) = self.mmproj.lock() {
+            *guard = None;
+        }
+
+        Ok(metadata)
+    }
+
+    /// Load (or replace) the mtmd projector bound to the currently loaded model.
+    /// Returns whether the projector supports vision.
+    fn load_mmproj(&self, mmproj_path: &Path) -> Result<bool, ggml::EngineError> {
+        let model = self.require_model()?;
+        let mtmd = slab_mtmd::Mtmd::new(&self.lib_dir).map_err(|source| {
+            GGMLLlamaEngineError::InitializeDynamicLibrary {
+                path: self.lib_dir.join("mtmd"),
+                source,
+            }
+        })?;
+        let ctx = slab_mtmd::MtmdContext::init_from_file(
+            &mtmd,
+            mmproj_path,
+            model.as_ref(),
+            slab_mtmd::MtmdContextParams::default(),
         )
+        .map_err(|error| GGMLLlamaEngineError::MultimodalLoad {
+            mmproj_path: mmproj_path.display().to_string(),
+            message: error.to_string(),
+        })?;
+        let supports_vision = ctx.supports_vision();
+        if let Ok(mut guard) = self.mmproj.lock() {
+            *guard = Some((Arc::new(mtmd), Arc::new(ctx)));
+        }
+        Ok(supports_vision)
+    }
+
+    /// Clone the loaded projector pair (library + context), if any (for
+    /// multimodal prefill).
+    fn require_mmproj(
+        &self,
+    ) -> Result<(Arc<slab_mtmd::Mtmd>, Arc<slab_mtmd::MtmdContext>), GGMLLlamaEngineError> {
+        let guard = self.mmproj.lock().map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+            operation: "lock mmproj projector",
+        })?;
+        guard.as_ref().map(|(mtmd, ctx)| (Arc::clone(mtmd), Arc::clone(ctx))).ok_or_else(|| {
+            GGMLLlamaEngineError::MultimodalLoad {
+                mmproj_path: String::new(),
+                message: "no multimodal projector loaded".to_owned(),
+            }
+        })
     }
 
     fn require_engine(&self) -> Result<LlamaRuntime, ggml::EngineError> {
@@ -852,6 +945,7 @@ impl GGMLLlamaEngine {
                 gbnf,
                 request.ignore_eos,
                 &logit_bias,
+                &request.image_parts,
             )
             .await
         {
@@ -974,6 +1068,7 @@ impl GGMLLlamaEngine {
                 gbnf,
                 request.ignore_eos,
                 &logit_bias,
+                &request.image_parts,
             )
             .await
         {
@@ -1439,6 +1534,87 @@ impl GGMLLlamaEngine {
     /// for cleanup).  `gbnf`, `ignore_eos`, and `logit_bias` are ignored when
     /// `session_id` is `Some` because the session's sampler was already built
     /// at creation time.
+    /// Multimodal prefill: tokenize `prompt` interleaved with `image_parts`
+    /// using the loaded mtmd projector, then drive `mtmd_helper_eval_chunks`
+    /// against the session's live context via the `run_with_context` escape
+    /// hatch. Advances the session's `n_past` so subsequent generation continues
+    /// from the new position. Degrades to a plain text append when no projector
+    /// is loaded.
+    async fn prefill_multimodal(
+        &self,
+        sid: SessionId,
+        prompt: &str,
+        image_parts: &[crate::domain::models::TextGenerationImagePart],
+    ) -> Result<(), ggml::EngineError> {
+        let (mtmd, mtmd_ctx) = match self.require_mmproj() {
+            Ok(pair) => pair,
+            Err(_) => {
+                tracing::warn!(
+                    "image parts present but no mmproj projector loaded; treating turn as text"
+                );
+                return self.append_input(sid, prompt.to_string()).await;
+            }
+        };
+
+        // Substitute the app-core sentinel with the projector's real media
+        // marker (one per image, in order).
+        let marker = mtmd_ctx.marker();
+        let resolved_marker = if marker.is_empty() { MTMD_MEDIA_SENTINEL } else { marker };
+        let prompt = prompt.replace(MTMD_MEDIA_SENTINEL, resolved_marker);
+
+        // Build bitmaps from the encoded image bytes (mtmd decodes via projector).
+        let bitmaps: Vec<slab_mtmd::MtmdBitmap> = image_parts
+            .iter()
+            .map(|part| slab_mtmd::MtmdBitmap::from_buf(&mtmd_ctx, &part.data, false))
+            .collect::<slab_mtmd::Result<_>>()
+            .map_err(|error| GGMLLlamaEngineError::MultimodalLoad {
+                mmproj_path: String::new(),
+                message: format!("bitmap decode failed: {error}"),
+            })?;
+        let bitmap_refs: Vec<&slab_mtmd::MtmdBitmap> = bitmaps.iter().collect();
+
+        let mut chunks = slab_mtmd::MtmdInputChunks::new(&mtmd);
+        let input_text = slab_mtmd::MtmdInputText::new(&prompt, true, true).map_err(|error| {
+            GGMLLlamaEngineError::MultimodalLoad {
+                mmproj_path: String::new(),
+                message: format!("mtmd input text failed: {error}"),
+            }
+        })?;
+        mtmd_ctx.tokenize(&input_text, &bitmap_refs, &mut chunks).map_err(|error| {
+            GGMLLlamaEngineError::MultimodalLoad {
+                mmproj_path: String::new(),
+                message: format!("mtmd tokenize failed: {error}"),
+            }
+        })?;
+
+        let engine = self.require_engine()?;
+        let mtmd_ctx_for_closure = Arc::clone(&mtmd_ctx);
+        engine
+            .run_with_context(
+                sid,
+                Box::new(move |rc: &mut slab_llama::RunContext| {
+                    let mut new_n_past = rc.n_past;
+                    if let Err(error) = mtmd_ctx_for_closure.eval_chunks_raw(
+                        rc.ctx as *mut std::ffi::c_void,
+                        &chunks,
+                        rc.n_past,
+                        rc.seq_id,
+                        MM_BATCH_TOKENS,
+                        true,
+                        &mut new_n_past,
+                    ) {
+                        return Err(error.to_string());
+                    }
+                    rc.set_new_n_past(new_n_past);
+                    Ok(())
+                }),
+            )
+            .await
+            .map_err(GGMLLlamaEngineError::from)?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub async fn inference(
         &self,
         prompt: &str,
@@ -1447,6 +1623,7 @@ impl GGMLLlamaEngine {
         gbnf: Option<String>,
         ignore_eos: bool,
         logit_bias: &[LlamaLogitBias],
+        image_parts: &[crate::domain::models::TextGenerationImagePart],
     ) -> Result<LlamaInferenceOutput, ggml::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
@@ -1462,7 +1639,12 @@ impl GGMLLlamaEngine {
         };
         let should_end = session_id.is_none();
 
-        if let Err(error) = self.append_input(sid, prompt.to_string()).await {
+        let prefill = if !image_parts.is_empty() {
+            self.prefill_multimodal(sid, prompt, image_parts).await
+        } else {
+            self.append_input(sid, prompt.to_string()).await
+        };
+        if let Err(error) = prefill {
             if should_end {
                 let _ = self.end_session(sid).await;
             }
@@ -1522,6 +1704,7 @@ impl GGMLLlamaEngine {
     /// management).  `gbnf`, `ignore_eos`, and `logit_bias` are ignored when
     /// `session_id` is `Some` because the session's sampler was already built
     /// at creation time.
+    #[allow(clippy::too_many_arguments)]
     pub async fn inference_stream(
         &self,
         prompt: &str,
@@ -1530,6 +1713,7 @@ impl GGMLLlamaEngine {
         gbnf: Option<String>,
         ignore_eos: bool,
         logit_bias: &[LlamaLogitBias],
+        image_parts: &[crate::domain::models::TextGenerationImagePart],
     ) -> Result<(StreamHandle, SessionId), ggml::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
@@ -1544,7 +1728,12 @@ impl GGMLLlamaEngine {
             }
         };
 
-        if let Err(error) = self.append_input(sid, prompt.to_string()).await {
+        let prefill = if !image_parts.is_empty() {
+            self.prefill_multimodal(sid, prompt, image_parts).await
+        } else {
+            self.append_input(sid, prompt.to_string()).await
+        };
+        if let Err(error) = prefill {
             if session_id.is_none() {
                 let _ = self.end_session(sid).await;
             }

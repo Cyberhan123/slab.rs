@@ -33,6 +33,9 @@ pub enum GGMLLlamaEngineError {
         source: LlamaError,
     },
 
+    #[error("Failed to load multimodal projector from: {mmproj_path}: {message}")]
+    MultimodalLoad { mmproj_path: String, message: String },
+
     #[error("Session key '{key}' is already active")]
     SessionKeyBusy { key: String },
 

@@ -7,7 +7,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::application::dtos as dto;
 use crate::domain::models::{
     GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, GgmlLlamaQuantizeInput, GgmlLlamaQuantizeOutput,
-    TextGenerationOptions,
+    TextGenerationImagePart, TextGenerationOptions,
 };
 use crate::domain::runtime::CoreError;
 
@@ -46,6 +46,7 @@ impl GgmlLlamaService {
             flash_attn,
             chat_template: request.chat_template,
             gbnf: request.gbnf,
+            mmproj_path: request.mmproj_path,
         };
 
         Ok(Self {
@@ -192,6 +193,11 @@ fn build_inference_params(
         stop_sequences: request.stop_sequences.unwrap_or_default(),
         agent_trace: request.agent_trace,
         stream: false,
+        image_parts: request
+            .image_parts
+            .into_iter()
+            .map(|part| TextGenerationImagePart { data: part.data, mime_type: part.mime_type })
+            .collect(),
     })
 }
 

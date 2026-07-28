@@ -9,10 +9,11 @@ use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
-    StructuredOutput, TextGenerationResponse, TextGenerationUsage,
+    ChatReasoningEffort, ChatVerbosity, ConversationContentPart,
+    ConversationMessage as DomainConversationMessage, ConversationMessageContent, StructuredOutput,
+    TextGenerationResponse, TextGenerationUsage,
 };
-use crate::domain::ports::RuntimeTextGenerationRequest;
+use crate::domain::ports::{RuntimeChatImagePart, RuntimeTextGenerationRequest};
 use crate::domain::services::llm::local::{
     local_chat, local_chat_stream, runtime_chunk_payload, runtime_request_payload,
     runtime_response_payload, text_chunk_from_runtime, text_response_from_runtime,
@@ -87,6 +88,77 @@ pub(crate) struct LocalRuntimeRequest {
     pub(crate) trailing_stop_markers: Vec<String>,
 }
 
+/// Stable sentinel substituted for each image part in the rendered prompt. The
+/// runtime replaces every occurrence with the loaded projector's real media
+/// marker before handing the prompt to `mtmd_tokenize` (which requires one
+/// marker per image, in order).
+pub(super) const MTMD_MEDIA_SENTINEL: &str = "<<SLAB_MTMD_MEDIA>>";
+
+/// Decode an image `image_url` payload into raw encoded bytes (PNG/JPEG/…).
+///
+/// Handles OpenAI-style `data:<mediatype>;base64,<…>` data URIs (the common
+/// local-inference case where the frontend embeds the image inline), bare
+/// base64 strings, and local file paths. Remote `http(s)://` URLs return `None`
+/// (local inference does not fetch them synchronously).
+fn decode_image_url(url: &str) -> Option<(Vec<u8>, Option<String>)> {
+    use base64::Engine as _;
+    if let Some(rest) = url.strip_prefix("data:") {
+        let comma = rest.find(',')?;
+        let meta = &rest[..comma];
+        let payload = &rest[comma + 1..];
+        let mediatype = meta.split(';').next().filter(|s| s.contains('/')).map(str::to_owned);
+        let bytes = if meta.contains("base64") {
+            base64::engine::general_purpose::STANDARD.decode(payload).ok()?
+        } else {
+            payload.as_bytes().to_vec()
+        };
+        return Some((bytes, mediatype));
+    }
+    if url.starts_with("http://") || url.starts_with("https://") {
+        return None;
+    }
+    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(url) {
+        return Some((bytes, None));
+    }
+    std::fs::read(url).ok().map(|bytes| (bytes, None))
+}
+
+/// Walk `messages` in place, replacing each `Image` content part with the
+/// [`MTMD_MEDIA_SENTINEL`] text marker and collecting the decoded image bytes
+/// (in order). Unresolvable images fall back to a `[image]` text placeholder and
+/// contribute no bitmap, keeping the sentinel/bitmap counts aligned. Messages
+/// without image parts are untouched — the text-only path is byte-identical to
+/// before this call.
+pub(super) fn extract_image_parts(
+    messages: &mut [DomainConversationMessage],
+) -> Vec<RuntimeChatImagePart> {
+    let mut images = Vec::new();
+    for message in messages.iter_mut() {
+        let ConversationMessageContent::Parts(parts) = &mut message.content else {
+            continue;
+        };
+        for part in parts.iter_mut() {
+            if let ConversationContentPart::Image { image_url, mime_type, .. } = part {
+                let resolved = image_url.as_deref().and_then(decode_image_url);
+                match resolved {
+                    Some((data, mime)) => {
+                        images.push(RuntimeChatImagePart {
+                            data,
+                            mime_type: mime_type.clone().or(mime),
+                        });
+                        *part =
+                            ConversationContentPart::Text { text: MTMD_MEDIA_SENTINEL.to_owned() };
+                    }
+                    None => {
+                        *part = ConversationContentPart::Text { text: "[image]".to_owned() };
+                    }
+                }
+            }
+        }
+    }
+    images
+}
+
 /// Render the local chat prompt (template + reasoning controls + gbnf) and
 /// assemble the [`RuntimeTextGenerationRequest`]. Shared by the chat streaming
 /// layer ([`create_chat_completion`]) and the `/responses` single-shot path so
@@ -116,11 +188,15 @@ pub(crate) async fn build_local_runtime_request(
     } else {
         local_reasoning_guidance(config.reasoning_effort, config.verbosity)
     };
-    let request_messages = if skip_inline {
+    let mut request_messages = if skip_inline {
         messages.to_vec()
     } else {
         apply_local_reasoning_controls(messages, config.reasoning_effort, config.verbosity)
     };
+    // Pull image parts out of the message content BEFORE the template flattens
+    // them to text, substituting a sentinel marker at each image's position.
+    // No-op (empty) for text-only turns.
+    let image_parts = extract_image_parts(&mut request_messages);
     if let Some(trace_context) = config.agent_trace.as_ref() {
         record_json_from_context(
             trace_context,
@@ -195,6 +271,7 @@ pub(crate) async fn build_local_runtime_request(
         gbnf,
         stop_sequences: effective_stop.clone(),
         agent_trace: config.agent_trace.clone(),
+        image_parts,
     };
     if let Some(trace_context) = config.agent_trace.as_ref() {
         record_json_from_context(
@@ -581,6 +658,7 @@ pub(super) async fn create_text_completion(
         gbnf,
         stop_sequences: Vec::new(),
         agent_trace: None,
+        image_parts: Vec::new(),
     };
 
     let mut response = text_response_from_runtime(local_chat(state, backend_id, request).await?);
@@ -600,3 +678,85 @@ pub(super) async fn create_text_completion(
 // runtime exec + RuntimeTextGeneration* -> TextGeneration* conversion + trace payloads
 // have been pushed down to `domain::services::llm::local`, shared by chat and the future
 // response service.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::models::{ConversationContentPart, ConversationMessageContent};
+
+    fn text_msg(role: &str, text: &str) -> DomainConversationMessage {
+        DomainConversationMessage {
+            role: role.to_owned(),
+            content: ConversationMessageContent::Text(text.to_owned()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn extract_image_parts_replaces_image_with_sentinel() {
+        // 1x1 PNG as a base64 data URI (the common local-inference encoding).
+        let data_uri = format!(
+            "data:image/png;base64,{}",
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        );
+        let mut messages = vec![
+            text_msg("user", "hello"),
+            DomainConversationMessage {
+                role: "user".to_owned(),
+                content: ConversationMessageContent::Parts(vec![
+                    ConversationContentPart::Text { text: "what is this? ".to_owned() },
+                    ConversationContentPart::Image {
+                        image_url: Some(data_uri),
+                        mime_type: None,
+                        detail: None,
+                    },
+                ]),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            },
+        ];
+        let images = extract_image_parts(&mut messages);
+        assert_eq!(images.len(), 1);
+        assert!(!images[0].data.is_empty());
+        assert_eq!(images[0].mime_type.as_deref(), Some("image/png"));
+        // The image part is replaced by the sentinel marker; text part untouched.
+        let ConversationMessageContent::Parts(parts) = &messages[1].content else {
+            panic!("content should still be Parts");
+        };
+        assert_eq!(parts.len(), 2);
+        let ConversationContentPart::Text { text } = &parts[1] else {
+            panic!("image part should have been replaced by a Text sentinel");
+        };
+        assert_eq!(text, MTMD_MEDIA_SENTINEL);
+    }
+
+    #[test]
+    fn extract_image_parts_is_noop_for_text_only() {
+        let mut messages = vec![text_msg("user", "plain text"), text_msg("assistant", "reply")];
+        let images = extract_image_parts(&mut messages);
+        assert!(images.is_empty());
+        assert_eq!(messages[0].content, ConversationMessageContent::Text("plain text".to_owned()));
+        assert_eq!(messages[1].content, ConversationMessageContent::Text("reply".to_owned()));
+    }
+
+    #[test]
+    fn extract_image_parts_drops_unresolvable_http_url() {
+        let mut messages = vec![DomainConversationMessage {
+            role: "user".to_owned(),
+            content: ConversationMessageContent::Parts(vec![ConversationContentPart::Image {
+                image_url: Some("https://example.com/cat.png".to_owned()),
+                mime_type: None,
+                detail: None,
+            }]),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }];
+        let images = extract_image_parts(&mut messages);
+        // Remote URLs are not fetched for local inference → no bitmap, fallback text.
+        assert!(images.is_empty());
+    }
+}

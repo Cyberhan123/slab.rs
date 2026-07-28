@@ -136,6 +136,15 @@ impl LlamaModel {
         unsafe { self.inner.lib.llama_model_get_vocab(self.inner.model.unwrap().as_ptr()) }
     }
 
+    /// Return the raw `llama_model*` pointer for FFI interop with sibling
+    /// `-sys` crates (e.g. `slab-mtmd`'s `mtmd_init_from_file`).
+    ///
+    /// The pointer is valid for the lifetime of this [`LlamaModel`]; callers
+    /// must not free it (the wrapper owns it).
+    pub fn as_ptr(&self) -> *mut slab_llama_sys::llama_model {
+        self.inner.model.expect("model pointer valid until Drop").as_ptr()
+    }
+
     /// Create an inference context for this model.
     ///
     /// # Arguments

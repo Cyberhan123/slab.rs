@@ -18,6 +18,10 @@ pub struct GgmlLlamaLoadConfig {
     pub chat_template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gbnf: Option<String>,
+    /// Optional multimodal vision/audio projector (mmproj) GGUF. When set, the
+    /// runtime loads an mtmd context bound to the text model for image inputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mmproj_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]

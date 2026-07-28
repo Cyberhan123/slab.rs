@@ -11,6 +11,9 @@ pub fn generate_vendor_sys_bindings(
     include_deps: &[&str],
     dynamic_library_name: &str,
     extra_rerun_paths: &[&str],
+    allowlist: Option<&[&str]>,
+    blocklist: Option<&[&str]>,
+    no_partialeq_types: Option<&[&str]>,
 ) -> Result<()> {
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-changed=src/bindings.rs");
@@ -32,7 +35,14 @@ pub fn generate_vendor_sys_bindings(
         include_dirs.push(artifact.include_dir.clone());
     }
 
-    let builder = configure_bindgen_builder("wrapper.h", &include_dirs, dynamic_library_name);
+    let builder = configure_bindgen_builder(
+        "wrapper.h",
+        &include_dirs,
+        dynamic_library_name,
+        allowlist,
+        blocklist,
+        no_partialeq_types,
+    );
     generate_or_copy_bindings(builder, &out_dir, &fallback_source)
         .with_context(|| format!("failed to prepare {primary_artifact} bindings"))?;
 

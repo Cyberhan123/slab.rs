@@ -519,6 +519,7 @@ fn build_backend_load_spec(
             flash_attn,
             chat_template,
             gbnf,
+            mmproj_path: None,
         })),
         RuntimeBackendId::GgmlWhisper => {
             Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {

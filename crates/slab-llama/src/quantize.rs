@@ -2,9 +2,11 @@
 //!
 //! Mirrors the modern `llama_model_quantize_params` surface, including the
 //! **turbo quantization types** [`LlamaFtype::MostlyTq1_0`] / `MostlyTq2_0`
-//! used by 1.58-bit / ternary models. Note: the Hadamard-rotation `attn_rot`
-//! "TurboQuant" variant (llama.cpp PR #21038) is **not** available in the
-//! vendored `b9555` build and requires a future DLL bump.
+//! used by 1.58-bit / ternary models, plus [`LlamaFtype::MostlyQ2_0`]. The
+//! Hadamard-rotation `attn_rot` "TurboQuant" (llama.cpp PR #21038) is toggled
+//! at runtime via the `LLAMA_ATTN_ROT_DISABLE` env var (read at context init)
+//! — see [`set_attn_rot_disabled`]. It is not an FFI symbol, so there is nothing
+//! to bind here; whether a given prebuilt DLL honors it depends on the build.
 //!
 //! The backend must be initialised ([`crate::Llama::backend_init`], done by
 //! [`crate::Llama::new`]) before calling [`crate::Llama::model_quantize`].
@@ -33,9 +35,9 @@ impl GgmlType {
 
 /// GGUF file type / quantization format.
 ///
-/// Covers the formats exposed by the vendored `b9555` `llama.h`, including the
-/// turbo types `TQ1_0`/`TQ2_0`. [`LlamaFtype::Unknown`] preserves any
-/// forward-compatible value the build did not name.
+/// Covers the formats exposed by the vendored `llama.h` (upstream `v10159`),
+/// including the turbo types `TQ1_0`/`TQ2_0` and `Q2_0`. [`LlamaFtype::Unknown`]
+/// preserves any forward-compatible value the build did not name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlamaFtype {
     AllF32,
@@ -73,6 +75,7 @@ pub enum LlamaFtype {
     MostlyMxfp4Moe,
     MostlyNvfp4,
     MostlyQ1_0,
+    MostlyQ2_0,
     Unknown(i32),
 }
 
@@ -115,6 +118,7 @@ impl LlamaFtype {
             "mxfp4_moe" => Self::MostlyMxfp4Moe,
             "nvfp4" => Self::MostlyNvfp4,
             "q1_0" => Self::MostlyQ1_0,
+            "q2_0" => Self::MostlyQ2_0,
             _ => Self::Unknown(-1),
         }
     }
@@ -157,6 +161,7 @@ impl LlamaFtype {
             Self::MostlyMxfp4Moe => Some("mxfp4_moe"),
             Self::MostlyNvfp4 => Some("nvfp4"),
             Self::MostlyQ1_0 => Some("q1_0"),
+            Self::MostlyQ2_0 => Some("q2_0"),
             Self::Unknown(_) => None,
         }
     }
@@ -199,6 +204,7 @@ impl LlamaFtype {
             Self::MostlyMxfp4Moe => llama_ftype_LLAMA_FTYPE_MOSTLY_MXFP4_MOE,
             Self::MostlyNvfp4 => llama_ftype_LLAMA_FTYPE_MOSTLY_NVFP4,
             Self::MostlyQ1_0 => llama_ftype_LLAMA_FTYPE_MOSTLY_Q1_0,
+            Self::MostlyQ2_0 => llama_ftype_LLAMA_FTYPE_MOSTLY_Q2_0,
             Self::Unknown(raw) => raw,
         }
     }
@@ -255,6 +261,7 @@ const KNOWN_FTYPES: &[LlamaFtype] = &[
     LlamaFtype::MostlyMxfp4Moe,
     LlamaFtype::MostlyNvfp4,
     LlamaFtype::MostlyQ1_0,
+    LlamaFtype::MostlyQ2_0,
 ];
 
 /// Parameters for [`Llama::model_quantize`].
@@ -353,6 +360,41 @@ impl Llama {
     }
 }
 
+/// Env-var name read by llama.cpp at context creation to disable the Hadamard
+/// attention rotation ("TurboQuant", PR #21038).
+const ATTN_ROT_DISABLE_ENV: &str = "LLAMA_ATTN_ROT_DISABLE";
+
+/// Toggle llama.cpp's TurboQuant attention rotation.
+///
+/// Sets the `LLAMA_ATTN_ROT_DISABLE` env var, which llama.cpp reads when a
+/// `llama_context` is created. Must be called **before** any context is
+/// initialised on the current process, and not concurrently with context
+/// creation. Whether the rotation is actually applied depends on the prebuilt
+/// `llama`/`mtmd` shared library having been compiled with PR #21038.
+///
+/// Pass `true` to opt out (disable TurboQuant); `false` restores the default
+/// (rotation enabled).
+//
+// `std::env::set_var`/`remove_var` became `unsafe` in Rust 1.95+ because env
+// mutation is not synchronised with concurrent readers. The caller is
+// responsible for single-threaded setup here.
+pub fn set_attn_rot_disabled(disabled: bool) {
+    // SAFETY: caller guarantees no concurrent context creation / env reads.
+    unsafe {
+        if disabled {
+            std::env::set_var(ATTN_ROT_DISABLE_ENV, "1");
+        } else {
+            std::env::remove_var(ATTN_ROT_DISABLE_ENV);
+        }
+    }
+}
+
+/// Whether TurboQuant attention rotation is currently disabled via the env var.
+#[must_use]
+pub fn attn_rot_disabled() -> bool {
+    std::env::var(ATTN_ROT_DISABLE_ENV).ok().is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,5 +450,33 @@ mod tests {
     fn from_raw_unknown_passthrough() {
         assert_eq!(LlamaFtype::from_raw(-1), LlamaFtype::Unknown(-1));
         assert_eq!(LlamaFtype::from_raw(9999), LlamaFtype::Unknown(9999));
+    }
+
+    #[test]
+    fn q2_0_round_trips() {
+        assert_eq!(LlamaFtype::from_name("q2_0"), LlamaFtype::MostlyQ2_0);
+        assert_eq!(LlamaFtype::MostlyQ2_0.to_raw(), 41);
+        assert_eq!(LlamaFtype::from_raw(41), LlamaFtype::MostlyQ2_0);
+        assert_eq!(LlamaFtype::MostlyQ2_0.name(), Some("q2_0"));
+    }
+
+    #[test]
+    fn attn_rot_toggle_round_trips() {
+        // Capture and restore so the test is order-independent.
+        let prior = std::env::var(ATTN_ROT_DISABLE_ENV).ok();
+        set_attn_rot_disabled(true);
+        assert!(attn_rot_disabled());
+        set_attn_rot_disabled(false);
+        assert!(!attn_rot_disabled());
+        match prior {
+            Some(value) => {
+                // SAFETY: test-only, single-threaded.
+                unsafe { std::env::set_var(ATTN_ROT_DISABLE_ENV, value) };
+            }
+            None => {
+                // SAFETY: test-only, single-threaded.
+                unsafe { std::env::remove_var(ATTN_ROT_DISABLE_ENV) };
+            }
+        }
     }
 }

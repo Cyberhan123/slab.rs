@@ -186,6 +186,7 @@ impl ModelPackEngineLoadSpec {
                 flash_attn: true,
                 chat_template: self.load_defaults.chat_template_source.clone(),
                 gbnf: self.load_defaults.gbnf_source.clone(),
+                mmproj_path: None,
             }),
             RuntimeBackendId::GgmlWhisper => {
                 RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {

@@ -12,7 +12,7 @@ pub(crate) use contracts::{
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, GgmlLlamaQuantizeInput,
     GgmlLlamaQuantizeOutput, GgmlWhisperLoadConfig, ImageGenerationRequest,
     ImageGenerationResponse, OnnxInferenceRequest, OnnxInferenceResponse, OnnxTensor,
-    TextGenerationMetadata, TextGenerationOptions, TextGenerationResponse,
+    TextGenerationImagePart, TextGenerationMetadata, TextGenerationOptions, TextGenerationResponse,
     TextGenerationStreamEvent, TextGenerationUsage,
 };
 #[cfg(feature = "ggml")]

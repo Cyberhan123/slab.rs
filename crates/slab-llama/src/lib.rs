@@ -63,11 +63,13 @@ pub use llama_sampler::{LlamaSampler, SamplerChainBuilder};
 pub use logging::GgmlLogLevel;
 pub use model_params::LlamaModelParams;
 pub use perf::LlamaPerfContextData;
-pub use quantize::{GgmlType, LlamaFtype, LlamaQuantizeParams};
+pub use quantize::{
+    GgmlType, LlamaFtype, LlamaQuantizeParams, attn_rot_disabled, set_attn_rot_disabled,
+};
 pub use runtime::{
     LlamaInferenceOutput, LlamaInferenceParams, LlamaLoadConfig, LlamaLogitBias, LlamaRuntime,
-    LlamaRuntimeError, LlamaSamplingOptions, LlamaSessionSnapshot, LlamaStopInfo, SessionId,
-    StreamChunk, StreamHandle,
+    LlamaRuntimeError, LlamaSamplingOptions, LlamaSessionSnapshot, LlamaStopInfo, RunContext,
+    RunWithContextFn, SessionId, StreamChunk, StreamHandle,
 };
 pub use token::{LlamaPos, LlamaSeqId, LlamaToken};
 
