@@ -71,27 +71,38 @@ impl Context {
             return Err(DiffusionError::ContextNull);
         }
 
-        let images_ptr = unsafe { self.lib.generate_image(self.ctx, &*inner.fp) };
+        let images_ptr = unsafe {
+            let mut images_ptr: *mut slab_diffusion_sys::sd_image_t = std::ptr::null_mut();
+            let mut num_images: i32 = 0;
+            let ok =
+                self.lib.generate_image(self.ctx, &*inner.fp, &mut images_ptr, &mut num_images);
+            if !ok || images_ptr.is_null() {
+                return Err(DiffusionError::GenerationFailed);
+            }
+            let count =
+                usize::try_from(num_images).map_err(|_| DiffusionError::GenerationFailed)?;
+            Self::collect_images(self.lib.as_ref(), images_ptr, count)
+        };
 
-        if images_ptr.is_null() {
-            return Err(DiffusionError::GenerationFailed);
-        }
-
-        let batch = usize::try_from(inner.get_batch_count())
-            .map_err(|_| DiffusionError::GenerationFailed)?;
-        Ok(Self::collect_images(self.lib.as_ref(), images_ptr, batch))
+        Ok(images_ptr)
     }
 
     pub fn generate_video(&self, params: VideoParams) -> Result<Video, DiffusionError> {
         let inner = InnerVideoParams::from_canonical(self.lib.as_ref(), self.ctx, &params)
             .map_err(DiffusionError::InvalidParameters)?;
+        let mut frames_ptr: *mut slab_diffusion_sys::sd_image_t = std::ptr::null_mut();
         let mut num_frames_out: i32 = 0;
-
-        let frames_ptr = unsafe {
-            self.lib.generate_video(self.ctx, &*inner.fp, &mut num_frames_out as *mut i32)
+        let ok = unsafe {
+            self.lib.generate_video(
+                self.ctx,
+                &*inner.fp,
+                &mut frames_ptr,
+                &mut num_frames_out,
+                std::ptr::null_mut(),
+            )
         };
 
-        if frames_ptr.is_null() {
+        if !ok || frames_ptr.is_null() {
             return Err(DiffusionError::GenerationFailed);
         }
 

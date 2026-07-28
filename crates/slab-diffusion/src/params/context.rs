@@ -132,14 +132,6 @@ pub(crate) struct InnerContextParams {
     embedding_views: Vec<sd_embedding_t>,
     photo_maker_path: Option<CString>,
     tensor_type_rules: Option<CString>,
-    main_device: Option<CString>,
-    diffusion_device: Option<CString>,
-    clip_device: Option<CString>,
-    vae_device: Option<CString>,
-    tae_device: Option<CString>,
-    control_net_device: Option<CString>,
-    photomaker_device: Option<CString>,
-    vision_device: Option<CString>,
 }
 
 impl Clone for InnerContextParams {
@@ -164,14 +156,6 @@ impl Clone for InnerContextParams {
             embedding_views: self.embedding_views.clone(),
             photo_maker_path: self.photo_maker_path.clone(),
             tensor_type_rules: self.tensor_type_rules.clone(),
-            main_device: self.main_device.clone(),
-            diffusion_device: self.diffusion_device.clone(),
-            clip_device: self.clip_device.clone(),
-            vae_device: self.vae_device.clone(),
-            tae_device: self.tae_device.clone(),
-            control_net_device: self.control_net_device.clone(),
-            photomaker_device: self.photomaker_device.clone(),
-            vision_device: self.vision_device.clone(),
         };
         cloned.sync_backing();
         cloned
@@ -200,14 +184,6 @@ impl Default for InnerContextParams {
             embedding_views: Vec::new(),
             photo_maker_path: None,
             tensor_type_rules: None,
-            main_device: None,
-            diffusion_device: None,
-            clip_device: None,
-            vae_device: None,
-            tae_device: None,
-            control_net_device: None,
-            photomaker_device: None,
-            vision_device: None,
         }
     }
 }
@@ -235,8 +211,8 @@ impl InnerContextParams {
         // `sd_ctx_params_init` enables short-lived one-shot defaults that do not match
         // the upstream long-lived server context behavior. Keep unset flags aligned with
         // the server path so reused contexts survive multiple inference calls.
-        self.fp.vae_decode_only = value.vae_decode_only.unwrap_or(false);
-        self.fp.free_params_immediately = value.free_params_immediately.unwrap_or(false);
+        // NOTE: upstream removed `vae_decode_only` / `free_params_immediately` from
+        // `sd_ctx_params_t`; only `tae_preview_only` remains of the server-compat flags.
         self.fp.tae_preview_only = value.tae_preview_only.unwrap_or(false);
     }
 
@@ -359,9 +335,11 @@ impl InnerContextParams {
         if let Some(lora_apply_mode) = value.lora_apply_mode {
             inner.fp.lora_apply_mode = lora_apply_mode.into();
         }
-        if let Some(offload_params_to_cpu) = value.offload_params_to_cpu {
-            inner.fp.offload_params_to_cpu = offload_params_to_cpu;
-        }
+        // NOTE: upstream `sd_ctx_params_t` dropped `offload_params_to_cpu`,
+        // `circular_x`/`circular_y`, the `chroma_*` masks, `qwen_image_zero_cond_t`,
+        // and the per-stage `*_device` strings (device assignment is now a single
+        // `backend` spec). Their public `ContextParams` options remain accepted for
+        // API stability but no longer map to a native field.
         if let Some(enable_mmap) = value.enable_mmap {
             inner.fp.enable_mmap = enable_mmap;
         }
@@ -377,82 +355,8 @@ impl InnerContextParams {
         if let Some(vae_conv_direct) = value.vae_conv_direct {
             inner.fp.vae_conv_direct = vae_conv_direct;
         }
-        if let Some(circular_x) = value.circular_x {
-            inner.fp.circular_x = circular_x;
-        }
-        if let Some(circular_y) = value.circular_y {
-            inner.fp.circular_y = circular_y;
-        }
         if let Some(force_sdxl_vae_conv_scale) = value.force_sdxl_vae_conv_scale {
             inner.fp.force_sdxl_vae_conv_scale = force_sdxl_vae_conv_scale;
-        }
-        if let Some(chroma_use_dit_mask) = value.chroma_use_dit_mask {
-            inner.fp.chroma_use_dit_mask = chroma_use_dit_mask;
-        }
-        if let Some(chroma_use_t5_mask) = value.chroma_use_t5_mask {
-            inner.fp.chroma_use_t5_mask = chroma_use_t5_mask;
-        }
-        if let Some(chroma_t5_mask_pad) = value.chroma_t5_mask_pad {
-            inner.fp.chroma_t5_mask_pad = chroma_t5_mask_pad;
-        }
-        if let Some(qwen_image_zero_cond_t) = value.qwen_image_zero_cond_t {
-            inner.fp.qwen_image_zero_cond_t = qwen_image_zero_cond_t;
-        }
-        if value.main_device.is_some() {
-            Self::set_c_string(
-                &mut inner.main_device,
-                &mut inner.fp.main_device,
-                value.main_device.as_deref(),
-            );
-        }
-        if value.diffusion_device.is_some() {
-            Self::set_c_string(
-                &mut inner.diffusion_device,
-                &mut inner.fp.diffusion_device,
-                value.diffusion_device.as_deref(),
-            );
-        }
-        if value.clip_device.is_some() {
-            Self::set_c_string(
-                &mut inner.clip_device,
-                &mut inner.fp.clip_device,
-                value.clip_device.as_deref(),
-            );
-        }
-        if value.vae_device.is_some() {
-            Self::set_c_string(
-                &mut inner.vae_device,
-                &mut inner.fp.vae_device,
-                value.vae_device.as_deref(),
-            );
-        }
-        if value.tae_device.is_some() {
-            Self::set_c_string(
-                &mut inner.tae_device,
-                &mut inner.fp.tae_device,
-                value.tae_device.as_deref(),
-            );
-        }
-        if value.control_net_device.is_some() {
-            Self::set_c_string(
-                &mut inner.control_net_device,
-                &mut inner.fp.control_net_device,
-                value.control_net_device.as_deref(),
-            );
-        }
-        if value.photomaker_device.is_some() {
-            Self::set_c_string(
-                &mut inner.photomaker_device,
-                &mut inner.fp.photomaker_device,
-                value.photomaker_device.as_deref(),
-            );
-        }
-        if value.vision_device.is_some() {
-            Self::set_c_string(
-                &mut inner.vision_device,
-                &mut inner.fp.vision_device,
-                value.vision_device.as_deref(),
-            );
         }
 
         inner
@@ -510,16 +414,6 @@ impl InnerContextParams {
         self.fp.photo_maker_path = self.photo_maker_path.as_ref().map_or(ptr::null(), c_string_ptr);
         self.fp.tensor_type_rules =
             self.tensor_type_rules.as_ref().map_or(ptr::null(), c_string_ptr);
-        self.fp.main_device = self.main_device.as_ref().map_or(ptr::null(), c_string_ptr);
-        self.fp.diffusion_device = self.diffusion_device.as_ref().map_or(ptr::null(), c_string_ptr);
-        self.fp.clip_device = self.clip_device.as_ref().map_or(ptr::null(), c_string_ptr);
-        self.fp.vae_device = self.vae_device.as_ref().map_or(ptr::null(), c_string_ptr);
-        self.fp.tae_device = self.tae_device.as_ref().map_or(ptr::null(), c_string_ptr);
-        self.fp.control_net_device =
-            self.control_net_device.as_ref().map_or(ptr::null(), c_string_ptr);
-        self.fp.photomaker_device =
-            self.photomaker_device.as_ref().map_or(ptr::null(), c_string_ptr);
-        self.fp.vision_device = self.vision_device.as_ref().map_or(ptr::null(), c_string_ptr);
     }
 }
 
@@ -530,31 +424,20 @@ mod tests {
     #[test]
     fn unset_context_flags_use_server_compatible_defaults() {
         let mut inner = InnerContextParams::default();
-        inner.fp.vae_decode_only = true;
-        inner.fp.free_params_immediately = true;
         inner.fp.tae_preview_only = true;
 
         inner.apply_server_compatible_defaults(&ContextParams::default());
 
-        assert!(!inner.fp.vae_decode_only);
-        assert!(!inner.fp.free_params_immediately);
         assert!(!inner.fp.tae_preview_only);
     }
 
     #[test]
     fn explicit_context_flags_override_server_compatible_defaults() {
         let mut inner = InnerContextParams::default();
-        let params = ContextParams {
-            vae_decode_only: Some(true),
-            free_params_immediately: Some(true),
-            tae_preview_only: Some(true),
-            ..Default::default()
-        };
+        let params = ContextParams { tae_preview_only: Some(true), ..Default::default() };
 
         inner.apply_server_compatible_defaults(&params);
 
-        assert!(inner.fp.vae_decode_only);
-        assert!(inner.fp.free_params_immediately);
         assert!(inner.fp.tae_preview_only);
     }
 }

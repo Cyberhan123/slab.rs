@@ -8,7 +8,8 @@ use slab_diffusion_sys::{
     prediction_t_EDM_V_PRED,
     prediction_t_FLOW_PRED,
     prediction_t_FLUX_FLOW_PRED,
-    prediction_t_FLUX2_FLOW_PRED,
+    prediction_t_SEFI_FLOW_PRED,
+    prediction_t_MINIT2I_FLOW_PRED,
     prediction_t_PREDICTION_COUNT,
 };
 use slab_diffusion_sys::prediction_t;
@@ -22,7 +23,8 @@ pub enum Prediction {
     EdmV = prediction_t_EDM_V_PRED,
     Flow = prediction_t_FLOW_PRED,
     FluxFlow = prediction_t_FLUX_FLOW_PRED,
-    Flux2Flow = prediction_t_FLUX2_FLOW_PRED,
+    SefiFlow = prediction_t_SEFI_FLOW_PRED,
+    MinitwoFlow = prediction_t_MINIT2I_FLOW_PRED,
     #[default]
     Unknown = prediction_t_PREDICTION_COUNT,
 }

@@ -19,7 +19,7 @@ impl Diffusion {
     pub fn new_upscaler_context(
         &self,
         esrgan_path: &str,
-        offload_params_to_cpu: bool,
+        _offload_params_to_cpu: bool,
         direct: bool,
         n_threads: i32,
         tile_size: i32,
@@ -30,14 +30,18 @@ impl Diffusion {
         let device_cstr =
             device.map(|value| CString::new(value).expect("device contains an interior NUL byte"));
 
+        // Upstream replaced `(offload_params_to_cpu, device)` with a single backend
+        // assignment pair `(backend, params_backend)`. Map the legacy device string to
+        // `backend`; there is no equivalent for `offload_params_to_cpu` or a separate
+        // params backend, so those are dropped/NULL.
         let ctx = unsafe {
             self.lib.new_upscaler_ctx(
                 esrgan_cstr.as_ptr(),
-                offload_params_to_cpu,
                 direct,
                 n_threads,
                 tile_size,
                 device_cstr.as_ref().map_or(std::ptr::null(), |value| value.as_ptr()),
+                std::ptr::null(),
             )
         };
 
@@ -60,15 +64,27 @@ impl UpscalerContext {
         input_image: Image,
         upscale_factor: u32,
     ) -> Result<Image, DiffusionError> {
-        let mut image =
-            unsafe { self.lib.upscale(self.fp, image_view(&input_image), upscale_factor) };
+        // Upstream `upscale` now returns `bool` and emits result images via out-params.
+        let mut images_ptr: *mut slab_diffusion_sys::sd_image_t = std::ptr::null_mut();
+        let mut num_images: i32 = 0;
+        let ok = unsafe {
+            self.lib.upscale(
+                self.fp,
+                image_view(&input_image),
+                upscale_factor,
+                &mut images_ptr,
+                &mut num_images,
+            )
+        };
 
-        if image.data.is_null() {
+        if !ok || images_ptr.is_null() {
             return Err(DiffusionError::UpscalerFailed);
         }
 
-        let owned = owned_image_from_raw(image);
-        unsafe { self.lib.free_sd_image_data(&mut image) };
+        // `upscale` produces a single output image (the first entry).
+        let raw = unsafe { *images_ptr };
+        let owned = owned_image_from_raw(raw);
+        unsafe { self.lib.free_sd_images(images_ptr, num_images) };
 
         Ok(owned)
     }
