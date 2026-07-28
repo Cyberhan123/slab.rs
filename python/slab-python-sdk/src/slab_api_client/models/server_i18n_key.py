@@ -203,6 +203,9 @@ class ServerI18NKey(str, Enum):
     SERVER_SETTINGS_PROPERTIES_DESCRIPTION_AGENTMEMORYMODEL = (
         "server.settings.properties.description.agentMemoryModel"
     )
+    SERVER_SETTINGS_PROPERTIES_DESCRIPTION_AGENTSLEEPINHIBITOR = (
+        "server.settings.properties.description.agentSleepInhibitor"
+    )
     SERVER_SETTINGS_PROPERTIES_DESCRIPTION_ALLOWEDORIGINS = (
         "server.settings.properties.description.allowedOrigins"
     )
@@ -418,6 +421,9 @@ class ServerI18NKey(str, Enum):
     )
     SERVER_SETTINGS_PROPERTIES_LABEL_AGENTMEMORYMODEL = (
         "server.settings.properties.label.agentMemoryModel"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_AGENTSLEEPINHIBITOR = (
+        "server.settings.properties.label.agentSleepInhibitor"
     )
     SERVER_SETTINGS_PROPERTIES_LABEL_ALLOWEDORIGINS = (
         "server.settings.properties.label.allowedOrigins"

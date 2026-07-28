@@ -852,6 +852,7 @@ fn section_location(path: &str) -> (&'static str, &'static str) {
         _ if path.starts_with("telemetry.") => ("telemetry", "general"),
         _ if path.starts_with("tools.ffmpeg.") => ("tools", "ffmpeg"),
         "agent.debug" => ("agent", "general"),
+        "agent.sleep_inhibitor" => ("agent", "general"),
         _ if path.starts_with("agent.tools.mcp.") => ("agent", "mcp"),
         _ if path.starts_with("agent.tools.websearch.") => ("agent", "websearch"),
         _ if path.starts_with("agent.hooks.") => ("agent", "hooks"),
@@ -1040,7 +1041,10 @@ fn string_map_json_schema(title: &str, title_key: ServerI18nKey) -> Value {
 }
 
 pub fn change_effect_for(path: &str) -> SettingChangeEffect {
-    if path.starts_with("agent.hooks.") || path.starts_with("agent.memories.") {
+    if path.starts_with("agent.hooks.")
+        || path.starts_with("agent.memories.")
+        || path == "agent.sleep_inhibitor"
+    {
         return SettingChangeEffect::Live;
     }
 
@@ -1420,6 +1424,7 @@ fn property_label(path: &str) -> String {
         "runtime.launch.desktop.bind_host" => "Desktop Runtime Bind Host".to_owned(),
         "runtime.launch.desktop.base_port" => "Desktop Runtime Base Port".to_owned(),
         "agent.debug" => "Agent Debug Trace".to_owned(),
+        "agent.sleep_inhibitor" => "Keep Awake During Turns".to_owned(),
         "agent.hooks.enabled" => "External Hooks".to_owned(),
         "agent.hooks.scripts" => "Legacy Hook Scripts".to_owned(),
         "agent.memories.enabled" => "Agent Memories".to_owned(),
@@ -1489,6 +1494,9 @@ fn property_description(path: &str) -> String {
         "tools.ffmpeg.install_dir" => "Optional install directory for the FFmpeg sidecar.".to_owned(),
         "agent.debug" => {
             "Write full-fidelity per-session agent trace files for prompt, tool, and runtime debugging.".to_owned()
+        }
+        "agent.sleep_inhibitor" => {
+            "Prevent the computer from sleeping while an agent turn is in progress.".to_owned()
         }
         "agent.hooks.enabled" => {
             "Enable external agent lifecycle hooks registered by plugins or legacy local script settings. Built-in hooks are unaffected.".to_owned()
@@ -1649,6 +1657,7 @@ fn property_label_key(path: &str) -> Option<ServerI18nKey> {
             Some(ServerI18nKey::SettingsPropertyLabelSessionStateDirectory)
         }
         "agent.debug" => Some(ServerI18nKey::SettingsPropertyLabelAgentDebugTrace),
+        "agent.sleep_inhibitor" => Some(ServerI18nKey::SettingsPropertyLabelAgentSleepInhibitor),
         "agent.hooks.enabled" => Some(ServerI18nKey::SettingsPropertyLabelExternalHooks),
         "agent.hooks.scripts" => Some(ServerI18nKey::SettingsPropertyLabelLegacyHookScripts),
         "agent.memories.enabled" => Some(ServerI18nKey::SettingsPropertyLabelAgentMemories),
@@ -1787,6 +1796,9 @@ fn property_description_key(path: &str) -> Option<ServerI18nKey> {
             Some(ServerI18nKey::SettingsPropertyDescriptionFfmpegInstallDir)
         }
         "agent.debug" => Some(ServerI18nKey::SettingsPropertyDescriptionAgentDebugTrace),
+        "agent.sleep_inhibitor" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionAgentSleepInhibitor)
+        }
         "agent.hooks.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionExternalHooks),
         "agent.hooks.scripts" => Some(ServerI18nKey::SettingsPropertyDescriptionLegacyHookScripts),
         "agent.memories.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionAgentMemories),

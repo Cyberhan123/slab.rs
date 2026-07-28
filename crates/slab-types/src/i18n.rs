@@ -246,6 +246,8 @@ pub enum ServerI18nKey {
     SettingsPropertyLabelSessionStateDirectory,
     #[serde(rename = "server.settings.properties.label.agentDebugTrace")]
     SettingsPropertyLabelAgentDebugTrace,
+    #[serde(rename = "server.settings.properties.label.agentSleepInhibitor")]
+    SettingsPropertyLabelAgentSleepInhibitor,
     #[serde(rename = "server.settings.properties.label.externalHooks")]
     SettingsPropertyLabelExternalHooks,
     #[serde(rename = "server.settings.properties.label.legacyHookScripts")]
@@ -382,6 +384,8 @@ pub enum ServerI18nKey {
     SettingsPropertyDescriptionFfmpegInstallDir,
     #[serde(rename = "server.settings.properties.description.agentDebugTrace")]
     SettingsPropertyDescriptionAgentDebugTrace,
+    #[serde(rename = "server.settings.properties.description.agentSleepInhibitor")]
+    SettingsPropertyDescriptionAgentSleepInhibitor,
     #[serde(rename = "server.settings.properties.description.externalHooks")]
     SettingsPropertyDescriptionExternalHooks,
     #[serde(rename = "server.settings.properties.description.legacyHookScripts")]

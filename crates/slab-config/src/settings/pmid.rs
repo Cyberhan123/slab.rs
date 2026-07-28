@@ -86,6 +86,7 @@ impl SettingsPmidCatalog {
             self.tools.ffmpeg.source.version(),
             self.tools.ffmpeg.source.artifact(),
             self.agent.debug(),
+            self.agent.sleep_inhibitor(),
             self.agent.hooks.enabled(),
             self.agent.hooks.scripts(),
             self.agent.memories.enabled(),
@@ -415,6 +416,10 @@ impl AgentPmids {
 
     pub fn debug(self) -> SettingPmid {
         SettingPmid::from_path("agent.debug")
+    }
+
+    pub fn sleep_inhibitor(self) -> SettingPmid {
+        SettingPmid::from_path("agent.sleep_inhibitor")
     }
 }
 

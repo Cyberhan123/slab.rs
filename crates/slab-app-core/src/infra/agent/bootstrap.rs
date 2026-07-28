@@ -187,6 +187,9 @@ fn build_agent_control(
             ),
         ))),
     ];
+    hooks.push(Arc::new(super::sleep_inhibitor_hook::SleepInhibitorHook::new(Arc::clone(
+        &ctx.pmid,
+    ))));
     if let Some(script_hook) =
         super::hooks::registered_script_hook(&ctx.pmid.config().agent.hooks, &ctx.config)
     {

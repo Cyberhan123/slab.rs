@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
+from typing_extensions import Self
 
 if TYPE_CHECKING:
     from ..models.plugin_language_server_transport_type_0 import (
@@ -53,9 +54,9 @@ class PluginLanguageServerContribution:
         languages = self.languages
 
         transport: dict[str, Any]
-        if isinstance(self.transport, PluginLanguageServerTransportType0):
-            transport = self.transport.to_dict()
-        elif isinstance(self.transport, PluginLanguageServerTransportType1):
+        if isinstance(self.transport, PluginLanguageServerTransportType0) or isinstance(
+            self.transport, PluginLanguageServerTransportType1
+        ):
             transport = self.transport.to_dict()
         else:
             transport = self.transport.to_dict()
@@ -73,7 +74,7 @@ class PluginLanguageServerContribution:
         return field_dict
 
     @classmethod
-    def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+    def from_dict(cls, src_dict: Mapping[str, Any]) -> Self:
         from ..models.plugin_language_server_transport_type_0 import (
             PluginLanguageServerTransportType0,
         )

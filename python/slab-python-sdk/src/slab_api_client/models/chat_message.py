@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
+from typing_extensions import Self
 
 from ..types import UNSET, Unset
 
@@ -72,34 +73,31 @@ class ChatMessage:
             content = []
             for componentsschemas_chat_message_content_type_1_item_data in self.content:
                 componentsschemas_chat_message_content_type_1_item: dict[str, Any]
-                if isinstance(
-                    componentsschemas_chat_message_content_type_1_item_data,
-                    ChatContentPartType0,
-                ):
-                    componentsschemas_chat_message_content_type_1_item = componentsschemas_chat_message_content_type_1_item_data.to_dict()
-                elif isinstance(
-                    componentsschemas_chat_message_content_type_1_item_data,
-                    ChatContentPartType1,
-                ):
-                    componentsschemas_chat_message_content_type_1_item = componentsschemas_chat_message_content_type_1_item_data.to_dict()
-                elif isinstance(
-                    componentsschemas_chat_message_content_type_1_item_data,
-                    ChatContentPartType2,
-                ):
-                    componentsschemas_chat_message_content_type_1_item = componentsschemas_chat_message_content_type_1_item_data.to_dict()
-                elif isinstance(
-                    componentsschemas_chat_message_content_type_1_item_data,
-                    ChatContentPartType3,
-                ):
-                    componentsschemas_chat_message_content_type_1_item = componentsschemas_chat_message_content_type_1_item_data.to_dict()
-                elif isinstance(
-                    componentsschemas_chat_message_content_type_1_item_data,
-                    ChatContentPartType4,
-                ):
-                    componentsschemas_chat_message_content_type_1_item = componentsschemas_chat_message_content_type_1_item_data.to_dict()
-                elif isinstance(
-                    componentsschemas_chat_message_content_type_1_item_data,
-                    ChatContentPartType5,
+                if (
+                    isinstance(
+                        componentsschemas_chat_message_content_type_1_item_data,
+                        ChatContentPartType0,
+                    )
+                    or isinstance(
+                        componentsschemas_chat_message_content_type_1_item_data,
+                        ChatContentPartType1,
+                    )
+                    or isinstance(
+                        componentsschemas_chat_message_content_type_1_item_data,
+                        ChatContentPartType2,
+                    )
+                    or isinstance(
+                        componentsschemas_chat_message_content_type_1_item_data,
+                        ChatContentPartType3,
+                    )
+                    or isinstance(
+                        componentsschemas_chat_message_content_type_1_item_data,
+                        ChatContentPartType4,
+                    )
+                    or isinstance(
+                        componentsschemas_chat_message_content_type_1_item_data,
+                        ChatContentPartType5,
+                    )
                 ):
                     componentsschemas_chat_message_content_type_1_item = componentsschemas_chat_message_content_type_1_item_data.to_dict()
                 else:
@@ -148,7 +146,7 @@ class ChatMessage:
         return field_dict
 
     @classmethod
-    def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+    def from_dict(cls, src_dict: Mapping[str, Any]) -> Self:
         from ..models.chat_content_part_type_0 import ChatContentPartType0
         from ..models.chat_content_part_type_1 import ChatContentPartType1
         from ..models.chat_content_part_type_2 import ChatContentPartType2

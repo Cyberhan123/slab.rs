@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
+from typing_extensions import Self
 
 from ..models.setting_change_effect import SettingChangeEffect
 from ..types import UNSET, Unset
@@ -89,9 +90,9 @@ class SettingPropertyView:
         overridden_by: dict[str, Any] | None | Unset
         if isinstance(self.overridden_by, Unset):
             overridden_by = UNSET
-        elif isinstance(self.overridden_by, SettingOverrideSourceType0):
-            overridden_by = self.overridden_by.to_dict()
-        elif isinstance(self.overridden_by, SettingOverrideSourceType1):
+        elif isinstance(self.overridden_by, SettingOverrideSourceType0) or isinstance(
+            self.overridden_by, SettingOverrideSourceType1
+        ):
             overridden_by = self.overridden_by.to_dict()
         else:
             overridden_by = self.overridden_by
@@ -129,7 +130,7 @@ class SettingPropertyView:
         return field_dict
 
     @classmethod
-    def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+    def from_dict(cls, src_dict: Mapping[str, Any]) -> Self:
         from ..models.i18n_payload import I18NPayload
         from ..models.setting_override_source_type_0 import SettingOverrideSourceType0
         from ..models.setting_override_source_type_1 import SettingOverrideSourceType1

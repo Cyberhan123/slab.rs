@@ -348,6 +348,11 @@
             }
           }
         },
+        "sleep_inhibitor": {
+          "default": true,
+          "description": "Keep the machine awake while an agent turn is in progress. Defaults to\n`true`; surfaced as the `agent.sleep_inhibitor` PMID setting.",
+          "type": "boolean"
+        },
         "tools": {
           "$ref": "#/$defs/AgentToolsConfig",
           "default": {
@@ -1904,6 +1909,7 @@
             "queue_capacity": 0
           }
         },
+        "sleep_inhibitor": true,
         "tools": {
           "mcp": {
             "enabled": false

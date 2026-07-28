@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from attrs import define as _attrs_define
+from typing_extensions import Self
 
 from ..models.chat_reasoning_effort import ChatReasoningEffort
 from ..models.chat_verbosity import ChatVerbosity
@@ -249,7 +250,7 @@ class ChatCompletionRequest:
         return field_dict
 
     @classmethod
-    def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+    def from_dict(cls, src_dict: Mapping[str, Any]) -> Self:
         from ..models.chat_message import ChatMessage
         from ..models.chat_response_format import ChatResponseFormat
         from ..models.chat_stream_options import ChatStreamOptions

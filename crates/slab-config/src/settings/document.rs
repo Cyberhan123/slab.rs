@@ -322,6 +322,10 @@ pub struct AgentSettingsConfig {
     /// provider reachability probe can set this automatically in a follow-up.
     #[serde(default)]
     pub offline: bool,
+    /// Keep the machine awake while an agent turn is in progress. Defaults to
+    /// `true`; surfaced as the `agent.sleep_inhibitor` PMID setting.
+    #[serde(default = "default_enabled")]
+    pub sleep_inhibitor: bool,
 }
 
 impl Default for AgentSettingsConfig {
@@ -334,6 +338,7 @@ impl Default for AgentSettingsConfig {
             runtime: AgentRuntimeConfig::default(),
             permissions: AgentPermissionsConfig::default(),
             offline: false,
+            sleep_inhibitor: true,
         }
     }
 }

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
+from typing_extensions import Self
 
 from ..models.server_i18n_key import ServerI18NKey
 from ..types import UNSET, Unset
@@ -48,7 +49,7 @@ class I18NMessageRef:
         return field_dict
 
     @classmethod
-    def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+    def from_dict(cls, src_dict: Mapping[str, Any]) -> Self:
         from ..models.i18n_message_ref_params import I18NMessageRefParams
 
         d = dict(src_dict)
