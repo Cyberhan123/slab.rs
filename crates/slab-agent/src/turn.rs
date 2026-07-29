@@ -358,7 +358,7 @@ fn token_budget_would_be_exhausted(
 
 /// External tools that require provider/network reachability and are removed
 /// from the agent's tool list in offline mode (INFRA-07). Local filesystem,
-/// shell, plan, verify, and a2u surface tools remain available offline.
+/// shell, plan, and verify tools remain available offline.
 fn is_external_tool_name(name: &str) -> bool {
     matches!(name, "web_search" | "mcp_call" | "mcp_list_tools") || name.starts_with("mcp__")
 }
@@ -847,16 +847,9 @@ mod tests {
         for external in ["web_search", "mcp_call", "mcp_list_tools", "mcp__server__tool"] {
             assert!(is_external_tool_name(external), "{external} should be external");
         }
-        for local in [
-            "read_file",
-            "write_file",
-            "shell",
-            "grep",
-            "plan_update",
-            "task.complete",
-            "verify",
-            "workspace.open",
-        ] {
+        for local in
+            ["read_file", "write_file", "shell", "grep", "plan_update", "task.complete", "verify"]
+        {
             assert!(!is_external_tool_name(local), "{local} should stay available offline");
         }
     }

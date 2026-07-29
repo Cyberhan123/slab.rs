@@ -44,8 +44,8 @@ struct CapabilityDescriptor {
 
 impl CapabilityDescriptor {
     /// Build one descriptor per `Tool`-kind capability declared by `source`.
-    /// `Workflow` / `A2uSurface` capabilities are not callable agent tools and
-    /// are skipped. Trust is derived once from the plugin's runtime kind.
+    /// `Workflow` capabilities are not callable agent tools and are skipped.
+    /// Trust is derived once from the plugin's runtime kind.
     fn for_source(source: &PluginCapabilitySource) -> Vec<Self> {
         let plugin_id = source.manifest.id.clone();
         let has_js = source.manifest.runtime.js.is_some();
@@ -382,19 +382,14 @@ mod tests {
         let port: Arc<dyn PluginToolPort> = Arc::new(CapturingPort::new(json!({})));
         let src = source(
             "team-plugin",
-            vec![
-                tool_cap("search", None),
-                tool_cap("render", Some(r#"{"type":"object"}"#)),
-                json!({ "id": "surf", "kind": "a2u_surface", "transport": { "type": "pluginCall", "function": "do_surf" } }),
-            ],
+            vec![tool_cap("search", None), tool_cap("render", Some(r#"{"type":"object"}"#))],
             false,
         );
         super::register_plugin_capability_tools(&router, port, std::slice::from_ref(&src));
 
         assert!(router.get("plugin__team_plugin__search").is_some());
         assert!(router.get("plugin__team_plugin__render").is_some());
-        // a2u_surface (non-tool) and unknown capabilities get no proxy.
-        assert!(router.get("plugin__team_plugin__surf").is_none());
+        // Unknown capabilities get no proxy.
         assert!(router.get("plugin__team_plugin__missing").is_none());
     }
 }

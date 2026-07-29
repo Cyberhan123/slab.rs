@@ -111,7 +111,6 @@ fn build_agent_control(
         shell_launcher,
         shell_config.bash_path.clone(),
     );
-    super::a2u_tools::register_builtin_a2u_tools(&tool_router);
     tool_router.register(Box::new(super::code_tools::CodeLspStatusTool::new(
         WorkspaceLspService::new(
             Arc::clone(&ctx.config),

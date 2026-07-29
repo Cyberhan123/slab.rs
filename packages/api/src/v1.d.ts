@@ -2384,7 +2384,7 @@ export interface components {
             status: number;
         };
         /** @enum {string} */
-        PluginCapabilityKind: "tool" | "workflow" | "a2u_surface";
+        PluginCapabilityKind: "tool" | "workflow";
         PluginCapabilityTransport: {
             function: string;
             type: components["schemas"]["PluginCapabilityTransportType"];

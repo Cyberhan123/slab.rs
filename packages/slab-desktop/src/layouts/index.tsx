@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { Outlet, useLocation } from "react-router-dom"
 
 import { WorkspaceStage } from "@slab/components/workspace"
@@ -7,11 +6,8 @@ import FooterStatusBar from "@/layouts/footer-status-bar"
 import Header, { DEFAULT_HEADER_META } from "@/layouts/header"
 import { HeaderProvider } from "@/layouts/header-provider"
 import { AppSidebar } from "@/layouts/sidebar"
-import { cn } from "@/lib/utils"
 import { getHeaderMetaForPath } from "@/routes/route-meta"
 import type { DesktopRouteObject } from "@/routes/route-meta"
-import { AgentSurfaceLayer } from "@/pages/assistant/components/agent-surface-layer"
-import { useAgentSurfaceStore } from "@/store/useAgentSurfaceStore"
 
 type LayoutProps = {
   routes: readonly DesktopRouteObject[]
@@ -22,13 +18,6 @@ export default function Layout({ routes }: LayoutProps) {
   const { pathname } = location
   const headerMeta = getHeaderMetaForPath(pathname, DEFAULT_HEADER_META, routes)
   const isChatShell = pathname === "/"
-  const [agentSurfaceActive, setAgentSurfaceActive] = useState(false)
-  const pendingSurface = useAgentSurfaceStore((state) => state.pendingSurface)
-  const requestComposerFocus = useAgentSurfaceStore((state) => state.requestComposerFocus)
-  const hasPendingRoutableAgentSurface = Boolean(
-    pendingSurface && pendingSurface.target !== "window" && pendingSurface.targetRoute !== "workspace"
-  )
-  const showAgentSurface = agentSurfaceActive || hasPendingRoutableAgentSurface
 
   return (
     <div className="workspace-shell flex h-screen min-h-0 w-full flex-col overflow-hidden">
@@ -41,26 +30,17 @@ export default function Layout({ routes }: LayoutProps) {
               className="min-h-0 flex-1 !rounded-none !border-0 !bg-transparent !shadow-none"
             >
               <main
-                className={cn(
-                  "flex min-h-0 flex-1 overflow-hidden bg-[var(--shell-card)]",
-                  isChatShell || showAgentSurface
-                    ? "p-0"
-                    : "px-[var(--shell-content-gutter)] pb-[var(--shell-content-gutter)] pt-4"
-                )}
+                className={
+                  isChatShell
+                    ? "flex min-h-0 flex-1 overflow-hidden bg-[var(--shell-card)] p-0"
+                    : "flex min-h-0 flex-1 overflow-hidden bg-[var(--shell-card)] px-[var(--shell-content-gutter)] pb-[var(--shell-content-gutter)] pt-4"
+                }
               >
                 <ErrorBoundary key={location.key} variant="page">
-                  <div
-                    className={cn("min-h-0 flex-1", showAgentSurface ? "hidden" : "flex")}
-                    aria-hidden={showAgentSurface}
-                  >
+                  <div className="min-h-0 flex-1 flex">
                     <Outlet />
                   </div>
                 </ErrorBoundary>
-                <AgentSurfaceLayer
-                  onActiveChange={setAgentSurfaceActive}
-                  onSurfaceClosed={requestComposerFocus}
-                  variant="shell"
-                />
               </main>
             </WorkspaceStage>
           </div>

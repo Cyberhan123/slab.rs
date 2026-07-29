@@ -18,7 +18,7 @@ import {
   type VideoGenerationTask,
 } from '@/lib/media-task-api';
 import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
-import { useAgentSurfaceStore } from '@/store/useAgentSurfaceStore';
+import { useWorkspaceHandoffStore } from '@/store/useWorkspaceHandoffStore';
 import { HEADER_SELECT_KEYS } from '@/layouts/header';
 import {
   DEFAULT_GENERATION_SIZE,
@@ -438,7 +438,7 @@ export function useVideoGeneration() {
   const openHistoryVideoInWorkspace = useCallback((task: VideoGenerationTask) => {
     const localPath = task.result_data?.video_path?.trim();
     if (localPath) {
-      useAgentSurfaceStore.getState().setPendingSurface({
+      useWorkspaceHandoffStore.getState().setPendingWorkspaceReveal({
         type: 'workspace',
         payload: {
           revealPath: localPath,

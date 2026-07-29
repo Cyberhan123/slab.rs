@@ -33,7 +33,7 @@ import {
   type WorkspaceExplorerPanel,
   type WorkspaceMarkdownMode,
 } from "@/store/useWorkspaceUiStore"
-import { useAgentSurfaceStore } from "@/store/useAgentSurfaceStore"
+import { useWorkspaceHandoffStore } from "@/store/useWorkspaceHandoffStore"
 import { getErrorMessage } from "@slab/api"
 import {
   getWorkspaceThemeMode,
@@ -87,10 +87,10 @@ export function useWorkspacePage() {
   const workspaceUi = workspace
     ? workspaceUiByRoot[workspace.rootPath] ?? emptyWorkspaceUiSnapshot
     : emptyWorkspaceUiSnapshot
-  const pendingWorkspaceSurface = useAgentSurfaceStore((state) =>
-    state.pendingSurface?.type === "workspace" ? state.pendingSurface : null
+  const pendingWorkspaceSurface = useWorkspaceHandoffStore((state) => state.pendingWorkspaceReveal)
+  const consumePendingSurface = useWorkspaceHandoffStore(
+    (state) => state.consumePendingWorkspaceReveal,
   )
-  const consumePendingSurface = useAgentSurfaceStore((state) => state.consumePendingSurface)
   const openFileTabs = workspaceUi.openFiles
   const activeFilePath = workspaceUi.activeFilePath
   const explorerPanel = workspaceUi.explorerPanel
@@ -692,7 +692,7 @@ export function useWorkspacePage() {
     const locationLabel = selectedText
       ? `${relativePath}:${selectedText.startLineNumber}-${selectedText.endLineNumber}`
       : relativePath
-    useAgentSurfaceStore.getState().setDraft({
+    useWorkspaceHandoffStore.getState().setDraft({
       autoSubmit: false,
       prompt: [
         `Explain this code from ${locationLabel}.`,
