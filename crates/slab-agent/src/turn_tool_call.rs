@@ -17,7 +17,7 @@ use crate::{
     port::{ApprovalDecision, ParsedToolCall, ToolRiskAssessment},
     protocol::{
         CommandExecutionOutputDeltaParams, CommandExecutionRequestApprovalParams, EventMsg,
-        ItemCompletedParams, ItemStartedParams, TurnItem,
+        FileChangeOutputDeltaParams, ItemCompletedParams, ItemStartedParams, TurnItem,
     },
     state::ToolCallStateMachine,
     tool::{
@@ -219,6 +219,20 @@ async fn emit_item_completed(context: &TurnExecutionContext<'_>, item: TurnItem)
 /// Display-only: the finalized output still arrives via `item/completed`.
 async fn emit_command_output_delta(context: &TurnExecutionContext<'_>, item_id: &str, delta: &str) {
     let msg = EventMsg::CommandExecutionOutputDelta(CommandExecutionOutputDeltaParams {
+        thread_id: context.thread_id.to_owned(),
+        turn_id: context.turn_index.to_string(),
+        item_id: item_id.to_owned(),
+        delta: delta.to_owned(),
+    });
+    context.notify.on_event_msg(context.thread_id, &msg).await;
+}
+
+/// Emit `EventMsg::FileChangeOutputDelta` for a running `apply_patch` item.
+/// Each delta is a JSON line `{"path": ..., "kind": ...}` reporting a file
+/// committed mid-apply; the finalized change set still arrives via
+/// `item/completed`.
+async fn emit_file_change_delta(context: &TurnExecutionContext<'_>, item_id: &str, delta: &str) {
+    let msg = EventMsg::FileChangeOutputDelta(FileChangeOutputDeltaParams {
         thread_id: context.thread_id.to_owned(),
         turn_id: context.turn_index.to_string(),
         item_id: item_id.to_owned(),
@@ -674,7 +688,11 @@ async fn handle_tool_call(
     };
     let drain = async {
         while let Some(delta) = delta_rx.recv().await {
-            emit_command_output_delta(context, &item_id, &delta).await;
+            if tool_call.name == "apply_patch" {
+                emit_file_change_delta(context, &item_id, &delta).await;
+            } else {
+                emit_command_output_delta(context, &item_id, &delta).await;
+            }
         }
     };
     let (run_result, ()) = tokio::join!(run, drain);
@@ -1006,15 +1024,25 @@ fn infer_descriptor(
     Some(descriptor.with_workspace(workspace_root))
 }
 
-/// Extract the first modified file path from a unified diff, for the file-edit
-/// descriptor subject. Falls back to `"patch"` when no path can be parsed.
+/// Extract the first modified file path from a patch, for the file-edit
+/// descriptor subject. Recognizes the `*** Begin Patch` dialect headers first
+/// and falls back to unified-diff `+++ b/path`. Returns `"patch"` when no path
+/// can be parsed.
 fn first_path_in_patch(patch: &str) -> String {
     for line in patch.lines() {
-        if let Some(rest) = line.strip_prefix("+++ ") {
-            let trimmed = rest.trim();
+        let trimmed = line.trim_start();
+        for header in ["*** Add File:", "*** Delete File:", "*** Update File:"] {
+            if let Some(rest) = trimmed.strip_prefix(header) {
+                let path = rest.trim().trim_matches('"');
+                if !path.is_empty() {
+                    return path.to_owned();
+                }
+            }
+        }
+        if let Some(rest) = trimmed.strip_prefix("+++ ") {
+            let candidate = rest.trim();
             // Strip the leading `b/` that git diffs use.
-            let path = trimmed.strip_prefix("b/").unwrap_or(trimmed);
-            let path = path.trim_matches('"');
+            let path = candidate.strip_prefix("b/").unwrap_or(candidate).trim_matches('"');
             if !path.is_empty() && path != "/dev/null" {
                 return path.to_owned();
             }

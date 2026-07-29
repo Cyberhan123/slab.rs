@@ -93,6 +93,7 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     approvals: [],
     approvalStatusByItemId: new Map<string, ApprovalStatus>(),
     liveOutputByItemId: new Map<string, string>(),
+    livePatchByItemId: new Map<string, string[]>(),
     modelLoad: null,
     turnUsage: null,
     contextWindow: null,

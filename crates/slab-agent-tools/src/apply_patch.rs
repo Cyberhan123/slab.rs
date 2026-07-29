@@ -1,10 +1,23 @@
-//! Unified-diff patch application tool.
+//! `*** Begin Patch` application tool.
+//!
+//! Drives the [`slab_apply_patch`] engine (the OpenAI/Codex `*** Begin Patch`
+//! dialect with fuzzy context matching and partial-failure delta tracking)
+//! against the configured workspace root through slab's `ExecutorFileSystem`.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentError, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver, ToolOutputStream,
+};
+use slab_apply_patch::{
+    AppliedPatchDelta, AppliedPatchFileChange, PatchProgress, PatchProgressKind, PatchProgressSink,
+    apply_patch_with_progress as apply_patch_engine, local_file_system,
+};
+use slab_file::{FileSystemSandboxContext, FileSystemSandboxPolicy};
+use slab_utils::path::absolute::AbsolutePathBuf;
 
 pub struct ApplyPatchTool {
     workspace_root: PathBuf,
@@ -23,7 +36,16 @@ impl ToolHandler for ApplyPatchTool {
     }
 
     fn description(&self) -> &str {
-        "Apply a unified diff patch inside the configured workspace root."
+        "Apply a `*** Begin Patch` / `*** End Patch` patch to files inside the \
+         configured workspace root. Wrap the patch with `*** Begin Patch` and \
+         `*** End Patch`. Use `*** Add File: <path>` followed by `+<line>` \
+         lines to create a file, `*** Delete File: <path>` to remove one, or \
+         `*** Update File: <path>` followed by one or more `@@` chunks (each \
+         context line prefixed with a single space, removed lines with `-`, \
+         added lines with `+`; optional `*** Move to: <path>` to rename and \
+         `*** End of File` to anchor the end of the file). Updates match the \
+         surrounding context leniently, and a partial application reports \
+         which files already changed."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -32,7 +54,7 @@ impl ToolHandler for ApplyPatchTool {
             "properties": {
                 "patch": {
                     "type": "string",
-                    "description": "Unified diff patch text."
+                    "description": "Patch text in the `*** Begin Patch` dialect (optionally wrapped in an `apply_patch <<'EOF' … EOF` heredoc)."
                 }
             },
             "required": ["patch"]
@@ -41,9 +63,8 @@ impl ToolHandler for ApplyPatchTool {
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
         let patch = arguments.get("patch").and_then(Value::as_str)?;
-        let subject = first_path_in_patch(patch);
         Some(
-            slab_agent::OperationDescriptor::file_edit(subject)
+            slab_agent::OperationDescriptor::file_edit(first_path_in_patch(patch))
                 .with_workspace(Some(self.workspace_root.clone()))
                 .with_detail(patch),
         )
@@ -55,7 +76,7 @@ impl ToolHandler for ApplyPatchTool {
 
     async fn execute(
         &self,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
         let patch = arguments
@@ -63,30 +84,153 @@ impl ToolHandler for ApplyPatchTool {
             .and_then(Value::as_str)
             .ok_or_else(|| AgentError::ToolExecution("missing 'patch' argument".into()))?;
 
-        let result = match slab_file::apply_unified_patch(&self.workspace_root, patch) {
-            Ok(result) => result,
-            Err(error) => slab_file::PatchApplyResult {
-                applied_files: Vec::new(),
-                result: "error".to_string(),
-                error_message: Some(error.to_string()),
-            },
+        // `workspace_root` may be relative (e.g. registration tests pass "."),
+        // so absolutize it infallibly against the process cwd. `cwd` and the
+        // sandbox `workspace_root` MUST be the same absolute path: the engine
+        // strips `cwd` to form a relative path string and the local filesystem
+        // adapter re-anchors it via `resolve_path(workspace_root, …)`.
+        let base = std::env::current_dir()
+            .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
+        let cwd = AbsolutePathBuf::resolve_path_against_base(&self.workspace_root, &base);
+        let root = cwd.as_path().to_path_buf();
+        let sandbox = FileSystemSandboxContext {
+            policy: FileSystemSandboxPolicy::WorkspaceWrite,
+            cwd: Some(root.clone()),
+            workspace_root: Some(root),
+            readable_roots: Vec::new(),
+            writable_roots: Vec::new(),
+            denied_paths: Vec::new(),
         };
 
-        Ok(ToolOutput {
-            content: serde_json::to_string(&result)
-                .map_err(|error| AgentError::ToolExecution(error.to_string()))?,
-            metadata: None,
-        })
+        // The engine writes a human-readable "Success." summary to stdout on
+        // full success and diagnostics to stderr on failure; the structured
+        // result is derived from the returned delta, not these sinks. Each
+        // committed file is reported through `ctx.output` so the host can show
+        // live "file applied" progress while the patch runs.
+        let progress = ToolProgressSink { observer: ctx.output.clone() };
+        let mut stdout_sink: Vec<u8> = Vec::new();
+        let mut stderr_sink: Vec<u8> = Vec::new();
+        let outcome = apply_patch_engine(
+            patch,
+            &cwd,
+            &mut stdout_sink,
+            &mut stderr_sink,
+            local_file_system(),
+            Some(&sandbox),
+            Some(&progress),
+        )
+        .await;
+
+        let content = match outcome {
+            Ok(delta) => render_ok(&delta),
+            Err(failure) => {
+                let (error, delta) = failure.into_parts();
+                render_err(&error.to_string(), &delta)
+            }
+        };
+
+        Ok(ToolOutput { content, metadata: None })
     }
 }
 
-/// Extract the first modified file path from a unified diff, for the
-/// file-edit descriptor subject. Falls back to `"patch"` when no path parses.
+/// Forwards each committed file from the apply engine to the host tool-output
+/// observer as a JSON line `{"path": ..., "kind": "add"|"modify"|"delete"}`,
+/// which the agent kernel routes to `FileChangeOutputDelta` for live UI progress.
+struct ToolProgressSink {
+    observer: Option<Arc<dyn ToolOutputObserver>>,
+}
+
+impl PatchProgressSink for ToolProgressSink {
+    fn on_progress(&self, progress: PatchProgress<'_>) {
+        let Some(observer) = self.observer.as_ref() else {
+            return;
+        };
+        let kind = match progress.kind {
+            PatchProgressKind::Add => "add",
+            PatchProgressKind::Modify => "modify",
+            PatchProgressKind::Delete => "delete",
+        };
+        let line = serde_json::json!({
+            "path": progress.path.display().to_string(),
+            "kind": kind,
+        })
+        .to_string();
+        observer.on_output(ToolOutputStream::Stdout, &line);
+    }
+}
+
+/// Split a committed [`AppliedPatchDelta`] into `(added, modified, deleted)`
+/// path lists, preserving application order.
+fn classify(delta: &AppliedPatchDelta) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let (mut added, mut modified, mut deleted) = (Vec::new(), Vec::new(), Vec::new());
+    for change in delta.changes() {
+        let path = change.path.to_string_lossy().into_owned();
+        match change.change {
+            AppliedPatchFileChange::Add { .. } => added.push(path),
+            AppliedPatchFileChange::Delete { .. } => deleted.push(path),
+            AppliedPatchFileChange::Update { .. } => modified.push(path),
+        }
+    }
+    (added, modified, deleted)
+}
+
+/// Render a successful application as the tool-result JSON. Keeps the legacy
+/// `applied_files` / `result` fields and adds per-kind lists plus the engine's
+/// `exact` flag.
+fn render_ok(delta: &AppliedPatchDelta) -> String {
+    let (added, modified, deleted) = classify(delta);
+    let mut applied_files = added.clone();
+    applied_files.extend(modified.iter().cloned());
+    applied_files.extend(deleted.iter().cloned());
+    serde_json::json!({
+        "result": "ok",
+        "added": added,
+        "modified": modified,
+        "deleted": deleted,
+        "applied_files": applied_files,
+        "exact": delta.is_exact(),
+    })
+    .to_string()
+}
+
+/// Render a failed application, including the files committed before the
+/// failure was observed (may be non-empty) so the model can reason about
+/// partial state instead of assuming nothing landed.
+fn render_err(message: &str, delta: &AppliedPatchDelta) -> String {
+    let (added, modified, deleted) = classify(delta);
+    let mut applied_files = added.clone();
+    applied_files.extend(modified.iter().cloned());
+    applied_files.extend(deleted.iter().cloned());
+    serde_json::json!({
+        "result": "error",
+        "error_message": message,
+        "added": added,
+        "modified": modified,
+        "deleted": deleted,
+        "applied_files": applied_files,
+        "exact": delta.is_exact(),
+    })
+    .to_string()
+}
+
+/// Extract the first modified file path from a patch, for the file-edit
+/// descriptor subject. Recognizes the `*** Begin Patch` dialect headers and
+/// keeps legacy unified-diff `+++ b/path` support as a fallback. Returns
+/// `"patch"` when no path can be parsed.
 fn first_path_in_patch(patch: &str) -> String {
     for line in patch.lines() {
-        if let Some(rest) = line.strip_prefix("+++ ") {
-            let trimmed = rest.trim();
-            let path = trimmed.strip_prefix("b/").unwrap_or(trimmed).trim_matches('"');
+        let trimmed = line.trim_start();
+        for header in ["*** Add File:", "*** Delete File:", "*** Update File:"] {
+            if let Some(rest) = trimmed.strip_prefix(header) {
+                let path = rest.trim().trim_matches('"');
+                if !path.is_empty() {
+                    return path.to_owned();
+                }
+            }
+        }
+        if let Some(rest) = trimmed.strip_prefix("+++ ") {
+            let candidate = rest.trim();
+            let path = candidate.strip_prefix("b/").unwrap_or(candidate).trim_matches('"');
             if !path.is_empty() && path != "/dev/null" {
                 return path.to_owned();
             }
@@ -99,7 +243,7 @@ fn first_path_in_patch(patch: &str) -> String {
 mod tests {
     use std::{
         fs,
-        path::PathBuf,
+        path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -112,30 +256,126 @@ mod tests {
         ToolContext::for_thread("thread").build()
     }
 
+    fn abs(root: &Path, name: &str) -> String {
+        root.join(name).to_string_lossy().into_owned()
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "slab_agent_tools_patch_{name}_{}_{}",
+            std::process::id(),
+            nonce
+        ));
+        fs::create_dir_all(&root).expect("create temp root");
+        root
+    }
+
     #[tokio::test]
-    async fn apply_patch_tool_reports_success_and_patch_errors_as_json() {
-        let root = temp_root("apply_patch");
+    async fn apply_patch_tool_applies_begin_patch_update() {
+        let root = temp_root("update");
         fs::write(root.join("a.txt"), "one\ntwo\n").expect("seed file");
         let tool = ApplyPatchTool::new(root.clone());
         let patch = "\
---- a/a.txt
-+++ b/a.txt
-@@ -1,2 +1,2 @@
- one
+*** Begin Patch
+*** Update File: a.txt
+@@
 -two
 +three
-";
+*** End Patch\n";
 
         let output = tool.execute(&ctx(), &json!({ "patch": patch })).await.expect("patch output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert_eq!(value["result"], "ok");
-        assert_eq!(value["applied_files"], json!(["a.txt"]));
+        assert_eq!(value["modified"], json!([abs(&root, "a.txt")]));
+        assert_eq!(value["exact"], true);
         assert_eq!(fs::read_to_string(root.join("a.txt")).unwrap(), "one\nthree\n");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn apply_patch_tool_adds_and_deletes_files() {
+        let root = temp_root("add_delete");
+        fs::write(root.join("old.txt"), "gone\n").expect("seed file");
+        let tool = ApplyPatchTool::new(root.clone());
+        let patch = "\
+*** Begin Patch
+*** Add File: new.txt
++created
+*** Delete File: old.txt
+*** End Patch\n";
+
+        let output = tool.execute(&ctx(), &json!({ "patch": patch })).await.expect("patch output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        assert_eq!(value["result"], "ok");
+        assert_eq!(value["added"], json!([abs(&root, "new.txt")]));
+        assert_eq!(value["deleted"], json!([abs(&root, "old.txt")]));
+        assert_eq!(fs::read_to_string(root.join("new.txt")).unwrap(), "created\n");
+        assert!(!root.join("old.txt").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn apply_patch_tool_reports_context_mismatch_as_error() {
+        let root = temp_root("mismatch");
+        fs::write(root.join("a.txt"), "one\ntwo\n").expect("seed file");
+        let tool = ApplyPatchTool::new(root.clone());
+        let patch = "\
+*** Begin Patch
+*** Update File: a.txt
+@@
+-two
++three
+*** End Patch\n";
+
+        // First application succeeds.
+        tool.execute(&ctx(), &json!({ "patch": patch })).await.expect("first apply");
+        // Second application can no longer find `two` (now `three`).
+        let output = tool.execute(&ctx(), &json!({ "patch": patch })).await.expect("patch output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        assert_eq!(value["result"], "error");
+        assert!(
+            value["error_message"]
+                .as_str()
+                .expect("error message")
+                .contains("Failed to find expected lines"),
+            "error_message was: {value}"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn apply_patch_tool_reports_partial_failure_delta() {
+        let root = temp_root("partial");
+        let tool = ApplyPatchTool::new(root.clone());
+        // Add `created.txt`, then try to update `missing.txt` (does not exist).
+        // The add commits before the update fails, mirroring scenario 015.
+        let patch = "\
+*** Begin Patch
+*** Add File: created.txt
++hello
+*** Update File: missing.txt
+@@
+-old
++new
+*** End Patch\n";
 
         let output = tool.execute(&ctx(), &json!({ "patch": patch })).await.expect("patch output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert_eq!(value["result"], "error");
-        assert!(value["error_message"].as_str().expect("error").contains("patch does not apply"));
+        assert!(
+            value["error_message"]
+                .as_str()
+                .expect("error message")
+                .contains("Failed to read file to update"),
+            "error_message was: {value}"
+        );
+        // The add landed before the failure.
+        assert_eq!(value["added"], json!([abs(&root, "created.txt")]));
+        assert_eq!(fs::read_to_string(root.join("created.txt")).unwrap(), "hello\n");
 
         let _ = fs::remove_dir_all(root);
     }
@@ -149,16 +389,5 @@ mod tests {
 
         assert_eq!(error.to_string(), "tool execution error: missing 'patch' argument");
         let _ = fs::remove_dir_all(root);
-    }
-
-    fn temp_root(name: &str) -> PathBuf {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "slab_agent_tools_patch_{name}_{}_{}",
-            std::process::id(),
-            nonce
-        ));
-        fs::create_dir_all(&root).expect("create temp root");
-        root
     }
 }

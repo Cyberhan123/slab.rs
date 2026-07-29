@@ -23,6 +23,7 @@ import {
   turnItemsToMessages,
   type ApprovalScope,
   type CommandExecutionOutputDeltaParams,
+  type FileChangeOutputDeltaParams,
   type CommandExecutionRequestApprovalParams,
   type ContextCompactedParams,
   type ContextCompactingParams,
@@ -105,6 +106,8 @@ export interface HarnessConversation {
   approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
   /** itemId → accumulated live command output (stdout/stderr deltas so far). */
   liveOutputByItemId: ReadonlyMap<string, string>
+  /** itemId → live `apply_patch` progress lines (one JSON object per applied file). */
+  livePatchByItemId: ReadonlyMap<string, string[]>
   /** Transient model-load indicator state (null when idle). */
   modelLoad: ModelLoadState
   /** Token usage for the most recent completed turn (null until the first turn completes). */
@@ -147,6 +150,7 @@ export function useHarnessConversation(
   const [error, setError] = useState<string | null>(null)
   const [approvalMap, setApprovalMap] = useState<Map<string, ApprovalRequest>>(new Map())
   const [liveOutputMap, setLiveOutputMap] = useState<Map<string, string>>(new Map())
+  const [livePatchMap, setLivePatchMap] = useState<Map<string, string[]>>(new Map())
   const [modelLoad, setModelLoad] = useState<ModelLoadState>(null)
   const [turnUsage, setTurnUsage] = useState<TurnUsage | null>(null)
   const [historyCreatedAt, setHistoryCreatedAt] = useState<number | null>(null)
@@ -171,6 +175,23 @@ export function useHarnessConversation(
           if (existing.length + params.delta.length > 256 * 1024) return prev
           const next = new Map(prev)
           next.set(params.itemId, existing + params.delta)
+          return next
+        })
+        return
+      }
+
+      // Accumulate live apply_patch progress (one JSON line per committed file)
+      // so the file-change card can show files as they apply, before
+      // `item/completed` finalizes the change set.
+      if (method === HARNESS_NOTIFICATION.ITEM_FILE_CHANGE_OUTPUT_DELTA) {
+        const params = (notification.params ?? {}) as FileChangeOutputDeltaParams
+        if (params.threadId !== client.currentThreadId) return
+        setLivePatchMap((prev) => {
+          const existing = prev.get(params.itemId) ?? []
+          // Bound per-item accumulation so a huge patch can't exhaust memory.
+          if (existing.length >= 1024) return prev
+          const next = new Map(prev)
+          next.set(params.itemId, [...existing, params.delta])
           return next
         })
         return
@@ -392,6 +413,7 @@ export function useHarnessConversation(
     // A new session means a new thread; drop any stale approval state.
     setApprovalMap(new Map())
     setLiveOutputMap(new Map())
+    setLivePatchMap(new Map())
     setModelLoad(null)
     setTurnUsage(null)
     setHistoryCreatedAt(null)
@@ -470,6 +492,7 @@ export function useHarnessConversation(
     approvals,
     approvalStatusByItemId,
     liveOutputByItemId: liveOutputMap,
+    livePatchByItemId: livePatchMap,
     modelLoad,
     turnUsage,
     historyCreatedAt,

@@ -17,11 +17,14 @@ export interface MessageInteractionValue {
   approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
   /** itemId → accumulated live command output (stdout/stderr deltas so far). */
   liveOutputByItemId: ReadonlyMap<string, string>
+  /** itemId → live `apply_patch` progress lines (one JSON object per applied file). */
+  livePatchByItemId: ReadonlyMap<string, string[]>
 }
 
 export const MessageInteractionContext = createContext<MessageInteractionValue>({
   approvalStatusByItemId: new Map<string, ApprovalStatus>(),
   liveOutputByItemId: new Map<string, string>(),
+  livePatchByItemId: new Map<string, string[]>(),
 })
 
 export const useMessageInteraction = (): MessageInteractionValue =>

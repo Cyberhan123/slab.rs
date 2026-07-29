@@ -57,6 +57,7 @@ function Assistant() {
         approvals,
         approvalStatusByItemId,
         liveOutputByItemId,
+        livePatchByItemId,
         modelLoad,
         turnUsage,
         historyCreatedAt,
@@ -190,6 +191,7 @@ function Assistant() {
                 approvals={approvals}
                 approvalStatusByItemId={approvalStatusByItemId}
                 liveOutputByItemId={liveOutputByItemId}
+                livePatchByItemId={livePatchByItemId}
                 modelLoad={modelLoad}
                 turnUsage={turnUsage}
                 contextWindow={usageContextWindow}

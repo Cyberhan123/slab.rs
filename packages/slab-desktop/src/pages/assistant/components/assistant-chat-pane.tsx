@@ -45,6 +45,7 @@ export type AssistantChatPaneProps = {
     approvals: ApprovalRequest[]
     approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
     liveOutputByItemId: ReadonlyMap<string, string>
+    livePatchByItemId: ReadonlyMap<string, string[]>
     /** Transient model-load indicator state (null when idle). */
     modelLoad: ModelLoadState
     /** Token usage for the most recent completed turn (null until first turn). */
@@ -74,6 +75,7 @@ export function AssistantChatPane({
     approvals,
     approvalStatusByItemId,
     liveOutputByItemId,
+    livePatchByItemId,
     modelLoad,
     turnUsage,
     contextWindow,
@@ -92,8 +94,8 @@ export function AssistantChatPane({
     const greeting = useGreeting()
 
     const interactionValue = useMemo(
-        () => ({ approvalStatusByItemId, liveOutputByItemId }),
-        [approvalStatusByItemId, liveOutputByItemId],
+        () => ({ approvalStatusByItemId, liveOutputByItemId, livePatchByItemId }),
+        [approvalStatusByItemId, liveOutputByItemId, livePatchByItemId],
     )
 
     useEffect(() => {

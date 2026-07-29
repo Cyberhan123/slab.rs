@@ -15326,6 +15326,7 @@ dependencies = [
  "shlex 2.0.1",
  "slab-agent",
  "slab-agent-tracing",
+ "slab-apply-patch",
  "slab-config",
  "slab-file",
  "slab-git",

@@ -55,6 +55,7 @@ function renderPart(
       value={{
         approvalStatusByItemId: ctx.approval ? new Map([["call-1", ctx.approval]]) : new Map(),
         liveOutputByItemId: ctx.liveOutput ? new Map([["call-1", ctx.liveOutput]]) : new Map(),
+        livePatchByItemId: new Map(),
       }}
     >
       <MessageToolCommandPart
