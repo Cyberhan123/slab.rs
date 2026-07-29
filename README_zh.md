@@ -24,21 +24,23 @@ Slab 是一个本地优先的 AI 桌面工作台，帮助你把聊天、语音�
 
 ## 简介
 
-Slab 适合希望在本地电脑上完成 AI 任务的个人开发者、研究者、创作者和团队。你可以把它理解成一个统一入口：在同一个桌面应用里完成模型下载与管理、发起聊天、处理音频、生成图片和跟踪任务进度。
+Slab 适合希望在本地电脑上完成 AI 任务的个人开发者、研究者、创作者和团队。你可以把它理解成一个统一入口：在同一个桌面应用里完成模型下载与管理、发起聊天、处理音频、生成图片、使用内置工作区以及跟踪任务进度——默认以本地模型为主，也可以按需接入云端服务商。
 
 ## 为什么选择 Slab
 
 - 一个应用覆盖多种 AI 任务，不需要在聊天、转写、图像生成和模型管理之间来回切换。
-- 更适合重视隐私、离线能力和本地控制的人群，很多工作可以直接在设备上完成。
-- 对日常使用更友好，长任务有任务队列，模型有集中管理，未来也会继续扩展可扩展性能力。
-- 既能作为桌面应用使用，也能作为统一接口衔接你的其他工具和流程。
+- 本地优先：很多任务直接在设备上运行，兼顾隐私与离线使用；聊天与补全也可以在你提供 API Key 时按需路由到云端服务商。
+- 对日常使用更友好，长任务有任务队列，模型有集中管理，内置工作区，并持续扩展插件化能力。
+- 既可作为桌面应用使用，其同一套应用核心也支撑无头 HTTP 服务和运行时 worker，便于融入你既有的工具与流程。
 
 ## 核心能力
 
 ### 当前可用
 
 - **智能聊天**  
-  在统一的聊天界面中与本地模型对话，适合写作辅助、问答、总结整理和日常思考。
+  在统一的聊天界面中与本地或云端模型对话，适合写作辅助、问答、总结整理和日常思考；并提供可选的智能体工具，支持文件编辑、Shell 命令等多步任务，以及自动上下文管理。
+- **内置工作区**  
+  提供文件浏览、代码编辑、语言服务和 git 集成的工作区，方便把项目直接放在助手旁边。
 - **音频转写**  
   把语音或音频快速转成文本，适合会议记录、采访整理、课程笔记和素材归档。
 - **图像生成**  
@@ -58,6 +60,8 @@ Slab 适合希望在本地电脑上完成 AI 任务的个人开发者、研究�
 
 - **插件生命周期管理**  
   桌面构建会管理已安装插件，同时保持 `plugin.json` 作为运行时资源、权限和扩展贡献点的静态真源。
+- **多运行时插件后端**  
+  插件可以以 JavaScript、Python 或 WebAssembly 提供后端逻辑，前端 UI 则运行在受沙箱保护的 Tauri 子 WebView 中。
 
 ## 项目结构
 
@@ -69,11 +73,15 @@ Slab 适合希望在本地电脑上完成 AI 任务的个人开发者、研究�
 |   |-- slab-app/                      桌面宿主应用与 Tauri 打包入口
 |   |-- slab-server/                   产品 API 的本地服务入口
 |   |-- slab-runtime/                  AI 任务执行运行时
+|   |-- slab-js-runtime/               受监管的 JavaScript 插件运行时
+|   |-- slab-python-runtime/           受监管的 Python 插件运行时
+|   |-- slab-mcp-server/               Model Context Protocol 桥接服务
 |   `-- slab-windows-full-installer/   Windows 全量安装器
 |-- crates/
 |   |-- slab-app-core/                 共享应用逻辑
 |   |-- slab-agent/                    Agent 控制平面与编排内核
 |   |-- slab-agent-tools/              内置确定性 Agent 工具
+|   |-- slab-cloud-provider/           云端模型服务商路由（基于 genai）
 |   |-- slab-hub/                      模型中心抽象层
 |   |-- slab-proto/                    共享协议定义
 |   |-- slab-runtime-core/             运行时调度与任务核心
@@ -82,7 +90,9 @@ Slab 适合希望在本地电脑上完成 AI 任务的个人开发者、研究�
 |-- packages/
 |   |-- slab-desktop/                  桌面前端应用
 |   |-- slab-components/               共享 UI 组件库
-|   `-- slab-i18n/                     共享国际化包
+|   |-- slab-plugin-sdk/               插件开发 SDK 包
+|   |-- slab-i18n/                     共享国际化包
+|   `-- ...                            API 客户端、插件 CLI/UI 与测试工具
 |-- docs/                              文档站点与使用指南
 |-- models/                            模型打包脚本与资源
 |-- plugins/                           运行时插件与插件市场工作区
@@ -91,7 +101,7 @@ Slab 适合希望在本地电脑上完成 AI 任务的个人开发者、研究�
 ```
 
 - `packages/slab-desktop` 是用户每天直接看到和操作的桌面界面。
-- `bin/slab-app`、`bin/slab-server`、`bin/slab-runtime` 共同支撑本地应用、任务执行和服务入口。
+- `bin/slab-app`、`bin/slab-server`、`bin/slab-runtime` 共同支撑本地应用、任务执行和服务入口，`bin/slab-js-runtime`、`bin/slab-python-runtime`、`bin/slab-mcp-server` 则承载受监管的插件运行时与 MCP 桥接。
 - `crates/` 目录是主要的共享能力层，承载模型、任务、协议和通用逻辑。
 - `plugins/` 包含运行时插件包。Manifest v1 用于声明运行时资源、扩展点贡献、权限和智能体能力，安装来源与运行状态由宿主单独持久化。
 - `docs/`、`models/`、`testdata/`、`vendor/` 分别承担文档、模型打包资源、样例数据和依赖资源等辅助角色。
@@ -116,7 +126,7 @@ bun install
 从仓库根目录启动最常用的开发流程。
 
 ```sh
-# 启动主开发流程
+# 启动主开发流程（桌面宿主 + sidecar + server/runtime）
 bun run dev:app
 
 # 只启动桌面前端
@@ -134,11 +144,13 @@ bun run check
 bun run check:rust
 bun run lint:rust
 
-# 运行完整自动化测试
+# 运行完整自动化测试（前端 + Rust 工作区）
 bun run test
+
+# 运行针对性测试套件
 bun run test:frontend
-bun run test:rust
 bun run test:browser
+bun run test:e2e
 
 # 只构建桌面前端
 bun run build:desktop
