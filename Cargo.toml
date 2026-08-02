@@ -11,6 +11,7 @@ members = [
     "crates/slab-agent",
     "crates/slab-agent-context",
     "crates/slab-agent-memories",
+    "crates/slab-agent-rollout",
     "crates/slab-agent-tracing",
     "crates/slab-agent-tools",
     "crates/slab-otel",
@@ -73,6 +74,7 @@ slab-app-core = { path = "./crates/slab-app-core", package = "slab-app-core", ve
 slab-agent = { path = "./crates/slab-agent", package = "slab-agent", version = "0.1.0" }
 slab-agent-context = { path = "./crates/slab-agent-context", package = "slab-agent-context", version = "0.1.0" }
 slab-agent-memories = { path = "./crates/slab-agent-memories", package = "slab-agent-memories", version = "0.1.0" }
+slab-agent-rollout = { path = "./crates/slab-agent-rollout", package = "slab-agent-rollout", version = "0.1.0" }
 slab-agent-tracing = { path = "./crates/slab-agent-tracing", package = "slab-agent-tracing", version = "0.1.0" }
 slab-agent-tools = { path = "./crates/slab-agent-tools", package = "slab-agent-tools", version = "0.1.0" }
 slab-otel = { path = "./crates/slab-otel", package = "slab-otel", version = "0.1.0" }

@@ -3,6 +3,7 @@
 //! Drives the slab-agent turn loop and exposes thread lifecycle / control
 //! operations. Holds a cheap clone of the shared [`AgentCore`].
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -13,15 +14,19 @@ use slab_agent::config::AgentConfig;
 use slab_agent::port::{
     ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, TurnItemRecord, TurnStateRecord,
 };
+use slab_agent_rollout::{
+    CompactedPayload, RolloutItem, RolloutLine, RolloutStore, TurnContextPayload,
+    read_rollout_lines,
+};
 use slab_types::ConversationMessage;
 use slab_utils::session_snapshot::{
     build_migration_snapshot, project_id_from_root, write_session_snapshot_atomic,
 };
-use uuid::Uuid;
 
 use super::{AgentCore, RestoredAgentSession};
 use crate::error::AppCoreError;
 use crate::infra::agent::event_hub::AgentEventMsgSubscription;
+use crate::infra::agent::rollout_store::build_session_meta;
 
 /// Engine-side agent service: owns the turn-loop control surface consumed by
 /// the harness WebSocket transport.
@@ -126,6 +131,22 @@ impl HarnessService {
     /// a new child thread at `depth + 1`, without running a turn. An optional
     /// `model_override` replaces the parent's model on the cloned config.
     /// Returns the forked child snapshot.
+    ///
+    /// `control.fork_thread` clones the parent history per-row through the store
+    /// adapter (all messages, then all turn states, then all turn items). That
+    /// batched order places every `TurnContext` line before every `TurnItem`
+    /// line in the child rollout file, which breaks `read_turn_items`'s
+    /// running-turn attribution heuristic (turn N's items inherit the highest
+    /// turn seen so far). It also only enqueues `AddItems` into the child
+    /// recorder — the child `SessionMeta` header is NOT durable until a flush.
+    ///
+    /// So after `control.fork_thread` we rebuild the child rollout file
+    /// **unconditionally and wholesale** in the correct interleaved order, with
+    /// the child `SessionMeta` (carrying `parent_id` provenance) reconstructed
+    /// from the child thread snapshot (H1: never depend on the not-yet-durable
+    /// child rollout file). The wholesale rewrite then flushes + atomically
+    /// replaces the child file, so the child replays attribution-correct
+    /// history and starts with a proper header (H2).
     pub async fn fork_thread(
         &self,
         parent_thread_id: &str,
@@ -136,11 +157,55 @@ impl HarnessService {
             .fork_thread(parent_thread_id, model_override)
             .await
             .map_err(AppCoreError::from)?;
-        control
-            .thread_snapshot(&child_id)
+
+        let rollout = self.0.rollout();
+        // Flush both parent and child so the parent's data lines are durable for
+        // the wholesale read, and the child's batched adapter writes (and any
+        // recorder-seeded SessionMeta) are flushed before we atomically replace
+        // the child file.
+        let _ = rollout.flush(parent_thread_id).await;
+        let _ = rollout.flush(&child_id).await;
+
+        // H1: build the child SessionMeta from the child snapshot (control
+        // already upserted it), mirroring upsert_thread. The child recorder has
+        // only buffered AddItems — its file may be absent or header-less — so
+        // reading the child file for its header (the pre-fix path) lost the
+        // header on EVERY fork.
+        let child_snapshot =
+            control.thread_snapshot(&child_id).await.map_err(AppCoreError::from)?.ok_or_else(
+                || AppCoreError::Internal(format!("forked thread missing: {child_id}")),
+            )?;
+        let child_meta_line = RolloutLine::now(RolloutItem::SessionMeta(build_session_meta(
+            &child_snapshot,
+            self.0.trace_dir(),
+        )));
+
+        // H2: the wholesale rewrite is UNCONDITIONAL. For a rollout-native
+        // parent (the common case) reuse its exact on-disk interleaved order —
+        // the production write order read_turn_items / read_messages already
+        // attribute correctly — swapping the parent SessionMeta for the child's.
+        // For a legacy parent with no rollout file yet, rebuild from the adapter
+        // reads (which fall back to SQL) in correct per-turn interleaved order.
+        let parent_lines = read_rollout_lines(&rollout.path_for(parent_thread_id));
+        let has_parent_rollout_data =
+            parent_lines.iter().any(|l| !matches!(l.item, RolloutItem::SessionMeta(_)));
+        let rebuilt = if has_parent_rollout_data {
+            let mut v: Vec<RolloutLine> = Vec::with_capacity(parent_lines.len() + 1);
+            v.push(child_meta_line);
+            v.extend(
+                parent_lines.into_iter().filter(|l| !matches!(l.item, RolloutItem::SessionMeta(_))),
+            );
+            v
+        } else {
+            rebuild_child_lines_from_legacy_parent(&self.0, parent_thread_id, child_meta_line)
+                .await?
+        };
+        rollout
+            .rewrite_session(&child_id, rebuilt)
             .await
-            .map_err(AppCoreError::from)?
-            .ok_or_else(|| AppCoreError::Internal(format!("forked thread missing: {child_id}")))
+            .map_err(|e| AppCoreError::Internal(e.to_string()))?;
+
+        Ok(child_snapshot)
     }
 
     /// Soft-archive a thread by stamping `archived_at`. Archived threads are
@@ -156,7 +221,13 @@ impl HarnessService {
     }
 
     /// Rollback a thread to the state *through* `to_turn_index` (inclusive):
-    /// deletes persisted messages and turn states with `turn_index > to_turn_index`.
+    /// drops every rollout line belonging to a turn `> to_turn_index`.
+    ///
+    /// Slice 6 collapses the old three-way `store.delete_*_from` (which each
+    /// routed to a separate `truncate_from_turn`) into a single atomic rollout
+    /// truncation. `keep_line` preserves the `SessionMeta` header unconditionally
+    /// and gates every other line by its turn affiliation, so one call drops the
+    /// messages, turn states, and turn items of the rolled-back turns together.
     /// Refuses while the thread is running — interrupt it first.
     pub async fn rollback_thread(
         &self,
@@ -169,22 +240,23 @@ impl HarnessService {
                 "thread is running; interrupt it before rolling back".to_owned(),
             ));
         }
+        // H4: rollback writes the rollout file directly, but reads flow through
+        // the gate-aware adapter. An un-backfilled legacy thread (no rollout
+        // file) would be a SILENT no-op here (truncate returns Ok early on a
+        // missing file) yet report success — refuse cleanly instead so the
+        // caller retries after startup backfill flips the thread rollout-native.
+        if !self.0.rollout().file_exists(thread_id).await {
+            return Err(AppCoreError::Internal(format!(
+                "thread {thread_id} is not yet migrated to the rollout true source; \
+                 retry after backfill completes"
+            )));
+        }
         let from = to_turn_index
             .checked_add(1)
             .ok_or_else(|| AppCoreError::Internal("turn index overflow".to_owned()))?;
         self.0
-            .store()
-            .delete_turn_states_from(thread_id, from)
-            .await
-            .map_err(|e| AppCoreError::Internal(e.to_string()))?;
-        self.0
-            .store()
-            .delete_thread_messages_from(thread_id, from)
-            .await
-            .map_err(|e| AppCoreError::Internal(e.to_string()))?;
-        self.0
-            .store()
-            .delete_turn_items_from(thread_id, from)
+            .rollout()
+            .truncate_from_turn(thread_id, from)
             .await
             .map_err(|e| AppCoreError::Internal(e.to_string()))?;
         self.0.get_thread_snapshot(thread_id).await
@@ -194,11 +266,18 @@ impl HarnessService {
     ///
     /// Summarizes older turns into a single recap (falling back to a
     /// trailing-window trim if the summarization LLM call fails) and keeps the
-    /// leading system prompt + a recent window verbatim. Persists the result by
-    /// clearing the thread's messages / turn states / turn items and re-inserting
-    /// the compacted set at sequential turn indexes — so the next `send_input`
-    /// resumes from `turn_index = compacted.len()` (see `append_input`). Refuses
-    /// while the thread is running; interrupt it first.
+    /// leading system prompt + a recent window verbatim. Persists the result as a
+    /// single atomic full-rewrite (H3) so the rollout file goes straight from
+    /// its prior contents to exactly `[SessionMeta, Compacted]` — there is NO
+    /// intermediate truncated state on disk. The `Compacted` line (carrying the
+    /// compacted set, `status = "manual"`, `turn_index = 0`) becomes the new
+    /// `read_messages` baseline — the replay rules clear the prior `TurnContext`
+    /// and adopt `compacted_messages` when the status is not `"skipped"`. The
+    /// compacted messages are NOT re-inserted as separate `MessageAppend` lines
+    /// (the `Compacted` line carries them; re-inserting would duplicate them on
+    /// the next read). Refuses while the thread is running (interrupt it first)
+    /// and refuses an un-backfilled legacy thread (H4 — the rollout file is the
+    /// only place the compact is visible to the gate-aware reads).
     ///
     /// Returns the refreshed snapshot, the number of removed messages, and the
     /// estimated token count of the compacted set.
@@ -212,6 +291,16 @@ impl HarnessService {
             return Err(AppCoreError::Internal(
                 "thread is running; interrupt it before compacting".to_owned(),
             ));
+        }
+        // H4: compact writes the rollout file directly, but reads flow through
+        // the gate-aware adapter. For an un-backfilled legacy thread the compact
+        // would be invisible (reads fall back to SQL with un-compacted history),
+        // so refuse cleanly until backfill completes.
+        if !self.0.rollout().file_exists(thread_id).await {
+            return Err(AppCoreError::Internal(format!(
+                "thread {thread_id} is not yet migrated to the rollout true source; \
+                 retry after backfill completes"
+            )));
         }
 
         let snapshot = self.0.get_thread_snapshot(thread_id).await?;
@@ -244,34 +333,41 @@ impl HarnessService {
             return Ok((snapshot, 0, 0));
         };
 
-        let store = self.0.store();
-        store
-            .delete_thread_messages_from(thread_id, 0)
+        // H3: persist the compaction as a SINGLE atomic full-rewrite so there is
+        // no window where the file holds only [SessionMeta] (truncated, no
+        // Compacted baseline). The pre-fix `truncate_from_turn(0)` (durable)
+        // then `append(Compacted)` (only enqueued — NOT durable until a later
+        // flush) meant a hard crash between compact_thread returning and the next
+        // read dropped the ENTIRE conversation. rewrite_session flushes pending
+        // writes, drops the writer handle, and atomically replaces the file with
+        // exactly [SessionMeta, Compacted] — durable at return time.
+        let rollout = self.0.rollout();
+        let compacted_line = RolloutLine::now(RolloutItem::Compacted(CompactedPayload {
+            thread_id: thread_id.to_owned(),
+            compacted_messages: compacted.clone(),
+            removed_messages: replaced_messages as u32,
+            output_tokens: output_tokens as u32,
+            status: "manual".to_owned(),
+            turn_index: 0,
+        }));
+        // Flush first so the existing SessionMeta header (and any pending writes)
+        // is durable, then recover the header line (preserving its timestamp).
+        // H4 guaranteed the file exists, so a header is present; the snapshot
+        // fallback guards the impossible-but-defensive empty case.
+        let _ = rollout.flush(thread_id).await;
+        let session_meta_line = read_rollout_lines(&rollout.path_for(thread_id))
+            .into_iter()
+            .find(|l| matches!(l.item, RolloutItem::SessionMeta(_)))
+            .unwrap_or_else(|| {
+                RolloutLine::now(RolloutItem::SessionMeta(build_session_meta(
+                    &snapshot,
+                    self.0.trace_dir(),
+                )))
+            });
+        rollout
+            .rewrite_session(thread_id, vec![session_meta_line, compacted_line])
             .await
             .map_err(|e| AppCoreError::Internal(e.to_string()))?;
-        store
-            .delete_turn_states_from(thread_id, 0)
-            .await
-            .map_err(|e| AppCoreError::Internal(e.to_string()))?;
-        store
-            .delete_turn_items_from(thread_id, 0)
-            .await
-            .map_err(|e| AppCoreError::Internal(e.to_string()))?;
-
-        let created_at = Utc::now().to_rfc3339();
-        for (index, message) in compacted.iter().enumerate() {
-            let record = ThreadMessageRecord {
-                id: format!("msg_{}_{}", Uuid::new_v4().simple(), index),
-                thread_id: thread_id.to_owned(),
-                turn_index: index as u32,
-                message: message.clone(),
-                created_at: created_at.clone(),
-            };
-            store
-                .insert_thread_message(&record)
-                .await
-                .map_err(|e| AppCoreError::Internal(e.to_string()))?;
-        }
 
         let snapshot = self.0.get_thread_snapshot(thread_id).await?;
         Ok((snapshot, replaced_messages as u32, output_tokens as u32))
@@ -356,5 +452,101 @@ impl HarnessService {
         let snapshot = build_migration_snapshot(&project_id, &suspended);
         write_session_snapshot_atomic(snapshot_dir, &snapshot).map_err(AppCoreError::Internal)?;
         Ok(WorkspaceMigrationOutcome { project_id, suspended_count: suspended.len() })
+    }
+}
+
+// ── fork/compact helpers ───────────────────────────────────────────────────
+
+/// Rebuild a child rollout line set from a **legacy** parent (one with no
+/// rollout file yet, read through the gate-aware adapter which falls back to
+/// SQL). Returns `[child_meta_line, ...data lines]` in the production
+/// per-turn interleaved order (messages, then turn state, then items) so
+/// `read_turn_items`'s running-turn heuristic and `read_messages`'s
+/// replace/append replay both attribute the child's history correctly (H2).
+async fn rebuild_child_lines_from_legacy_parent(
+    core: &AgentCore,
+    parent_thread_id: &str,
+    child_meta_line: RolloutLine,
+) -> Result<Vec<RolloutLine>, AppCoreError> {
+    let messages = core
+        .store()
+        .list_thread_messages(parent_thread_id)
+        .await
+        .map_err(|e| AppCoreError::Internal(e.to_string()))?;
+    let states = core
+        .store()
+        .list_turn_states(parent_thread_id)
+        .await
+        .map_err(|e| AppCoreError::Internal(e.to_string()))?;
+    let items = core
+        .store()
+        .list_turn_items(parent_thread_id)
+        .await
+        .map_err(|e| AppCoreError::Internal(e.to_string()))?;
+
+    // Union of turn indices across the three record sets, ordered ascending so
+    // the rebuilt file walks turns in order (each turn's TurnContext stamps the
+    // running turn before that turn's TurnItems).
+    let mut turns: BTreeSet<u32> = BTreeSet::new();
+    for m in &messages {
+        turns.insert(m.turn_index);
+    }
+    for s in &states {
+        turns.insert(s.turn_index);
+    }
+    for i in &items {
+        turns.insert(i.turn_index);
+    }
+
+    let mut rebuilt: Vec<RolloutLine> =
+        Vec::with_capacity(messages.len() + states.len() + items.len() + 1);
+    rebuilt.push(child_meta_line);
+    for turn in turns {
+        for m in messages.iter().filter(|m| m.turn_index == turn) {
+            rebuilt.push(RolloutLine::now(RolloutItem::TurnContext(
+                TurnContextPayload::MessageAppend {
+                    turn_index: turn,
+                    message: m.message.clone(),
+                    id: Some(m.id.clone()),
+                    created_at: Some(m.created_at.clone()),
+                },
+            )));
+        }
+        for s in states.iter().filter(|s| s.turn_index == turn) {
+            rebuilt.push(RolloutLine::now(RolloutItem::TurnContext(
+                turn_state_payload_from_record(s),
+            )));
+        }
+        for it in items.iter().filter(|i| i.turn_index == turn) {
+            let item: slab_agent::protocol::TurnItem = serde_json::from_str(&it.item_json)
+                .map_err(|e| AppCoreError::Internal(format!("failed to decode TurnItem: {e}")))?;
+            rebuilt.push(RolloutLine::now(RolloutItem::TurnItem(item)));
+        }
+    }
+    Ok(rebuilt)
+}
+
+/// Reconstruct a rollout [`TurnContextPayload::TurnState`] from a persisted
+/// [`TurnStateRecord`], mirroring `RolloutBackedAgentStore::upsert_turn_state`
+/// (including the F6 raw-blob preservation when the typed list fails to parse).
+fn turn_state_payload_from_record(record: &TurnStateRecord) -> TurnContextPayload {
+    let mut input_messages = Vec::new();
+    let mut input_messages_raw = None;
+    if let Some(json) = &record.input_messages_json {
+        match serde_json::from_str::<Vec<ConversationMessage>>(json) {
+            Ok(parsed) => input_messages = parsed,
+            Err(_) => input_messages_raw = Some(json.clone()),
+        }
+    }
+    TurnContextPayload::TurnState {
+        turn_index: record.turn_index,
+        status: record.status.clone(),
+        input_messages,
+        tool_specs_json: record.tool_specs_json.clone(),
+        llm_response_json: record.llm_response_json.clone(),
+        error: record.error.clone(),
+        completed_at: record.completed_at.clone(),
+        started_at: Some(record.started_at.clone()),
+        input_messages_raw,
     }
 }

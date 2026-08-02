@@ -15315,6 +15315,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-agent-rollout"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "dashmap 6.2.1",
+ "serde",
+ "serde_json",
+ "slab-agent",
+ "slab-types",
+ "slab-utils",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "slab-agent-tools"
 version = "0.1.0"
 dependencies = [
@@ -15349,10 +15368,11 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "slab-otel",
+ "slab-utils",
  "tempfile",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -15422,6 +15442,7 @@ dependencies = [
  "slab-agent",
  "slab-agent-context",
  "slab-agent-memories",
+ "slab-agent-rollout",
  "slab-agent-tools",
  "slab-agent-tracing",
  "slab-build-utils",

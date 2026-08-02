@@ -11,12 +11,15 @@
 
 pub mod compact;
 pub mod harness;
+#[cfg(test)]
+mod harness_tests;
 pub mod response;
 
 pub use compact::{SummarizingCompactPort, maybe_compact_messages};
 pub use harness::HarnessService;
 pub use response::ResponseService;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use dashmap::DashSet;
@@ -29,16 +32,16 @@ use slab_types::ConversationMessage;
 
 use crate::error::AppCoreError;
 use crate::infra::agent::event_hub::{AgentEventHub, AgentEventMsgSubscription};
-use crate::infra::agent::turn_item_persistence;
+use crate::infra::agent::rollout_persistence;
 
 /// Shared core held by both the harness and response services.
 ///
 /// INVARIANT: every field must be `Arc`-backed — cloning yields another handle
 /// to the *same* state. The two services therefore share one runtime, one store,
-/// one event hub, and one `turn_item_observers` guard set. Adding any
-/// owned/non-`Arc` field would silently make them diverge (especially the
-/// `turn_item_observers` idempotency relied on by [`Self::spawn`] /
-/// [`Self::send_input`]).
+/// one event hub, one rollout true source, and one `rollout_observers` guard
+/// set. Adding any owned/non-`Arc` field would silently make them diverge
+/// (especially the `rollout_observers` idempotency relied on by [`Self::spawn`]
+/// / [`Self::send_input`]).
 #[derive(Clone)]
 pub(crate) struct AgentCore {
     runtime: AgentRuntime,
@@ -49,9 +52,19 @@ pub(crate) struct AgentCore {
     /// chat/responses paths. Same `Arc` instance as the one wired into
     /// `AgentControl` so all paths compact identically.
     compact: Arc<dyn CompactPort>,
-    /// Thread ids that already have a turn-item persistence observer running.
-    /// Guards `spawn_turn_item_persistence` to one observer per thread.
-    turn_item_observers: Arc<DashSet<String>>,
+    /// Append-only rollout event-source true source (Slice 4). Shared with the
+    /// harness so `compact_thread` / `fork_thread` / `rollback_thread` can
+    /// access the rollout directly (Slice 6).
+    rollout: Arc<slab_agent_rollout::RolloutFileStore>,
+    /// The trace directory configured from `agent.debug` (Slice 11b), threaded
+    /// in so the harness can apply the SAME root-vs-child `trace_path` rule as
+    /// `RolloutBackedAgentStore::upsert_thread` when it reconstructs a
+    /// `SessionMeta` (J4: fork / compact fallback). `None` when agent debugging
+    /// is off — then even a root thread carries no `trace_path`.
+    trace_dir: Option<PathBuf>,
+    /// Thread ids that already have a rollout persistence observer running.
+    /// Guards `spawn_rollout_persistence` to one observer per thread.
+    rollout_observers: Arc<DashSet<String>>,
 }
 
 /// Persisted session state restored by the unified agent responses route.
@@ -69,8 +82,18 @@ impl AgentCore {
         store: Arc<dyn AgentStorePort>,
         events: Arc<AgentEventHub>,
         compact: Arc<dyn CompactPort>,
+        rollout: Arc<slab_agent_rollout::RolloutFileStore>,
+        trace_dir: Option<PathBuf>,
     ) -> Self {
-        Self { runtime, store, events, compact, turn_item_observers: Arc::new(DashSet::new()) }
+        Self {
+            runtime,
+            store,
+            events,
+            compact,
+            rollout,
+            trace_dir,
+            rollout_observers: Arc::new(DashSet::new()),
+        }
     }
 
     pub(crate) fn runtime(&self) -> AgentRuntime {
@@ -89,6 +112,21 @@ impl AgentCore {
         &self.events
     }
 
+    /// Rollout true source accessor. Consumed by the harness `compact_thread`
+    /// (truncate + `Compacted` append) and `rollback_thread` (single atomic
+    /// `truncate_from_turn`) paths so those operations act on the rollout file
+    /// directly instead of going through the store adapter's per-table deletes.
+    pub(crate) fn rollout(&self) -> &Arc<slab_agent_rollout::RolloutFileStore> {
+        &self.rollout
+    }
+
+    /// The configured trace directory (Slice 11b), so the harness can apply the
+    /// canonical root-vs-child `trace_path` rule when reconstructing a
+    /// `SessionMeta` (J4). `None` when agent debugging is off.
+    pub(crate) fn trace_dir(&self) -> Option<&Path> {
+        self.trace_dir.as_deref()
+    }
+
     /// Spawn a root agent thread. Returns the new thread ID.
     pub(crate) async fn spawn(
         &self,
@@ -101,21 +139,22 @@ impl AgentCore {
             .create_response(session_id, config, messages)
             .await
             .map_err(AppCoreError::from)?;
-        self.ensure_turn_item_persistence(&thread_id);
+        self.ensure_rollout_persistence(&thread_id);
         Ok(thread_id)
     }
 
-    /// Ensure exactly one turn-item persistence observer is running for the
+    /// Ensure exactly one rollout persistence observer is running for the
     /// thread. The first call for a given thread spawns it; subsequent calls
     /// (e.g. `send_input` resuming a thread) are no-ops. The observer runs for
-    /// the process lifetime, capturing every finalized `TurnItem` across all of
-    /// the thread's runs.
-    fn ensure_turn_item_persistence(&self, real_thread_id: &str) {
-        if self.turn_item_observers.insert(real_thread_id.to_owned()) {
-            turn_item_persistence::spawn_turn_item_persistence(
-                Arc::clone(&self.store),
+    /// the process lifetime, capturing every finalized `TurnItem`, compaction
+    /// marker, and allowed lifecycle event across all of the thread's runs.
+    fn ensure_rollout_persistence(&self, real_thread_id: &str) {
+        if self.rollout_observers.insert(real_thread_id.to_owned()) {
+            rollout_persistence::spawn_rollout_persistence(
+                Arc::clone(&self.rollout),
                 Arc::clone(&self.events),
                 real_thread_id.to_owned(),
+                slab_agent_rollout::EventPersistenceMode::Limited,
             );
         }
     }
@@ -127,7 +166,7 @@ impl AgentCore {
         content: String,
     ) -> Result<(), AppCoreError> {
         self.runtime.append_input(thread_id, content).await.map_err(AppCoreError::from)?;
-        self.ensure_turn_item_persistence(thread_id);
+        self.ensure_rollout_persistence(thread_id);
         Ok(())
     }
 

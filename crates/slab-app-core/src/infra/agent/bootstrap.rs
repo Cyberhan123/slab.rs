@@ -23,12 +23,40 @@ pub(crate) struct AgentBootstrap {
 }
 
 pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> AgentBootstrap {
+    let settings = ctx.pmid.config();
+    // Slice 11a/11b: compute the trace directory ONCE from `agent.debug`. The
+    // trace sink + (future) trace bundle depend on `agent.debug` ALONE (no
+    // longer on `telemetry.enabled`); OTel provider assembly is a separate
+    // switch still gated by `telemetry.enabled` in the binary init. This dir is
+    // also threaded into the rollout store so a root thread's SessionMeta carries
+    // it as `trace_path` (Slice 11b rollout ↔ trace coordination).
+    let trace_dir: Option<PathBuf> =
+        if settings.agent.debug { Some(agent_trace_log_dir(ctx)) } else { None };
+    // Rollout JSONL true source (Slice 4). One shared file store for the whole
+    // process; one recorder per thread, files under <app_home>/sessions.
+    let rollout =
+        Arc::new(slab_agent_rollout::RolloutFileStore::new(slab_utils::app_home::sessions_dir()));
+    // The ONLY AgentStorePort wired into the runtime: rollout-backed, with
+    // metadata + tool-call audit delegated to the SQL store and the legacy
+    // three tables no longer written. The same SQL store also backs the
+    // Slice-5 rollout-session index (read gate + new-thread mark).
+    let rollout_store = Arc::new(super::rollout_store::RolloutBackedAgentStore::new(
+        Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>,
+        Arc::clone(&store) as Arc<dyn crate::infra::db::repository::rollout_index::RolloutIndex>,
+        Arc::clone(&rollout),
+        trace_dir.clone(),
+    ));
+    // Slice 5: fire-and-forget backfill of legacy SQL threads into rollout.
+    // Must NOT block app boot — the read gate defaults new threads to
+    // completed and falls back to SQL for un-backfilled legacy threads, so an
+    // async backfill is safe (no orphan window).
+    schedule_rollout_backfill(Arc::clone(&store), Arc::clone(&rollout));
     let store_for_agent: Arc<dyn slab_agent::port::AgentStorePort> =
-        Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>;
+        rollout_store.clone() as Arc<dyn slab_agent::port::AgentStorePort>;
     let event_hub = Arc::new(AgentEventHub::new());
     // Only the event hub is wired as a notify port now. response_json
-    // persistence was removed — complete messages + turn state remain the store
-    // of record (see AgentCore / AgentStorePort).
+    // persistence was removed — the rollout true source plus SQL metadata
+    // remain the store of record (see AgentCore / AgentStorePort).
     let composite_notify: Arc<dyn slab_agent::AgentNotifyPort> =
         Arc::new(super::event_hub::CompositeNotifyPort::new(vec![
             Arc::clone(&event_hub) as Arc<dyn slab_agent::AgentNotifyPort>
@@ -44,16 +72,46 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         Arc::clone(&event_hub),
         composite_notify,
         Arc::clone(&compact),
+        rollout_store.clone() as Arc<dyn slab_agent::port::AgentStorePort>,
+        trace_dir.clone(),
     );
     let agent_runtime = AgentRuntime::new(control);
-    let core =
-        AgentCore::new(agent_runtime.clone(), store_for_agent, Arc::clone(&event_hub), compact);
+    let core = AgentCore::new(
+        agent_runtime.clone(),
+        store_for_agent,
+        Arc::clone(&event_hub),
+        compact,
+        rollout,
+        trace_dir,
+    );
     let runtime = AgentRuntimeReloader::new((*ctx.model_state).clone(), core.runtime());
     schedule_agent_runtime_reload(runtime.clone());
     let harness = HarnessService::new(core.clone());
     let response = ResponseService::new(core, (*ctx.model_state).clone());
 
     AgentBootstrap { harness, response, runtime }
+}
+
+/// Spawn the Slice-5 rollout backfill as a fire-and-forget task. Legacy threads
+/// (pre-migration data still in the three SQL tables) are copied into rollout
+/// JSONL and flipped to `backfill_status = "completed"`. Never blocks app boot.
+fn schedule_rollout_backfill(
+    sqlx: Arc<AnyStore>,
+    rollout: Arc<slab_agent_rollout::RolloutFileStore>,
+) {
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        tracing::warn!(
+            "rollout backfill: no Tokio runtime active; legacy threads stay on the SQL read path until next restart"
+        );
+        return;
+    };
+    handle.spawn(async move {
+        let (succeeded, failed) =
+            super::rollout_backfill::backfill_all_threads(sqlx, rollout).await;
+        if succeeded + failed > 0 {
+            tracing::info!(succeeded, failed, "rollout backfill complete");
+        }
+    });
 }
 
 fn schedule_agent_runtime_reload(agent_runtime: AgentRuntimeReloader) {
@@ -75,11 +133,15 @@ fn build_agent_control(
     event_hub: Arc<AgentEventHub>,
     notify_port: Arc<dyn slab_agent::AgentNotifyPort>,
     compact: Arc<dyn slab_agent::CompactPort>,
+    store_adapter: Arc<dyn slab_agent::port::AgentStorePort>,
+    trace_dir: Option<PathBuf>,
 ) -> Arc<AgentControl> {
     let llm = Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
+    // memory_store / exec_db stay on the original SQL store (metadata + audit +
+    // memory pipeline); only the conversation/turn-state/item surface is backed
+    // by rollout via store_adapter.
     let memory_store = Arc::clone(&store);
     let exec_db = Arc::clone(&store);
-    let store_adapter: Arc<dyn slab_agent::port::AgentStorePort> = store;
     let workspace_root = crate::domain::services::workspace_root_from_config(&ctx.config);
     let sandbox_driver = workspace_root.clone().and_then(|root| {
         let env = SandboxEnvironment::new(Some(root), SandboxPolicy::WorkspaceWrite);
@@ -121,13 +183,19 @@ fn build_agent_control(
     let tool_router = Arc::new(tool_router);
     let approval_port: Arc<dyn slab_agent::ApprovalPort> = event_hub;
     let settings = ctx.pmid.config();
-    let (trace, trace_dir): (Arc<dyn AgentTraceSink>, Option<PathBuf>) =
-        if settings.agent.debug && settings.telemetry.enabled {
-            let dir = agent_trace_log_dir(ctx);
-            (FileAgentTraceSink::shared(dir.clone()), Some(dir))
-        } else {
-            (Arc::new(NoopAgentTraceSink), None)
-        };
+    // Slice 11a decouple: the trace sink gate is `agent.debug` ONLY (computed
+    // upstream in `build_agent_bootstrap`, which is why `trace_dir` is already
+    // an Option here). Two INDEPENDENT diagnostic switches:
+    //   - `agent.debug`       → this trace sink + trace bundle (`slab-agent-tracing`,
+    //                           decoupled from `slab-otel` in Slice 8).
+    //   - `telemetry.enabled` → OTel PROVIDER assembly + export, gated separately
+    //                           in the server/app/runtime init (intentionally
+    //                           untouched here). On `agent.debug` alone the user
+    //                           now gets the trace bundle even with OTel off.
+    let (trace, trace_dir): (Arc<dyn AgentTraceSink>, Option<PathBuf>) = match trace_dir {
+        Some(dir) => (FileAgentTraceSink::shared(dir.clone()), Some(dir)),
+        None => (Arc::new(NoopAgentTraceSink), None),
+    };
 
     let memory_config = ctx.pmid.config().agent.memories.clone();
     let memory_root = memory_config

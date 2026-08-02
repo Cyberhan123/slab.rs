@@ -27,6 +27,7 @@ slab-runtime-core = { workspace = true }
 slab-agent        = { workspace = true }
 slab-agent-context = { workspace = true }
 slab-agent-memories = { workspace = true }
+slab-agent-rollout = { workspace = true }
 slab-agent-tracing = { workspace = true }
 slab-agent-tools  = { workspace = true }
 slab-mcp          = { workspace = true }
