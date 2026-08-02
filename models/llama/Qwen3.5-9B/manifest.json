@@ -5,7 +5,7 @@
   "id": "Qwen3.5-9B",
   "label": "Qwen3.5-9B",
   "family": "llama",
-  "context_window": 4096,
+  "context_window": 8192,
   "metadata": {
     "author": "QwenTeam"
   },

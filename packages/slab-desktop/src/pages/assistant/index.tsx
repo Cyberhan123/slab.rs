@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { useTranslation } from "@slab/i18n"
@@ -22,6 +23,12 @@ function Assistant() {
     const [isSessionSheetOpen, setIsSessionSheetOpen] = useState(false)
     const [isChatBusy, setIsChatBusy] = useState(false)
     const [messageCount, setMessageCount] = useState(0)
+    // `?session=<id>` deep link pins this page to a specific session, bypassing
+    // the shared `zustand:assistant-ui` "current session" (which is global per
+    // server and would race across concurrent e2e browsers). Absent the param,
+    // behavior is unchanged.
+    const [searchParams] = useSearchParams()
+    const sessionOverride = searchParams.get("session")
 
     const {
         conversationList,
@@ -34,7 +41,7 @@ function Assistant() {
         isSessionsLoading: sessionsLoading,
         setCurrentSessionId: setCurConversation,
         updateSessionLabel,
-    } = useAssistantSessions()
+    } = useAssistantSessions({ lockedSessionId: sessionOverride ?? undefined })
 
     const {
         modelOptions,

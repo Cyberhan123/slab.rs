@@ -80,7 +80,7 @@ function MessageToolFileChangePart({
             })}
           </ul>
         ) : null}
-        <ul className="space-y-2">
+        <ul className="space-y-2" data-testid="assistant-tool-file-change">
           {changes.map((change) => (
             <li
               key={`${change.type}:${change.path}`}

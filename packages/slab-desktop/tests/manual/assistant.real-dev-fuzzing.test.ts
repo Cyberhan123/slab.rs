@@ -875,13 +875,17 @@ function toolFuzzCases(): ToolFuzzCase[] {
   const grepNeedle = `${marker} grep needle`
   const patchPath = markerRelativePath("patch", "apply-patch.txt")
   const patchReplacement = `${marker} patched`
+  // The apply_patch tool drives the `slab-apply-patch` engine, which only
+  // accepts the `*** Begin Patch` dialect — a unified diff is rejected at the
+  // parser. Hand the model a correct `*** Begin Patch` patch so the case does
+  // not depend on the model translating a unified diff.
   const patch = [
-    `--- a/${patchPath}`,
-    `+++ b/${patchPath}`,
-    "@@ -1,2 +1,2 @@",
-    " one",
+    "*** Begin Patch",
+    `*** Update File: ${patchPath}`,
+    "@@",
     "-two",
     `+${patchReplacement}`,
+    "*** End Patch",
     "",
   ].join("\n")
   const shellNeedle = `${marker}-shell-ok`

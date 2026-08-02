@@ -44,14 +44,29 @@ function toSessionRecords(data: SessionRecord[] | undefined): SessionRecord[] {
   return Array.isArray(data) ? data : []
 }
 
-export function useAssistantSessions() {
+export function useAssistantSessions({ lockedSessionId }: { lockedSessionId?: string } = {}) {
+  const trimmedLock = lockedSessionId?.trim() || undefined
   const { t } = useTranslation()
   const assistantErrorEnvelopeRenderingEnabled = useGuardrailFlag(
     GUARDRAIL_PMIDS.assistantErrorEnvelopeRendering
   )
   const hasHydrated = useAssistantUiStore((state) => state.hasHydrated)
-  const currentSessionId = useAssistantUiStore((state) => state.currentSessionId)
-  const setCurrentSessionId = useAssistantUiStore((state) => state.setCurrentSessionId)
+  const storeCurrentSessionId = useAssistantUiStore((state) => state.currentSessionId)
+  const setStoreCurrentSessionId = useAssistantUiStore((state) => state.setCurrentSessionId)
+  // When locked to a `?session=` override, surface it as the current session and
+  // make setCurrentSessionId a no-op so the shared global `zustand:assistant-ui`
+  // store is never mutated (concurrent e2e browsers each bind their own session).
+  // The override also gates the bootstrap/fallback effects below.
+  const currentSessionId = trimmedLock ?? storeCurrentSessionId
+  const setCurrentSessionId = useCallback(
+    (next: string) => {
+      if (trimmedLock) {
+        return
+      }
+      setStoreCurrentSessionId(next)
+    },
+    [setStoreCurrentSessionId, trimmedLock]
+  )
   const sessionLabels = useAssistantUiStore((state) => state.sessionLabels)
   const setSessionLabel = useAssistantUiStore((state) => state.setSessionLabel)
   const removeSessionLabel = useAssistantUiStore((state) => state.removeSessionLabel)
@@ -210,6 +225,10 @@ export function useAssistantSessions() {
   )
 
   useEffect(() => {
+    if (trimmedLock) {
+      return
+    }
+
     if (isSessionsLoading) {
       return
     }
@@ -225,9 +244,13 @@ export function useAssistantSessions() {
 
     hasBootstrappedSessions.current = true
     void createSession({ quiet: true, select: true })
-  }, [createSession, isSessionsLoading, sessionRecords.length])
+  }, [createSession, isSessionsLoading, sessionRecords.length, trimmedLock])
 
   useEffect(() => {
+    if (trimmedLock) {
+      return
+    }
+
     if (!hasHydrated || isSessionsLoading || conversationList.length === 0) {
       return
     }
@@ -247,6 +270,7 @@ export function useAssistantSessions() {
     hasHydrated,
     isSessionsLoading,
     setCurrentSessionId,
+    trimmedLock,
   ])
 
   return {

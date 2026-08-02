@@ -32,7 +32,7 @@ type JsonRequestInit = Omit<RequestInit, "body"> & {
   json?: unknown
 }
 
-export type ManagedDevProcess = {
+export type ManagedProcess = {
   logs: string[]
   stop: () => Promise<void>
 }
@@ -42,7 +42,7 @@ type ManagedChild = {
   label: string
 }
 
-export type FullstackDevEnvironment = {
+export type E2eRuntime = {
   databasePath: string
   databaseUrl: string
   e2eRootDir: string
@@ -87,7 +87,7 @@ const defaultEventuallyIntervalMs = 250
 const managedProcessStopTimeoutMs = 12_000
 const devLogRingLimit = 500
 
-export async function createFullstackDevEnvironment(): Promise<FullstackDevEnvironment> {
+export async function createE2eEnvironment(): Promise<E2eRuntime> {
   const serverPort = await reserveTcpPort()
   const uiPort = await reserveTcpPort()
   const serverBind = `127.0.0.1:${serverPort}`
@@ -153,9 +153,51 @@ export async function createFullstackDevEnvironment(): Promise<FullstackDevEnvir
   }
 }
 
-export async function startFullstackDev(
-  testEnv: FullstackDevEnvironment
-): Promise<ManagedDevProcess> {
+let sidecarBuildPromise: Promise<void> | undefined
+
+/**
+ * Ensure the three sidecar binaries the fullstack e2e stack needs exist in
+ * `target/debug/`: `slab-server` plus its `managed_children` siblings
+ * `slab-runtime` and `slab-js-runtime` (slab-server resolves those as siblings
+ * next to its own exe via `resolve_sibling_sidecar_exe`). This mirrors
+ * `dev:app`'s `build:sidecars` prefix so `bun run test:e2e` is self-sufficient:
+ * no manual pre-build required, and a stale binary is rebuilt (cargo incremental
+ * makes an up-to-date build a near no-op). Memoized per process.
+ */
+export async function ensureSidecarBinariesBuilt(repoRootPath: string): Promise<void> {
+  if (!sidecarBuildPromise) {
+    sidecarBuildPromise = runSidecarBuild(repoRootPath)
+  }
+  return sidecarBuildPromise
+}
+
+async function runSidecarBuild(repoRootPath: string): Promise<void> {
+  // Synchronous: the stack cannot start until the binaries exist. When the npm
+  // `build:sidecars:e2e` step already built them this is a cargo fingerprint
+  // check (~seconds); run directly via vitest it performs a fresh build.
+  execFileSync(
+    "bun",
+    [
+      "./scripts/cargo/run.ts",
+      "build",
+      "-p",
+      "slab-server",
+      "-p",
+      "slab-runtime",
+      "-p",
+      "slab-js-runtime",
+    ],
+    {
+      cwd: repoRootPath,
+      stdio: "inherit",
+    }
+  )
+}
+
+export async function startE2eRuntime(
+  testEnv: E2eRuntime
+): Promise<ManagedProcess> {
+  await ensureSidecarBinariesBuilt(testEnv.repoRoot)
   await assertTcpPortAvailable(testEnv.serverPort, "slab-server")
   await assertTcpPortAvailable(testEnv.uiPort, "desktop Vite")
 
@@ -168,6 +210,11 @@ export async function startFullstackDev(
     CARGO: cargoShimPath,
     NO_COLOR: "1",
     SLAB_BIND: testEnv.serverBind,
+    // Bound to SLAB_E2E_CONCURRENCY (default 2) so the runtime's LLM
+    // backend_capacity matches the vitest maxWorkers — excess turns otherwise
+    // hit the 30s GPU-acquire timeout and fail. The model loads once; this only
+    // sets how many concurrent inference sequences the n_ctx budget serves.
+    SLAB_BACKEND_CAPACITY: String(process.env.SLAB_E2E_CONCURRENCY ?? 2),
     SLAB_CORS_ORIGINS: `${testEnv.uiBaseUrl},http://localhost:${testEnv.uiPort}`,
     SLAB_DATABASE_URL: testEnv.databaseUrl,
     SLAB_ENABLE_SWAGGER: "true",
@@ -499,7 +546,7 @@ export async function eventually<T>(
   throw new Error(`${label} timed out after ${timeoutMs}ms.${suffix}`)
 }
 
-export function cleanupFullstackDevEnvironment(testEnv: FullstackDevEnvironment | undefined): void {
+export function cleanupE2eEnvironment(testEnv: E2eRuntime | undefined): void {
   if (testEnv?.rootDir) {
     rmSync(testEnv.rootDir, { force: true, recursive: true })
   }
@@ -682,7 +729,7 @@ function sqliteUrlForPath(path: string): string {
 }
 
 function spawnSlabServer(
-  testEnv: FullstackDevEnvironment,
+  testEnv: E2eRuntime,
   env: NodeJS.ProcessEnv
 ): ChildProcessWithoutNullStreams {
   const args = [

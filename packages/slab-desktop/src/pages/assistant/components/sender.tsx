@@ -324,6 +324,7 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
                 {PERMISSION_MODES.map((mode) => (
                   <DropdownMenuItem
                     key={mode.value}
+                    data-testid={`assistant-permission-mode-${mode.value}`}
                     onSelect={(event) => {
                       event.preventDefault()
                       setPermissionMode(mode.value)

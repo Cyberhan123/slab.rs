@@ -4,6 +4,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { MemoryRouter } from "react-router-dom"
+
 import { HeaderProvider } from "@/layouts/header-provider"
 import Header from "@/layouts/header"
 
@@ -289,8 +291,10 @@ function restoredMessages(): UIMessage[] {
 function renderAssistant() {
   return render(
     <HeaderProvider>
-      <Header />
-      <Assistant />
+      <MemoryRouter>
+        <Header />
+        <Assistant />
+      </MemoryRouter>
     </HeaderProvider>,
   )
 }

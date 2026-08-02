@@ -1,30 +1,24 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest"
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright"
 
+import type { E2eRuntimeEndpoints } from "./support/e2e-global-setup"
 import {
-  cleanupFullstackDevEnvironment,
   completeSetup,
-  createFullstackDevEnvironment,
   ensureModelDownloaded,
   getModel,
   importLocalModelPack,
   selectModelConfigVariant,
-  startFullstackDev,
-  type FullstackDevEnvironment,
-  type ManagedDevProcess,
-} from "./support/fullstack-dev"
+} from "./support/e2e-runtime"
 
-let env: FullstackDevEnvironment | undefined
+let env: E2eRuntimeEndpoints | undefined
 
-describe.sequential("hub e2e", () => {
+describe("hub e2e", () => {
   let browser: Browser | undefined
   let context: BrowserContext | undefined
-  let dev: ManagedDevProcess | undefined
   let page: Page
 
   beforeAll(async () => {
-    env = await createFullstackDevEnvironment()
-    dev = await startFullstackDev(env)
+    env = inject("e2e-runtime")
     await completeSetup(env.serverBaseUrl)
     await importLocalModelPack(env.serverBaseUrl, "Qwen2.5-0.5B-Instruct")
     await selectModelConfigVariant(env.serverBaseUrl, "Qwen2.5-0.5B-Instruct", "Q4_K_M")
@@ -42,8 +36,6 @@ describe.sequential("hub e2e", () => {
   afterAll(async () => {
     await context?.close().catch(() => {})
     await browser?.close().catch(() => {})
-    await dev?.stop().catch(() => {})
-    cleanupFullstackDevEnvironment(env)
   })
 
   it("imports the fixed model pack and downloads it from the Hub UI", async () => {
@@ -75,9 +67,9 @@ describe.sequential("hub e2e", () => {
   })
 })
 
-function requireEnv(): FullstackDevEnvironment {
+function requireEnv(): E2eRuntimeEndpoints {
   if (!env) {
-    throw new Error("Fullstack dev environment was not initialized.")
+    throw new Error("e2e shared runtime endpoints were not provided.")
   }
 
   return env

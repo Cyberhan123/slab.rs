@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMutationObserverTarget } from "@mantine/hooks";
 import { sortBy } from "lodash-es";
@@ -147,6 +147,11 @@ function PluginThemeSync() {
 function WorkspaceModeSync() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  // A `?session=` deep link intentionally pins the Assistant to a specific
+  // session; honor it instead of bouncing `/` to `/workspace` (which would
+  // drop the query). Lets concurrent e2e browsers each bind their own session.
+  const hasSessionDeepLink = searchParams.has("session");
   const workspaceQueryClient = useQueryClient();
   const initialPathRef = useRef(location.pathname);
   const redirectedWorkspaceRootRef = useRef<string | null>(null);
@@ -180,12 +185,13 @@ function WorkspaceModeSync() {
     if (
       initialPathRef.current === "/" &&
       workspace &&
-      redirectedWorkspaceRootRef.current !== workspace.rootPath
+      redirectedWorkspaceRootRef.current !== workspace.rootPath &&
+      !hasSessionDeepLink
     ) {
       redirectedWorkspaceRootRef.current = workspace.rootPath;
       navigate("/workspace", { replace: true });
     }
-  }, [navigate, workspace]);
+  }, [hasSessionDeepLink, navigate, workspace]);
 
   useEffect(() => {
     if (!workspace) {

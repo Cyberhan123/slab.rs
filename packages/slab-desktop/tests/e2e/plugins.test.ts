@@ -3,35 +3,29 @@ import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { chromium, type Browser, type BrowserContext, type Frame, type Page } from "playwright"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest"
 
+import type { E2eRuntimeEndpoints } from "./support/e2e-global-setup"
 import {
-  cleanupFullstackDevEnvironment,
   completeSetup,
-  createFullstackDevEnvironment,
   eventually,
   requestJson,
-  startFullstackDev,
-  type FullstackDevEnvironment,
-  type ManagedDevProcess,
-} from "./support/fullstack-dev"
+} from "./support/e2e-runtime"
 
 const pluginId = "e2e-models-read"
 
-let env: FullstackDevEnvironment | undefined
+let env: E2eRuntimeEndpoints | undefined
 
-describe.sequential("plugins e2e", () => {
+describe("plugins e2e", () => {
   let browser: Browser | undefined
   let context: BrowserContext | undefined
-  let dev: ManagedDevProcess | undefined
   let page: Page
   let pluginPackPath: string
 
   beforeAll(async () => {
-    env = await createFullstackDevEnvironment()
+    env = inject("e2e-runtime")
     pluginPackPath = writeE2ePluginPack(env.rootDir)
 
-    dev = await startFullstackDev(env)
     await completeSetup(env.serverBaseUrl)
 
     browser = await chromium.launch({ headless: true })
@@ -47,8 +41,6 @@ describe.sequential("plugins e2e", () => {
   afterAll(async () => {
     await context?.close().catch(() => {})
     await browser?.close().catch(() => {})
-    await dev?.stop().catch(() => {})
-    cleanupFullstackDevEnvironment(env)
   })
 
   it("imports a browser plugin and rejects the browser API bridge", async () => {
@@ -372,9 +364,9 @@ const CRC32_TABLE = new Uint32Array(
   })
 )
 
-function requireEnv(): FullstackDevEnvironment {
+function requireEnv(): E2eRuntimeEndpoints {
   if (!env) {
-    throw new Error("Fullstack dev environment was not initialized.")
+    throw new Error("e2e shared runtime endpoints were not provided.")
   }
 
   return env

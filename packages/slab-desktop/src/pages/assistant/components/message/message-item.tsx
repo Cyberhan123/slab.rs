@@ -119,7 +119,7 @@ function MessageRow({
         .join("")
         .trim()
     return (
-        <Message align={isUserMessage ? "end" : "start"}>
+        <Message align={isUserMessage ? "end" : "start"} data-testid={`assistant-message-${message.role}`}>
             <MessageAvatar className={cn("items-start self-start group-has-data-[slot=message-footer]/message:-translate-y-0")}>
                 {isUserMessage ? <UserAvatar name={t("pages.assistant.message.user")} /> : <AgentAvatar name={t("pages.assistant.message.assistant")} />}
             </MessageAvatar>
