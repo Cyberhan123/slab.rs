@@ -89,10 +89,29 @@ impl FileAgentTraceSink {
     }
 
     pub fn shared_for_context(context: &AgentTraceContext) -> Option<Arc<FileAgentTraceSink>> {
-        let log_dir = context.trace_dir.as_ref()?.clone();
+        let log_dir = context.trace_dir.as_ref()?;
+        Some(Self::shared_for_log_dir(log_dir))
+    }
+
+    /// Resolve the process-global shared [`FileAgentTraceSink`] for a log
+    /// directory, creating + caching it on first sight. The registry is keyed
+    /// by the canonical log directory, so EVERY caller writing into the same
+    /// `log_dir` shares ONE instance — and therefore ONE monotonically
+    /// increasing `sequence` counter.
+    ///
+    /// This matters because two write paths land in the SAME per-session JSONL:
+    /// the [`crate::BundleAgentTraceSink`] (main-process `slab-agent` events,
+    /// which compose a legacy sink internally) and
+    /// [`record_json_from_context`] (`slab-runtime` / `slab-app-core` adapter,
+    /// resolved via the registry). If each held its OWN sink instance, both
+    /// would start their sequence counter at 0 and interleave `[0,0,1,1,...]`
+    /// in the shared file. Routing both through this registry unifies the
+    /// counter so sequences are collision-free across the two paths.
+    pub fn shared_for_log_dir(log_dir: impl AsRef<Path>) -> Arc<FileAgentTraceSink> {
+        let log_dir = log_dir.as_ref().to_path_buf();
         let sinks = CONTEXT_SINKS.get_or_init(|| Mutex::new(HashMap::new()));
         let mut guard = sinks.lock().expect("agent trace context sink lock poisoned");
-        Some(guard.entry(log_dir.clone()).or_insert_with(|| Arc::new(Self::new(log_dir))).clone())
+        guard.entry(log_dir.clone()).or_insert_with(|| Arc::new(Self::new(log_dir))).clone()
     }
 
     fn record_payload(&self, context: &AgentTraceContext, event: &AgentTraceEvent) -> Value {

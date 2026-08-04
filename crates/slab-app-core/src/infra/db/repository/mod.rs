@@ -212,6 +212,34 @@ mod tests {
             invalid_backfill_state_status.is_err(),
             "CHECK rejects unknown rollout_backfill_state status",
         );
+        // Slice D2b: the backfill lease columns exist and are nullable (the CAS
+        // acquire/release rely on them; NULL means "no lease held"). A row
+        // inserted without specifying them must succeed and read back NULL.
+        let backfill_state_columns = table_columns(&pool, "rollout_backfill_state").await;
+        assert!(
+            backfill_state_columns.contains("lease_owner"),
+            "rollout_backfill_state.lease_owner column exists",
+        );
+        assert!(
+            backfill_state_columns.contains("lease_expires_at"),
+            "rollout_backfill_state.lease_expires_at column exists",
+        );
+        sqlx::query(
+            "INSERT INTO rollout_backfill_state (thread_id, status) \
+             VALUES ('thread-rollout', 'in_progress')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert backfill_state without lease columns");
+        let (lease_owner, lease_expires_at): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT lease_owner, lease_expires_at FROM rollout_backfill_state \
+             WHERE thread_id = 'thread-rollout'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read lease columns");
+        assert_eq!(lease_owner, None, "lease_owner defaults to NULL (no lease)");
+        assert_eq!(lease_expires_at, None, "lease_expires_at defaults to NULL");
         // The zombie agent_thread_responses table + its index are dropped.
         assert_table_absent(&pool, "agent_thread_responses").await;
         assert_index_absent(&pool, "idx_atr_thread").await;

@@ -95,6 +95,11 @@ pub struct SettingsDocument {
     pub database: DatabaseConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    /// OpenTelemetry provider/export settings. `telemetry.enabled` assembles and
+    /// enables the OTel provider for local/remote trace, log, and metric export.
+    /// This is INDEPENDENT of the agent trace bundle: the bundle is gated by
+    /// `agent.debug` alone, so `agent.debug` users get the bundle even with OTel
+    /// export disabled here.
     #[serde(default)]
     pub telemetry: OtelSettings,
     #[serde(default)]
@@ -301,6 +306,11 @@ impl Default for FfmpegToolConfig {
 /// Agent-specific settings.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AgentSettingsConfig {
+    /// Enable agent diagnostics. Gates BOTH the full-fidelity per-session agent
+    /// trace files (prompt/tool/runtime) AND the per-root-thread trace bundle
+    /// that `slab-agent-tracing` writes under `logs/agent_trace/`. This is
+    /// INDEPENDENT of `telemetry.enabled`: the bundle is recorded even when the
+    /// OpenTelemetry provider/export is off.
     #[serde(default = "default_enabled")]
     pub debug: bool,
     #[serde(default)]
@@ -1983,6 +1993,41 @@ mod tests {
         assert!(!telemetry_default.contains_key("slab_home"));
         assert!(!telemetry_default.contains_key("exporter"));
         assert!(!telemetry_default.contains_key("trace_exporter"));
+    }
+
+    #[test]
+    fn diagnostic_switch_leaves_carry_independence_descriptions() {
+        // Slice C: the two independent diagnostic switches (`telemetry.enabled`
+        // and `agent.debug`) must both expose a schema `description` so the
+        // settings UI and docs render the independence contract symmetrically.
+        // A dropped doc comment + regenerated schema fails here.
+        let schema = settings_document_json_schema();
+        let telemetry_enabled = schema
+            .pointer("/$defs/OtelSettings/properties/enabled")
+            .and_then(Value::as_object)
+            .expect("telemetry.enabled leaf");
+        let agent_debug = schema
+            .pointer("/$defs/AgentSettingsConfig/properties/debug")
+            .and_then(Value::as_object)
+            .expect("agent.debug leaf");
+
+        let telemetry_desc = telemetry_enabled
+            .get("description")
+            .and_then(Value::as_str)
+            .expect("telemetry.enabled description");
+        let agent_desc = agent_debug
+            .get("description")
+            .and_then(Value::as_str)
+            .expect("agent.debug description");
+
+        assert!(
+            telemetry_desc.to_lowercase().contains("independent"),
+            "telemetry.enabled schema description must state independence: {telemetry_desc}"
+        );
+        assert!(
+            agent_desc.to_lowercase().contains("independent"),
+            "agent.debug schema description must state independence: {agent_desc}"
+        );
     }
 
     #[test]

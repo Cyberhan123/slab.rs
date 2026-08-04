@@ -93,6 +93,9 @@ fn default_http_protocol() -> OtelHttpProtocol {
 /// Runtime OpenTelemetry settings shared by Slab hosts.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct OtelSettings {
+    /// Assemble and enable the OpenTelemetry provider for local/remote trace,
+    /// log, and metric export. INDEPENDENT of the agent trace bundle: the bundle
+    /// is gated by `agent.debug` alone, so it is recorded even when this is off.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default = "default_environment")]

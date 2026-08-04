@@ -24,6 +24,7 @@
 //! a dependency of `slab-agent` / `slab-app-core` for gen_ai metrics.
 
 pub mod bundle;
+pub mod bundle_sink;
 pub mod event;
 pub mod reducer;
 pub mod writer;
@@ -42,8 +43,9 @@ pub use sink::{
 pub use bundle::{
     AGENT_TRACE_DIR_NAME, BUNDLE_FORMAT_VERSION, BundleManifest, BundleStart, MANIFEST_FILE,
     PAYLOADS_DIR, STATE_FILE, TRACE_FILE, ThreadTraceContext, TraceBundle, agent_trace_root,
-    bundle_dir_name, start_root_or_disabled,
+    bundle_dir_for_root_thread, bundle_dir_name, start_root_or_disabled,
 };
+pub use bundle_sink::BundleAgentTraceSink;
 
 /// Compile-time snapshot of this crate's `Cargo.toml`. Used by the
 /// `crate_has_no_slab_otel_dependency` test to assert the Slice 8 decouple is

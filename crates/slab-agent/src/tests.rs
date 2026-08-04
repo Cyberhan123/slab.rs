@@ -1462,6 +1462,253 @@ fn assert_trace_event(events: &[(AgentTraceContext, AgentTraceEvent)], event_nam
     );
 }
 
+// ── F3: real-path integration — slab-agent → BundleAgentTraceSink ───────────
+//
+// Every bundle_sink unit test hand-builds an AgentTraceContext and stuffs
+// `root_thread_id` into it. If `thread.rs` ever stopped stamping
+// `root_thread_id` on the trace context, ALL of those sink tests would stay
+// green while production stopped writing bundles (classic false-green). This
+// test drives the REAL production path: AgentControl → AgentThread::run →
+// record_json → BundleAgentTraceSink → bundle on disk. It pins the wiring.
+
+#[tokio::test]
+async fn bundle_sink_receives_events_from_real_agent_control_path() {
+    use slab_agent_tracing::{
+        AGENT_TRACE_DIR_NAME, BundleAgentTraceSink, MANIFEST_FILE, TRACE_FILE,
+        bundle_dir_for_root_thread,
+    };
+
+    let trace_root = tempfile::tempdir().expect("trace temp dir");
+    let trace_dir = trace_root.path().to_path_buf();
+
+    // Real bundle sink + real trace_dir flowing into AgentControl (mirrors
+    // slab-app-core bootstrap when agent.debug is on).
+    let trace_sink: Arc<dyn AgentTraceSink> = BundleAgentTraceSink::shared(trace_dir.clone());
+
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    // Register echo so MockLlm's first-call tool request resolves (build before
+    // wrapping in Arc — ToolRouter is registered through &self before the run).
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new_with_hooks_and_tracing(
+        llm,
+        store_port,
+        notify,
+        approval,
+        Arc::new(router),
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        Vec::new(),
+        trace_sink,
+        Some(trace_dir.clone()),
+    ));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+
+    let thread_id = control.spawn("bundle-session".into(), config, messages).await.expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    // The bundle the sink MUST have written into (deterministic path).
+    let bundle_dir = bundle_dir_for_root_thread(&trace_dir, &thread_id);
+    assert!(bundle_dir.is_dir(), "bundle materialized: {}", bundle_dir.display());
+    assert!(bundle_dir.join(MANIFEST_FILE).is_file(), "manifest.json written");
+    assert!(bundle_dir.join(TRACE_FILE).is_file(), "trace.jsonl written");
+
+    // Parse trace.jsonl; the manifest points at trace_id == root_thread_id.
+    let manifest: serde_json::Value = serde_json::from_str(
+        std::fs::read_to_string(bundle_dir.join(MANIFEST_FILE)).expect("read manifest").trim(),
+    )
+    .expect("manifest json");
+    assert_eq!(manifest["root_thread_id"], thread_id, "manifest stamped with root thread id");
+
+    let trace_text =
+        std::fs::read_to_string(bundle_dir.join(TRACE_FILE)).expect("read trace.jsonl");
+    let lines: Vec<&str> = trace_text.trim().lines().collect();
+    assert!(!lines.is_empty(), "trace.jsonl has events");
+
+    // The full turn lifecycle landed: turn_started → agent_llm_request →
+    // llm_response_normalized → tool lifecycle → turn_completed. Pins the
+    // slab-agent→sink path against a future bypass.
+    assert!(trace_text.contains("\"kind\":\"turn_started\""), "turn_started: {trace_text}");
+    assert!(
+        trace_text.contains("\"kind\":\"inference_started\""),
+        "agent_llm_request bridged to InferenceStarted: {trace_text}",
+    );
+    assert!(
+        trace_text.contains("\"kind\":\"inference_completed\""),
+        "llm_response_normalized bridged to InferenceCompleted: {trace_text}",
+    );
+    assert!(trace_text.contains("\"kind\":\"turn_completed\""), "turn_completed: {trace_text}",);
+
+    // Every event stamped with the root thread id (root thread owns this bundle).
+    for line in &lines {
+        let event: serde_json::Value = serde_json::from_str(line).expect("parse trace line");
+        assert_eq!(event["thread_id"], thread_id, "event stamped with root thread id: {line}");
+    }
+
+    // The bundle lives under <trace_dir>/agent_trace/ (the deterministic root).
+    assert!(bundle_dir.starts_with(trace_dir.join(AGENT_TRACE_DIR_NAME)));
+}
+
+// ── F2: depth>=2 spawn chain — true root propagates to grandchild bundle ─────
+//
+// A naive "child root = parent_id" stamp groups a depth-2 grandchild under its
+// depth-1 parent, producing an orphan bundle unreachable from the rollout
+// (build_session_meta stamps trace_path ONLY on the true root). This test
+// spawns a 3-layer chain (root → child → grandchild) through the REAL
+// AgentControl spawn path and asserts all three thread_ids land in the SAME
+// (root) bundle.
+
+/// LLM that immediately returns a final text answer (no tool calls) so each
+/// spawned thread completes in a single turn.
+struct FinalAnswerLlm;
+
+#[async_trait]
+impl LlmPort for FinalAnswerLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        Ok(LlmResponse {
+            content: Some("done".into()),
+            content_already_streamed: false,
+            tool_calls: vec![],
+            finish_reason: Some("stop".into()),
+            usage: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn depth_two_grandchild_groups_under_root_bundle() {
+    use slab_agent_tracing::{BundleAgentTraceSink, TRACE_FILE, bundle_dir_for_root_thread};
+
+    let trace_root = tempfile::tempdir().expect("trace temp dir");
+    let trace_dir = trace_root.path().to_path_buf();
+    let trace_sink: Arc<dyn AgentTraceSink> = BundleAgentTraceSink::shared(trace_dir.clone());
+
+    let llm = Arc::new(FinalAnswerLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new_with_hooks_and_tracing(
+        llm,
+        store_port,
+        notify,
+        approval,
+        Arc::new(ToolRouter::new()),
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        Vec::new(),
+        trace_sink,
+        Some(trace_dir.clone()),
+    ));
+
+    let mk = || ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("go".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    };
+    let config = AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() };
+
+    // depth 0 — root.
+    let root_id = control.spawn("depth-session".into(), config.clone(), vec![mk()]).await.unwrap();
+    wait_for_persisted_status(&store, &root_id, ThreadStatus::Completed).await;
+
+    // depth 1 — child whose root is root_id.
+    let child_id = control
+        .spawn_child("depth-session".into(), root_id.clone(), 1, config.clone(), vec![mk()])
+        .await
+        .unwrap();
+    wait_for_persisted_status(&store, &child_id, ThreadStatus::Completed).await;
+
+    // depth 2 — grandchild whose nearest parent is child_id but whose ROOT is root_id.
+    let grandchild_id = control
+        .spawn_child("depth-session".into(), child_id.clone(), 2, config.clone(), vec![mk()])
+        .await
+        .unwrap();
+    wait_for_persisted_status(&store, &grandchild_id, ThreadStatus::Completed).await;
+
+    // All three thread_ids must appear in the SAME root bundle. If the
+    // nearest-ancestor bug regressed, the grandchild would write into a
+    // trace-<child>-<child> orphan dir instead.
+    let root_bundle = bundle_dir_for_root_thread(&trace_dir, &root_id);
+    let trace_text = std::fs::read_to_string(root_bundle.join(TRACE_FILE))
+        .expect("read root bundle trace.jsonl");
+    assert!(trace_text.contains(&format!("\"thread_id\":\"{root_id}\"")), "root in root bundle");
+    assert!(trace_text.contains(&format!("\"thread_id\":\"{child_id}\"")), "child in root bundle");
+    assert!(
+        trace_text.contains(&format!("\"thread_id\":\"{grandchild_id}\"")),
+        "grandchild in ROOT bundle (not orphaned under child): {trace_text}",
+    );
+
+    // No orphan bundle directory exists for the child or grandchild as a root.
+    let child_as_root = bundle_dir_for_root_thread(&trace_dir, &child_id);
+    assert!(
+        !child_as_root.join(TRACE_FILE).exists(),
+        "no orphan child bundle: a depth-1 child is NOT its own root",
+    );
+    let grandchild_as_root = bundle_dir_for_root_thread(&trace_dir, &grandchild_id);
+    assert!(
+        !grandchild_as_root.join(TRACE_FILE).exists(),
+        "no orphan grandchild bundle: depth-2 groups under the true root",
+    );
+}
+
+#[tokio::test]
+async fn resolve_root_thread_id_walks_three_layer_parent_chain() {
+    // Focused unit test for the chain walker (the heart of the F2 fix), with a
+    // hand-built 3-layer parent chain in the in-memory store.
+    use crate::thread::resolve_root_thread_id;
+
+    let store = Arc::new(PersistingStore::default());
+    let now = chrono::Utc::now().to_rfc3339();
+    let snap = |id: &str, parent: Option<&str>, depth: u32| ThreadSnapshot {
+        id: id.into(),
+        session_id: "s".into(),
+        parent_id: parent.map(str::to_owned),
+        depth,
+        status: ThreadStatus::Completed,
+        role_name: None,
+        config_json: "{}".into(),
+        completion_text: None,
+        created_at: now.clone(),
+        updated_at: now.clone(),
+        archived_at: None,
+    };
+    store.upsert_thread(&snap("root", None, 0)).await.unwrap();
+    store.upsert_thread(&snap("child", Some("root"), 1)).await.unwrap();
+    store.upsert_thread(&snap("grandchild", Some("child"), 2)).await.unwrap();
+
+    // Walking from the grandchild's parent (child) reaches root in 2 hops.
+    let resolved = resolve_root_thread_id(&*store, "child").await;
+    assert_eq!(resolved.as_deref(), Some("root"), "grandchild resolves to the true root");
+
+    // depth-1 child's parent is the root → one hop.
+    let resolved = resolve_root_thread_id(&*store, "root").await;
+    assert_eq!(resolved.as_deref(), Some("root"), "child resolves to root");
+
+    // A missing parent snapshot falls back to None (caller uses nearest ancestor).
+    let resolved = resolve_root_thread_id(&*store, "nonexistent").await;
+    assert_eq!(resolved, None, "missing parent chain → None fallback");
+}
+
 #[tokio::test]
 async fn lifecycle_hooks_inject_start_observations_and_llm_messages_in_order() {
     let calls = Arc::new(Mutex::new(Vec::new()));

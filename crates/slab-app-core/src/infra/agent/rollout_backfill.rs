@@ -51,6 +51,17 @@
 //! they are EXCLUDED from the tail — never duplicated) → same rewrite →
 //! `completed`. No duplication, no loss.
 //!
+//! # Concurrency + crash recovery (D2b)
+//! A single `backfill_all_threads` run is one worker per process, but a
+//! crash-looping process used to re-enter the same thread's atomic rewrite on
+//! every boot, and two slab-server processes sharing a DB could race on the
+//! same thread. [`backfill_thread`] takes a `lease_owner` and acquires an
+//! advisory CAS lease (`try_acquire_backfill_lease`) before rewriting; a thread
+//! whose lease is held by a LIVE owner (or not yet expired after a crash) is
+//! SKIPPED without being marked failed. The lease is released on success OR
+//! failure of the rewrite, so a failed thread is retryable by a later worker
+//! without waiting for the TTL (default 15 min).
+//!
 //! # Known transient gap (G5)
 //! For a legacy thread that is actively used BEFORE its backfill completes:
 //! writes go to rollout, reads fall back to SQL, so the just-written
@@ -74,6 +85,38 @@ use crate::error::AppCoreError;
 use crate::infra::db::repository::SqlxStore;
 use crate::infra::db::repository::rollout_index::RolloutIndex;
 
+/// Backfill lease TTL: a worker that crashes mid-backfill holds the lease for at
+/// most this long before another worker may re-acquire it as stale (D2b).
+const BACKFILL_LEASE_TTL_SECS: u64 = 900;
+
+/// Batch size for the startup backfill loop: candidates are processed in
+/// fixed-size batches with a checkpoint log between batches (D2b). Bounded so a
+/// single bulk run emits periodic progress and never holds a huge in-memory
+/// window of work.
+const BACKFILL_BATCH_SIZE: usize = 200;
+
+/// Outcome of a single-thread backfill (L1). Distinguishes a real completion
+/// from a skip so the bulk loop can count + log them separately (a skip is NOT
+/// a success — it means another live worker owns the thread or it was already
+/// done).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BackfillOutcome {
+    /// The thread was backfilled: the atomic rewrite + `mark_completed` ran.
+    Completed,
+    /// No work was done — the thread was already `completed`, or another live
+    /// worker holds the backfill lease. The caller logs but does NOT count it
+    /// as a success.
+    Skipped,
+}
+
+/// Build a globally-unique lease owner id for one `backfill_all_threads`
+/// invocation. Generated ONCE per bulk run (not per thread) so every thread in
+/// the run shares an owner, while a concurrent process (or a later run) gets a
+/// distinct owner — letting two workers tell each other's leases apart (D2b).
+fn backfill_lease_owner() -> String {
+    format!("backfill-pid{}-{}", std::process::id(), uuid::Uuid::new_v4().simple())
+}
+
 /// A decoded `agent_turn_states` row held during per-turn grouping.
 struct LegacyTurnState {
     status: String,
@@ -91,23 +134,89 @@ struct LegacyTurnState {
 /// (legacy SQL rows + post-migration rollout writes coexisting) via a single
 /// atomic rewrite. See the module docs for the idempotency + crash-safety
 /// argument.
-pub async fn backfill_thread(
+///
+/// `lease_owner` identifies the calling worker (one per `backfill_all_threads`
+/// run). Before rewriting, this acquires the advisory CAS lease
+/// ([`RolloutIndex::try_acquire_backfill_lease`]); a thread whose lease is
+/// already held by a LIVE owner is SKIPPED (returned as
+/// [`BackfillOutcome::Skipped`], NOT marked failed). The lease is released on
+/// success OR failure of the rewrite so a failed thread is retryable without
+/// waiting for the TTL. (D2b.)
+pub(crate) async fn backfill_thread(
     sqlx: &SqlxStore,
     rollout: &RolloutFileStore,
     thread_id: &str,
     session_id: &str,
-) -> Result<(), AppCoreError> {
+    lease_owner: &str,
+) -> Result<BackfillOutcome, AppCoreError> {
     // (1) Idempotency: already completed → nothing to do.
     if matches!(
         sqlx.rollout_backfill_status(thread_id).await?,
         Some(status) if status == "completed"
     ) {
-        return Ok(());
+        return Ok(BackfillOutcome::Skipped);
     }
 
-    let _ = sqlx.mark_backfill_state(thread_id, "in_progress", 0, None).await;
+    // (2) Acquire the advisory lease BEFORE any rewrite. Ok(true) ⇒ this worker
+    // now holds the lease (the CAS stamped status='in_progress' + started_at, so
+    // the pre-write `mark_backfill_state("in_progress")` is no longer needed).
+    // Ok(false) ⇒ another LIVE owner holds it → SKIP without marking failed
+    // (the holder is still working; we must not clobber its state). Err ⇒ a
+    // transient SQL error — propagate WITHOUT releasing (we never acquired, so
+    // releasing could clear another worker's live lease — M1).
+    match sqlx.try_acquire_backfill_lease(thread_id, lease_owner, BACKFILL_LEASE_TTL_SECS).await? {
+        true => {}
+        false => {
+            tracing::info!(
+                thread_id = %thread_id,
+                lease_owner = %lease_owner,
+                "rollout backfill: thread skipped (lease held by another live owner)",
+            );
+            return Ok(BackfillOutcome::Skipped);
+        }
+    }
 
-    // (2) Read the legacy thread metadata. Used to build the SessionMeta header
+    // (3) Run the rewrite. This worker holds the lease; on EITHER outcome we
+    // release it (warn-only, never blocks) so a failed thread is retryable by a
+    // later worker without waiting for the TTL. The inner function stamps
+    // `mark_backfill_state("completed")` on success and we stamp `"failed"`
+    // HERE — only on this worker's own failure path, AFTER it held the lease
+    // (so we never overwrite another worker's in_progress with our failed).
+    let result = backfill_thread_inner(sqlx, rollout, thread_id, session_id).await;
+    if let Err(error) = &result {
+        // We held the lease → safe to record our own failure.
+        let _ = sqlx.mark_backfill_state(thread_id, "failed", 0, Some(&error.to_string())).await;
+    }
+    // Release on success AND failure (warn-only). This MUST run for the
+    // failure case too: without it a failed thread stays leased until the TTL
+    // and is not retryable until then.
+    if let Err(error) = sqlx.release_backfill_lease(thread_id).await {
+        tracing::warn!(
+            thread_id = %thread_id,
+            %error,
+            "rollout backfill: failed to release backfill lease (will expire at TTL)",
+        );
+    }
+    match result {
+        Ok(()) => Ok(BackfillOutcome::Completed),
+        Err(error) => Err(error),
+    }
+}
+
+/// The atomic rewrite itself (the original `backfill_thread` body), MINUS the
+/// pre-write `mark_backfill_state("in_progress")`: the lease CAS already
+/// stamped `status='in_progress' + started_at`, so a second write would
+/// needlessly overwrite it. On success this stamps
+/// `mark_backfill_state("completed")`; on failure it returns `Err` and leaves
+/// the terminal `"failed"` stamp to the caller (which knows this worker holds
+/// the lease). Holds the lease on entry; the caller releases it.
+async fn backfill_thread_inner(
+    sqlx: &SqlxStore,
+    rollout: &RolloutFileStore,
+    thread_id: &str,
+    session_id: &str,
+) -> Result<(), AppCoreError> {
+    // (1) Read the legacy thread metadata. Used to build the SessionMeta header
     // when the rollout file does not yet carry one, and to no-op when the
     // thread vanished (deleted concurrently).
     let thread_row = sqlx::query(
@@ -206,8 +315,11 @@ pub async fn backfill_thread(
 
     // (4) Read existing rollout lines (flush first so pending writes are
     // durable). For a pure-legacy thread the file does not exist yet → empty.
+    // Uses `resolve_path` (the read reverse-lookup chain: session_index →
+    // date-partitioned scan → legacy flat fallback), NOT the write-only
+    // `path_for_new`. (D1.)
     let _ = rollout.flush(thread_id).await;
-    let existing_lines: Vec<RolloutLine> = read_rollout_lines(&rollout.path_for(thread_id));
+    let existing_lines: Vec<RolloutLine> = read_rollout_lines(&rollout.resolve_path(thread_id));
 
     // (5) SessionMeta line: prefer the existing file's header (it carries the
     // real config / session_id stamped by the adapter's upsert_thread); else
@@ -307,23 +419,42 @@ pub async fn backfill_thread(
         }
     }
 
-    // (8) complete_lines = [SessionMeta] + legacy + post-migration tail.
+    // (8) complete_lines = [SessionMeta] + legacy + post-migration tail. Pull
+    // the SessionMeta out of the header line BEFORE moving it into the vec — it
+    // is also needed below to seed the recorder at the canonical path (D1).
+    let session_meta = match &session_meta_line.item {
+        RolloutItem::SessionMeta(meta) => meta.clone(),
+        // session_meta_line is always built as a SessionMeta above.
+        _ => unreachable!("session_meta_line is always a SessionMeta line"),
+    };
     let mut complete_lines: Vec<RolloutLine> =
         Vec::with_capacity(1 + legacy_lines.len() + post_migration_tail.len());
     complete_lines.push(session_meta_line);
     complete_lines.extend(legacy_lines);
     complete_lines.extend(post_migration_tail);
 
-    // (9) Atomic rewrite — replaces the file with exactly these lines. Handles
-    // both the pure-legacy case (creates the file) and the mixed case (merges
-    // legacy prefix + post-migration tail). Idempotent + crash-safe (see module
-    // docs).
+    // (9) Ensure a recorder exists at the CANONICAL path before the rewrite
+    // (D1). `create_session` is idempotent: for a PURE-LEGACY thread (no
+    // existing rollout file) it spawns a `Create` recorder at the
+    // date-partitioned `path_for_new` path derived from `meta.started_at` and
+    // appends a `session_index.jsonl` entry — so the rewritten file lands in
+    // the NEW layout (not the legacy flat fallback). For a MIXED thread it
+    // spawns a `Resume` recorder on the EXISTING file's path (found via
+    // `lookup_path`), so the rewrite preserves the existing path. The rewrite
+    // itself (next line) routes through that recorder when present.
+    rollout.create_session(session_meta);
+
+    // (10) Atomic rewrite — replaces the file with exactly these lines. Handles
+    // both the pure-legacy case (creates the file at path_for_new via the
+    // recorder) and the mixed case (merges legacy prefix + post-migration tail
+    // on the existing path). Idempotent + crash-safe (see module docs).
     rollout.rewrite_session(thread_id, complete_lines.clone()).await.map_err(map_rollout_error)?;
 
-    // (10) Compute the real last_turn_index / last_item_id / line_count from the
+    // (11) Compute the real last_turn_index / last_item_id / line_count from the
     // complete line set, then flip the index to completed. last_turn_index is
     // the max turn across legacy + post-migration; last_item_id is the last
-    // TurnItem's id.
+    // TurnItem's id. The file path is resolved via the read reverse-lookup chain
+    // (now finds the just-written file).
     let last_turn_index =
         complete_lines.iter().filter_map(|line| line.item.turn_index()).max().unwrap_or(0);
     let last_item_id = complete_lines.iter().rev().find_map(|line| match &line.item {
@@ -331,7 +462,7 @@ pub async fn backfill_thread(
         _ => None,
     });
     let line_count = u32::try_from(complete_lines.len()).unwrap_or(0);
-    let file_path = rollout.path_for(thread_id).to_string_lossy().into_owned();
+    let file_path = rollout.resolve_path(thread_id).to_string_lossy().into_owned();
 
     mark_completed(
         sqlx,
@@ -388,11 +519,18 @@ fn extract_post_migration_tail(
 }
 
 /// Backfill every thread not yet `completed`. Spawned fire-and-forget at
-/// startup; returns `(succeeded, failed)` for diagnostics logging.
+/// startup; returns `(succeeded, skipped, failed)` for diagnostics logging
+/// (L1: `skipped` is reported separately — a skip is NOT a success).
+///
+/// Candidates are processed in fixed-size batches ([`BACKFILL_BATCH_SIZE`])
+/// with a checkpoint log between batches so a long run emits periodic progress
+/// (D2b). A single `lease_owner` is generated for the whole run and passed to
+/// each [`backfill_thread`], so every thread in this run shares an owner while
+/// a concurrent process gets a distinct one.
 pub async fn backfill_all_threads(
     sqlx: Arc<SqlxStore>,
     rollout: Arc<RolloutFileStore>,
-) -> (usize, usize) {
+) -> (usize, usize, usize) {
     let candidates = match sqlx.list_thread_ids_for_backfill().await {
         Ok(candidates) => candidates,
         Err(error) => {
@@ -400,29 +538,63 @@ pub async fn backfill_all_threads(
                 %error,
                 "rollout backfill: failed to list candidate threads; legacy threads stay on SQL",
             );
-            return (0, 0);
+            return (0, 0, 0);
         }
     };
 
+    // One owner per bulk run (D2b): every thread shares it, a concurrent
+    // process gets a different one.
+    let owner = backfill_lease_owner();
+    let total = candidates.len();
     let mut succeeded = 0usize;
+    let mut skipped = 0usize;
     let mut failed = 0usize;
-    for (thread_id, session_id) in candidates {
-        match backfill_thread(&sqlx, &rollout, &thread_id, &session_id).await {
-            Ok(()) => succeeded += 1,
-            Err(error) => {
-                failed += 1;
-                tracing::warn!(
-                    thread_id = %thread_id,
-                    %error,
-                    "rollout backfill: thread failed; it stays on the SQL read path",
-                );
-                let _ = sqlx
-                    .mark_backfill_state(&thread_id, "failed", 0, Some(&error.to_string()))
-                    .await;
+
+    for (batch_idx, chunk) in candidates.chunks(BACKFILL_BATCH_SIZE).enumerate() {
+        for (thread_id, session_id) in chunk {
+            match backfill_thread(&sqlx, &rollout, thread_id, session_id, &owner).await {
+                Ok(BackfillOutcome::Completed) => succeeded += 1,
+                Ok(BackfillOutcome::Skipped) => {
+                    skipped += 1;
+                    tracing::info!(
+                        thread_id = %thread_id,
+                        "rollout backfill: thread skipped (already completed or lease held)",
+                    );
+                }
+                Err(error) => {
+                    // M1: do NOT release_backfill_lease here and do NOT
+                    // mark_backfill_state("failed") here. `backfill_thread`
+                    // already released this worker's OWN lease and stamped its
+                    // OWN "failed" on its failure path (only when it held the
+                    // lease). If we also released/marked here we could clobber
+                    // ANOTHER worker's live lease: when `try_acquire_backfill_lease`
+                    // itself returned Err (transient SQL error, we never
+                    // acquired), an unconditional release would clear whoever
+                    // currently holds the lease, and a `mark_failed` would
+                    // overwrite their in_progress — letting a third worker
+                    // re-enter a thread still being backfilled (the exact
+                    // double-rewrite the lease prevents).
+                    failed += 1;
+                    tracing::warn!(
+                        thread_id = %thread_id,
+                        %error,
+                        "rollout backfill: thread failed; it stays on the SQL read path",
+                    );
+                }
             }
         }
+        tracing::info!(
+            batch = batch_idx,
+            batch_len = chunk.len(),
+            total,
+            succeeded,
+            skipped,
+            failed,
+            worker = %owner,
+            "rollout backfill: batch checkpoint",
+        );
     }
-    (succeeded, failed)
+    (succeeded, skipped, failed)
 }
 
 /// Decode a stored `agent_thread_messages.content` blob into a
@@ -709,7 +881,7 @@ mod tests {
         let sql_states = sqlx.list_turn_states("thread-legacy").await.expect("sql states");
 
         // Run the backfill.
-        backfill_thread(&sqlx, &rollout, "thread-legacy", "session-legacy")
+        backfill_thread(&sqlx, &rollout, "thread-legacy", "session-legacy", "test-owner")
             .await
             .expect("backfill");
 
@@ -842,7 +1014,7 @@ mod tests {
         assert_eq!(before[0].id, "gm0");
 
         // Run the backfill (flips the gate to completed).
-        backfill_thread(&sqlx_arc, &rollout, "thread-gate", "session-gate")
+        backfill_thread(&sqlx_arc, &rollout, "thread-gate", "session-gate", "test-owner")
             .await
             .expect("backfill");
         assert_eq!(
@@ -935,16 +1107,16 @@ mod tests {
         seed_message(&sqlx, "im0", "thread-idem", 0, &user_msg("once"), "2026-01-01T00:00:00Z")
             .await;
 
-        backfill_thread(&sqlx, &rollout, "thread-idem", "session-idem")
+        backfill_thread(&sqlx, &rollout, "thread-idem", "session-idem", "test-owner")
             .await
             .expect("first backfill");
-        let lines_after_first = read_rollout_lines(&rollout.path_for("thread-idem")).len();
+        let lines_after_first = read_rollout_lines(&rollout.resolve_path("thread-idem")).len();
 
         // Second run must be a no-op (index already completed).
-        backfill_thread(&sqlx, &rollout, "thread-idem", "session-idem")
+        backfill_thread(&sqlx, &rollout, "thread-idem", "session-idem", "test-owner")
             .await
             .expect("second backfill");
-        let lines_after_second = read_rollout_lines(&rollout.path_for("thread-idem")).len();
+        let lines_after_second = read_rollout_lines(&rollout.resolve_path("thread-idem")).len();
 
         assert_eq!(lines_after_first, lines_after_second, "no duplicate lines on re-run");
         assert_eq!(
@@ -972,9 +1144,10 @@ mod tests {
             .expect("pre-mark b");
 
         let sqlx_arc = Arc::new(sqlx);
-        let (succeeded, failed) =
+        let (succeeded, skipped, failed) =
             backfill_all_threads(Arc::clone(&sqlx_arc), Arc::clone(&rollout)).await;
         assert_eq!(succeeded, 1, "only thread-a needed backfilling");
+        assert_eq!(skipped, 0, "thread-b was excluded by the candidate query, not skipped");
         assert_eq!(failed, 0);
         assert_eq!(
             sqlx_arc.rollout_backfill_status("thread-a").await.unwrap().as_deref(),
@@ -1056,7 +1229,7 @@ mod tests {
 
         // Run the backfill — must MERGE the legacy turn-0 message with the
         // post-migration turn-5 message.
-        backfill_thread(&sqlx_arc, &rollout, "thread-mixed", "session-mixed")
+        backfill_thread(&sqlx_arc, &rollout, "thread-mixed", "session-mixed", "test-owner")
             .await
             .expect("backfill mixed");
 
@@ -1084,7 +1257,7 @@ mod tests {
             .execute(&sqlx_arc.pool)
             .await
             .expect("reset status");
-        backfill_thread(&sqlx_arc, &rollout, "thread-mixed", "session-mixed")
+        backfill_thread(&sqlx_arc, &rollout, "thread-mixed", "session-mixed", "test-owner")
             .await
             .expect("retry backfill");
         let messages_after_retry =
@@ -1108,7 +1281,7 @@ mod tests {
         // Thread metadata only — no messages, states, or items.
         seed_session_thread(&sqlx, "thread-empty", "session-empty").await;
 
-        backfill_thread(&sqlx, &rollout, "thread-empty", "session-empty")
+        backfill_thread(&sqlx, &rollout, "thread-empty", "session-empty", "test-owner")
             .await
             .expect("backfill empty");
 
@@ -1130,7 +1303,7 @@ mod tests {
         let items = adapter.list_turn_items("thread-empty").await.expect("items");
         assert!(items.is_empty(), "empty legacy thread → no items");
         // The file carries exactly the SessionMeta header line.
-        let lines = read_rollout_lines(&rollout.path_for("thread-empty"));
+        let lines = read_rollout_lines(&rollout.resolve_path("thread-empty"));
         assert_eq!(lines.len(), 1, "only the SessionMeta header line");
         assert!(matches!(lines[0].item, RolloutItem::SessionMeta(_)));
     }
@@ -1197,5 +1370,370 @@ mod tests {
             "G3: real last_item_id not clobbered by re-upsert"
         );
         assert_eq!(line_count, 10, "G4(b): non-zero line_count not clobbered by re-upsert");
+    }
+
+    // ---- Slice D2b: backfill lease (CAS concurrency-safety + crash recovery) ----
+
+    /// Read `(lease_owner, lease_expires_at)` for `thread_id`. Returns
+    /// `(None, None)` when no `rollout_backfill_state` row exists.
+    async fn lease_state(sqlx: &SqlxStore, thread_id: &str) -> (Option<String>, Option<String>) {
+        sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "SELECT lease_owner, lease_expires_at FROM rollout_backfill_state WHERE thread_id = ?1",
+        )
+        .bind(thread_id)
+        .fetch_optional(&sqlx.pool)
+        .await
+        .expect("read lease state")
+        .unwrap_or((None, None))
+    }
+
+    // (1) Two owners on an EXISTING row: the CAS UPDATE WHERE guard makes the
+    // lease mutually exclusive. Mutation: drop the
+    // `AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at
+    // < ?5)` guard from the UPDATE → the second owner's UPDATE overwrites A's
+    // lease and ALSO reports acquired → the `!b` assert fails.
+    #[tokio::test]
+    async fn lease_cas_is_mutually_exclusive_for_existing_row() {
+        let sqlx = store().await;
+        seed_session_thread(&sqlx, "t", "s").await;
+        sqlx.mark_backfill_state("t", "in_progress", 0, None).await.expect("seed state row");
+        let a = sqlx
+            .try_acquire_backfill_lease("t", "owner-A", BACKFILL_LEASE_TTL_SECS)
+            .await
+            .expect("acquire A");
+        assert!(a, "first owner acquires the free lease");
+        let b = sqlx
+            .try_acquire_backfill_lease("t", "owner-B", BACKFILL_LEASE_TTL_SECS)
+            .await
+            .expect("acquire B");
+        assert!(!b, "second owner denied — lease is mutually exclusive");
+        let (owner, _) = lease_state(&sqlx, "t").await;
+        assert_eq!(owner.as_deref(), Some("owner-A"), "DB still records owner A");
+    }
+
+    // (2) Two owners on a FRESH row (no prior state): the first INSERTs via ON
+    // CONFLICT DO NOTHING, the second is denied. Mutation: drop the
+    // `ON CONFLICT (thread_id) DO NOTHING` → the second INSERT errors on the
+    // primary-key conflict → `.expect("acquire B")` panics.
+    #[tokio::test]
+    async fn lease_cas_is_mutually_exclusive_for_fresh_row() {
+        let sqlx = store().await;
+        seed_session_thread(&sqlx, "t", "s").await;
+        let a = sqlx
+            .try_acquire_backfill_lease("t", "owner-A", BACKFILL_LEASE_TTL_SECS)
+            .await
+            .expect("acquire A");
+        assert!(a, "first owner INSERTs the row and acquires");
+        let b = sqlx
+            .try_acquire_backfill_lease("t", "owner-B", BACKFILL_LEASE_TTL_SECS)
+            .await
+            .expect("acquire B");
+        assert!(!b, "second owner denied — ON CONFLICT DO NOTHING leaves A's row");
+    }
+
+    // (3) An expired lease is re-acquirable. Mutation: drop the
+    // `OR lease_expires_at < ?5` clause from the UPDATE WHERE → the expired
+    // lease is still treated as live → B is denied → the `b` assert fails.
+    #[tokio::test]
+    async fn lease_cas_reacquires_after_expiry() {
+        let sqlx = store().await;
+        seed_session_thread(&sqlx, "t", "s").await;
+        sqlx.mark_backfill_state("t", "in_progress", 0, None).await.expect("seed state row");
+        assert!(
+            sqlx.try_acquire_backfill_lease("t", "owner-A", BACKFILL_LEASE_TTL_SECS)
+                .await
+                .expect("A acquire")
+        );
+        // Backdate owner-A's lease to the epoch — strictly expired.
+        sqlx::query(
+            "UPDATE rollout_backfill_state SET lease_expires_at = '1970-01-01T00:00:00Z' \
+             WHERE thread_id = 't'",
+        )
+        .execute(&sqlx.pool)
+        .await
+        .expect("backdate expiry");
+        let b = sqlx
+            .try_acquire_backfill_lease("t", "owner-B", BACKFILL_LEASE_TTL_SECS)
+            .await
+            .expect("B acquire");
+        assert!(b, "stale (expired) lease is re-acquired by another owner");
+        let (owner, _) = lease_state(&sqlx, "t").await;
+        assert_eq!(owner.as_deref(), Some("owner-B"), "DB now records owner B");
+    }
+
+    // (4) backfill_thread SKIPS a thread whose lease is held by a live owner
+    // (does NOT rewrite, does NOT mark failed). Mutation: delete the
+    // `false => { … return Ok(BackfillOutcome::Skipped); }` branch so a
+    // not-acquired worker proceeds anyway → B rewrites →
+    // `file_exists("t-skip")` becomes true → the assert fails.
+    #[tokio::test]
+    async fn backfill_thread_skips_thread_holding_live_lease() {
+        let sqlx = store().await;
+        let dir = rollout_dir();
+        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
+        seed_session_thread(&sqlx, "t-skip", "s-skip").await;
+        seed_message(&sqlx, "m", "t-skip", 0, &user_msg("x"), "2026-01-01T00:00:00Z").await;
+        // Owner A holds a live lease.
+        sqlx.mark_backfill_state("t-skip", "in_progress", 0, None).await.expect("seed state");
+        assert!(
+            sqlx.try_acquire_backfill_lease("t-skip", "owner-A", BACKFILL_LEASE_TTL_SECS)
+                .await
+                .expect("A acquire")
+        );
+
+        let outcome = backfill_thread(&sqlx, &rollout, "t-skip", "s-skip", "owner-B")
+            .await
+            .expect("skip is not an error");
+        assert_eq!(outcome, BackfillOutcome::Skipped, "live lease → skipped, not failed");
+        assert!(!rollout.file_exists("t-skip").await, "skip did NOT rewrite the file");
+        // B's skip left A's lease intact (no clobber).
+        let (owner, _) = lease_state(&sqlx, "t-skip").await;
+        assert_eq!(owner.as_deref(), Some("owner-A"), "skip left the holder's lease intact");
+    }
+
+    // (5) backfill_thread releases its lease on success. Mutation: delete the
+    // post-run `release_backfill_lease` call → lease_owner stays set → the
+    // `owner.is_none()` assert fails.
+    #[tokio::test]
+    async fn backfill_thread_releases_lease_on_success() {
+        let sqlx = store().await;
+        let dir = rollout_dir();
+        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
+        seed_session_thread(&sqlx, "t-rel", "s-rel").await;
+        seed_message(&sqlx, "m", "t-rel", 0, &user_msg("x"), "2026-01-01T00:00:00Z").await;
+
+        let outcome =
+            backfill_thread(&sqlx, &rollout, "t-rel", "s-rel", "owner-A").await.expect("backfill");
+        assert_eq!(outcome, BackfillOutcome::Completed);
+
+        let (owner, expires) = lease_state(&sqlx, "t-rel").await;
+        assert!(owner.is_none(), "lease_owner cleared after success");
+        assert!(expires.is_none(), "lease_expires_at cleared after success");
+        // The released lease is re-acquirable by another owner.
+        assert!(
+            sqlx.try_acquire_backfill_lease("t-rel", "owner-B", BACKFILL_LEASE_TTL_SECS)
+                .await
+                .expect("B acquire")
+        );
+    }
+
+    // (6) backfill_all_threads processes candidates larger than one batch (250 >
+    // 200) and completes ALL of them across multiple batches. Mutation: make
+    // the batch loop break after the first batch (e.g. process only
+    // `candidates.chunks(BACKFILL_BATCH_SIZE).take(1)`) → only 200/250
+    // complete → the `succeeded == 250` assert fails.
+    #[tokio::test]
+    async fn backfill_all_threads_processes_candidates_in_batches() {
+        let sqlx = store().await;
+        let dir = rollout_dir();
+        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
+        for i in 0..250 {
+            let tid = format!("t-{i:03}");
+            let sid = format!("s-{i:03}");
+            seed_session_thread(&sqlx, &tid, &sid).await;
+            seed_message(&sqlx, &format!("m-{i}"), &tid, 0, &user_msg("x"), "2026-01-01T00:00:00Z")
+                .await;
+        }
+        let sqlx_arc = Arc::new(sqlx);
+        let (succeeded, skipped, failed) =
+            backfill_all_threads(Arc::clone(&sqlx_arc), Arc::clone(&rollout)).await;
+        assert_eq!(succeeded, 250, "all candidates backfilled across batches");
+        assert_eq!(skipped, 0);
+        assert_eq!(failed, 0);
+        // Sampling across the batch boundary (200/201).
+        for sample in ["t-000", "t-199", "t-200", "t-249"] {
+            assert_eq!(
+                sqlx_arc.rollout_backfill_status(sample).await.unwrap().as_deref(),
+                Some("completed"),
+                "{sample} completed",
+            );
+        }
+    }
+
+    // (7) A crashed worker (acquired then never released) blocks a fresh worker
+    // until the lease TTL elapses, after which the stale lease is re-acquired
+    // and the thread is backfilled.
+    #[tokio::test]
+    async fn backfill_thread_recovers_after_prior_worker_crash() {
+        let sqlx = store().await;
+        let dir = rollout_dir();
+        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
+        seed_session_thread(&sqlx, "t-crash", "s-crash").await;
+        seed_message(&sqlx, "m", "t-crash", 0, &user_msg("x"), "2026-01-01T00:00:00Z").await;
+        // Worker A acquires then "crashes" (never releases).
+        sqlx.mark_backfill_state("t-crash", "in_progress", 0, None).await.expect("seed state");
+        assert!(
+            sqlx.try_acquire_backfill_lease("t-crash", "worker-A", BACKFILL_LEASE_TTL_SECS)
+                .await
+                .expect("A acquire")
+        );
+
+        // Worker B arrives BEFORE the TTL → still blocked.
+        let outcome = backfill_thread(&sqlx, &rollout, "t-crash", "s-crash", "worker-B")
+            .await
+            .expect("no err");
+        assert_eq!(
+            outcome,
+            BackfillOutcome::Skipped,
+            "before TTL the crashed lease still blocks B"
+        );
+        assert!(!rollout.file_exists("t-crash").await, "B did not rewrite while A's lease live");
+
+        // Simulate the TTL elapsing.
+        sqlx::query(
+            "UPDATE rollout_backfill_state SET lease_expires_at = '1970-01-01T00:00:00Z' \
+             WHERE thread_id = 't-crash'",
+        )
+        .execute(&sqlx.pool)
+        .await
+        .expect("backdate expiry");
+
+        // Worker C arrives AFTER expiry → re-acquires + backfills.
+        let outcome = backfill_thread(&sqlx, &rollout, "t-crash", "s-crash", "worker-C")
+            .await
+            .expect("backfill C");
+        assert_eq!(outcome, BackfillOutcome::Completed, "stale lease re-acquired after TTL");
+        assert!(rollout.file_exists("t-crash").await, "C rewrote the file");
+        assert_eq!(
+            sqlx.rollout_backfill_status("t-crash").await.unwrap().as_deref(),
+            Some("completed"),
+        );
+    }
+
+    // (8) release_backfill_lease clears both lease columns.
+    #[tokio::test]
+    async fn release_backfill_lease_frees_the_lease() {
+        let sqlx = store().await;
+        seed_session_thread(&sqlx, "t", "s").await;
+        sqlx.mark_backfill_state("t", "in_progress", 0, None).await.expect("seed state");
+        assert!(
+            sqlx.try_acquire_backfill_lease("t", "owner-A", BACKFILL_LEASE_TTL_SECS)
+                .await
+                .expect("acquire")
+        );
+        let (owner, expires) = lease_state(&sqlx, "t").await;
+        assert!(owner.is_some() && expires.is_some(), "lease held before release");
+        sqlx.release_backfill_lease("t").await.expect("release");
+        let (owner, expires) = lease_state(&sqlx, "t").await;
+        assert!(owner.is_none(), "lease_owner NULL after release");
+        assert!(expires.is_none(), "lease_expires_at NULL after release");
+    }
+
+    // (9) backfill_lease_owner() yields a unique id per call (pid prefix + uuid).
+    #[tokio::test]
+    async fn backfill_lease_owner_is_unique_per_invocation() {
+        let a = backfill_lease_owner();
+        let b = backfill_lease_owner();
+        assert_ne!(a, b, "each invocation gets a unique owner id");
+        assert!(a.starts_with("backfill-pid") && b.starts_with("backfill-pid"));
+    }
+
+    // H1 (review HIGH): the lease CAS must serialize CONCURRENT workers. This
+    // spawns N tokio tasks that race `try_acquire_backfill_lease` on the SAME
+    // thread and asserts EXACTLY ONE returns true and the DB records that
+    // winner. With the test store's pool-of-1 the workers serialize at the
+    // pool, but the CAS UPDATE WHERE guard is still what decides the winner:
+    // the first UPDATE sets the lease, every later UPDATE's WHERE sees it held
+    // → 0 rows → false. Mutation: drop the CAS UPDATE WHERE guard → every
+    // worker's UPDATE overwrites and reports acquired → wins == N → the
+    // `wins == 1` assert fails. This is the false-green the review flagged:
+    // without it the CAS never faced a concurrent contender.
+    #[tokio::test]
+    async fn lease_cas_serializes_concurrent_workers_exactly_one_winner() {
+        let sqlx = Arc::new(store().await);
+        seed_session_thread(&sqlx, "t-race", "s-race").await;
+        // Pre-create the state row so the UPDATE (CAS) branch — not the INSERT
+        // fallback — is the contested path.
+        sqlx.mark_backfill_state("t-race", "in_progress", 0, None).await.expect("seed state");
+
+        const N: usize = 8;
+        let mut handles = Vec::new();
+        for i in 0..N {
+            let store = Arc::clone(&sqlx);
+            handles.push(tokio::spawn(async move {
+                store
+                    .try_acquire_backfill_lease(
+                        "t-race",
+                        &format!("owner-{i}"),
+                        BACKFILL_LEASE_TTL_SECS,
+                    )
+                    .await
+            }));
+        }
+        let mut wins = 0usize;
+        let mut winner: Option<String> = None;
+        for (i, handle) in handles.into_iter().enumerate() {
+            let acquired = handle.await.expect("task joined").expect("acquire ok");
+            if acquired {
+                wins += 1;
+                winner = Some(format!("owner-{i}"));
+            }
+        }
+        assert_eq!(wins, 1, "exactly one concurrent worker wins the lease");
+        let (db_owner, _) = lease_state(&sqlx, "t-race").await;
+        assert_eq!(db_owner, winner, "DB records the unique winner");
+    }
+
+    // M1 (review MEDIUM): a thread whose backfill FAILS must release ONLY its
+    // own lease (so it is retryable) and must NOT touch another worker's live
+    // lease on a different thread. Seeds a corrupt item_json that makes
+    // backfill_thread_inner fail, plus a sibling thread whose lease is held by
+    // owner-A; after the run, the failed thread's lease is released + marked
+    // failed, while owner-A's lease is untouched. Mutation: remove the inner
+    // Err-path `release_backfill_lease` in backfill_thread → the failed
+    // thread's lease stays held → the `owner.is_none()` assert fails.
+    #[tokio::test]
+    async fn backfill_all_threads_failure_releases_own_lease_not_anothers() {
+        let sqlx = store().await;
+        let dir = rollout_dir();
+        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
+
+        // thread-fail: a candidate that will fail (valid JSON that does NOT
+        // decode as a TurnItem — passes the column's json_valid CHECK but
+        // trips the serde decode inside backfill_thread_inner).
+        seed_session_thread(&sqlx, "t-fail", "s-fail").await;
+        sqlx::query(
+            "INSERT INTO agent_turn_items (id, thread_id, turn_index, seq, item_json, created_at) \
+             VALUES ('bad-item', 't-fail', 0, 0, '{}', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&sqlx.pool)
+        .await
+        .expect("seed undecodable item");
+
+        // thread-other: a candidate whose lease is held by a DIFFERENT worker.
+        seed_session_thread(&sqlx, "t-other", "s-other").await;
+        seed_message(&sqlx, "om", "t-other", 0, &user_msg("y"), "2026-01-01T00:00:00Z").await;
+        sqlx.mark_backfill_state("t-other", "in_progress", 0, None)
+            .await
+            .expect("seed other state");
+        assert!(
+            sqlx.try_acquire_backfill_lease("t-other", "owner-A", BACKFILL_LEASE_TTL_SECS)
+                .await
+                .expect("A acquire on other")
+        );
+
+        let sqlx_arc = Arc::new(sqlx);
+        let (succeeded, skipped, failed) =
+            backfill_all_threads(Arc::clone(&sqlx_arc), Arc::clone(&rollout)).await;
+
+        assert_eq!(succeeded, 0, "no thread completed");
+        assert_eq!(failed, 1, "thread-fail failed");
+        assert_eq!(skipped, 1, "thread-other skipped (lease held by owner-A)");
+
+        // thread-fail: marked failed + its OWN lease released (retryable).
+        let status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM rollout_backfill_state WHERE thread_id = 't-fail'",
+        )
+        .fetch_optional(&sqlx_arc.pool)
+        .await
+        .expect("read fail status");
+        assert_eq!(status.as_deref(), Some("failed"), "failed thread stamped failed");
+        let (owner, _) = lease_state(&sqlx_arc, "t-fail").await;
+        assert!(owner.is_none(), "failed thread released its own lease (retryable)");
+
+        // thread-other: owner-A's live lease UNTOUCHED by the sibling failure.
+        let (owner, expires) = lease_state(&sqlx_arc, "t-other").await;
+        assert_eq!(owner.as_deref(), Some("owner-A"), "sibling failure did not clear A's lease");
+        assert!(expires.is_some(), "sibling failure did not clear A's expiry");
     }
 }

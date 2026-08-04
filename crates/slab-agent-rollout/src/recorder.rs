@@ -76,18 +76,15 @@ pub struct RolloutRecorderHandle {
 }
 
 impl RolloutRecorderHandle {
-    /// Spawn a recorder actor. `sessions_dir` is the directory in which
-    /// `<thread_id>.rollout.jsonl` lives.
-    pub fn spawn(params: RolloutRecorderParams, sessions_dir: PathBuf) -> Self {
+    /// Spawn a recorder actor. `file_path` is the FULL path to the rollout
+    /// file this recorder owns. The store computes the path once (sanitizing
+    /// the thread id + date-partitioning via
+    /// [`RolloutFileStore::path_for_new`](crate::store::RolloutFileStore::path_for_new))
+    /// and passes it here verbatim, so the write path and the store's read path
+    /// resolve to the SAME file (no read/write split-brain, L5).
+    pub fn spawn(params: RolloutRecorderParams, file_path: PathBuf) -> Self {
         let thread_id = params.thread_id().to_owned();
-        // Sanitize exactly as `RolloutFileStore::path_for` does, so the write
-        // path and the store's read path resolve to the SAME file (and a hostile
-        // thread id cannot traverse out of `sessions_dir`). Without this, a
-        // thread_id like "a/b" would write to `sessions_dir/a/b.rollout.jsonl`
-        // while reads look at the sanitized `a_b.rollout.jsonl` — a silent
-        // read/write split-brain. (L5)
-        let file_stem = crate::store::sanitize_thread_id(&thread_id);
-        let path = sessions_dir.join(format!("{file_stem}.rollout.jsonl"));
+        let path = file_path;
         let meta_to_write = match params {
             RolloutRecorderParams::Create { meta } => Some(meta),
             RolloutRecorderParams::Resume { .. } => None,
@@ -424,7 +421,7 @@ mod tests {
         let expected = dir.path().join("t1.rollout.jsonl");
         let handle = RolloutRecorderHandle::spawn(
             RolloutRecorderParams::Create { meta: meta("t1") },
-            dir.path().to_owned(),
+            expected.clone(),
         );
         // Spawned with no items — file must not exist yet.
         assert!(!expected.exists(), "file created before any write");
@@ -450,7 +447,7 @@ mod tests {
         let path = dir.path().join("t2.rollout.jsonl");
         let handle = RolloutRecorderHandle::spawn(
             RolloutRecorderParams::Create { meta: meta("t2") },
-            dir.path().to_owned(),
+            path.clone(),
         );
         for i in 0..5 {
             handle.add_item(RolloutItem::TurnItem(TurnItem::AgentMessage {
@@ -480,7 +477,7 @@ mod tests {
         {
             let h = RolloutRecorderHandle::spawn(
                 RolloutRecorderParams::Create { meta: meta("t3") },
-                dir.path().to_owned(),
+                path.clone(),
             );
             h.flush_and_wait().await.unwrap();
             h.shutdown().await;
@@ -490,7 +487,7 @@ mod tests {
         // Resume and append — header must not be duplicated.
         let h = RolloutRecorderHandle::spawn(
             RolloutRecorderParams::Resume { thread_id: "t3".to_owned() },
-            dir.path().to_owned(),
+            path.clone(),
         );
         h.add_item(RolloutItem::TurnItem(TurnItem::AgentMessage {
             id: "x".to_owned(),
@@ -580,7 +577,7 @@ mod tests {
         let path = dir.path().join("t6.rollout.jsonl");
         let handle = RolloutRecorderHandle::spawn(
             RolloutRecorderParams::Create { meta: meta("t6") },
-            dir.path().to_owned(),
+            path.clone(),
         );
         handle.add_item(RolloutItem::TurnItem(TurnItem::AgentMessage {
             id: "z".to_owned(),
@@ -603,7 +600,7 @@ mod tests {
         let path = dir.path().join("tb1.rollout.jsonl");
         let handle = RolloutRecorderHandle::spawn(
             RolloutRecorderParams::Create { meta: meta("tb1") },
-            dir.path().to_owned(),
+            path.clone(),
         );
         // Materialize a durable turn-1 line so the file exists with known state.
         handle.add_item(RolloutItem::TurnContext(crate::item::TurnContextPayload::MessageAppend {
@@ -658,7 +655,7 @@ mod tests {
         {
             let handle = RolloutRecorderHandle::spawn(
                 RolloutRecorderParams::Create { meta: meta("th4") },
-                dir.path().to_owned(),
+                path.clone(),
             );
             handle.add_item(RolloutItem::TurnItem(TurnItem::AgentMessage {
                 id: "pending".to_owned(),

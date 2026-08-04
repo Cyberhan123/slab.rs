@@ -221,7 +221,22 @@ impl AgentThread {
         // INFRA-09: tag subagent events with the delegating parent's span id so
         // the parent→child tree can be reconstructed from the trace JSONL.
         if let Some(parent) = self.parent_id.clone() {
-            trace_context = trace_context.with_parent_span_id(parent);
+            trace_context = trace_context.with_parent_span_id(parent.clone());
+            // Slice 0 trace-bundle grouping: a child thread correlates back to
+            // its ROOT thread's bundle (not its immediate parent). The root is
+            // resolved by walking the persisted parent chain up to the ancestor
+            // with no parent. depth-1 children resolve in one hop; depth-N
+            // grandchild spawn chains (DelegateSubagentTool nesting, default
+            // max_depth 4) resolve through the full chain so every descendant
+            // groups under the SAME root bundle and remains reachable from the
+            // rollout via the root thread's SessionMeta.trace_path. If the chain
+            // cannot be walked (a parent snapshot is not yet persisted — a
+            // diagnostic race), we fall back to the nearest ancestor id so the
+            // event is still grouped deterministically rather than dropped.
+            let root = resolve_root_thread_id(store.as_ref(), &parent).await.unwrap_or(parent);
+            trace_context = trace_context.with_root_thread_id(root);
+        } else {
+            trace_context = trace_context.with_root_thread_id(thread_id.clone());
         }
         if let Some(trace_dir) = trace_dir {
             trace_context = trace_context.with_trace_dir(trace_dir);
@@ -745,6 +760,38 @@ impl AgentThread {
             }),
         );
     }
+}
+
+/// Resolve the ROOT thread id for a non-root thread by walking the persisted
+/// parent chain up to the ancestor with no `parent_id` (the root).
+///
+/// Used by [`AgentThread::run`] to stamp `root_thread_id` on the trace context
+/// so every descendant of a root (depth-1 children AND depth>=2 grandchildren
+/// produced by nested `DelegateSubagentTool` delegation, bounded by
+/// `max_depth`) groups into the SAME root bundle — keeping the grandchild
+/// bundle reachable from the rollout via the root thread's
+/// `SessionMeta.trace_path` (`build_session_meta` only stamps `trace_path` on
+/// the true root).
+///
+/// Returns `None` when the chain cannot be walked (a parent snapshot is not yet
+/// persisted, e.g. a diagnostic race right after spawn); the caller then falls
+/// back to the nearest ancestor id so the event is still grouped
+/// deterministically rather than dropped. Bounded by the spawn `max_depth`,
+/// so at most `max_depth` store lookups.
+pub(crate) async fn resolve_root_thread_id(
+    store: &dyn AgentStorePort,
+    parent_id: &str,
+) -> Option<String> {
+    let mut current = parent_id.to_owned();
+    // Bounded by max_depth; guard against a malformed/cyclic chain defensively.
+    for _ in 0..crate::control::MAX_SPAWN_DEPTH_GUARD {
+        let snapshot = store.get_thread(&current).await.ok()??;
+        match snapshot.parent_id {
+            Some(grandparent) => current = grandparent,
+            None => return Some(snapshot.id),
+        }
+    }
+    None
 }
 
 impl TerminationReason {

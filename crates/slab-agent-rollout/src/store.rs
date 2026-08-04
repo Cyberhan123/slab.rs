@@ -4,9 +4,10 @@
 //! by a [`DashMap`]). Writes go through the recorder actor; reads open a fresh
 //! read-only handle (flushing the writer first so pending items are durable).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use chrono::{DateTime, Datelike};
 use dashmap::DashMap;
 use tokio::sync::{mpsc, oneshot};
 
@@ -60,54 +61,280 @@ impl RolloutFileStore {
         Self { sessions_dir, recorders: DashMap::new() }
     }
 
-    /// File path for `thread_id`.
+    /// The date-partitioned write path for a NEW session:
+    /// `sessions/YYYY/MM/DD/rollout-<ts>-<sanitized_thread_id>.jsonl`. `<ts>` is
+    /// a compact, fixed-width RFC-3339 timestamp (`YYYYMMDDTHHMMSSZ`) so
+    /// file-name dictionary order equals chronological order within a day
+    /// directory — the D2 watermark backfill relies on this to find the newest
+    /// file for a thread by a simple reverse-scan. `YYYY/MM/DD` is extracted
+    /// from `started_at` (RFC-3339); an unparseable `started_at` falls back to
+    /// the epoch (`1970/01/01`, ts `19700101T000000Z`).
+    ///
+    /// Use this when materializing a NEW rollout file (you have the
+    /// [`SessionMeta`] with its `started_at`). For reads, use
+    /// [`Self::resolve_path`] which reverse-looks-up the EXISTING file across
+    /// all layouts (date-partitioned, `session_index.jsonl`, legacy flat).
     ///
     /// The thread id is sanitized to a single path-safe segment: any char that
     /// is not ascii-alphanumeric, `-` or `_` becomes `_`. This prevents path
     /// traversal (`..`, `/`, `\`) from a hostile or malformed thread id, and is a
     /// no-op for normal UUID-like ids. (L5)
-    pub fn path_for(&self, thread_id: &str) -> PathBuf {
+    pub fn path_for_new(&self, thread_id: &str, started_at: &str) -> PathBuf {
+        let (year, month, day) = date_parts_from_started_at(started_at);
+        let ts = compact_ts_from_started_at(started_at);
+        let stem = sanitize_thread_id(thread_id);
+        self.sessions_dir
+            .join(format!("{year:04}"))
+            .join(format!("{month:02}"))
+            .join(format!("{day:02}"))
+            .join(format!("rollout-{ts}-{stem}.jsonl"))
+    }
+
+    /// The pre-migration flat path `sessions/<sanitized_thread_id>.rollout.jsonl`.
+    /// Kept as the read fallback ([`Self::resolve_path`]) so a rollout file
+    /// written by a previous version (or skipped by the startup migration) is
+    /// still readable.
+    fn legacy_flat_path(&self, thread_id: &str) -> PathBuf {
         self.sessions_dir.join(format!("{}.rollout.jsonl", sanitize_thread_id(thread_id)))
+    }
+
+    /// Reverse-look-up the EXISTING rollout file for `thread_id` across all
+    /// layouts (no fallback to a non-existent path). Returns `None` when no file
+    /// is found anywhere.
+    ///
+    /// Chain order (cheapest + most-authoritative first):
+    /// 1. `session_index.jsonl` text index (L2') — newest entry whose
+    ///    `file_path` still exists on disk (stale entries are skipped).
+    /// 2. Date-partitioned scan — `sessions/YYYY/MM/DD/
+    ///    rollout-*-<sanitized>.jsonl`; the lexicographically-largest (newest)
+    ///    match wins.
+    /// 3. Legacy flat path — `sessions/<sanitized>.rollout.jsonl`.
+    pub fn lookup_path(&self, thread_id: &str) -> Option<PathBuf> {
+        let sanitized = sanitize_thread_id(thread_id);
+        // (1) session_index.jsonl (L2' text reverse-lookup).
+        if let Some(entry) =
+            crate::session_index::find_latest_for_thread(&self.sessions_dir, &sanitized)
+        {
+            let indexed = PathBuf::from(&entry.file_path);
+            if indexed.exists() {
+                return Some(indexed);
+            }
+        }
+        // (2) date-partitioned scan (newest match by file-name dictionary order).
+        if let Some(found) = scan_date_dirs_for_thread(&self.sessions_dir, &sanitized) {
+            return Some(found);
+        }
+        // (3) legacy flat fallback (pre-migration / skipped-by-migration files).
+        let flat = self.legacy_flat_path(thread_id);
+        if flat.exists() {
+            return Some(flat);
+        }
+        None
+    }
+
+    /// The read path for `thread_id`: the first existing file in the
+    /// [`Self::lookup_path`] chain, or — when no file exists yet — the legacy
+    /// flat path (non-existent, so a subsequent `read_rollout_lines` returns an
+    /// empty vec, matching the pre-migration behaviour for a thread with no
+    /// rollout file).
+    pub fn resolve_path(&self, thread_id: &str) -> PathBuf {
+        self.lookup_path(thread_id).unwrap_or_else(|| self.legacy_flat_path(thread_id))
+    }
+
+    /// List the [`SessionMeta`] headers of EVERY rollout file discoverable under
+    /// `sessions_dir` — the date-partitioned tree (`YYYY/MM/DD/rollout-*.jsonl`)
+    /// AND the legacy top-level flat files (`*.rollout.jsonl`). Used by the
+    /// `RolloutBackedAgentStore` list DB-unavailable fallback to reconstruct a
+    /// best-effort thread listing purely from the rollout true source when the
+    /// metadata DB cannot be queried.
+    ///
+    /// One `SessionMeta` per thread id. The precedence MIRRORS
+    /// [`Self::lookup_path`]'s reverse chain: the date-partitioned tree wins
+    /// over the legacy flat layout (the tree is the canonical new layout; a flat
+    /// file is at best a stale pre-migration duplicate). Lexicographic path
+    /// order is NOT a valid cross-layout chronological signal — `dir/2026/...`
+    /// sorts before `dir/t.rollout.jsonl` purely on the `2` < `t` byte — so the
+    /// two layouts are folded SEPARATELY: within the tree the newest path per
+    /// thread wins (dict-order == chronological there, since the fixed-width ts
+    /// prefix is the only variable segment under a shared YYYY/MM/DD/ parent),
+    /// then a flat file fills in ONLY threads absent from the tree. Files whose
+    /// first line does not parse as a `SessionMeta`-bearing rollout line are
+    /// skipped (best-effort).
+    pub fn list_all_session_metas(&self) -> Vec<SessionMeta> {
+        // (1) Date-partitioned tree: newest path per thread wins (dict-order ==
+        // chronological within the tree).
+        let mut by_thread: std::collections::HashMap<String, SessionMeta> =
+            std::collections::HashMap::new();
+        let mut newest_path: std::collections::HashMap<String, PathBuf> =
+            std::collections::HashMap::new();
+        for path in scan_all_date_dirs(&self.sessions_dir) {
+            let Some(meta) = read_first_line_session_meta(&path) else {
+                continue;
+            };
+            let better = !matches!(
+                newest_path.get(&meta.thread_id),
+                Some(cur) if path.as_path() <= cur.as_path()
+            );
+            if better {
+                newest_path.insert(meta.thread_id.clone(), path);
+                by_thread.insert(meta.thread_id.clone(), meta);
+            }
+        }
+        // (2) Legacy flat files: fill in ONLY threads absent from the tree.
+        for path in list_dir_entries(&self.sessions_dir).into_iter().map(|e| e.path()) {
+            let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !path.is_file() || !fname.ends_with(".rollout.jsonl") {
+                continue;
+            }
+            let Some(meta) = read_first_line_session_meta(&path) else {
+                continue;
+            };
+            by_thread.entry(meta.thread_id.clone()).or_insert(meta);
+        }
+        by_thread.into_values().collect()
+    }
+
+    /// One-shot startup migration: move every top-level
+    /// `<thread_id>.rollout.jsonl` (the pre-migration flat layout) into the
+    /// date-partitioned layout derived from its own `SessionMeta.started_at`,
+    /// and append a `session_index.jsonl` entry for each move.
+    ///
+    /// Idempotent: a second run finds no top-level `*.rollout.jsonl` files and
+    /// is a no-op. Crash-safe: `std::fs::rename` is atomic within the same
+    /// volume, so a crash leaves the file at either the old or the new path —
+    /// re-running picks it up from wherever it is. Returns the number of files
+    /// moved. Best-effort: a single rename failure is warned and skipped (the
+    /// [`Self::lookup_path`] flat fallback still finds the unmoved file).
+    pub fn migrate_flat_rollouts(&self) -> usize {
+        // Collect the candidate entries BEFORE renaming: renaming during a live
+        // `read_dir` iteration can skip or revisit entries on Windows
+        // (FindFirstFile/FindNextFile observe the directory lazily). A snapshot
+        // Vec makes the migration deterministic and idempotent across platforms.
+        let candidates: Vec<PathBuf> = match std::fs::read_dir(&self.sessions_dir) {
+            Ok(r) => r
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.is_file()
+                        && p.file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|n| n.ends_with(".rollout.jsonl"))
+                            .unwrap_or(false)
+                })
+                .collect(),
+            Err(_) => return 0,
+        };
+        let mut migrated = 0usize;
+        for path in candidates {
+            let Some(meta) = read_first_line_session_meta(&path) else {
+                // Not a rollout file we recognize (or empty/corrupt) — leave it.
+                continue;
+            };
+            let new_path = self.path_for_new(&meta.thread_id, &meta.started_at);
+            if new_path == path || new_path.exists() {
+                // Already migrated (or a duplicate); leave the flat file for
+                // resolve_path's flat fallback rather than risk clobbering.
+                continue;
+            }
+            if let Some(parent) = new_path.parent()
+                && std::fs::create_dir_all(parent).is_err()
+            {
+                continue;
+            }
+            match std::fs::rename(&path, &new_path) {
+                Ok(()) => {
+                    let entry = crate::session_index::SessionIndexEntry {
+                        // Key the index by the SANITIZED id — the same form used
+                        // for the file-name stem AND the lookup_path query — so
+                        // `find_latest_for_thread(sanitized)` hits. Writing the
+                        // raw id here would miss for any thread id whose raw form
+                        // differs from its sanitized form (path separators, etc.).
+                        thread_id: sanitize_thread_id(&meta.thread_id),
+                        session_id: meta.session_id.clone(),
+                        name: None,
+                        updated_at: chrono::Utc::now().to_rfc3339(),
+                        file_path: new_path.to_string_lossy().into_owned(),
+                    };
+                    crate::session_index::append_entry(&self.sessions_dir, &entry);
+                    migrated += 1;
+                }
+                Err(error) => tracing::warn!(
+                    error = %error,
+                    from = %path.display(),
+                    to = %new_path.display(),
+                    "rollout flat-to-date migration: rename failed; leaving the flat file in place",
+                ),
+            }
+        }
+        migrated
     }
 
     /// Explicitly create a session (writes the `SessionMeta` header lazily on the
     /// first write). Returns without writing.
     ///
-    /// If a rollout file for `meta.thread_id` already exists (e.g. on process
-    /// restart, or when the adapter re-sends meta for an existing thread), a
-    /// fresh `Create` recorder would append a SECOND `SessionMeta` header into
-    /// the existing file. To avoid that we mirror `recorder_for`: spawn with
-    /// `Resume` when the file is present, `Create` otherwise. (M2)
+    /// If a rollout file for `meta.thread_id` already exists anywhere in the
+    /// [`Self::lookup_path`] chain (e.g. on process restart, or when the adapter
+    /// re-sends meta for an existing thread), spawn with `Resume` on the EXISTING
+    /// path so a fresh `Create` recorder does not append a SECOND `SessionMeta`
+    /// header (M2). Otherwise spawn `Create` at the new date-partitioned path
+    /// derived from `meta.started_at`, and append a `session_index.jsonl` entry
+    /// pointing at it (the L2' text reverse-lookup index).
     pub fn create_session(&self, meta: SessionMeta) {
         let thread_id = meta.thread_id.clone();
-        self.recorders.entry(thread_id).or_insert_with(|| {
-            let params = if self.path_for(&meta.thread_id).exists() {
-                RolloutRecorderParams::Resume { thread_id: meta.thread_id.clone() }
+        self.recorders.entry(thread_id.clone()).or_insert_with(|| {
+            if let Some(existing) = self.lookup_path(&thread_id) {
+                RolloutRecorderHandle::spawn(
+                    RolloutRecorderParams::Resume { thread_id: thread_id.clone() },
+                    existing,
+                )
             } else {
-                RolloutRecorderParams::Create { meta }
-            };
-            RolloutRecorderHandle::spawn(params, self.sessions_dir.clone())
+                let path = self.path_for_new(&thread_id, &meta.started_at);
+                let entry = crate::session_index::SessionIndexEntry {
+                    // Keyed by the SANITIZED id (matches the file-name stem and
+                    // the lookup_path query); see migrate_flat_rollouts.
+                    thread_id: sanitize_thread_id(&thread_id),
+                    session_id: meta.session_id.clone(),
+                    name: None,
+                    updated_at: chrono::Utc::now().to_rfc3339(),
+                    file_path: path.to_string_lossy().into_owned(),
+                };
+                crate::session_index::append_entry(&self.sessions_dir, &entry);
+                RolloutRecorderHandle::spawn(RolloutRecorderParams::Create { meta }, path)
+            }
         });
     }
 
     /// Get or spawn the recorder for `thread_id`. Auto-creates with a default
-    /// `SessionMeta` when neither a recorder nor a file exists yet.
+    /// `SessionMeta` (started_at = now) when neither a recorder nor a file
+    /// exists. The default meta's `started_at` seeds the date-partitioned write
+    /// path so even an auto-created session lands in the new layout.
     fn recorder_for(&self, thread_id: &str) -> Option<mpsc::UnboundedSender<RolloutCmd>> {
         // Fast path: existing recorder.
         if let Some(handle) = self.recorders.get(thread_id) {
             return Some(handle.sender());
         }
         // Slow path: insert a new recorder (Create vs Resume by file existence).
-        let path = self.path_for(thread_id);
-        let params = if path.exists() {
-            RolloutRecorderParams::Resume { thread_id: thread_id.to_owned() }
+        let (params, path) = if let Some(existing) = self.lookup_path(thread_id) {
+            (RolloutRecorderParams::Resume { thread_id: thread_id.to_owned() }, existing)
         } else {
-            RolloutRecorderParams::Create { meta: default_meta(thread_id) }
+            let meta = default_meta(thread_id);
+            let path = self.path_for_new(thread_id, &meta.started_at);
+            let entry = crate::session_index::SessionIndexEntry {
+                // Keyed by the SANITIZED id (matches the file-name stem and the
+                // lookup_path query); see migrate_flat_rollouts.
+                thread_id: sanitize_thread_id(thread_id),
+                session_id: meta.session_id.clone(),
+                name: None,
+                updated_at: chrono::Utc::now().to_rfc3339(),
+                file_path: path.to_string_lossy().into_owned(),
+            };
+            crate::session_index::append_entry(&self.sessions_dir, &entry);
+            (RolloutRecorderParams::Create { meta }, path)
         };
         let entry = self
             .recorders
             .entry(thread_id.to_owned())
-            .or_insert_with(|| RolloutRecorderHandle::spawn(params, self.sessions_dir.clone()));
+            .or_insert_with(|| RolloutRecorderHandle::spawn(params, path));
         Some(entry.sender())
     }
 
@@ -133,17 +360,168 @@ fn default_meta(thread_id: &str) -> SessionMeta {
 
 /// Map a thread id to a path-safe file-name segment. Any char that is not
 /// ascii-alphanumeric, `-` or `_` becomes `_`. The mapping is deterministic and
-/// a no-op for normal UUID-like ids. Applied both inside
-/// [`RolloutFileStore::path_for`] (every store path lookup: recorder_for /
-/// create_session / read / truncate) AND inside [`RolloutRecorderHandle::spawn`]
-/// (the on-disk write path) so a hostile thread id cannot traverse out of
-/// `sessions_dir` and — critically — the write path and the store's read path
-/// resolve to the SAME file (no read/write split-brain). (L5)
+/// a no-op for normal UUID-like ids. Applied inside every
+/// [`RolloutFileStore`] path builder ([`RolloutFileStore::path_for_new`] +
+/// [`RolloutFileStore::legacy_flat_path`] + the date-dir scan suffix) so a
+/// hostile thread id cannot traverse out of `sessions_dir` and — critically —
+/// the write path (computed once by the store and passed verbatim to
+/// [`RolloutRecorderHandle::spawn`]) and the store's read path resolve to the
+/// SAME file (no read/write split-brain). (L5)
 pub(crate) fn sanitize_thread_id(thread_id: &str) -> String {
     thread_id
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
         .collect()
+}
+
+/// `(year, month, day)` for the date partition, derived from an RFC-3339
+/// `started_at`. Falls back to the epoch (`1970-01-01`) when the timestamp
+/// cannot be parsed — the file still lands at a deterministic path
+/// (`sessions/1970/01/01/...`) rather than panicking.
+fn date_parts_from_started_at(started_at: &str) -> (i32, u32, u32) {
+    match DateTime::parse_from_rfc3339(started_at) {
+        // Project to UTC BEFORE extracting the calendar fields: `parse_from_rfc3339`
+        // yields a `DateTime<FixedOffset>`, and `.year()/.month()/.day()` reflect
+        // the offset's LOCAL wall-clock, not the UTC instant. Formatting the local
+        // fields would put the date partition on the offset's calendar day (and,
+        // for `compact_ts_from_started_at`, emit a 'Z'-suffixed ts that encodes a
+        // non-UTC instant), which lets two distinct UTC instants collapse to the
+        // same sort key and breaks the dict-order == chronological-order invariant.
+        Ok(dt) => {
+            let utc = dt.with_timezone(&chrono::Utc);
+            (utc.year(), utc.month(), utc.day())
+        }
+        Err(_) => (1970, 1, 1),
+    }
+}
+
+/// Compact, fixed-width timestamp `YYYYMMDDTHHMMSSZ` for a rollout file name.
+/// Dictionary order equals chronological order. Falls back to
+/// `19700101T000000Z` when `started_at` cannot be parsed.
+fn compact_ts_from_started_at(started_at: &str) -> String {
+    match DateTime::parse_from_rfc3339(started_at) {
+        // Project to UTC BEFORE formatting (see `date_parts_from_started_at`):
+        // the ts string ends in 'Z' (asserting UTC), so it MUST encode the UTC
+        // instant — otherwise dictionary order no longer equals chronological
+        // order and the D2 watermark reverse-scan can mis-rank files.
+        Ok(dt) => dt.with_timezone(&chrono::Utc).format("%Y%m%dT%H%M%SZ").to_string(),
+        Err(_) => "19700101T000000Z".to_owned(),
+    }
+}
+
+/// Scan the 3-level date-partitioned tree (`sessions/YYYY/MM/DD/`) for a rollout
+/// file whose sanitized stem matches `sanitized`, returning the
+/// lexicographically-largest (newest, since the timestamp prefix is fixed-width)
+/// match. Returns `None` when no file matches or the tree is absent. A missing
+/// branch (e.g. a non-date directory) is skipped, not fatal.
+fn scan_date_dirs_for_thread(sessions_dir: &Path, sanitized: &str) -> Option<PathBuf> {
+    let suffix = format!("-{sanitized}.jsonl");
+    let mut newest: Option<PathBuf> = None;
+    for year in list_dir_entries(sessions_dir) {
+        if !is_all_digits(year.file_name(), 4) {
+            continue;
+        }
+        for month in list_dir_entries(&year.path()) {
+            if !is_all_digits(month.file_name(), 2) {
+                continue;
+            }
+            for day in list_dir_entries(&month.path()) {
+                if !is_all_digits(day.file_name(), 2) {
+                    continue;
+                }
+                for file in list_dir_entries(&day.path()) {
+                    let fname = file.file_name();
+                    let fname = fname.to_string_lossy();
+                    if fname.starts_with("rollout-") && fname.ends_with(&suffix) {
+                        let p = file.path();
+                        if newest.as_ref().is_none_or(|cur| p > *cur) {
+                            newest = Some(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    newest
+}
+
+/// `read_dir(path)` flattened to a `Vec<DirEntry>` (errors dropped). Used by the
+/// date-tree scan so a missing/unreadable branch is simply skipped.
+fn list_dir_entries(path: &Path) -> Vec<std::fs::DirEntry> {
+    std::fs::read_dir(path).map(|r| r.flatten().collect()).unwrap_or_default()
+}
+
+/// Walk the 3-level date-partitioned tree (`sessions/YYYY/MM/DD/`) and collect
+/// every `rollout-*.jsonl` file. Used by [`RolloutFileStore::list_all_session_metas`]
+/// (the DB-unavailable fallback surface) which folds the result by thread id,
+/// keeping the newest path per thread (dict-order == chronological within the
+/// tree). A missing/unreadable branch is skipped, not fatal. Legacy flat files
+/// live at the top level and are handled separately by the caller.
+fn scan_all_date_dirs(sessions_dir: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for year in list_dir_entries(sessions_dir) {
+        if !is_all_digits(year.file_name(), 4) {
+            continue;
+        }
+        for month in list_dir_entries(&year.path()) {
+            if !is_all_digits(month.file_name(), 2) {
+                continue;
+            }
+            for day in list_dir_entries(&month.path()) {
+                if !is_all_digits(day.file_name(), 2) {
+                    continue;
+                }
+                for file in list_dir_entries(&day.path()) {
+                    let fname = file.file_name();
+                    let fname = fname.to_string_lossy();
+                    if fname.starts_with("rollout-") && fname.ends_with(".jsonl") {
+                        out.push(file.path());
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Whether `name` is exactly `len` ASCII digits — the date-partition directory
+/// filter (years are 4 digits, months/days are 2). Guards the scan against
+/// descending into unrelated directories.
+fn is_all_digits(name: std::ffi::OsString, len: usize) -> bool {
+    let s = name.to_string_lossy();
+    s.len() == len && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Read the first non-empty line of `path` and return its `SessionMeta` if it
+/// parses as a `SessionMeta`-bearing rollout line. Used by the flat-to-date
+/// migration to derive the new path from a legacy file's own header.
+///
+/// Reads at most the first 64 KiB (the `SessionMeta` header is always line 0 and
+/// is far smaller) so a multi-gigabyte legacy rollout file does not get fully
+/// buffered into memory just to parse its header — the migration runs once per
+/// top-level flat file at startup, so this bounds the startup memory spike.
+fn read_first_line_session_meta(path: &Path) -> Option<SessionMeta> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    const CAP: usize = 64 * 1024;
+    let mut buf = Vec::with_capacity(CAP);
+    file.take(CAP as u64).read_to_end(&mut buf).ok()?;
+    for line_bytes in buf.split(|b| *b == b'\n') {
+        if line_bytes.trim_ascii().is_empty() {
+            continue;
+        }
+        let Ok(line): std::result::Result<RolloutLine, _> = serde_json::from_slice(line_bytes)
+        else {
+            continue;
+        };
+        if let RolloutItem::SessionMeta(meta) = line.item {
+            return Some(meta);
+        }
+        // First non-empty line was not a SessionMeta header — not a recognizable
+        // rollout file; stop (the header is always line 0).
+        return None;
+    }
+    None
 }
 
 /// Atomically rewrite `path`, dropping every line at or beyond `from_turn`.
@@ -241,7 +619,7 @@ fn keep_line(item: &RolloutItem, running_turn: &mut Option<u32>, from_turn: u32)
 impl RolloutStore for RolloutFileStore {
     async fn read_messages(&self, thread_id: &str) -> Vec<slab_types::ConversationMessage> {
         let _ = self.flush(thread_id).await;
-        let lines = read_rollout_lines(&self.path_for(thread_id));
+        let lines = read_rollout_lines(&self.resolve_path(thread_id));
         let mut out: Vec<slab_types::ConversationMessage> = Vec::new();
         for line in lines {
             match line.item {
@@ -290,7 +668,7 @@ impl RolloutStore for RolloutFileStore {
 
     async fn read_turn_items(&self, thread_id: &str) -> Vec<slab_agent::port::TurnItemRecord> {
         let _ = self.flush(thread_id).await;
-        let lines = read_rollout_lines(&self.path_for(thread_id));
+        let lines = read_rollout_lines(&self.resolve_path(thread_id));
         let mut out = Vec::new();
         let mut current_turn: u32 = 0;
         // `seq` orders items within (thread_id, turn_index) — per-turn, matching
@@ -327,7 +705,7 @@ impl RolloutStore for RolloutFileStore {
 
     async fn read_events(&self, thread_id: &str) -> Vec<slab_agent::protocol::EventMsg> {
         let _ = self.flush(thread_id).await;
-        read_rollout_lines(&self.path_for(thread_id))
+        read_rollout_lines(&self.resolve_path(thread_id))
             .into_iter()
             .filter_map(|line| match line.item {
                 RolloutItem::EventMsg(e) => Some(e),
@@ -385,7 +763,7 @@ impl RolloutStore for RolloutFileStore {
             Some(handle) => handle.sender(),
             None => {
                 // No live recorder — operate on the file directly.
-                return truncate_rollout_file(&self.path_for(thread_id), from_turn);
+                return truncate_rollout_file(&self.resolve_path(thread_id), from_turn);
             }
         };
         let (ack, rx) = oneshot::channel();
@@ -402,7 +780,7 @@ impl RolloutStore for RolloutFileStore {
         let tx = match self.recorders.get(thread_id) {
             Some(handle) => handle.sender(),
             None => {
-                return rewrite_rollout_file(&self.path_for(thread_id), &lines);
+                return rewrite_rollout_file(&self.resolve_path(thread_id), &lines);
             }
         };
         let (ack, rx) = oneshot::channel();
@@ -411,14 +789,16 @@ impl RolloutStore for RolloutFileStore {
     }
 
     async fn file_exists(&self, thread_id: &str) -> bool {
-        self.path_for(thread_id).exists()
+        self.resolve_path(thread_id).exists()
     }
 
     async fn read_session_meta(&self, thread_id: &str) -> Option<SessionMeta> {
         let _ = self.flush(thread_id).await;
-        read_rollout_lines(&self.path_for(thread_id)).into_iter().find_map(|line| match line.item {
-            RolloutItem::SessionMeta(meta) => Some(meta),
-            _ => None,
+        read_rollout_lines(&self.resolve_path(thread_id)).into_iter().find_map(|line| {
+            match line.item {
+                RolloutItem::SessionMeta(meta) => Some(meta),
+                _ => None,
+            }
         })
     }
 }
@@ -474,7 +854,9 @@ mod tests {
         .unwrap();
         s.flush("a/b").await.unwrap();
 
-        // Read uses path_for (sanitized "a_b"); the write must land in the same file.
+        // Read uses resolve_path (sanitized "a_b"); the write must land in the
+        // same file. lookup_path finds it via the session_index.jsonl entry
+        // appended at create_session (or via the date-dir scan).
         let items = s.read_turn_items("a/b").await;
         assert_eq!(
             items.len(),
@@ -483,9 +865,22 @@ mod tests {
         );
         assert_eq!(items[0].id, "m1");
 
-        // The on-disk file is the sanitized stem, NOT a nested subdir.
-        assert!(dir.path().join("a_b.rollout.jsonl").exists(), "file must be the sanitized stem");
-        assert!(!dir.path().join("a").exists(), "raw separator must not create a nested directory");
+        // The on-disk file is under sessions_dir in the new date-partitioned
+        // layout, with the SANITIZED stem "a_b" in the file name — NOT a nested
+        // subdir created by the raw separator.
+        let found = s.lookup_path("a/b").expect("file materialized under the new layout");
+        let file_name = found.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(found.starts_with(dir.path()), "file stays under sessions_dir");
+        assert!(file_name.contains("a_b"), "sanitized stem in {file_name}");
+        assert!(!file_name.contains('/'), "no '/' in {file_name}");
+        assert!(
+            !dir.path().join("a").exists(),
+            "raw separator must not create a top-level nested directory"
+        );
+        assert!(
+            !dir.path().join("a_b.rollout.jsonl").exists(),
+            "no top-level flat file (new layout is date-partitioned)"
+        );
     }
 
     #[tokio::test]
@@ -663,7 +1058,7 @@ mod tests {
         assert_eq!(texts, vec!["summary".to_owned()], "compacted baseline replaces history");
 
         // The file holds exactly [SessionMeta, Compacted] — no old items/messages.
-        let lines = read_rollout_lines(&s.path_for("t"));
+        let lines = read_rollout_lines(&s.resolve_path("t"));
         assert_eq!(lines.len(), 2, "only the header + the Compacted line survive");
         assert!(matches!(lines[0].item, RolloutItem::SessionMeta(_)));
         assert!(matches!(lines[1].item, RolloutItem::Compacted(_)));
@@ -739,7 +1134,7 @@ mod tests {
         // control.fork_thread's upsert_thread materialized; here it is built
         // directly since the test does not run control.fork_thread.)
         s.flush("t-parent").await.unwrap();
-        let parent_lines = read_rollout_lines(&s.path_for("t-parent"));
+        let parent_lines = read_rollout_lines(&s.resolve_path("t-parent"));
         let child_meta = SessionMeta {
             thread_id: "t-child".to_owned(),
             session_id: "s".to_owned(),
@@ -898,7 +1293,7 @@ mod tests {
         rx1.await.unwrap();
         rx2.await.unwrap();
 
-        let lines = read_rollout_lines(&s.path_for("t"));
+        let lines = read_rollout_lines(&s.resolve_path("t"));
         let header_count =
             lines.iter().filter(|l| matches!(l.item, RolloutItem::SessionMeta(_))).count();
         assert_eq!(header_count, 1, "only one SessionMeta header expected");
@@ -1357,7 +1752,7 @@ mod tests {
         .unwrap();
         s.flush("t").await.unwrap();
         // One header so far.
-        let before = read_rollout_lines(&s.path_for("t"))
+        let before = read_rollout_lines(&s.resolve_path("t"))
             .iter()
             .filter(|l| matches!(l.item, RolloutItem::SessionMeta(_)))
             .count();
@@ -1386,19 +1781,22 @@ mod tests {
         .unwrap();
         s.flush("t").await.unwrap();
 
-        let header_count = read_rollout_lines(&s.path_for("t"))
+        let header_count = read_rollout_lines(&s.resolve_path("t"))
             .iter()
             .filter(|l| matches!(l.item, RolloutItem::SessionMeta(_)))
             .count();
         assert_eq!(header_count, 1, "exactly one SessionMeta header, not two");
     }
 
-    // L5: a hostile thread id cannot traverse out of sessions_dir.
+    // L5: a hostile thread id cannot traverse out of sessions_dir. Both the
+    // write path (path_for_new) and the read path (resolve_path's flat fallback)
+    // must sanitize the thread id to a single path-safe segment.
     #[test]
-    fn path_for_sanitizes_traversal_thread_id() {
+    fn path_for_new_sanitizes_traversal_thread_id() {
         let dir = tempfile::tempdir().unwrap();
         let s = store(&dir);
-        let p = s.path_for("../escape");
+        let started = "2026-08-03T00:00:00Z";
+        let p = s.path_for_new("../escape", started);
         let parent = dir.path();
         assert!(
             p.starts_with(parent),
@@ -1407,15 +1805,30 @@ mod tests {
         );
         // The sanitized segment contains no path separators or dots.
         let file_name = p.file_name().unwrap().to_string_lossy().to_string();
+        assert!(file_name.starts_with("rollout-"), "date-partitioned file name: {file_name}");
         assert!(!file_name.contains('/'), "no '/' in {file_name}");
         assert!(!file_name.contains('\\'), "no '\\' in {file_name}");
-        assert!(!file_name.contains(".."), "no '..' in {file_name}");
-        // A normal UUID-like id is a no-op.
-        let normal = s.path_for("01234567-89ab-cdef");
+        assert!(
+            file_name.ends_with("-___escape.jsonl"),
+            "traversal chars collapsed to '_' (sanitized): {file_name}"
+        );
+        // The date partition is honored (2026/08/03 from the rfc3339 started_at).
+        assert!(p.starts_with(parent.join("2026").join("08").join("03")), "date partition honored");
+
+        // The legacy flat read fallback sanitizes too (and stays under sessions_dir).
+        let flat = s.resolve_path("../escape");
+        assert!(flat.starts_with(parent));
+        let flat_name = flat.file_name().unwrap().to_string_lossy().to_string();
+        assert!(!flat_name.contains('/'));
+        assert!(!flat_name.contains('\\'));
+        assert!(!flat_name.contains(".."));
+
+        // A normal UUID-like id is a no-op on the stem.
+        let normal = s.path_for_new("01234567-89ab-cdef", started);
         assert!(normal.starts_with(parent));
         assert_eq!(
             normal.file_name().unwrap().to_string_lossy(),
-            "01234567-89ab-cdef.rollout.jsonl"
+            "rollout-20260803T000000Z-01234567-89ab-cdef.jsonl"
         );
     }
 
@@ -1453,7 +1866,7 @@ mod tests {
 
         // Rewrite with a DIFFERENT line set: keep the SessionMeta header, drop
         // the old lines, and write a new turn-2 message (timestamps preserved).
-        let meta_line = read_rollout_lines(&s.path_for("t"))
+        let meta_line = read_rollout_lines(&s.resolve_path("t"))
             .into_iter()
             .find(|l| matches!(l.item, RolloutItem::SessionMeta(_)))
             .expect("header present");
@@ -1472,7 +1885,7 @@ mod tests {
         s.rewrite_session("t", new_lines).await.unwrap();
 
         // The file now contains EXACTLY the new set (header + one turn-2 line).
-        let after = read_rollout_lines(&s.path_for("t"));
+        let after = read_rollout_lines(&s.resolve_path("t"));
         assert_eq!(after.len(), 2, "rewrite replaced the whole file");
         assert!(matches!(after[0].item, RolloutItem::SessionMeta(_)));
         // The old content is gone.
@@ -1505,7 +1918,7 @@ mod tests {
         .unwrap();
         s.flush("t").await.unwrap();
 
-        let final_lines = read_rollout_lines(&s.path_for("t"));
+        let final_lines = read_rollout_lines(&s.resolve_path("t"));
         assert_eq!(final_lines.len(), 3, "post-rewrite append landed");
         // Order: header, rewritten line, then the appended item.
         let ids: Vec<&str> = final_lines
@@ -1526,8 +1939,10 @@ mod tests {
     async fn rewrite_session_direct_path_without_recorder() {
         let dir = tempfile::tempdir().unwrap();
         let s = store(&dir);
-        let path = s.path_for("ghost");
-        // Seed the file directly (no recorder), so no handle is open.
+        // Seed a LEGACY FLAT file directly (no recorder ever holds a handle).
+        // resolve_path's flat fallback finds it, so rewrite_session operates on
+        // it directly.
+        let path = dir.path().join("ghost.rollout.jsonl");
         let seed = RolloutLine::with_timestamp(
             "2026-08-02T00:00:00Z",
             RolloutItem::SessionMeta(default_meta("ghost")),
@@ -1547,6 +1962,615 @@ mod tests {
         let after = read_rollout_lines(&path);
         assert_eq!(after.len(), 1, "direct rewrite replaced the file");
         assert!(matches!(after[0].item, RolloutItem::TurnItem(_)));
+    }
+
+    // ── Slice D (D1): date-partitioned path layout + reverse lookup + migration ─
+    //
+    // These tests exercise the REAL file system (create_session writes a real
+    // date-partitioned file → read reads it back; a synthesized legacy flat file
+    // → migration moves it → read still resolves). No mocks: a false-green here
+    // (e.g. resolve_path silently falling back to flat when the date file is the
+    // truth) would hide a real production read/write split-brain.
+
+    fn started(year: i32, month: u32, day: u32, sec: u32) -> String {
+        use chrono::TimeZone;
+        chrono::Utc.with_ymd_and_hms(year, month, day, 0, 0, sec).unwrap().to_rfc3339()
+    }
+
+    fn meta_with(thread_id: &str, started_at: &str) -> SessionMeta {
+        SessionMeta {
+            thread_id: thread_id.to_owned(),
+            session_id: "s".to_owned(),
+            parent_id: None,
+            started_at: started_at.to_owned(),
+            config_json: serde_json::json!({}),
+            rollout_version: SessionMeta::CURRENT_VERSION,
+            role_name: None,
+            trace_path: None,
+        }
+    }
+
+    // create_session writes to the date-partitioned path derived from
+    // SessionMeta.started_at: sessions/YYYY/MM/DD/rollout-<ts>-<tid>.jsonl.
+    #[tokio::test]
+    async fn create_session_writes_date_partitioned_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+        let started_at = started(2026, 8, 3, 12);
+        s.create_session(meta_with("t-partition", &started_at));
+        s.append(
+            "t-partition",
+            RolloutItem::TurnItem(TurnItem::AgentMessage {
+                id: "m1".to_owned(),
+                text: "hi".to_owned(),
+            }),
+        )
+        .await
+        .unwrap();
+        s.flush("t-partition").await.unwrap();
+
+        // The file is at the expected date-partitioned path. The thread id
+        // "t-partition" keeps its hyphen (sanitize preserves `-`).
+        let expected = dir
+            .path()
+            .join("2026")
+            .join("08")
+            .join("03")
+            .join("rollout-20260803T000012Z-t-partition.jsonl");
+        assert!(expected.exists(), "file at date-partitioned path: {}", expected.display());
+
+        // lookup_path / resolve_path find it.
+        assert_eq!(s.lookup_path("t-partition").as_deref(), Some(expected.as_path()));
+        assert_eq!(s.resolve_path("t-partition"), expected);
+
+        // Round-trip read works.
+        let items = s.read_turn_items("t-partition").await;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "m1");
+
+        // No top-level flat file was created.
+        assert!(!dir.path().join("t-partition.rollout.jsonl").exists());
+    }
+
+    // resolve_path reverse-lookup chain — each link exercised in isolation:
+    // (a) session_index.jsonl hit; (b) date-dir scan hit (no index); (c) legacy
+    // flat fallback. A SECOND store over the SAME dir resolves the same file
+    // (the index + scan survive across instances — important across restarts).
+    #[tokio::test]
+    async fn resolve_path_reverse_chain_index_scan_and_flat_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // (a) Date-partitioned file created via create_session lands an
+        // session_index.jsonl entry; a FRESH store instance resolves it through
+        // the index (no in-memory recorder state shared).
+        let s = store(&dir);
+        let started_at = started(2026, 8, 3, 0);
+        s.create_session(meta_with("t-index", &started_at));
+        s.append(
+            "t-index",
+            RolloutItem::TurnItem(TurnItem::AgentMessage {
+                id: "ix".to_owned(),
+                text: "x".to_owned(),
+            }),
+        )
+        .await
+        .unwrap();
+        s.flush("t-index").await.unwrap();
+        let indexed_path = s.lookup_path("t-index").expect("indexed lookup");
+
+        // (b) A date-partitioned file with NO index entry is found by the scan.
+        // Drop a file directly into the date tree, bypassing create_session so
+        // no index entry is appended.
+        let scan_dir = dir.path().join("2026").join("08").join("04");
+        std::fs::create_dir_all(&scan_dir).unwrap();
+        let scan_path = scan_dir.join("rollout-20260804T000000Z-t-scan.jsonl");
+        let scan_seed = RolloutLine::now(RolloutItem::SessionMeta(meta_with(
+            "t-scan",
+            &started(2026, 8, 4, 0),
+        )));
+        std::fs::write(&scan_path, serde_json::to_vec(&scan_seed).unwrap()).unwrap();
+
+        // (c) A legacy flat file (pre-migration) is found by the flat fallback.
+        let flat_path = dir.path().join("t-flat.rollout.jsonl");
+        let flat_seed = RolloutLine::now(RolloutItem::SessionMeta(meta_with(
+            "t-flat",
+            &started(2026, 1, 1, 0),
+        )));
+        std::fs::write(&flat_path, serde_json::to_vec(&flat_seed).unwrap()).unwrap();
+
+        // A FRESH store (no shared recorder map) must resolve all three purely
+        // from the on-disk reverse chain.
+        let fresh = store(&dir);
+        assert_eq!(fresh.lookup_path("t-index").as_deref(), Some(indexed_path.as_path()));
+        assert_eq!(fresh.lookup_path("t-scan").as_deref(), Some(scan_path.as_path()));
+        assert_eq!(fresh.lookup_path("t-flat").as_deref(), Some(flat_path.as_path()));
+        // A thread with no file anywhere resolves to the (non-existent) flat
+        // fallback, so reads return empty rather than panicking.
+        let ghost = fresh.resolve_path("ghost");
+        assert!(!ghost.exists());
+        assert!(fresh.read_turn_items("ghost").await.is_empty());
+    }
+
+    // The flat fallback is the LAST chain link — if a date-partitioned file AND
+    // a flat file BOTH exist for the same thread (e.g. migration left a stale
+    // flat duplicate), the date-partitioned (scan) result wins over flat. This
+    // pins the chain order: index > scan > flat.
+    #[tokio::test]
+    async fn resolve_path_prefers_date_partitioned_over_flat() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+
+        // Create the date-partitioned file (writes index entry too).
+        s.create_session(meta_with("t-dup", &started(2026, 8, 3, 0)));
+        s.append(
+            "t-dup",
+            RolloutItem::TurnItem(TurnItem::AgentMessage {
+                id: "new".to_owned(),
+                text: "from-date".to_owned(),
+            }),
+        )
+        .await
+        .unwrap();
+        s.flush("t-dup").await.unwrap();
+        let date_path = s.lookup_path("t-dup").expect("date file exists");
+
+        // Synthesize a STALE flat duplicate at the top level.
+        let flat_path = dir.path().join("t-dup.rollout.jsonl");
+        let flat_seed =
+            RolloutLine::now(RolloutItem::SessionMeta(meta_with("t-dup", &started(2020, 1, 1, 0))));
+        std::fs::write(&flat_path, serde_json::to_vec(&flat_seed).unwrap()).unwrap();
+
+        // resolve_path returns the DATE-partitioned file (not the flat dup).
+        assert_eq!(s.resolve_path("t-dup"), date_path);
+        // The read returns the date-file item ("new"), not the flat dup.
+        let items = s.read_turn_items("t-dup").await;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "new");
+    }
+
+    // Startup migration moves a top-level flat file into the date-partitioned
+    // layout, appends a session_index.jsonl entry, and is IDEMPOTENT (a second
+    // run finds no flat files and is a no-op). The reverse-lookup finds the
+    // file at its NEW location after the move, and the read still returns the
+    // original content.
+    #[tokio::test]
+    async fn migrate_flat_rollouts_moves_files_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+
+        // Synthesize TWO legacy flat files (top-level *.rollout.jsonl). Each
+        // line is written with a trailing newline (the real recorder always
+        // appends `\n` per line), so read_first_line_session_meta can parse the
+        // header in isolation.
+        let flat_a = dir.path().join("t-legacy-a.rollout.jsonl");
+        let meta_a = meta_with("t-legacy-a", &started(2026, 7, 15, 30));
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&flat_a).unwrap();
+            let header = RolloutLine::now(RolloutItem::SessionMeta(meta_a.clone()));
+            writeln!(f, "{}", serde_json::to_string(&header).unwrap()).unwrap();
+            // Append a TurnItem so the file has real content to round-trip.
+            let item = RolloutLine::now(RolloutItem::TurnItem(TurnItem::AgentMessage {
+                id: "la".to_owned(),
+                text: "legacy-a".to_owned(),
+            }));
+            writeln!(f, "{}", serde_json::to_string(&item).unwrap()).unwrap();
+        }
+
+        let flat_b = dir.path().join("t-legacy-b.rollout.jsonl");
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&flat_b).unwrap();
+            let header = RolloutLine::now(RolloutItem::SessionMeta(meta_with(
+                "t-legacy-b",
+                &started(2026, 8, 1, 0),
+            )));
+            writeln!(f, "{}", serde_json::to_string(&header).unwrap()).unwrap();
+        }
+
+        assert!(flat_a.exists());
+        assert!(flat_b.exists());
+
+        // Run migration.
+        let migrated = s.migrate_flat_rollouts();
+        assert_eq!(migrated, 2, "both flat files migrated");
+
+        // The flat files are gone; the date-partitioned files exist.
+        assert!(!flat_a.exists(), "flat a moved away");
+        assert!(!flat_b.exists(), "flat b moved away");
+        let new_a = dir
+            .path()
+            .join("2026")
+            .join("07")
+            .join("15")
+            .join("rollout-20260715T000030Z-t-legacy-a.jsonl");
+        let new_b = dir
+            .path()
+            .join("2026")
+            .join("08")
+            .join("01")
+            .join("rollout-20260801T000000Z-t-legacy-b.jsonl");
+        assert!(new_a.exists(), "a moved to date partition: {}", new_a.display());
+        assert!(new_b.exists(), "b moved to date partition: {}", new_b.display());
+
+        // The reverse lookup finds them at the new locations.
+        assert_eq!(s.lookup_path("t-legacy-a").as_deref(), Some(new_a.as_path()));
+        assert_eq!(s.lookup_path("t-legacy-b").as_deref(), Some(new_b.as_path()));
+
+        // The content round-trips through resolve_path.
+        let items = s.read_turn_items("t-legacy-a").await;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "la");
+
+        // Idempotent: a second run finds no flat files and is a no-op.
+        let migrated_again = s.migrate_flat_rollouts();
+        assert_eq!(migrated_again, 0, "second migration is a no-op");
+        assert!(new_a.exists());
+        assert!(new_b.exists());
+
+        // A FRESH store (simulating a restart) resolves the migrated files via
+        // the session_index.jsonl entries appended by the migration.
+        let fresh = store(&dir);
+        assert_eq!(fresh.lookup_path("t-legacy-a").as_deref(), Some(new_a.as_path()));
+    }
+
+    // Crash-safety / partial-progress idempotency: if migration moved file A but
+    // crashed before moving file B, a re-run moves only B (A is already gone
+    // from the flat location). No file is moved twice; no content is lost.
+    #[tokio::test]
+    async fn migrate_flat_rollouts_partial_progress_resumes() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+
+        let flat_a = dir.path().join("t-crash-a.rollout.jsonl");
+        let flat_b = dir.path().join("t-crash-b.rollout.jsonl");
+        std::fs::write(
+            &flat_a,
+            serde_json::to_vec(&RolloutLine::now(RolloutItem::SessionMeta(meta_with(
+                "t-crash-a",
+                &started(2026, 6, 1, 0),
+            ))))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            &flat_b,
+            serde_json::to_vec(&RolloutLine::now(RolloutItem::SessionMeta(meta_with(
+                "t-crash-b",
+                &started(2026, 6, 2, 0),
+            ))))
+            .unwrap(),
+        )
+        .unwrap();
+
+        // Simulate "A already migrated, B still flat": move A manually (as if a
+        // prior run did one then crashed).
+        let new_a = dir
+            .path()
+            .join("2026")
+            .join("06")
+            .join("01")
+            .join("rollout-20260601T000000Z-t-crash-a.jsonl");
+        std::fs::create_dir_all(new_a.parent().unwrap()).unwrap();
+        std::fs::rename(&flat_a, &new_a).unwrap();
+        assert!(!flat_a.exists());
+        assert!(flat_b.exists());
+
+        // Re-run migration: only B is moved (A is not at the flat path anymore).
+        let migrated = s.migrate_flat_rollouts();
+        assert_eq!(migrated, 1, "only the remaining flat file moved");
+        assert!(new_a.exists(), "A still at its migrated location");
+        let new_b = dir
+            .path()
+            .join("2026")
+            .join("06")
+            .join("02")
+            .join("rollout-20260602T000000Z-t-crash-b.jsonl");
+        assert!(new_b.exists(), "B moved");
+        assert!(!flat_b.exists());
+
+        // Both resolve.
+        assert!(s.lookup_path("t-crash-a").is_some());
+        assert!(s.lookup_path("t-crash-b").is_some());
+    }
+
+    // Read compatibility for an UN-migrated flat file (migration skipped or not
+    // yet run): resolve_path's flat fallback finds it and the read returns the
+    // real content. This is the safety net that makes migration best-effort.
+    #[tokio::test]
+    async fn read_falls_back_to_legacy_flat_when_not_migrated() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+
+        // A flat file the migration never touched.
+        let flat = dir.path().join("t-unmigrated.rollout.jsonl");
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&flat).unwrap();
+            let seed = RolloutLine::now(RolloutItem::SessionMeta(meta_with(
+                "t-unmigrated",
+                &started(2025, 12, 25, 0),
+            )));
+            writeln!(f, "{}", serde_json::to_string(&seed).unwrap()).unwrap();
+            let item = RolloutLine::now(RolloutItem::TurnItem(TurnItem::AgentMessage {
+                id: "um".to_owned(),
+                text: "unmigrated-content".to_owned(),
+            }));
+            writeln!(f, "{}", serde_json::to_string(&item).unwrap()).unwrap();
+        }
+
+        // resolve_path's flat fallback finds it; the read returns the content.
+        assert_eq!(s.resolve_path("t-unmigrated"), flat);
+        assert!(s.file_exists("t-unmigrated").await);
+        let items = s.read_turn_items("t-unmigrated").await;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "um");
+        assert!(s.read_session_meta("t-unmigrated").await.is_some());
+    }
+
+    // ts dictionary order = chronological order: files for different threads
+    // created at different started_at values sort by path the same way they
+    // sort by time. This is the invariant D2's watermark reverse-scan relies on.
+    #[test]
+    fn path_for_new_ts_dict_order_equals_time_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+        let times = [
+            ("a", started(2026, 8, 3, 1)),
+            ("b", started(2026, 8, 3, 30)),
+            ("c", started(2026, 8, 3, 59)),
+            ("d", started(2026, 8, 4, 0)),
+            ("e", started(2027, 1, 1, 0)),
+        ];
+        let paths: Vec<PathBuf> = times.iter().map(|(t, ts)| s.path_for_new(t, ts)).collect();
+        // Paths sort the same as the input time order.
+        let mut sorted_by_path = paths.clone();
+        sorted_by_path.sort();
+        assert_eq!(
+            sorted_by_path, paths,
+            "path dictionary order equals chronological (started_at) order"
+        );
+        // And each path's parent follows YYYY/MM/DD.
+        for (path, (_t, ts)) in paths.iter().zip(times.iter()) {
+            let parent = path.parent().unwrap();
+            let date_dir = dir
+                .path()
+                .join(format!("{}", chrono::DateTime::parse_from_rfc3339(ts).unwrap().year()))
+                .join(format!("{:02}", chrono::DateTime::parse_from_rfc3339(ts).unwrap().month()))
+                .join(format!("{:02}", chrono::DateTime::parse_from_rfc3339(ts).unwrap().day()));
+            assert_eq!(parent, date_dir);
+        }
+    }
+
+    // An unparseable started_at ("x", as several existing tests use) still
+    // produces a deterministic path: the epoch date partition + epoch ts. The
+    // file round-trips through resolve_path.
+    #[tokio::test]
+    async fn unparseable_started_at_falls_back_to_epoch_partition() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+        s.create_session(meta_with("t-epoch", "x"));
+        s.append(
+            "t-epoch",
+            RolloutItem::TurnItem(TurnItem::AgentMessage {
+                id: "e1".to_owned(),
+                text: "epoch".to_owned(),
+            }),
+        )
+        .await
+        .unwrap();
+        s.flush("t-epoch").await.unwrap();
+
+        let epoch_path = dir
+            .path()
+            .join("1970")
+            .join("01")
+            .join("01")
+            .join("rollout-19700101T000000Z-t-epoch.jsonl");
+        assert!(epoch_path.exists(), "epoch fallback path: {}", epoch_path.display());
+        assert_eq!(s.lookup_path("t-epoch").as_deref(), Some(epoch_path.as_path()));
+        let items = s.read_turn_items("t-epoch").await;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "e1");
+    }
+
+    // ── D1 fixup regressions ──
+
+    // F1: session_index.jsonl entries must be keyed by the SANITIZED thread id
+    // (the form used as the file-name stem AND as the lookup_path query), not the
+    // raw thread id. For a thread id with a path separator ("a/b" -> "a_b"), the
+    // bug wrote the RAW "a/b" key but lookup_path queried the SANITIZED "a_b" →
+    // the index ALWAYS missed for special-char ids → silent fall-back to the full
+    // date-tree scan (the index's O(1) reverse-lookup promise was lost). The
+    // existing 't-index'/'t-scan' tests never caught this because their ids are
+    // already sanitized (raw == sanitized). This test uses an id where raw !=
+    // sanitized and asserts the index is hit DIRECTLY (find_latest_for_thread
+    // with the sanitized id returns the entry), NOT via the scan fallback.
+    #[tokio::test]
+    async fn index_key_matches_sanitized_query_for_special_char_thread_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+        // "a/b" sanitizes to "a_b" — raw != sanitized.
+        s.create_session(meta_with("a/b", &started(2026, 8, 3, 0)));
+        s.flush("a/b").await.unwrap();
+
+        let sanitized = sanitize_thread_id("a/b");
+        assert_eq!(sanitized, "a_b", "raw != sanitized for this id");
+
+        // The index MUST have an entry keyed by the SANITIZED id ("a_b"), so a
+        // direct reverse-lookup by "a_b" hits it WITHOUT needing the scan.
+        // Mutation: revert the create_session write site back to
+        // `thread_id: thread_id.clone()` (raw "a/b") → the index never matches
+        // "a_b" → find_latest_for_thread returns None → this expect panics.
+        let entry = crate::session_index::find_latest_for_thread(dir.path(), &sanitized)
+            .expect("index keyed by sanitized id; raw-key mutation makes this None");
+        // The indexed file_path must point at the real on-disk file (sanitized
+        // stem "a_b"), proving the entry is genuine — not a scan-side ghost.
+        let indexed = PathBuf::from(&entry.file_path);
+        assert!(indexed.exists(), "indexed path exists on disk: {}", indexed.display());
+        assert!(
+            indexed.to_string_lossy().contains("a_b"),
+            "sanitized stem in indexed path: {}",
+            indexed.display(),
+        );
+        assert!(
+            !indexed.to_string_lossy().contains("a/b"),
+            "no raw separator in indexed path: {}",
+            indexed.display(),
+        );
+    }
+
+    // F2: compact_ts_from_started_at and date_parts_from_started_at must project
+    // to UTC before formatting. A non-"Z" RFC-3339 offset (e.g. -05:00) must
+    // produce a ts and date partition in UTC, not the offset's local wall-clock.
+    // The bug formatted the DateTime<FixedOffset> directly: the ts string ended
+    // in 'Z' (asserting UTC) but encoded the LOCAL offset time, so two distinct
+    // UTC instants could produce the SAME ts — breaking the dict-order ==
+    // chronological-order invariant D2's watermark reverse-scan relies on. The
+    // existing dict-order test used only "Z" (UTC) inputs where FixedOffset ==
+    // UTC, so it never caught this.
+    #[test]
+    fn path_for_new_uses_utc_for_non_z_offsets() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+        // Same stem for both so the timestamp is the ONLY path differentiator.
+        // 2026-08-03T23:00:00-05:00 == 2026-08-04T04:00:00Z (UTC).
+        let minus_five = "2026-08-03T23:00:00-05:00";
+        let path_off = s.path_for_new("t", minus_five);
+        // ts must be the UTC instant 20260804T040000Z, not the local 20260803T230000Z.
+        assert!(
+            path_off.to_string_lossy().contains("rollout-20260804T040000Z-"),
+            "non-Z offset must be projected to UTC: {}",
+            path_off.display(),
+        );
+        // Date partition must be the UTC date 2026/08/04, not the local 08/03.
+        assert!(
+            path_off.starts_with(dir.path().join("2026").join("08").join("04")),
+            "date partition in UTC: {}",
+            path_off.display(),
+        );
+
+        // Control: the UTC instant 2026-08-03T23:00:00Z (earlier than the -05:00
+        // instant in UTC).
+        let zulu = "2026-08-03T23:00:00Z";
+        let path_zulu = s.path_for_new("t", zulu);
+        assert!(
+            path_zulu.to_string_lossy().contains("rollout-20260803T230000Z-"),
+            "Z input stays UTC: {}",
+            path_zulu.display(),
+        );
+        assert!(
+            path_zulu.starts_with(dir.path().join("2026").join("08").join("03")),
+            "Z date partition: {}",
+            path_zulu.display(),
+        );
+
+        // Dict-order == chronological-order: the -05:00 instant (UTC 04:00 on
+        // 08-04) is LATER than the Z instant (UTC 23:00 on 08-03), so its path
+        // must sort STRICTLY GREATER. Mutation: drop `with_timezone(&Utc)` from
+        // compact_ts_from_started_at → the -05:00 ts becomes 20260803230000Z and
+        // the date partition becomes 2026/08/03, so path_off == path_zulu and
+        // BOTH the ts assertion above AND this strict-order assertion fail.
+        assert_ne!(
+            path_zulu, path_off,
+            "the two UTC instants must produce distinct paths (bug collapsed them)",
+        );
+        let mut both = vec![path_zulu.clone(), path_off.clone()];
+        both.sort();
+        assert_eq!(
+            both,
+            vec![path_zulu, path_off],
+            "dict order follows UTC instant order (zulu < minus-five after UTC projection)",
+        );
+    }
+
+    // ── Slice D2a: list_all_session_metas (DB-unavailable fallback surface) ──
+
+    // list_all_session_metas walks BOTH the date tree AND the legacy flat files,
+    // dedupes by thread id (newest path wins), and skips files whose first line
+    // is not a SessionMeta header. The RolloutBackedAgentStore DB-unavailable
+    // fallback depends on every discoverable thread surfacing here.
+    //
+    // Mutation guards:
+    //  - Drop the flat-file branch from collect_all_rollout_files → t-flat
+    //    disappears → its assertion fails.
+    //  - Make the dedup keep the OLDEST path (>= instead of strict >) → the
+    //    "t-dup newer started_at" assertion fails.
+    //  - Make read_first_line_session_meta parse ANY first line → the corrupt
+    //    file's "x" thread leaks in → the count assertion fails.
+    #[tokio::test]
+    async fn list_all_session_metas_dedupes_and_skips_unparseable() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+
+        // Two real threads in the date tree (create_session + a flush each so the
+        // file materializes with a SessionMeta header).
+        s.create_session(meta_with("t-a", &started(2026, 8, 3, 0)));
+        s.flush("t-a").await.unwrap();
+        s.create_session(meta_with("t-b", &started(2026, 8, 4, 0)));
+        s.flush("t-b").await.unwrap();
+
+        // A legacy FLAT file (top-level) for a third thread.
+        let flat = dir.path().join("t-flat.rollout.jsonl");
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&flat).unwrap();
+            let header = RolloutLine::now(RolloutItem::SessionMeta(meta_with(
+                "t-flat",
+                &started(2026, 1, 1, 0),
+            )));
+            writeln!(f, "{}", serde_json::to_string(&header).unwrap()).unwrap();
+        }
+
+        // A stale flat DUPLICATE of t-a (older started_at than the date file).
+        // list_all_session_metas must keep ONLY the date-tree t-a (newest path).
+        let dup_flat = dir.path().join("t-a.rollout.jsonl");
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&dup_flat).unwrap();
+            let header = RolloutLine::now(RolloutItem::SessionMeta(meta_with(
+                "t-a",
+                &started(2019, 1, 1, 0),
+            )));
+            writeln!(f, "{}", serde_json::to_string(&header).unwrap()).unwrap();
+        }
+
+        // A corrupt file whose first line is NOT a SessionMeta — must be skipped.
+        let corrupt = dir
+            .path()
+            .join("2026")
+            .join("08")
+            .join("05")
+            .join("rollout-20260805T000000Z-t-corrupt.jsonl");
+        std::fs::create_dir_all(corrupt.parent().unwrap()).unwrap();
+        std::fs::write(
+            &corrupt,
+            serde_json::to_vec(&RolloutLine::now(RolloutItem::TurnItem(TurnItem::AgentMessage {
+                id: "nope".to_owned(),
+                text: "no-header".to_owned(),
+            })))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let metas = s.list_all_session_metas();
+        // Exactly three threads: t-a, t-b, t-flat (t-corrupt skipped; t-a deduped).
+        assert_eq!(metas.len(), 3, "corrupt skipped + dup deduped: {metas:?}");
+        let by_id: std::collections::HashMap<&str, &SessionMeta> =
+            metas.iter().map(|m| (m.thread_id.as_str(), m)).collect();
+        assert!(by_id.contains_key("t-a"), "date-tree t-a present");
+        assert!(by_id.contains_key("t-b"), "date-tree t-b present");
+        assert!(by_id.contains_key("t-flat"), "flat t-flat present");
+
+        // Dedup: t-a's kept entry is the NEWER date-tree file, not the stale flat
+        // dup. The date-tree file's started_at is 2026-08-03; the flat dup's is
+        // 2019-01-01.
+        let a = by_id["t-a"];
+        assert!(
+            a.started_at.starts_with("2026-08-03"),
+            "dup dedup keeps the newest (date-tree) t-a: got started_at={}",
+            a.started_at,
+        );
     }
 }
 

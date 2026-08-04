@@ -368,8 +368,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
         SettingsSectionView {
             id: "telemetry".to_owned(),
             title: "Telemetry".to_owned(),
-            description_md: "OpenTelemetry export, local telemetry files, and GenAI content capture."
-                .to_owned(),
+            description_md: "OpenTelemetry provider assembly, local/remote export, and GenAI content capture. The agent trace bundle is controlled separately by agent.debug.".to_owned(),
             i18n: None,
             subsections: vec![SettingsSubsectionView {
                 id: "general".to_owned(),
@@ -512,8 +511,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
         SettingsSectionView {
             id: "agent".to_owned(),
             title: "Agent".to_owned(),
-            description_md: "Agent tool configuration used by built-in deterministic tools."
-                .to_owned(),
+            description_md: "Agent tools, runtime, hooks, and diagnostics. agent.debug also controls the trace bundle written under logs/agent_trace/.".to_owned(),
             i18n: None,
             subsections: vec![
                 SettingsSubsectionView {
@@ -1474,7 +1472,7 @@ fn property_description(path: &str) -> String {
         "logging.json" => "Emit newline-delimited JSON logs by default.".to_owned(),
         "logging.path" => "Optional directory used for persisted log files.".to_owned(),
         "telemetry.enabled" => {
-            "Enable program-managed local telemetry export and session telemetry.".to_owned()
+            "Assemble and enable the OpenTelemetry provider for local/remote trace, log, and metric export. Independent of the agent trace bundle, which is controlled by agent.debug.".to_owned()
         }
         "telemetry.environment" => "Deployment environment attached to telemetry resources.".to_owned(),
         "telemetry.service_name" => "OpenTelemetry service.name resource value.".to_owned(),
@@ -1493,7 +1491,7 @@ fn property_description(path: &str) -> String {
         "tools.ffmpeg.auto_download" => "Download FFmpeg automatically when it is missing.".to_owned(),
         "tools.ffmpeg.install_dir" => "Optional install directory for the FFmpeg sidecar.".to_owned(),
         "agent.debug" => {
-            "Write full-fidelity per-session agent trace files for prompt, tool, and runtime debugging.".to_owned()
+            "Enable agent diagnostics: full-fidelity per-session agent trace files plus the per-root-thread trace bundle written under logs/agent_trace/. Independent of telemetry.enabled.".to_owned()
         }
         "agent.sleep_inhibitor" => {
             "Prevent the computer from sleeping while an agent turn is in progress.".to_owned()
@@ -2835,5 +2833,56 @@ mod tests {
         assert!(error.to_string().contains("missing.setting"));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn property_descriptions_decouple_agent_debug_from_telemetry() {
+        // Slice C contract: agent.debug and telemetry.enabled are INDEPENDENT
+        // diagnostic switches, and each property description must state that
+        // independence AND cross-reference the other switch so the decoupling is
+        // visible at every surface. A revert to the old non-cross-referencing
+        // wording fails both halves of each assertion.
+        let agent_debug = property_description("agent.debug");
+        assert!(
+            agent_debug.to_lowercase().contains("independent"),
+            "agent.debug description must state independence: {agent_debug}"
+        );
+        assert!(
+            agent_debug.contains("telemetry.enabled"),
+            "agent.debug description must cross-reference telemetry.enabled: {agent_debug}"
+        );
+
+        let telemetry = property_description("telemetry.enabled");
+        assert!(
+            telemetry.to_lowercase().contains("independent"),
+            "telemetry.enabled description must state independence: {telemetry}"
+        );
+        assert!(
+            telemetry.contains("agent.debug"),
+            "telemetry.enabled description must cross-reference agent.debug: {telemetry}"
+        );
+    }
+
+    #[test]
+    fn telemetry_and_agent_section_descriptions_reference_the_other_switch() {
+        // Slice C: the telemetry/agent section `description_md` must mirror the
+        // en-US i18n wording, which cross-references the other switch (restores
+        // the "description_md == en-US i18n value" invariant the other 8 sections
+        // already satisfy). A revert to the old standalone wording fails here.
+        let sections = empty_sections();
+        let telemetry =
+            sections.iter().find(|section| section.id == "telemetry").expect("telemetry section");
+        assert!(
+            telemetry.description_md.contains("agent.debug"),
+            "telemetry section description must cross-reference agent.debug: {}",
+            telemetry.description_md
+        );
+
+        let agent = sections.iter().find(|section| section.id == "agent").expect("agent section");
+        assert!(
+            agent.description_md.contains("trace bundle"),
+            "agent section description must mention the trace bundle: {}",
+            agent.description_md
+        );
     }
 }

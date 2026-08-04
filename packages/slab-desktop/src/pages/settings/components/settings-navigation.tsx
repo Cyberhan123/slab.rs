@@ -1,4 +1,6 @@
 import {
+  Activity,
+  Bug,
   CloudCog,
   Cloud,
   Cpu,
@@ -26,6 +28,7 @@ type SettingsNavigationProps = {
 };
 
 const sectionIcons: Record<string, LucideIcon> = {
+  agent: Bug,
   cloud: Cloud,
   database: Database,
   diffusion: Sparkles,
@@ -36,6 +39,7 @@ const sectionIcons: Record<string, LucideIcon> = {
   runtime: Cpu,
   server: Server,
   setup: Download,
+  telemetry: Activity,
   tools: Wrench,
 };
 

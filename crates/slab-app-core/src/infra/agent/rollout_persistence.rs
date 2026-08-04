@@ -297,7 +297,7 @@ mod tests {
         let assertion = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
                 rollout.flush("t").await.unwrap();
-                let lines = slab_agent_rollout::read_rollout_lines(&rollout.path_for("t"));
+                let lines = slab_agent_rollout::read_rollout_lines(&rollout.resolve_path("t"));
                 if lines.iter().any(|l| matches!(l.item, RolloutItem::Compacted(_))) {
                     return;
                 }
@@ -307,7 +307,7 @@ mod tests {
         .await;
         assertion.expect("observer did not persist compacted marker in time");
 
-        let lines = slab_agent_rollout::read_rollout_lines(&rollout.path_for("t"));
+        let lines = slab_agent_rollout::read_rollout_lines(&rollout.resolve_path("t"));
         let compacted = lines
             .iter()
             .find_map(|l| match &l.item {
@@ -424,7 +424,7 @@ mod tests {
         let wait = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
                 rollout.flush("t").await.unwrap();
-                if slab_agent_rollout::read_rollout_lines(&rollout.path_for("t"))
+                if slab_agent_rollout::read_rollout_lines(&rollout.resolve_path("t"))
                     .iter()
                     .any(|l| matches!(l.item, RolloutItem::Compacted(_)))
                 {
@@ -598,7 +598,7 @@ mod tests {
         let wait = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
                 rollout.flush("t").await.unwrap();
-                if slab_agent_rollout::read_rollout_lines(&rollout.path_for("t"))
+                if slab_agent_rollout::read_rollout_lines(&rollout.resolve_path("t"))
                     .iter()
                     .any(|l| matches!(l.item, RolloutItem::Compacted(_)))
                 {

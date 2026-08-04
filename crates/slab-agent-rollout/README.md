@@ -1,8 +1,14 @@
 # slab-agent-rollout
 
 Append-only JSONL event-source for slab agent sessions — the **L1 rollout true
-source**. Each agent thread owns one file under
-`<app_home>/sessions/<thread_id>.rollout.jsonl`.
+source**. Each agent thread owns one file under a date-partitioned layout:
+`<app_home>/sessions/YYYY/MM/DD/rollout-<ts>-<thread_id>.jsonl` (where `<ts>` is
+a compact, fixed-width `YYYYMMDDTHHMMSSZ` timestamp, so file-name dictionary
+order equals chronological order). A small append-only
+`<app_home>/sessions/session_index.jsonl` text index (L2') backs the reverse
+lookup (`thread_id` → file); reads fall back to a date-dir scan and the legacy
+flat layout (`<app_home>/sessions/<thread_id>.rollout.jsonl`) so the boot-time
+flat-to-date migration is best-effort and crash-safe.
 
 ## Why
 

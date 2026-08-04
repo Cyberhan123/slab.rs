@@ -186,7 +186,7 @@ impl HarnessService {
         // attribute correctly — swapping the parent SessionMeta for the child's.
         // For a legacy parent with no rollout file yet, rebuild from the adapter
         // reads (which fall back to SQL) in correct per-turn interleaved order.
-        let parent_lines = read_rollout_lines(&rollout.path_for(parent_thread_id));
+        let parent_lines = read_rollout_lines(&rollout.resolve_path(parent_thread_id));
         let has_parent_rollout_data =
             parent_lines.iter().any(|l| !matches!(l.item, RolloutItem::SessionMeta(_)));
         let rebuilt = if has_parent_rollout_data {
@@ -355,7 +355,7 @@ impl HarnessService {
         // H4 guaranteed the file exists, so a header is present; the snapshot
         // fallback guards the impossible-but-defensive empty case.
         let _ = rollout.flush(thread_id).await;
-        let session_meta_line = read_rollout_lines(&rollout.path_for(thread_id))
+        let session_meta_line = read_rollout_lines(&rollout.resolve_path(thread_id))
             .into_iter()
             .find(|l| matches!(l.item, RolloutItem::SessionMeta(_)))
             .unwrap_or_else(|| {

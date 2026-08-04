@@ -50,6 +50,13 @@ struct SpawnRequest {
     persist_messages_from: Option<usize>,
 }
 
+/// Defensive upper bound on parent-chain walks (e.g. [`crate::thread::resolve_root_thread_id`]).
+/// Well beyond any realistic `max_depth` (default 4, configurable per config) —
+/// the only purpose is to terminate deterministically if a persisted parent
+/// chain were ever cyclic or malformed. Normal walks stop at the root in
+/// `depth` hops.
+pub(crate) const MAX_SPAWN_DEPTH_GUARD: u32 = 64;
+
 // ── AgentControl ─────────────────────────────────────────────────────────────
 
 /// Top-level controller that owns and coordinates all active agent threads.

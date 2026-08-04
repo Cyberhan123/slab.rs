@@ -78,6 +78,20 @@ impl RolloutIndex for HarnessMockStore {
         Ok(self.backfill.lock().unwrap().get(thread_id).cloned())
     }
 
+    async fn rollout_backfill_progress_for(
+        &self,
+        thread_ids: &[String],
+    ) -> sqlx::Result<std::collections::HashMap<String, (Option<String>, i64)>> {
+        // This mock tracks only `backfill_status` (no line_count); report
+        // line_count = 0 for every seeded thread. The harness tests this mock
+        // backs do not exercise list-path ghost exclusion.
+        let map = self.backfill.lock().unwrap();
+        Ok(thread_ids
+            .iter()
+            .filter_map(|id| map.get(id).map(|s| (id.clone(), (Some(s.clone()), 0))))
+            .collect())
+    }
+
     async fn mark_rollout_session(
         &self,
         thread_id: &str,
@@ -103,6 +117,21 @@ impl RolloutIndex for HarnessMockStore {
         _lines_written: u32,
         _error: Option<&str>,
     ) -> sqlx::Result<()> {
+        Ok(())
+    }
+
+    async fn try_acquire_backfill_lease(
+        &self,
+        _thread_id: &str,
+        _lease_owner: &str,
+        _lease_ttl_secs: u64,
+    ) -> sqlx::Result<bool> {
+        // This mock backs harness tests that do not exercise backfill lease
+        // contention — always grant the lease.
+        Ok(true)
+    }
+
+    async fn release_backfill_lease(&self, _thread_id: &str) -> sqlx::Result<()> {
         Ok(())
     }
 
@@ -482,7 +511,7 @@ async fn h1_fork_preserves_child_session_meta_header() {
     assert_eq!(child_meta.session_id, "sess-h1", "header session_id preserved");
 
     // The child file's first physical line is the SessionMeta header.
-    let lines = read_rollout_lines(&th.rollout.path_for(&child.id));
+    let lines = read_rollout_lines(&th.rollout.resolve_path(&child.id));
     assert!(!lines.is_empty(), "child rollout file is non-empty");
     assert!(
         matches!(lines[0].item, RolloutItem::SessionMeta(_)),
@@ -600,7 +629,7 @@ async fn h3_compact_thread_leaves_atomic_session_meta_plus_compacted() {
 
     // H3: the file holds EXACTLY [SessionMeta, Compacted] right after return
     // (no intermediate truncated state, no pending Compacted).
-    let lines = read_rollout_lines(&th.rollout.path_for(thread_id));
+    let lines = read_rollout_lines(&th.rollout.resolve_path(thread_id));
     assert_eq!(lines.len(), 2, "H3: exactly [SessionMeta, Compacted] on disk");
     assert!(matches!(lines[0].item, RolloutItem::SessionMeta(_)));
     match &lines[1].item {

@@ -2,23 +2,41 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use slab_agent::{AgentHook, AgentRuntime, ToolRouter};
+use slab_agent_rollout::RolloutFileStore;
 use slab_config::AgentMemoriesConfig;
 
 use crate::context::ModelState;
 use crate::domain::services::{PluginService, workspace_root_from_config};
 use crate::error::AppCoreError;
 
+use super::rollout_store::RolloutBackedAgentStore;
+
 #[derive(Clone)]
 pub(crate) struct AgentRuntimeReloader {
     state: ModelState,
     runtime: AgentRuntime,
     tool_router: Arc<ToolRouter>,
+    /// Shared rollout true source (Slice F) so a reloaded memory pipeline reads
+    /// the SAME rollout files the live agent runtime writes. Retained for
+    /// `rollout_path` stamping; the conversation itself is read via
+    /// `rollout_store` (the production read path).
+    rollout: Arc<RolloutFileStore>,
+    /// Shared rollout-backed store (the production read path). A reloaded memory
+    /// pipeline reads the conversation through this — the SAME `list_thread_messages`
+    /// path the runtime uses — so the memory model and the runtime never diverge
+    /// (closes the G5 orphan window for memory).
+    rollout_store: Arc<RolloutBackedAgentStore>,
 }
 
 impl AgentRuntimeReloader {
-    pub(crate) fn new(state: ModelState, runtime: AgentRuntime) -> Self {
+    pub(crate) fn new(
+        state: ModelState,
+        runtime: AgentRuntime,
+        rollout: Arc<RolloutFileStore>,
+        rollout_store: Arc<RolloutBackedAgentStore>,
+    ) -> Self {
         let tool_router = runtime.tool_router();
-        Self { state, runtime, tool_router }
+        Self { state, runtime, tool_router, rollout, rollout_store }
     }
 
     pub(crate) async fn reload(&self) -> Result<(), AppCoreError> {
@@ -93,8 +111,12 @@ impl AgentRuntimeReloader {
         memory_config: AgentMemoriesConfig,
         memory_root: PathBuf,
     ) -> Vec<Arc<dyn AgentHook>> {
+        let workspace_root = workspace_root_from_config(self.state.config());
         let memory_pipeline = crate::infra::agent::memory::AgentMemoryPipeline::new(
             Arc::clone(self.state.store()),
+            Arc::clone(&self.rollout),
+            Arc::clone(&self.rollout_store),
+            workspace_root,
             Arc::new(self.state.clone()),
             memory_config.clone(),
             memory_root.clone(),

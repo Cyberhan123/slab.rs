@@ -1,10 +1,13 @@
 //! `slab-agent-rollout` — append-only JSONL event-source for slab agent sessions.
 //!
-//! This crate is the **L1 true source**: each thread owns one
-//! `<app_home>/sessions/<thread_id>.rollout.jsonl` file containing a flat
-//! sequence of [`RolloutLine`]s. It depends *upward* on `slab-agent` (for
-//! [`TurnItem`] / [`EventMsg`]) and `slab-types` (for [`ConversationMessage`]);
-//! `slab-agent` never depends on it, keeping the agent core pure.
+//! This crate is the **L1 true source**: each thread owns one rollout JSONL
+//! file containing a flat sequence of [`RolloutLine`]s. Files live in a
+//! date-partitioned layout — `<app_home>/sessions/YYYY/MM/DD/
+//! rollout-<ts>-<thread_id>.jsonl` — so file-name dictionary order equals
+//! chronological order (the D2 watermark backfill relies on this). It depends
+//! *upward* on `slab-agent` (for [`TurnItem`] / [`EventMsg`]) and `slab-types`
+//! (for [`ConversationMessage`]); `slab-agent` never depends on it, keeping the
+//! agent core pure.
 //!
 //! Layout:
 //! - [`item`] — the wire types ([`RolloutItem`], [`RolloutLine`], [`SessionMeta`],
@@ -14,6 +17,7 @@
 //! - [`writer`] — [`JsonlWriter`] + atomic file replacement.
 //! - [`reader`] — fault-tolerant line reader ([`read_rollout_lines`]).
 //! - [`recorder`] — single-writer actor ([`RolloutRecorderHandle`]).
+//! - [`session_index`] — `session_index.jsonl` (L2' text reverse-lookup index).
 //! - [`store`] — [`RolloutStore`] trait + [`RolloutFileStore`].
 //!
 //! [`TurnItem`]: slab_agent::protocol::TurnItem
@@ -28,6 +32,7 @@ pub mod policy;
 pub mod projection;
 pub mod reader;
 pub mod recorder;
+pub mod session_index;
 pub mod store;
 pub mod writer;
 
@@ -39,5 +44,6 @@ pub use projection::{
 };
 pub use reader::{RolloutReader, read_rollout_lines};
 pub use recorder::{RolloutCmd, RolloutRecorderHandle, RolloutRecorderParams};
+pub use session_index::SessionIndexEntry;
 pub use store::{RolloutFileStore, RolloutStore};
 pub use writer::JsonlWriter;

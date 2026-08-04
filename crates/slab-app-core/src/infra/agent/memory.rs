@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
@@ -13,6 +13,7 @@ use slab_agent_memories::{
     read::{MemoryCitationSourceKind, parse_memory_citations},
     templates,
 };
+use slab_agent_rollout::RolloutFileStore;
 use slab_config::AgentMemoriesConfig;
 use slab_types::{ConversationMessage, ConversationMessageContent, StructuredOutput};
 use tracing::{debug, warn};
@@ -26,11 +27,32 @@ use crate::domain::models::{
 use crate::domain::services::ChatService;
 use crate::infra::db::AnyStore;
 
+use super::rollout_store::RolloutBackedAgentStore;
+
 const MEMORY_PHASE2_SESSION_PREFIX: &str = "memory-phase2-";
 
 #[derive(Clone)]
 pub struct AgentMemoryPipeline {
     store: Arc<AnyStore>,
+    /// The rollout JSONL true source (Slice F). Retained so `build_phase1_input`
+    /// can stamp the real on-disk `rollout_path` for the prompt. The CONVERSATION
+    /// itself is read through `rollout_store` below — the SAME production read
+    /// path the agent runtime uses — so the memory model can never diverge from
+    /// what the runtime replayed.
+    rollout: Arc<RolloutFileStore>,
+    /// The rollout-backed store that owns the production read path
+    /// (`list_thread_messages` / `read_thread_messages_with_source`): the
+    /// `is_rollout_ready` gate (`backfill_status == "completed"`, file_exists
+    /// fallback on index error) + `replay_messages` + SQL fallback. Routing the
+    /// phase1 read through here closes the G5 orphan window: a legacy thread
+    /// whose backfill has not completed reads the FULL SQL history in BOTH the
+    /// runtime and the memory model (instead of memory reading a partial rollout
+    /// tail via a bare `file_exists` gate).
+    rollout_store: Arc<RolloutBackedAgentStore>,
+    /// App-wide workspace root, surfaced as `rollout_cwd` in the phase1 prompt
+    /// so the memory model knows where the session ran. `None` when no
+    /// workspace is bound (the prompt then renders "unknown").
+    workspace_root: Option<PathBuf>,
     model_state: Arc<ModelState>,
     config: AgentMemoriesConfig,
     memory_root: PathBuf,
@@ -40,11 +62,23 @@ pub struct AgentMemoryPipeline {
 impl AgentMemoryPipeline {
     pub fn new(
         store: Arc<AnyStore>,
+        rollout: Arc<RolloutFileStore>,
+        rollout_store: Arc<RolloutBackedAgentStore>,
+        workspace_root: Option<PathBuf>,
         model_state: Arc<ModelState>,
         config: AgentMemoriesConfig,
         memory_root: PathBuf,
     ) -> Self {
-        Self { store, model_state, config, memory_root, control: Arc::new(OnceLock::new()) }
+        Self {
+            store,
+            rollout,
+            rollout_store,
+            workspace_root,
+            model_state,
+            config,
+            memory_root,
+            control: Arc::new(OnceLock::new()),
+        }
     }
 
     pub fn set_control(&self, control: Arc<AgentControl>) {
@@ -406,25 +440,13 @@ impl AgentMemoryPipeline {
         &self,
         candidate: RolloutCandidate,
     ) -> Result<Phase1RolloutInput, String> {
-        let rows: Vec<AgentThreadMessageRow> = sqlx::query_as(
-            "SELECT role, content, created_at FROM agent_thread_messages \
-             WHERE thread_id = ?1 ORDER BY turn_index ASC, created_at ASC, id ASC",
+        build_phase1_input(
+            &self.rollout_store,
+            &self.rollout,
+            self.workspace_root.as_deref(),
+            candidate,
         )
-        .bind(&candidate.thread_id)
-        .fetch_all(&self.store.pool)
         .await
-        .map_err(|error| error.to_string())?;
-        let items = rows
-            .into_iter()
-            .map(|row| {
-                let content = serde_json::from_str::<ConversationMessage>(&row.content)
-                    .map(|message| message.rendered_text())
-                    .unwrap_or(row.content);
-                phase1::RolloutResponseItem { role: row.role, content, created_at: row.created_at }
-            })
-            .collect();
-        let items = phase1::filter_memory_relevant_items(items);
-        Ok(Phase1RolloutInput { candidate, items })
     }
 
     async fn complete_phase1_success(&self, output: Phase1MemoryOutput) -> Result<(), String> {
@@ -679,6 +701,62 @@ async fn record_memory_usage_in_pool(
     Ok(())
 }
 
+/// Build the phase1 input for a candidate thread, reading the conversation
+/// through the SAME production read path the agent runtime uses
+/// ([`RolloutBackedAgentStore::read_thread_messages_with_source`], which
+/// [`AgentStorePort::list_thread_messages`](slab_agent::port::AgentStorePort::list_thread_messages)
+/// also delegates to). The memory model and the runtime therefore share ONE
+/// code path — `is_rollout_ready` gate + `replay_messages` + SQL fallback — and
+/// can never diverge on what the conversation was.
+///
+/// This closes the G5 orphan window for memory: when a legacy thread's startup
+/// backfill has not reached `backfill_status = "completed"` (the rollout file
+/// may already be materialized with only a post-migration tail), BOTH the
+/// runtime and the memory model read the FULL SQL history. The earlier Slice-F
+/// implementation gated on a bare `rollout.file_exists`, which read the partial
+/// rollout tail and silently corrupted memory.
+///
+/// `rollout_path` is stamped with the real rollout file path when the read came
+/// from rollout; it stays `None` for the SQL fallback (the prompt renders
+/// `"state-db"`, matching the pre-Slice-F behaviour). `rollout_cwd` is always
+/// the app-wide workspace root when one is bound.
+///
+/// Extracted as a free function so the shared read path is unit-testable
+/// without constructing the full [`ModelState`]-backed pipeline.
+async fn build_phase1_input(
+    rollout_store: &RolloutBackedAgentStore,
+    rollout: &RolloutFileStore,
+    workspace_root: Option<&Path>,
+    mut candidate: RolloutCandidate,
+) -> Result<Phase1RolloutInput, String> {
+    // The workspace cwd is meaningful regardless of storage source — the session
+    // ran in this workspace whether its conversation now lives in rollout or SQL.
+    candidate.rollout_cwd = workspace_root.map(|root| root.to_string_lossy().into_owned());
+
+    let (records, from_rollout) = rollout_store
+        .read_thread_messages_with_source(&candidate.thread_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    if from_rollout {
+        candidate.rollout_path =
+            Some(rollout.resolve_path(&candidate.thread_id).to_string_lossy().into_owned());
+    }
+    let items = records
+        .into_iter()
+        .map(|record| {
+            // rendered_text borrows; call it before moving `role` out of the message.
+            let content = record.message.rendered_text();
+            phase1::RolloutResponseItem {
+                role: record.message.role,
+                content,
+                created_at: record.created_at,
+            }
+        })
+        .collect();
+    let items = phase1::filter_memory_relevant_items(items);
+    Ok(Phase1RolloutInput { candidate, items })
+}
+
 pub struct AgentMemoryStartupHook {
     pipeline: AgentMemoryPipeline,
 }
@@ -732,13 +810,6 @@ struct AgentThreadCandidateRow {
     session_id: String,
     config_json: String,
     updated_at: String,
-}
-
-#[derive(sqlx::FromRow)]
-struct AgentThreadMessageRow {
-    role: String,
-    content: String,
-    created_at: String,
 }
 
 #[derive(sqlx::FromRow)]
@@ -809,6 +880,9 @@ fn phase2_consolidation_agent_config(model: &str, prompt: String) -> AgentConfig
 #[cfg(test)]
 mod tests {
     use slab_agent::AgentConfig;
+    use slab_agent_rollout::{
+        RolloutFileStore, RolloutItem, RolloutStore, SessionMeta, TurnContextPayload,
+    };
 
     use super::*;
     use crate::infra::db::AnyStore;
@@ -894,6 +968,609 @@ mod tests {
         assert!(!config.allowed_tools.contains(&"delegate_subagent".to_owned()));
         assert!(!config.allowed_tools.contains(&"web_search".to_owned()));
         assert!(!config.allowed_tools.contains(&"shell".to_owned()));
+    }
+
+    fn text_msg(role: &str, text: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: role.to_owned(),
+            content: ConversationMessageContent::Text(text.to_owned()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }
+    }
+
+    fn append_message(
+        turn_index: u32,
+        message: ConversationMessage,
+        id: &str,
+        created_at: &str,
+    ) -> RolloutItem {
+        RolloutItem::TurnContext(TurnContextPayload::MessageAppend {
+            turn_index,
+            message,
+            id: Some(id.to_owned()),
+            created_at: Some(created_at.to_owned()),
+        })
+    }
+
+    // Build a rollout-backed store backed by a REAL in-memory SqlxStore (which
+    // impls both AgentStorePort and RolloutIndex) + a temp-dir RolloutFileStore.
+    // This makes the memory tests drive the production read path with NO mock —
+    // the rollout_session_index gate, replay_messages, and the SQL fallback all
+    // run for real, so a gate regression cannot hide behind a stub.
+    fn rollout_backed_store(
+        store: Arc<AnyStore>,
+        rollout: Arc<RolloutFileStore>,
+    ) -> Arc<RolloutBackedAgentStore> {
+        Arc::new(RolloutBackedAgentStore::new(
+            Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>,
+            Arc::clone(&store)
+                as Arc<dyn crate::infra::db::repository::rollout_index::RolloutIndex>,
+            rollout,
+            None,
+        ))
+    }
+
+    async fn mark_rollout_session(
+        store: &AnyStore,
+        thread_id: &str,
+        session_id: &str,
+        file_path: &str,
+        backfill_status: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO rollout_session_index \
+             (thread_id, session_id, file_path, last_updated_at, created_at, backfill_status) \
+             VALUES (?1, ?2, ?3, strftime('%Y-%m-%dT%H:%M:%fZ','now'), \
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?4)",
+        )
+        .bind(thread_id)
+        .bind(session_id)
+        .bind(file_path)
+        .bind(backfill_status)
+        .execute(&store.pool)
+        .await
+        .expect("mark rollout session index");
+    }
+
+    async fn insert_sql_message(
+        store: &AnyStore,
+        thread_id: &str,
+        id: &str,
+        turn_index: i64,
+        message: ConversationMessage,
+        created_at: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO agent_thread_messages (id, thread_id, turn_index, role, content, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(id)
+        .bind(thread_id)
+        .bind(turn_index)
+        .bind(&message.role)
+        .bind(serde_json::to_string(&message).unwrap())
+        .bind(created_at)
+        .execute(&store.pool)
+        .await
+        .expect("insert sql message");
+    }
+
+    fn compacted_marker(
+        thread_id: &str,
+        turn_index: u32,
+        summary: Vec<ConversationMessage>,
+        status: &str,
+    ) -> RolloutItem {
+        RolloutItem::Compacted(slab_agent_rollout::CompactedPayload {
+            thread_id: thread_id.to_owned(),
+            compacted_messages: summary,
+            removed_messages: 0,
+            output_tokens: 0,
+            status: status.to_owned(),
+            turn_index,
+        })
+    }
+
+    // Slice F: the phase1 input is read from the rollout JSONL true source when
+    // the rollout gate (`backfill_status == "completed"`) admits it. The replay
+    // MUST preserve role / rendered_text / created_at fidelity (created_at from
+    // the F3-carried timestamp, NOT the line write-time), stamp
+    // candidate.rollout_path with the REAL on-disk file path, and surface
+    // rollout_cwd as the workspace root — so the rendered prompt no longer falls
+    // back to "state-db" / "unknown".
+    #[tokio::test]
+    async fn build_phase1_input_reads_rollout_true_source_with_fidelity() {
+        let dir = tempfile::tempdir().unwrap();
+        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
+        let store = Arc::new(AnyStore::connect("sqlite::memory:").await.expect("store"));
+        let backed = rollout_backed_store(Arc::clone(&store), Arc::clone(&rollout));
+        let thread_id = "t-rollout";
+        insert_thread(&store, thread_id).await;
+
+        rollout.create_session(SessionMeta {
+            thread_id: thread_id.to_owned(),
+            session_id: "session-1".to_owned(),
+            parent_id: None,
+            started_at: "2026-08-03T00:00:00Z".to_owned(),
+            config_json: serde_json::json!({}),
+            rollout_version: SessionMeta::CURRENT_VERSION,
+            role_name: None,
+            trace_path: None,
+        });
+        rollout
+            .append(
+                thread_id,
+                append_message(0, text_msg("user", "hello world"), "m-u", "2026-08-03T00:00:01Z"),
+            )
+            .await
+            .unwrap();
+        rollout
+            .append(
+                thread_id,
+                append_message(0, text_msg("assistant", "hi there"), "m-a", "2026-08-03T00:00:02Z"),
+            )
+            .await
+            .unwrap();
+        rollout
+            .append(
+                thread_id,
+                append_message(1, text_msg("tool", "tool output"), "m-t", "2026-08-03T00:00:03Z"),
+            )
+            .await
+            .unwrap();
+        // Flip the production read gate to rollout-ready (backfill completed).
+        let file_path = rollout.resolve_path(thread_id).to_string_lossy().into_owned();
+        mark_rollout_session(&store, thread_id, "session-1", &file_path, "completed").await;
+
+        let candidate = RolloutCandidate {
+            thread_id: thread_id.to_owned(),
+            session_id: "session-1".to_owned(),
+            rollout_path: None,
+            rollout_cwd: None,
+            source_updated_at: Utc::now(),
+        };
+        let workspace = PathBuf::from("C:/repo");
+        let input =
+            build_phase1_input(&backed, rollout.as_ref(), Some(workspace.as_path()), candidate)
+                .await
+                .expect("phase1 input");
+
+        // rollout_path is the real on-disk rollout file path (NOT "state-db").
+        let expected_path = rollout.resolve_path(thread_id).to_string_lossy().into_owned();
+        assert_eq!(input.candidate.rollout_path.as_deref(), Some(expected_path.as_str()));
+        assert_eq!(input.candidate.rollout_cwd.as_deref(), Some("C:/repo"));
+
+        // role / content / created_at fidelity, in conversation order.
+        let roles: Vec<&str> = input.items.iter().map(|i| i.role.as_str()).collect();
+        assert_eq!(roles, vec!["user", "assistant", "tool"]);
+        assert_eq!(input.items[0].content, "hello world");
+        assert_eq!(input.items[1].content, "hi there");
+        assert_eq!(input.items[2].content, "tool output");
+        assert_eq!(input.items[0].created_at, "2026-08-03T00:00:01Z");
+        assert_eq!(input.items[1].created_at, "2026-08-03T00:00:02Z");
+        assert_eq!(input.items[2].created_at, "2026-08-03T00:00:03Z");
+
+        // The rendered prompt carries the real rollout_path + rollout_cwd.
+        let prompt = input.render_user_prompt().expect("prompt");
+        assert!(prompt.contains(&format!("rollout_path: {expected_path}")));
+        assert!(prompt.contains("rollout_cwd: C:/repo"));
+        assert!(!prompt.contains("state-db"));
+    }
+
+    // Slice F legacy fallback: when the rollout gate is NOT ready (no rollout
+    // file AND no completed index row — a pre-migration thread whose startup
+    // backfill has not run), the input is read from the SQL `agent_thread_messages`
+    // rows. rollout_path stays None so the prompt renders "state-db" (matching
+    // the pre-Slice-F behaviour). Memory and the runtime take the SAME branch.
+    #[tokio::test]
+    async fn build_phase1_input_falls_back_to_sql_when_no_rollout_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
+        let store = Arc::new(AnyStore::connect("sqlite::memory:").await.expect("store"));
+        let backed = rollout_backed_store(Arc::clone(&store), Arc::clone(&rollout));
+        let thread_id = "t-legacy";
+        insert_thread(&store, thread_id).await;
+        insert_sql_message(
+            &store,
+            thread_id,
+            "m-legacy",
+            0,
+            text_msg("user", "legacy hello"),
+            "2026-01-01T00:00:00Z",
+        )
+        .await;
+
+        // No rollout file AND no rollout_session_index row -> gate false -> SQL.
+        assert!(!rollout.file_exists(thread_id).await);
+
+        let candidate = RolloutCandidate {
+            thread_id: thread_id.to_owned(),
+            session_id: "session-1".to_owned(),
+            rollout_path: None,
+            rollout_cwd: None,
+            source_updated_at: Utc::now(),
+        };
+        let input = build_phase1_input(&backed, rollout.as_ref(), None, candidate)
+            .await
+            .expect("phase1 input");
+
+        // SQL fallback: rollout_path stays None, rollout_cwd None (no workspace).
+        assert!(input.candidate.rollout_path.is_none());
+        assert!(input.candidate.rollout_cwd.is_none());
+        assert_eq!(input.items.len(), 1);
+        assert_eq!(input.items[0].role, "user");
+        assert_eq!(input.items[0].content, "legacy hello");
+        assert_eq!(input.items[0].created_at, "2026-01-01T00:00:00Z");
+
+        let prompt = input.render_user_prompt().expect("prompt");
+        assert!(prompt.contains("rollout_path: state-db"));
+        assert!(prompt.contains("rollout_cwd: unknown"));
+    }
+
+    // B1/B2 G5 orphan-window regression: a legacy thread whose startup backfill
+    // has NOT completed has its full legacy prefix in SQL and only a post-migration
+    // tail in the rollout file. The memory pipeline MUST read the SAME source the
+    // runtime does (the SQL legacy prefix) — NOT the partial rollout tail — so the
+    // memory model never silently consumes a truncated conversation.
+    //
+    // Pre-fix the memory gate was a bare `rollout.file_exists`, which (once the
+    // post-migration write materialized the rollout file) read ONLY the tail while
+    // the runtime served the full SQL prefix -> permanent silent memory corruption
+    // (memory marked succeeded, never re-run). This test pins the fix: it MUST
+    // fail if the gate is reverted to `file_exists` (see mutation note below).
+    //
+    // Real path (no mock): real SqlxStore index gate, real rollout JSONL, real SQL.
+    #[tokio::test]
+    async fn g5_orphan_window_reads_full_sql_not_partial_rollout_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
+        let store = Arc::new(AnyStore::connect("sqlite::memory:").await.expect("store"));
+        let backed = rollout_backed_store(Arc::clone(&store), Arc::clone(&rollout));
+        let thread_id = "t-orphan";
+        insert_thread(&store, thread_id).await;
+
+        // SQL: the full LEGACY prefix (3 messages). This is what the runtime reads
+        // while the backfill is incomplete — it is the production truth here.
+        let legacy = [
+            ("user", "legacy question", "2026-01-01T00:00:01Z"),
+            ("assistant", "legacy answer", "2026-01-01T00:00:02Z"),
+            ("tool", "legacy tool output", "2026-01-01T00:00:03Z"),
+        ];
+        for (i, (role, text, ts)) in legacy.iter().enumerate() {
+            insert_sql_message(
+                &store,
+                thread_id,
+                &format!("legacy-{i}"),
+                0,
+                text_msg(role, text),
+                ts,
+            )
+            .await;
+        }
+
+        // Rollout: only the POST-MIGRATION tail materialized (backfill not yet
+        // merged the legacy prefix into the rollout file).
+        rollout.create_session(SessionMeta {
+            thread_id: thread_id.to_owned(),
+            session_id: "session-1".to_owned(),
+            parent_id: None,
+            started_at: "2026-08-03T00:00:00Z".to_owned(),
+            config_json: serde_json::json!({}),
+            rollout_version: SessionMeta::CURRENT_VERSION,
+            role_name: None,
+            trace_path: None,
+        });
+        rollout
+            .append(
+                thread_id,
+                append_message(
+                    1,
+                    text_msg("user", "post-migration tail"),
+                    "m-tail",
+                    "2026-08-03T00:00:01Z",
+                ),
+            )
+            .await
+            .unwrap();
+
+        // G5 orphan window: backfill started but NOT completed. The rollout file
+        // IS materialized (file_exists would be true), but the gate is NOT ready.
+        let file_path = rollout.resolve_path(thread_id).to_string_lossy().into_owned();
+        mark_rollout_session(&store, thread_id, "session-1", &file_path, "in_progress").await;
+
+        let candidate = RolloutCandidate {
+            thread_id: thread_id.to_owned(),
+            session_id: "session-1".to_owned(),
+            rollout_path: None,
+            rollout_cwd: None,
+            source_updated_at: Utc::now(),
+        };
+        let input = build_phase1_input(&backed, rollout.as_ref(), None, candidate)
+            .await
+            .expect("phase1 input");
+
+        // Memory read the FULL SQL legacy prefix (3 messages), NOT the 1-item
+        // rollout tail. This is the production truth during the orphan window.
+        assert_eq!(
+            input.items.len(),
+            3,
+            "memory must read the full SQL legacy prefix, not the partial rollout tail"
+        );
+        let contents: Vec<&str> = input.items.iter().map(|i| i.content.as_str()).collect();
+        assert_eq!(contents, vec!["legacy question", "legacy answer", "legacy tool output"]);
+        assert!(
+            !contents.iter().any(|c| c.contains("post-migration")),
+            "the rollout-only tail must NOT leak into memory during the orphan window"
+        );
+        // SQL fallback -> rollout_path stays None (prompt renders "state-db").
+        assert!(input.candidate.rollout_path.is_none());
+
+        // Mutation note: if the gate in read_thread_messages_with_source is
+        // reverted to a bare `rollout.file_exists`, this read returns the 1-item
+        // rollout tail and the assertions above fail (len 1, content
+        // "post-migration tail", rollout_path = real path).
+    }
+
+    // Happy-path parity ONLY (H1/M3): the SAME exchange written to a rollout-
+    // completed thread (read via rollout) and to a SQL-only thread (read via the
+    // SQL fallback) projects to the SAME memory item sequence. This is the
+    // happy-path (both sources carry identical data); the divergence scenario —
+    // legacy prefix in SQL vs partial tail in rollout — is covered by
+    // `g5_orphan_window_reads_full_sql_not_partial_rollout_tail`.
+    #[tokio::test]
+    async fn rollout_and_sql_produce_equivalent_memory_items_happy_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
+        let store = Arc::new(AnyStore::connect("sqlite::memory:").await.expect("store"));
+        let backed = rollout_backed_store(Arc::clone(&store), Arc::clone(&rollout));
+
+        let exchange = [
+            ("user", "what is 2+2", "2026-08-03T01:00:00Z"),
+            ("assistant", "it is 4", "2026-08-03T01:00:01Z"),
+            ("tool", "calculator: 4", "2026-08-03T01:00:02Z"),
+        ];
+
+        // Thread A: rollout-completed (rollout-native, no SQL rows).
+        let rollout_id = "t-rollout-equiv";
+        insert_thread(&store, rollout_id).await;
+        rollout.create_session(SessionMeta {
+            thread_id: rollout_id.to_owned(),
+            session_id: "session-1".to_owned(),
+            parent_id: None,
+            started_at: "2026-08-03T00:00:00Z".to_owned(),
+            config_json: serde_json::json!({}),
+            rollout_version: SessionMeta::CURRENT_VERSION,
+            role_name: None,
+            trace_path: None,
+        });
+        for (i, (role, text, ts)) in exchange.iter().enumerate() {
+            rollout
+                .append(rollout_id, append_message(0, text_msg(role, text), &format!("m-{i}"), ts))
+                .await
+                .unwrap();
+        }
+        let file_path = rollout.resolve_path(rollout_id).to_string_lossy().into_owned();
+        mark_rollout_session(&store, rollout_id, "session-1", &file_path, "completed").await;
+        let rollout_input = build_phase1_input(
+            &backed,
+            rollout.as_ref(),
+            None,
+            RolloutCandidate {
+                thread_id: rollout_id.to_owned(),
+                session_id: "session-1".to_owned(),
+                rollout_path: None,
+                rollout_cwd: None,
+                source_updated_at: Utc::now(),
+            },
+        )
+        .await
+        .expect("rollout phase1 input");
+
+        // Thread B: SQL-only (no rollout file, no index row -> SQL fallback).
+        let sql_id = "t-sql-equiv";
+        insert_thread(&store, sql_id).await;
+        for (i, (role, text, ts)) in exchange.iter().enumerate() {
+            insert_sql_message(&store, sql_id, &format!("m-{i}"), 0, text_msg(role, text), ts)
+                .await;
+        }
+        let sql_input = build_phase1_input(
+            &backed,
+            rollout.as_ref(),
+            None,
+            RolloutCandidate {
+                thread_id: sql_id.to_owned(),
+                session_id: "session-1".to_owned(),
+                rollout_path: None,
+                rollout_cwd: None,
+                source_updated_at: Utc::now(),
+            },
+        )
+        .await
+        .expect("sql phase1 input");
+
+        assert_eq!(rollout_input.items.len(), exchange.len());
+        assert_eq!(sql_input.items.len(), exchange.len());
+        for (rollout_item, sql_item) in rollout_input.items.iter().zip(sql_input.items.iter()) {
+            assert_eq!(rollout_item.role, sql_item.role, "role mismatch");
+            assert_eq!(rollout_item.content, sql_item.content, "content mismatch");
+            assert_eq!(rollout_item.created_at, sql_item.created_at, "created_at mismatch");
+        }
+        // rollout-completed thread stamps the real path; SQL-only stays None.
+        assert!(rollout_input.candidate.rollout_path.is_some());
+        assert!(sql_input.candidate.rollout_path.is_none());
+    }
+
+    // M2: a Compacted marker (auto/manual) resets the replay baseline to the
+    // summary, dropping the pre-compaction MessageAppends; post-compaction
+    // appends are then layered on top. Memory must observe baseline(summary) +
+    // post-compaction, with the pre-compaction turns dropped.
+    #[tokio::test]
+    async fn compacted_marker_resets_baseline_for_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
+        let store = Arc::new(AnyStore::connect("sqlite::memory:").await.expect("store"));
+        let backed = rollout_backed_store(Arc::clone(&store), Arc::clone(&rollout));
+        let thread_id = "t-compacted";
+        insert_thread(&store, thread_id).await;
+
+        rollout.create_session(SessionMeta {
+            thread_id: thread_id.to_owned(),
+            session_id: "session-1".to_owned(),
+            parent_id: None,
+            started_at: "2026-08-03T00:00:00Z".to_owned(),
+            config_json: serde_json::json!({}),
+            rollout_version: SessionMeta::CURRENT_VERSION,
+            role_name: None,
+            trace_path: None,
+        });
+        // Two pre-compaction appends — these MUST be dropped by the Compacted
+        // marker (baseline.clear).
+        rollout
+            .append(
+                thread_id,
+                append_message(
+                    0,
+                    text_msg("user", "pre-1 dropped"),
+                    "pre-1",
+                    "2026-08-03T00:00:01Z",
+                ),
+            )
+            .await
+            .unwrap();
+        rollout
+            .append(
+                thread_id,
+                append_message(
+                    0,
+                    text_msg("assistant", "pre-2 dropped"),
+                    "pre-2",
+                    "2026-08-03T00:00:02Z",
+                ),
+            )
+            .await
+            .unwrap();
+        // Compacted: a 2-message summary baseline (auto compaction).
+        rollout
+            .append(
+                thread_id,
+                compacted_marker(
+                    thread_id,
+                    0,
+                    vec![
+                        text_msg("user", "summary-user"),
+                        text_msg("assistant", "summary-assistant"),
+                    ],
+                    "auto",
+                ),
+            )
+            .await
+            .unwrap();
+        // Two post-compaction appends — these survive on top of the baseline.
+        rollout
+            .append(
+                thread_id,
+                append_message(1, text_msg("user", "post-1"), "post-1", "2026-08-03T00:00:10Z"),
+            )
+            .await
+            .unwrap();
+        rollout
+            .append(
+                thread_id,
+                append_message(
+                    1,
+                    text_msg("assistant", "post-2"),
+                    "post-2",
+                    "2026-08-03T00:00:11Z",
+                ),
+            )
+            .await
+            .unwrap();
+        let file_path = rollout.resolve_path(thread_id).to_string_lossy().into_owned();
+        mark_rollout_session(&store, thread_id, "session-1", &file_path, "completed").await;
+
+        let candidate = RolloutCandidate {
+            thread_id: thread_id.to_owned(),
+            session_id: "session-1".to_owned(),
+            rollout_path: None,
+            rollout_cwd: None,
+            source_updated_at: Utc::now(),
+        };
+        let input = build_phase1_input(&backed, rollout.as_ref(), None, candidate)
+            .await
+            .expect("phase1 input");
+
+        // baseline(summary=2) + post-compaction(2) = 4. Pre-compaction dropped.
+        let contents: Vec<&str> = input.items.iter().map(|i| i.content.as_str()).collect();
+        assert_eq!(
+            contents,
+            vec!["summary-user", "summary-assistant", "post-1", "post-2"],
+            "pre-compaction appends must be dropped; summary baseline + post-compaction kept"
+        );
+
+        // M1 pin (known pre-existing distortion): replay_messages stamps every
+        // compacted baseline message with the SAME timestamp — the Compacted
+        // line write-time — instead of preserving any per-message created_at.
+        // The two summary messages therefore share one created_at (the compaction
+        // moment), distinct from the post-compaction appends' carried timestamps.
+        // See notes (M1) for why this is deferred, not fixed here.
+        assert_eq!(
+            input.items[0].created_at, input.items[1].created_at,
+            "M1 pin: compacted-baseline messages share the compaction line timestamp"
+        );
+        assert_ne!(
+            input.items[0].created_at, input.items[2].created_at,
+            "post-compaction appends keep their own carried created_at"
+        );
+    }
+
+    // L4: an empty rollout session (SessionMeta only, no MessageAppends) with a
+    // completed gate yields a real rollout_path but an EMPTY item list, and the
+    // prompt renders without panicking.
+    #[tokio::test]
+    async fn empty_rollout_session_yields_real_path_and_empty_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
+        let store = Arc::new(AnyStore::connect("sqlite::memory:").await.expect("store"));
+        let backed = rollout_backed_store(Arc::clone(&store), Arc::clone(&rollout));
+        let thread_id = "t-empty";
+        insert_thread(&store, thread_id).await;
+
+        rollout.create_session(SessionMeta {
+            thread_id: thread_id.to_owned(),
+            session_id: "session-1".to_owned(),
+            parent_id: None,
+            started_at: "2026-08-03T00:00:00Z".to_owned(),
+            config_json: serde_json::json!({}),
+            rollout_version: SessionMeta::CURRENT_VERSION,
+            role_name: None,
+            trace_path: None,
+        });
+        // No appends -> empty conversation. Mark rollout-ready so the read comes
+        // from rollout (not the empty SQL fallback).
+        let file_path = rollout.resolve_path(thread_id).to_string_lossy().into_owned();
+        mark_rollout_session(&store, thread_id, "session-1", &file_path, "completed").await;
+
+        let candidate = RolloutCandidate {
+            thread_id: thread_id.to_owned(),
+            session_id: "session-1".to_owned(),
+            rollout_path: None,
+            rollout_cwd: None,
+            source_updated_at: Utc::now(),
+        };
+        let input = build_phase1_input(&backed, rollout.as_ref(), None, candidate)
+            .await
+            .expect("phase1 input");
+
+        assert!(input.items.is_empty(), "no appends -> empty item list");
+        // rollout-ready -> the real on-disk rollout path is stamped.
+        let expected_path = rollout.resolve_path(thread_id).to_string_lossy().into_owned();
+        assert_eq!(input.candidate.rollout_path.as_deref(), Some(expected_path.as_str()));
+
+        // render_user_prompt must not panic on an empty conversation.
+        let prompt = input.render_user_prompt().expect("prompt renders on empty items");
+        assert!(prompt.contains(&format!("rollout_path: {expected_path}")));
     }
 
     async fn insert_thread(store: &AnyStore, thread_id: &str) {

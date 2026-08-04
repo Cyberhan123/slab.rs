@@ -28,12 +28,16 @@
 //! real same-process defect when the id was a per-instance ordinal counter
 //! (reset to 0 on every `open`); the unique-id design fixes it outright.
 //!
-//! `trace.jsonl` itself is append-only, so concurrent appends from multiple
-//! writers/threads are safe (each append is one buffered line flushed under a
-//! per-writer mutex; the OS appends atomically). If a future slice lets
-//! `slab-runtime` write into the same bundle from a second process, only
-//! `trace.jsonl` cross-process append ordering would need care (file locking or
-//! per-process files) — payload uniqueness is already process-independent.
+//! `trace.jsonl` itself is append-only. Within ONE process the live
+//! [`crate::BundleAgentTraceSink`] serializes same-bundle appends under a
+//! per-bundle lock (see its module docs), so concurrent root + subagent
+//! records produce clean, parseable lines. That lock does NOT cross processes:
+//! if a future slice lets `slab-runtime` write into the same bundle from a
+//! second process, `trace.jsonl` cross-process append ordering would need care
+//! (file locking or per-process files) — a raw `TraceWriter` opened directly
+//! (without the sink) is only atomic to the extent a single OS append of one
+//! buffered line is, so direct multi-writer use without the sink's lock is NOT
+//! guaranteed line-atomic. Payload uniqueness is already process-independent.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -78,6 +82,20 @@ pub fn sanitize_trace_segment(value: &str) -> String {
 /// Per-root-thread bundle directory name: `trace-<trace_id>-<root_thread_id>`.
 pub fn bundle_dir_name(trace_id: &str, root_thread_id: &str) -> String {
     format!("trace-{}-{}", sanitize_trace_segment(trace_id), sanitize_trace_segment(root_thread_id))
+}
+
+/// Deterministic per-root-thread bundle directory under a configured trace dir:
+/// `<trace_dir>/agent_trace/trace-<root_thread_id>-<root_thread_id>`.
+///
+/// The `trace_id` is derived from the `root_thread_id` (rather than a random
+/// uuid) so the path is DETERMINISTIC: the live [`crate::BundleAgentTraceSink`]
+/// and the rollout `build_session_meta` (in `slab-app-core`) use this EXACT
+/// formula, so the directory the sink writes into is identical to the path
+/// stamped onto the root thread's `SessionMeta.trace_path`. `trace_dir` is the
+/// configured agent-trace base directory (the legacy log dir, NOT yet joined
+/// with `agent_trace`).
+pub fn bundle_dir_for_root_thread(trace_dir: &Path, root_thread_id: &str) -> PathBuf {
+    trace_dir.join(AGENT_TRACE_DIR_NAME).join(bundle_dir_name(root_thread_id, root_thread_id))
 }
 
 /// Manifest written once when a bundle is created.
@@ -351,6 +369,18 @@ mod tests {
         assert_eq!(bundle_dir_name("abc/..", "rt"), "trace-abc-rt");
         assert_eq!(bundle_dir_name("uuid-1", "rt-1"), "trace-uuid-1-rt-1");
         assert_eq!(bundle_dir_name("a b", "c d"), "trace-a_b-c_d");
+    }
+
+    #[test]
+    fn bundle_dir_for_root_thread_is_deterministic() {
+        // trace_id is derived from root_thread_id, so the same root always maps
+        // to the same dir under <trace_dir>/agent_trace.
+        let dir = bundle_dir_for_root_thread(Path::new("/logs"), "rt-1");
+        assert_eq!(dir, Path::new("/logs").join(AGENT_TRACE_DIR_NAME).join("trace-rt-1-rt-1"));
+        // Idempotent: same root → same dir.
+        assert_eq!(dir, bundle_dir_for_root_thread(Path::new("/logs"), "rt-1"));
+        // Different root → different dir.
+        assert_ne!(dir, bundle_dir_for_root_thread(Path::new("/logs"), "rt-2"));
     }
 
     #[test]

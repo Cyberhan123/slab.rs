@@ -72,6 +72,68 @@ The legacy ~50 `record_json` / `record_json_from_context` call sites keep their
 free-form `source`/`event`/`payload` shape; they are carried through the typed
 taxonomy's `Other` catch-all variant and are NOT migrated by this work.
 
+## Live bundle sink (Slice 0 hot-path wiring)
+
+[`BundleAgentTraceSink`] is the production sink `slab-app-core` bootstrap assembles
+when `agent.debug` is on. It COMPOSES a [`FileAgentTraceSink`] (so the legacy
+per-session JSONL and the byte-identical `slab_otel::session` telemetry wire stay
+alive) and ADDITIONALLY records every **main-process `slab-agent`** event into a
+per-root-thread bundle.
+
+### What reaches the bundle vs. the legacy JSONL only (scope boundary)
+
+- **Into the bundle**: main-process `slab-agent` events flowing through the
+  `trace_sink` (`record_json` in `crates/slab-agent/**` — turn lifecycle, LLM
+  request/response, tool calls, compaction, thread lifecycle). The sink is
+  assembled by `slab-app-core` bootstrap and shared with every spawned thread.
+- **Legacy JSONL ONLY** (bypasses the bundle, this slice): `record_json_from_context`
+  callers in `slab-app-core` (`domain/services/chat/local.rs`,
+  `infra/agent/adapter.rs`) and `slab-runtime` (cross-process). Those resolve a
+  shared `FileAgentTraceSink` from the per-`trace_dir` registry and write the
+  per-session JSONL + telemetry wire, but do NOT route into the per-root-thread
+  bundle. This is a deliberate Slice 0 trade-off: coordinating cross-process /
+  adapter writes into the same bundle's `payloads/` is deferred (see
+  "Cross-process write split" below). The consequence: a bundle covers the
+  `slab-agent` orchestration view; the runtime/adapter LLM-request payloads are
+  in the legacy JSONL until a later slice bridges them.
+
+- **Lazy bundle**: the bundle (and its once-written manifest) is created on the
+  sink's first sight of a root thread id, then cached. The bundle directory is
+  deterministic — `bundle_dir_for_root_thread(trace_dir, root_thread_id)` — so
+  the rollout `SessionMeta.trace_path` (set on the ROOT thread by
+  `slab-app-core::build_session_meta`) and the sink's output dir are the SAME
+  path. `trace_id` is derived from `root_thread_id` (no random uuid) precisely
+  so the path is reproducible by both sides.
+- **Free-form → typed bridge**: high-frequency event names map to the typed
+  `RawTraceEventPayload` variants (`agent_llm_request` → `InferenceStarted`,
+  `llm_response_normalized` → `InferenceCompleted`, `tool_call_started` →
+  `ToolCallStarted`, `tool_call_output`/`tool_calls_completed` →
+  `ToolCallCompleted`, `turn_started`/`turn_completed` → `TurnStarted`/
+  `TurnCompleted`, `context_compaction_completed` → `ContextCompacted`);
+  everything else falls through to the `Other` catch-all so an event is NEVER
+  dropped. Inference events use EXACT name matching (`agent_llm_request`,
+  `llm_response_normalized`, `chat_response_normalized`) — a substring `request`
+  match would misclassify the real `structured_output_requested` event (emitted
+  every turn when structured output is configured) as a phantom inference
+  request; tool/turn/compaction use case-insensitive substring (no real-name
+  collisions there). Marker variants carry no payload (the data is on the event
+  envelope + the rollout true source).
+- **Per-record writer**: a fresh `TraceWriter` is opened per record so each
+  event is stamped with its own `thread_id`/`turn_index`/`parent_span_id` (a
+  root thread and a child thread share one bundle but carry distinct stamps).
+- **Diagnostic-only failures**: any bundle/payload/append error is logged at
+  `warn!` and the event is simply not recorded to the bundle — agent execution
+  always continues.
+
+`slab-agent` stamps `root_thread_id` onto its trace context (root → its own id;
+child → its TRUE root, resolved by walking the persisted parent chain up to the
+ancestor with no parent, so a depth-N spawn chain — nested `DelegateSubagentTool`
+delegation, bounded by `max_depth` — ALL groups into the SAME root bundle). If the
+chain cannot be walked (a parent snapshot not yet persisted — a diagnostic race),
+the child falls back to its nearest ancestor so the event is still grouped
+deterministically. `slab-runtime` (cross-process) is UNCHANGED this slice: it keeps
+writing the legacy per-session JSONL via `record_json_from_context`.
+
 ## Conversation reducer (Slice 10) — OFFLINE
 
 The `reducer` module is an **offline diagnostic**: it is never wired into the

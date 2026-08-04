@@ -44,9 +44,19 @@ pub(crate) const TEST_FILENAME: &str = "test-model.gguf";
 pub(crate) const TEST_HUB_PROVIDER: &str = "hf_hub";
 
 pub(crate) async fn migrated_test_store() -> AnyStore {
+    // Mirror the production `SqlxStore::connect` SQLite concurrency pragmas
+    // (WAL + busy_timeout), not just `foreign_keys`. The backfill-lease CAS
+    // tests exercise writer serialization: a pool of connections (or, for the
+    // in-memory store, the single shared connection) must apply the
+    // `busy_timeout` so a contending writer waits instead of erroring, and WAL
+    // documents the production journal mode. Without these the test store
+    // diverges from production and the CAS serialization invariant is exercised
+    // against a pragmatically different DB. (Slice D2b H1.)
     let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
         .expect("sqlite test url")
-        .foreign_keys(true);
+        .foreign_keys(true)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        .busy_timeout(std::time::Duration::from_millis(5_000));
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
         .connect_with(options)

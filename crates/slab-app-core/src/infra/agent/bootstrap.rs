@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use slab_agent::{AgentControl, AgentRuntime, AgentThreadContext, ToolRouter, WorkspaceRef};
-use slab_agent_tracing::{AgentTraceSink, FileAgentTraceSink, NoopAgentTraceSink};
+use slab_agent_tracing::{AgentTraceSink, BundleAgentTraceSink, NoopAgentTraceSink};
 use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
 
 use crate::context::AppContext;
@@ -30,12 +30,32 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     // switch still gated by `telemetry.enabled` in the binary init. This dir is
     // also threaded into the rollout store so a root thread's SessionMeta carries
     // it as `trace_path` (Slice 11b rollout ↔ trace coordination).
+    //
+    // The decision goes through the pure `agent_trace_enabled` gate so the
+    // independence contract (agent.debug alone, telemetry.enabled ignored) is
+    // unit-tested — see `agent_trace_gate_is_independent_of_telemetry_enabled`.
     let trace_dir: Option<PathBuf> =
-        if settings.agent.debug { Some(agent_trace_log_dir(ctx)) } else { None };
+        if agent_trace_enabled(settings.agent.debug, settings.telemetry.enabled) {
+            Some(agent_trace_log_dir(ctx))
+        } else {
+            None
+        };
     // Rollout JSONL true source (Slice 4). One shared file store for the whole
-    // process; one recorder per thread, files under <app_home>/sessions.
+    // process; one recorder per thread, files under <app_home>/sessions in the
+    // date-partitioned layout `YYYY/MM/DD/rollout-<ts>-<thread_id>.jsonl`.
     let rollout =
         Arc::new(slab_agent_rollout::RolloutFileStore::new(slab_utils::app_home::sessions_dir()));
+    // Slice D (D1): one-shot startup migration of pre-migration FLAT rollout
+    // files (`<thread_id>.rollout.jsonl` at the sessions root) into the new
+    // date-partitioned layout. Runs synchronously BEFORE any recorder is spawned
+    // (the adapter below spawns recorders lazily on first write), so there is no
+    // race between a live writer and the rename. Idempotent + crash-safe: a
+    // second boot finds no flat files; a crash mid-rename leaves the file at one
+    // of the two paths and the next boot picks it up.
+    let migrated = rollout.migrate_flat_rollouts();
+    if migrated > 0 {
+        tracing::info!(migrated, "rollout flat files migrated to date-partitioned layout");
+    }
     // The ONLY AgentStorePort wired into the runtime: rollout-backed, with
     // metadata + tool-call audit delegated to the SQL store and the legacy
     // three tables no longer written. The same SQL store also backs the
@@ -73,6 +93,8 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         composite_notify,
         Arc::clone(&compact),
         rollout_store.clone() as Arc<dyn slab_agent::port::AgentStorePort>,
+        Arc::clone(&rollout),
+        Arc::clone(&rollout_store),
         trace_dir.clone(),
     );
     let agent_runtime = AgentRuntime::new(control);
@@ -81,10 +103,15 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         store_for_agent,
         Arc::clone(&event_hub),
         compact,
-        rollout,
+        Arc::clone(&rollout),
         trace_dir,
     );
-    let runtime = AgentRuntimeReloader::new((*ctx.model_state).clone(), core.runtime());
+    let runtime = AgentRuntimeReloader::new(
+        (*ctx.model_state).clone(),
+        core.runtime(),
+        rollout,
+        rollout_store,
+    );
     schedule_agent_runtime_reload(runtime.clone());
     let harness = HarnessService::new(core.clone());
     let response = ResponseService::new(core, (*ctx.model_state).clone());
@@ -106,10 +133,10 @@ fn schedule_rollout_backfill(
         return;
     };
     handle.spawn(async move {
-        let (succeeded, failed) =
+        let (succeeded, skipped, failed) =
             super::rollout_backfill::backfill_all_threads(sqlx, rollout).await;
-        if succeeded + failed > 0 {
-            tracing::info!(succeeded, failed, "rollout backfill complete");
+        if succeeded + skipped + failed > 0 {
+            tracing::info!(succeeded, skipped, failed, "rollout backfill complete");
         }
     });
 }
@@ -127,6 +154,7 @@ fn schedule_agent_runtime_reload(agent_runtime: AgentRuntimeReloader) {
 
 /// Construct the [`slab_agent::AgentControl`] singleton, wiring up the port
 /// adapters and registering built-in tools.
+#[allow(clippy::too_many_arguments)]
 fn build_agent_control(
     ctx: &AppContext,
     store: Arc<AnyStore>,
@@ -134,6 +162,8 @@ fn build_agent_control(
     notify_port: Arc<dyn slab_agent::AgentNotifyPort>,
     compact: Arc<dyn slab_agent::CompactPort>,
     store_adapter: Arc<dyn slab_agent::port::AgentStorePort>,
+    rollout: Arc<slab_agent_rollout::RolloutFileStore>,
+    rollout_store: Arc<super::rollout_store::RolloutBackedAgentStore>,
     trace_dir: Option<PathBuf>,
 ) -> Arc<AgentControl> {
     let llm = Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
@@ -183,17 +213,22 @@ fn build_agent_control(
     let tool_router = Arc::new(tool_router);
     let approval_port: Arc<dyn slab_agent::ApprovalPort> = event_hub;
     let settings = ctx.pmid.config();
-    // Slice 11a decouple: the trace sink gate is `agent.debug` ONLY (computed
+    // Slice 11a/0 decouple: the trace sink gate is `agent.debug` ONLY (computed
     // upstream in `build_agent_bootstrap`, which is why `trace_dir` is already
     // an Option here). Two INDEPENDENT diagnostic switches:
     //   - `agent.debug`       → this trace sink + trace bundle (`slab-agent-tracing`,
-    //                           decoupled from `slab-otel` in Slice 8).
+    //                           decoupled from `slab-otel` in Slice 8). When on,
+    //                           a `BundleAgentTraceSink` records every slab-agent
+    //                           event into a per-root-thread bundle AND keeps the
+    //                           legacy per-session JSONL + `slab_otel::session`
+    //                           telemetry wire alive (the sink composes a
+    //                           `FileAgentTraceSink` internally).
     //   - `telemetry.enabled` → OTel PROVIDER assembly + export, gated separately
     //                           in the server/app/runtime init (intentionally
     //                           untouched here). On `agent.debug` alone the user
     //                           now gets the trace bundle even with OTel off.
     let (trace, trace_dir): (Arc<dyn AgentTraceSink>, Option<PathBuf>) = match trace_dir {
-        Some(dir) => (FileAgentTraceSink::shared(dir.clone()), Some(dir)),
+        Some(dir) => (BundleAgentTraceSink::shared(dir.clone()), Some(dir)),
         None => (Arc::new(NoopAgentTraceSink), None),
     };
 
@@ -228,6 +263,9 @@ fn build_agent_control(
     }
     let memory_pipeline = super::memory::AgentMemoryPipeline::new(
         memory_store,
+        Arc::clone(&rollout),
+        Arc::clone(&rollout_store),
+        workspace_root.clone(),
         Arc::clone(&ctx.model_state),
         memory_config.clone(),
         memory_root.clone(),
@@ -311,6 +349,17 @@ fn build_agent_control(
         .register(Box::new(slab_agent_tools::DelegateSubagentTool::new(Arc::clone(&control))));
     memory_pipeline.set_control(Arc::clone(&control));
     control
+}
+
+/// Slice 11a decouple contract: the agent trace directory (and therefore the
+/// trace sink + trace bundle) is gated by `agent.debug` ALONE. `telemetry_enabled`
+/// is accepted as an explicit parameter purely so the independence is
+/// unit-testable. Returning `agent_debug` and intentionally ignoring
+/// `telemetry_enabled` IS the contract — do not AND the two here: the bundle
+/// must be recorded even when the OTel provider/export is off.
+fn agent_trace_enabled(agent_debug: bool, telemetry_enabled: bool) -> bool {
+    let _ = telemetry_enabled;
+    agent_debug
 }
 
 fn agent_trace_log_dir(ctx: &AppContext) -> PathBuf {
@@ -464,7 +513,7 @@ mod tests {
     use slab_config::{AgentMcpConfig, AgentMcpEnvValueConfig, AgentMcpServerConfig};
     use slab_sandboxing::{SandboxDriver, SandboxError, SandboxSetupStatus, SandboxedCommand};
 
-    use super::{agent_mcp_client_config_with_env, available_sandbox_driver};
+    use super::{agent_mcp_client_config_with_env, agent_trace_enabled, available_sandbox_driver};
 
     struct StatusDriver {
         status: SandboxSetupStatus,
@@ -486,6 +535,25 @@ mod tests {
         fn setup_status(&self) -> SandboxSetupStatus {
             self.status.clone()
         }
+    }
+
+    #[test]
+    fn agent_trace_gate_is_independent_of_telemetry_enabled() {
+        // The critical independence assertion: `agent.debug` alone must enable the
+        // trace directory/sink/bundle even when `telemetry.enabled` is OFF. If a
+        // future change re-couples the gate to `agent.debug && telemetry.enabled`,
+        // this case flips to false and the assertion fails.
+        assert!(
+            agent_trace_enabled(true, false),
+            "agent.debug must enable the trace bundle even when telemetry.enabled is off"
+        );
+        assert!(agent_trace_enabled(true, true));
+        // `telemetry.enabled` alone must NOT enable the agent trace bundle.
+        assert!(
+            !agent_trace_enabled(false, true),
+            "telemetry.enabled must not enable the agent trace bundle"
+        );
+        assert!(!agent_trace_enabled(false, false));
     }
 
     #[test]

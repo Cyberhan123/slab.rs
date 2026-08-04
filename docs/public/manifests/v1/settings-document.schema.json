@@ -301,6 +301,7 @@
       "properties": {
         "debug": {
           "default": true,
+          "description": "Enable agent diagnostics. Gates BOTH the full-fidelity per-session agent\ntrace files (prompt/tool/runtime) AND the per-root-thread trace bundle\nthat `slab-agent-tracing` writes under `logs/agent_trace/`. This is\nINDEPENDENT of `telemetry.enabled`: the bundle is recorded even when the\nOpenTelemetry provider/export is off.",
           "type": "boolean"
         },
         "hooks": {
@@ -1071,6 +1072,7 @@
         },
         "enabled": {
           "default": true,
+          "description": "Assemble and enable the OpenTelemetry provider for local/remote trace,\nlog, and metric export. INDEPENDENT of the agent trace bundle: the bundle\nis gated by `agent.debug` alone, so it is recorded even when this is off.",
           "type": "boolean"
         },
         "environment": {
@@ -2129,7 +2131,8 @@
           "type": "none"
         },
         "service_name": "slab"
-      }
+      },
+      "description": "OpenTelemetry provider/export settings. `telemetry.enabled` assembles and\nenables the OTel provider for local/remote trace, log, and metric export.\nThis is INDEPENDENT of the agent trace bundle: the bundle is gated by\n`agent.debug` alone, so `agent.debug` users get the bundle even with OTel\nexport disabled here."
     },
     "tools": {
       "$ref": "#/$defs/ToolsConfig",
