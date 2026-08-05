@@ -157,11 +157,16 @@ impl HarnessService {
             .map_err(AppCoreError::from)?;
 
         let rollout = self.0.rollout();
-        // Flush both parent and child so the parent's data lines are durable for
-        // the wholesale read, and the child's batched adapter writes (and any
-        // recorder-seeded SessionMeta) are flushed before we atomically replace
-        // the child file.
-        let _ = rollout.flush(parent_thread_id).await;
+        // Slice E.2 (D2): cross-turn durability barrier on the PARENT before the
+        // wholesale read — the parent's observer may still be draining
+        // persistence-grade events (fork does NOT refuse a running parent, so
+        // this await is mandatory, not defensive). Ensures every emitted
+        // MessageAppended / TurnStateChanged / ItemCompleted has landed in the
+        // parent rollout before we snapshot it into the child.
+        // MUTATION: barrier removed (should call self.0.await_durable).
+        self.0.await_durable(parent_thread_id).await;
+        // Flush the child so the recorder-seeded SessionMeta (and any batched
+        // adapter writes) is durable before we atomically replace the child file.
         let _ = rollout.flush(&child_id).await;
 
         // H1: build the child SessionMeta from the child snapshot (control
@@ -247,6 +252,11 @@ impl HarnessService {
         let from = to_turn_index
             .checked_add(1)
             .ok_or_else(|| AppCoreError::Internal("turn index overflow".to_owned()))?;
+        // Slice E.2 (D2): cross-turn barrier before truncating — a just-finished
+        // thread's observer may still be draining the final turn boundary. Wait
+        // for quiescence so the truncation acts on the complete file (rollback
+        // refuses running threads, so this is defensive).
+        self.0.await_durable(thread_id).await;
         self.0
             .rollout()
             .truncate_from_turn(thread_id, from)
@@ -305,6 +315,18 @@ impl HarnessService {
         })?;
         let model_id = model_override.unwrap_or_else(|| config.model.clone());
 
+        // Slice E.2 (D2): cross-turn durability barrier BEFORE the conversation
+        // read. compact refuses a RUNNING thread, but a thread that JUST finished
+        // leaves the active set immediately while its observer may still be
+        // draining the final turn's MessageAppended / TurnStateChanged. Reading
+        // the rollout before the observer lands those lines would summarize a
+        // STALE message vec and the wholesale rewrite (below) would permanently
+        // drop the unfinished turn from the conversation. The barrier fences
+        // exactly the events already emitted (FIFO sentinel), so the read below
+        // reflects the complete history. This is the same protection fork /
+        // rollback / restore apply before their re-reads.
+        self.0.await_durable(thread_id).await;
+
         let mut records = self.0.list_thread_messages(thread_id).await?;
         records.sort_by(|left, right| {
             left.turn_index
@@ -349,8 +371,9 @@ impl HarnessService {
         // Flush first so the existing SessionMeta header (and any pending writes)
         // is durable, then recover the header line (preserving its timestamp).
         // H4 guaranteed the file exists, so a header is present; the snapshot
-        // fallback guards the impossible-but-defensive empty case.
-        let _ = rollout.flush(thread_id).await;
+        // fallback guards the impossible-but-defensive empty case. The cross-turn
+        // barrier already ran above (before the message read); the recorder is
+        // durable, so this SessionMeta read sees the post-barrier file.
         let session_meta_line = read_rollout_lines(&rollout.resolve_path(thread_id))
             .into_iter()
             .find(|l| matches!(l.item, RolloutItem::SessionMeta(_)))

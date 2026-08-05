@@ -376,7 +376,7 @@ async fn resolve_input(
                         "unknown previous_response_id: {thread_id}"
                     )));
                 }
-                let records = core.store().list_thread_messages(thread_id).await?;
+                let records = core.reader().list_thread_messages(thread_id).await?;
                 let next_turn =
                     records.iter().map(|r| r.turn_index).max().map(|m| m + 1).unwrap_or(0);
                 let history = records.into_iter().map(|r| r.message).collect::<Vec<_>>();
@@ -475,8 +475,13 @@ async fn persist_input(
             .await?;
     }
     for msg in &input.new_user_messages {
-        core.store()
-            .insert_thread_message(&ThreadMessageRecord {
+        // Slice E.2 (option c): single_shot has NO turn loop and emits NO
+        // `EventMsg`, so it is NOT an agent thread and the rollout persistence
+        // observer never runs for it. Its conversation writes flow directly
+        // through the `RolloutConversationStore::append_message` trait (the
+        // app-core-internal out-of-band writer), bypassing the event hub.
+        core.reader()
+            .append_message(&ThreadMessageRecord {
                 id: format!("msg_{}_{}", Uuid::new_v4().simple(), input.turn_index),
                 thread_id: input.response_id.clone(),
                 turn_index: input.turn_index,
@@ -497,8 +502,10 @@ async fn persist_assistant_and_complete(
     match outcome {
         SingleShotOutcome::Completed { text, tool_calls, .. } => {
             let text = text.clone().unwrap_or_default();
-            core.store()
-                .insert_thread_message(&ThreadMessageRecord {
+            // Slice E.2 (option c): single_shot writes out-of-band via the
+            // `RolloutConversationStore` trait (no EventMsg, no observer).
+            core.reader()
+                .append_message(&ThreadMessageRecord {
                     id: format!("msg_{}_{}", Uuid::new_v4().simple(), turn_index),
                     thread_id: response_id.to_owned(),
                     turn_index,
@@ -884,7 +891,7 @@ pub(crate) async fn run_get_response(
         core.store().get_thread(response_id).await?.ok_or_else(|| {
             AppCoreError::BadRequest(format!("unknown response id: {response_id}"))
         })?;
-    let records = core.store().list_thread_messages(response_id).await?;
+    let records = core.reader().list_thread_messages(response_id).await?;
 
     let outcome = if thread.status == ThreadStatus::Errored {
         SingleShotOutcome::Failed {

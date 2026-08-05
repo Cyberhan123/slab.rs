@@ -26,7 +26,7 @@ use slab_agent_rollout::{RolloutItem, RolloutStore, read_rollout_lines};
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use super::AgentCore;
-use super::RolloutConversationReader;
+use super::RolloutConversationStore;
 use super::harness::HarnessService;
 use crate::infra::agent::event_hub::AgentEventHub;
 use crate::infra::agent::rollout_store::RolloutBackedAgentStore;
@@ -35,7 +35,7 @@ use crate::infra::db::repository::rollout_index::RolloutIndex;
 // ── in-memory SQL delegate + RolloutIndex mock ──────────────────────────────
 
 /// Minimal in-memory mock that implements `AgentStorePort` + `RolloutIndex` +
-/// `RolloutConversationReader`. Stores thread metadata, messages, items, and
+/// `RolloutConversationStore`. Stores thread metadata, messages, items, and
 /// states. Slice E dropped the legacy/backfill surface (`thread_has_legacy_data`
 /// and the backfill/lease methods): rollout is the only source, so the mock no
 /// longer tracks a per-thread legacy flag.
@@ -144,35 +144,6 @@ impl AgentStorePort for HarnessMockStore {
         }
         Ok(())
     }
-    async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError> {
-        self.messages.lock().unwrap().push(record.clone());
-        Ok(())
-    }
-    async fn list_thread_messages(
-        &self,
-        thread_id: &str,
-    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
-        Ok(self
-            .messages
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|m| m.thread_id == thread_id)
-            .cloned()
-            .collect())
-    }
-    async fn upsert_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError> {
-        let mut states = self.states.lock().unwrap();
-        if let Some(existing) = states
-            .iter_mut()
-            .find(|s| s.thread_id == record.thread_id && s.turn_index == record.turn_index)
-        {
-            *existing = record.clone();
-        } else {
-            states.push(record.clone());
-        }
-        Ok(())
-    }
     async fn archive_thread(&self, id: &str, archived_at: Option<&str>) -> Result<(), AgentError> {
         let mut threads = self.threads.lock().unwrap();
         if let Some(t) = threads.get_mut(id) {
@@ -182,10 +153,10 @@ impl AgentStorePort for HarnessMockStore {
     }
 }
 
-// Slice E: list_turn_states / list_turn_items moved off `AgentStorePort` onto
-// the app-core-internal `RolloutConversationReader` trait.
+// Slice E.2: list_turn_states / list_turn_items + the conversation read/write
+// live on the app-core-internal `RolloutConversationStore` trait.
 #[async_trait]
-impl RolloutConversationReader for HarnessMockStore {
+impl RolloutConversationStore for HarnessMockStore {
     async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError> {
         Ok(self
             .states
@@ -205,6 +176,35 @@ impl RolloutConversationReader for HarnessMockStore {
             .filter(|i| i.thread_id == thread_id)
             .cloned()
             .collect())
+    }
+    async fn list_thread_messages(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
+        Ok(self
+            .messages
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m.thread_id == thread_id)
+            .cloned()
+            .collect())
+    }
+    async fn append_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError> {
+        self.messages.lock().unwrap().push(record.clone());
+        Ok(())
+    }
+    async fn append_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError> {
+        let mut states = self.states.lock().unwrap();
+        if let Some(existing) = states
+            .iter_mut()
+            .find(|s| s.thread_id == record.thread_id && s.turn_index == record.turn_index)
+        {
+            *existing = record.clone();
+        } else {
+            states.push(record.clone());
+        }
+        Ok(())
     }
 }
 
@@ -280,6 +280,34 @@ impl CompactPort for ScriptedCompact {
 /// error before compaction runs).
 struct SkipCompact;
 
+/// Echo compaction policy: returns the input messages VERBATIM as the summary
+/// (identity compaction). Used by the compact barrier test so the `Compacted`
+/// baseline reflects exactly what `compact_thread` READ from the rollout —
+/// letting the test assert the cross-turn barrier waited for a lagging observer
+/// before the read (otherwise the baseline is missing turn-0 data).
+struct EchoCompact;
+
+#[async_trait]
+impl CompactPort for EchoCompact {
+    fn threshold_tokens(&self) -> usize {
+        1
+    }
+    fn estimate_tokens(&self, _messages: &[ConversationMessage]) -> usize {
+        999
+    }
+    async fn compact(
+        &self,
+        messages: &[ConversationMessage],
+        _ctx: &CompactContext<'_>,
+    ) -> Result<CompactOutcome, AgentError> {
+        Ok(CompactOutcome::Replaced {
+            messages: messages.to_vec(),
+            output_tokens: 1,
+            replaced_messages: messages.len(),
+        })
+    }
+}
+
 #[async_trait]
 impl CompactPort for SkipCompact {
     fn threshold_tokens(&self) -> usize {
@@ -304,6 +332,7 @@ struct TestHarness {
     store: Arc<dyn AgentStorePort>,
     rollout: Arc<slab_agent_rollout::RolloutFileStore>,
     mock: Arc<HarnessMockStore>,
+    events: Arc<AgentEventHub>,
     _dir: tempfile::TempDir,
 }
 
@@ -337,14 +366,21 @@ impl TestHarness {
         let core = AgentCore::new(
             runtime,
             Arc::clone(&store_adapter) as Arc<dyn AgentStorePort>,
-            event_hub,
+            Arc::clone(&event_hub),
             compact,
             rollout.clone(),
-            Arc::clone(&store_adapter) as Arc<dyn RolloutConversationReader>,
+            Arc::clone(&store_adapter) as Arc<dyn RolloutConversationStore>,
             None,
         );
         let harness = HarnessService::new(core);
-        Self { harness, store: store_adapter as Arc<dyn AgentStorePort>, rollout, mock, _dir: dir }
+        Self {
+            harness,
+            store: store_adapter as Arc<dyn AgentStorePort>,
+            rollout,
+            mock,
+            events: event_hub,
+            _dir: dir,
+        }
     }
 }
 
@@ -393,16 +429,21 @@ async fn seed_rollout_native_parent(
 ) {
     store.upsert_thread(&snapshot(parent_id, session)).await.expect("upsert parent");
     for turn in 0..turns {
-        store
-            .insert_thread_message(&ThreadMessageRecord {
-                id: format!("m{parent_id}-{turn}"),
-                thread_id: parent_id.to_owned(),
-                turn_index: turn,
-                message: user_msg(&format!("u{turn}")),
-                created_at: "2026-08-02T00:00:00Z".to_owned(),
-            })
+        // Slice E.2: `insert_thread_message` left the slab-agent store trait;
+        // seed the message directly as a rollout TurnContext::MessageAppend line
+        // (the same line the observer's `MessageAppended` arm produces).
+        rollout
+            .append(
+                parent_id,
+                RolloutItem::TurnContext(slab_agent_rollout::TurnContextPayload::MessageAppend {
+                    turn_index: turn,
+                    message: user_msg(&format!("u{turn}")),
+                    id: Some(format!("m{parent_id}-{turn}")),
+                    created_at: Some("2026-08-02T00:00:00Z".to_owned()),
+                }),
+            )
             .await
-            .expect("insert message");
+            .expect("seed message");
         let item = slab_agent::protocol::TurnItem::AgentMessage {
             id: format!("a{parent_id}-{turn}"),
             text: format!("r{turn}"),
@@ -618,22 +659,28 @@ async fn harness_list_turn_states_and_items_delegate_to_reader() {
     let parent_id = "reader-delegate";
     seed_rollout_native_parent(&th.store, &th.rollout, parent_id, "sess-rd", 1).await;
     // seed_rollout_native_parent writes a MessageAppend + a TurnItem per turn but
-    // no TurnState — write one through the adapter so list_turn_states has a row
-    // to find via the reader delegation.
-    th.store
-        .upsert_turn_state(&TurnStateRecord {
-            thread_id: parent_id.to_owned(),
-            turn_index: 0,
-            status: "completed".to_owned(),
-            input_messages_json: None,
-            tool_specs_json: None,
-            llm_response_json: None,
-            error: None,
-            started_at: "2026-08-02T00:00:00Z".to_owned(),
-            completed_at: Some("2026-08-02T00:00:05Z".to_owned()),
-        })
+    // no TurnState — write one directly to the rollout as a TurnContext::TurnState
+    // line (Slice E.2: the slab-agent `upsert_turn_state` store method is gone;
+    // production writes this via the observer's `TurnStateChanged` arm, which
+    // produces the same rollout line) so list_turn_states has a row to find via
+    // the reader delegation.
+    th.rollout
+        .append(
+            parent_id,
+            RolloutItem::TurnContext(slab_agent_rollout::TurnContextPayload::TurnState {
+                turn_index: 0,
+                status: "completed".to_owned(),
+                input_messages: Vec::new(),
+                tool_specs_json: None,
+                llm_response_json: None,
+                error: None,
+                started_at: Some("2026-08-02T00:00:00Z".to_owned()),
+                completed_at: Some("2026-08-02T00:00:05Z".to_owned()),
+                input_messages_raw: None,
+            }),
+        )
         .await
-        .expect("upsert turn state");
+        .expect("seed turn state");
 
     // The wrapper delegation reads through `core.reader()` → the adapter → the
     // rollout replay. Both must return the seeded row.
@@ -652,4 +699,302 @@ async fn harness_list_turn_states_and_items_delegate_to_reader() {
         "list_turn_items delegated to the reader and observed the seeded TurnItem",
     );
     assert_eq!(items[0].id, "areader-delegate-0");
+}
+
+// Test B (P7) — fork durability under a lagging observer (the cross-turn
+// barrier).
+//
+// Drives a parent thread through turn 0 via the persistence channel with a
+// TEST-ONLY per-event delay injected into the observer, then forks. The fork
+// barrier (`HarnessService::fork_thread` → `AgentCore::await_durable`) must wait
+// for the slow observer to drain + flush BEFORE the wholesale parent-rollout
+// read, so the child inherits turn-0 data.
+//
+// Mutation that MUST fail: remove the `await_durable(parent_thread_id)` call in
+// `HarnessService::fork_thread`. The wholesale read then snapshots the parent
+// rollout BEFORE the slow observer has landed turn 0 → the child rollout is
+// missing the turn-0 MessageAppended + TurnItem → the assertions fail. This is
+// the cross-turn false-green the barrier exists to close.
+#[tokio::test]
+async fn fork_barrier_waits_for_lagging_observer() {
+    let compact: Arc<dyn CompactPort> = Arc::new(SkipCompact);
+    let th = TestHarness::build(compact).await;
+    let parent_id = "parent-barrier";
+
+    // Seed the parent thread metadata (no rollout data yet — turn 0 arrives via
+    // the event path the observer drains).
+    th.store.upsert_thread(&snapshot(parent_id, "sess-barrier")).await.expect("upsert parent");
+
+    // Spawn a SLOW test-local observer: it drains the persistence mpsc with a
+    // per-event delay so turn-0 data is NOT in the parent rollout until the
+    // barrier waits it out. This mirrors a lagging production observer.
+    let rollout = th.rollout.clone();
+    let events = th.events.clone();
+    let observer_thread_id = parent_id.to_owned();
+    let subscribed = Arc::new(tokio::sync::Notify::new());
+    let subscribed_signal = subscribed.clone();
+    let observer = tokio::spawn(async move {
+        use crate::infra::agent::event_hub::PersistenceMessage;
+        let (snap, mut rx) = events.persistence_subscribe(&observer_thread_id);
+        // Signal that the sender is live so the test emits AFTER subscribe —
+        // otherwise the events land in the replay snapshot (drained instantly,
+        // bypassing the per-event delay).
+        subscribed_signal.notify_one();
+        let mut current_turn: u32 = 0;
+        for msg in &snap {
+            current_turn =
+                process_slow_event(&rollout, &observer_thread_id, current_turn, msg).await;
+        }
+        while let Some(message) = rx.recv().await {
+            match message {
+                PersistenceMessage::Event(msg) => {
+                    // Test-only delay: stretch the observer so turn-0 data stays
+                    // in the mpsc long enough that a fork WITHOUT the barrier
+                    // reads an empty parent.
+                    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+                    current_turn =
+                        process_slow_event(&rollout, &observer_thread_id, current_turn, &msg).await;
+                }
+                PersistenceMessage::Barrier(reply) => {
+                    // Mirror the production observer: flush THEN reply so the
+                    // barrier caller (fork) re-reads a durable file.
+                    let _ = rollout.flush(&observer_thread_id).await;
+                    let _ = reply.send(());
+                }
+            }
+        }
+    });
+    // Wait for the observer to subscribe so emitted events go to the mpsc (the
+    // delayed path), not the instant-drain replay snapshot.
+    subscribed.notified().await;
+
+    // Drive turn 0 of the parent via the event path: MessageAppended + an item +
+    // a TurnCompleted boundary (the boundary is where the observer flushes +
+    // stamps durable_turn — the signal the barrier waits for).
+    th.events
+        .on_event_msg(
+            parent_id,
+            &slab_agent::protocol::EventMsg::MessageAppended(
+                slab_agent::protocol::MessageAppendedParams {
+                    thread_id: parent_id.to_owned(),
+                    turn_index: 0,
+                    message: user_msg("turn-0-user"),
+                    id: "m-parent-barrier-0".to_owned(),
+                    created_at: "2026-08-05T00:00:00Z".to_owned(),
+                },
+            ),
+        )
+        .await;
+    th.events
+        .on_event_msg(
+            parent_id,
+            &slab_agent::protocol::EventMsg::ItemCompleted(
+                slab_agent::protocol::ItemCompletedParams {
+                    item: slab_agent::protocol::TurnItem::AgentMessage {
+                        id: "a-parent-barrier-0".to_owned(),
+                        text: "r".to_owned(),
+                    },
+                    thread_id: parent_id.to_owned(),
+                    turn_id: "0".to_owned(),
+                },
+            ),
+        )
+        .await;
+    th.events
+        .on_event_msg(
+            parent_id,
+            &slab_agent::protocol::EventMsg::TurnCompleted(
+                slab_agent::protocol::TurnCompletedParams {
+                    thread_id: parent_id.to_owned(),
+                    turn: slab_agent::protocol::Turn {
+                        id: "0".to_owned(),
+                        status: "completed".to_owned(),
+                        ..Default::default()
+                    },
+                    usage: None,
+                },
+            ),
+        )
+        .await;
+
+    // Fork — the barrier must wait for the slow observer to land turn 0.
+    let child = th.harness.fork_thread(parent_id, None).await.expect("fork succeeds");
+    // Stop the slow observer.
+    observer.abort();
+
+    // The child rollout inherited the parent's turn-0 data (barrier waited).
+    let child_items = th.rollout.read_turn_items(&child.id).await;
+    assert!(
+        child_items.iter().any(|i| i.id == "a-parent-barrier-0"),
+        "fork barrier waited for the observer: child has turn-0 TurnItem"
+    );
+    let child_lines = slab_agent_rollout::read_rollout_lines(&th.rollout.resolve_path(&child.id));
+    let has_user = child_lines.iter().any(|line| {
+        matches!(
+            &line.item,
+            slab_agent_rollout::RolloutItem::TurnContext(
+                slab_agent_rollout::TurnContextPayload::MessageAppend { message, .. }
+            ) if message.rendered_text().contains("turn-0-user")
+        )
+    });
+    assert!(has_user, "fork barrier waited for the observer: child has turn-0 MessageAppended");
+}
+
+// Test B (compact variant) — compact_thread durability under a lagging observer.
+//
+// Mirrors `fork_barrier_waits_for_lagging_observer` but for `compact_thread`.
+// Drives a thread through turn 0 via the persistence channel with a TEST-ONLY
+// per-event delay injected into the observer, then compacts. The compact
+// barrier (`HarnessService::compact_thread` → `AgentCore::await_durable`) must
+// run BEFORE `list_thread_messages` reads the rollout, so the `Compacted`
+// baseline summarizes the COMPLETE message vec (turn 0 included). `EchoCompact`
+// returns its input verbatim, so the baseline directly reflects what was read.
+//
+// Mutation that MUST fail: move `await_durable` back to AFTER the
+// `list_thread_messages` read (the pre-fix placement). The read then snapshots
+// the rollout BEFORE the slow observer has landed turn 0 → the message vec is
+// empty → `EchoCompact` echoes an empty vec → the `Compacted` baseline omits
+// "turn-0-user" → the assertion fails. This is the same cross-turn false-green
+// class the barrier closes, applied to the compact read path.
+#[tokio::test]
+async fn compact_barrier_waits_for_lagging_observer() {
+    let compact: Arc<dyn CompactPort> = Arc::new(EchoCompact);
+    let th = TestHarness::build(compact).await;
+    let thread_id = "thread-compact-barrier";
+
+    // Seed the thread metadata + create the rollout file (the H4 guard requires
+    // a rollout file to exist before compact runs). One direct MessageAppend
+    // makes `file_exists` true WITHOUT going through the event path (the event
+    // path is what the slow observer drains).
+    th.store.upsert_thread(&snapshot(thread_id, "sess-compact-barrier")).await.expect("upsert");
+    th.rollout
+        .append(
+            thread_id,
+            RolloutItem::TurnContext(slab_agent_rollout::TurnContextPayload::MessageAppend {
+                turn_index: 0,
+                message: user_msg("seed"),
+                id: Some("m-seed".to_owned()),
+                created_at: Some("2026-08-05T00:00:00Z".to_owned()),
+            }),
+        )
+        .await
+        .expect("seed message");
+    th.rollout.flush(thread_id).await.expect("flush seed");
+
+    // Spawn a SLOW test-local observer: drains the persistence mpsc with a
+    // per-event delay so turn-0 data is NOT in the rollout until the barrier
+    // waits it out.
+    let rollout = th.rollout.clone();
+    let events = th.events.clone();
+    let observer_thread_id = thread_id.to_owned();
+    let subscribed = Arc::new(tokio::sync::Notify::new());
+    let subscribed_signal = subscribed.clone();
+    let observer = tokio::spawn(async move {
+        use crate::infra::agent::event_hub::PersistenceMessage;
+        let (snap, mut rx) = events.persistence_subscribe(&observer_thread_id);
+        subscribed_signal.notify_one();
+        let mut current_turn: u32 = 0;
+        for msg in &snap {
+            current_turn =
+                process_slow_event(&rollout, &observer_thread_id, current_turn, msg).await;
+        }
+        while let Some(message) = rx.recv().await {
+            match message {
+                PersistenceMessage::Event(msg) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+                    current_turn =
+                        process_slow_event(&rollout, &observer_thread_id, current_turn, &msg).await;
+                }
+                PersistenceMessage::Barrier(reply) => {
+                    let _ = rollout.flush(&observer_thread_id).await;
+                    let _ = reply.send(());
+                }
+            }
+        }
+    });
+    subscribed.notified().await;
+
+    // Drive turn 0's user message via the event path. The slow observer delays
+    // 60ms before landing it, so it is NOT in the rollout when compact_thread
+    // begins — UNLESS the barrier waits.
+    th.events
+        .on_event_msg(
+            thread_id,
+            &slab_agent::protocol::EventMsg::MessageAppended(
+                slab_agent::protocol::MessageAppendedParams {
+                    thread_id: thread_id.to_owned(),
+                    turn_index: 0,
+                    message: user_msg("turn-0-user"),
+                    id: "m-compact-barrier-0".to_owned(),
+                    created_at: "2026-08-05T00:00:00Z".to_owned(),
+                },
+            ),
+        )
+        .await;
+
+    // Compact — the barrier must wait for the slow observer to land turn 0
+    // BEFORE the `list_thread_messages` read.
+    let (_snapshot, removed, _tokens) =
+        th.harness.compact_thread(thread_id, None).await.expect("compact succeeds");
+    // Stop the slow observer.
+    observer.abort();
+    // Sanity: EchoCompact reported it replaced at least the seed + turn-0 msg.
+    assert!(removed >= 1, "compact replaced messages (barrier let the read see turn 0)");
+
+    // The `Compacted` baseline (EchoCompact = input verbatim) must include the
+    // turn-0 user message — proving the barrier ran before the read.
+    let messages = th.rollout.read_messages(thread_id).await;
+    let texts: Vec<String> = messages
+        .iter()
+        .map(|m| match &m.content {
+            ConversationMessageContent::Text(t) => t.clone(),
+            _ => String::new(),
+        })
+        .collect();
+    assert!(
+        texts.iter().any(|t| t.contains("turn-0-user")),
+        "compact barrier waited for the observer: baseline includes turn-0 user message ({texts:?})"
+    );
+}
+
+/// Test-local slow-observer event processor (mirrors the production observer's
+/// MessageAppended / ItemCompleted / TurnStarted arms for the event kinds Test B
+/// emits).
+async fn process_slow_event(
+    rollout: &slab_agent_rollout::RolloutFileStore,
+    thread_id: &str,
+    mut current_turn: u32,
+    msg: &slab_agent::protocol::EventMsg,
+) -> u32 {
+    use slab_agent::protocol::{EventMsg, ItemCompletedParams, MessageAppendedParams};
+    use slab_agent_rollout::{RolloutItem, TurnContextPayload};
+    match msg {
+        EventMsg::MessageAppended(MessageAppendedParams {
+            turn_index,
+            message,
+            id,
+            created_at,
+            ..
+        }) => {
+            let _ = rollout
+                .append(
+                    thread_id,
+                    RolloutItem::TurnContext(TurnContextPayload::MessageAppend {
+                        turn_index: *turn_index,
+                        message: message.clone(),
+                        id: Some(id.clone()),
+                        created_at: Some(created_at.clone()),
+                    }),
+                )
+                .await;
+        }
+        EventMsg::ItemCompleted(ItemCompletedParams { item, .. }) => {
+            let _ = rollout.append(thread_id, RolloutItem::TurnItem(item.clone())).await;
+        }
+        EventMsg::TurnStarted(p) => {
+            current_turn = p.turn.id.parse::<u32>().unwrap_or(current_turn);
+        }
+        _ => {}
+    }
+    current_turn
 }

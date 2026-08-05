@@ -4,9 +4,15 @@
 //! stream into the rollout JSONL true source (it superseded the old
 //! SQL-writeback `turn_item_persistence` observer, which was removed in Slice 7
 //! once the rollout adapter became the only `AgentStorePort` impl). One observer
-//! task per thread (the agent `AgentCore` guards with a `DashSet`). It subscribes
-//! to the [`AgentEventHub`] `EventMsg` stream and appends each event to the
-//! rollout file in its [`RolloutItem`] form:
+//! task per thread (the agent `AgentCore` guards with a `DashSet`).
+//!
+//! Slice E.2 (D2): the observer consumes a DEDICATED UNBOUNDED persistence
+//! channel (`AgentEventHub::persistence_subscribe`), NOT the UI broadcast. The
+//! bounded broadcast could `Lagged`-drop persistence-grade events under flood —
+//! a silent conversation-data-loss false-green. The unbounded mpsc guarantees
+//! delivery; there is NO `Lagged` branch in this loop. It subscribes to the
+//! persistence channel and appends each event to the rollout file in its
+//! [`RolloutItem`] form:
 //!
 //! - [`EventMsg::ItemCompleted`] → [`RolloutItem::TurnItem`] (full-fidelity UI
 //!   artifact).
@@ -18,6 +24,13 @@
 //!   drops the marker (the H3 fix).
 //! - any other event allowed by [`EventPersistenceMode`] →
 //!   [`RolloutItem::EventMsg`].
+//!
+//! At every turn boundary (after the boundary flush) the observer has durable
+//! data on disk. The cross-turn barrier in `fork_thread` / `compact_thread` /
+//! `rollback_thread` / `restore_session` is the FIFO `Barrier` sentinel handled
+//! in the `recv()` loop (flush + oneshot reply): when the observer reaches it,
+//! every prior event on the unbounded mpsc has been appended + flushed, so the
+//! caller may re-read the rollout with the complete history.
 //!
 //! Each append is fire-and-forget into the recorder actor; errors are warned,
 //! not fatal — a transient flush failure must not kill the persistence task.
@@ -31,17 +44,16 @@ use slab_agent::protocol::EventMsg;
 use slab_agent_rollout::{
     CompactedPayload, EventPersistenceMode, RolloutFileStore, RolloutItem, RolloutStore,
 };
-use tokio::sync::broadcast;
 
-use crate::infra::agent::event_hub::AgentEventHub;
+use crate::infra::agent::event_hub::{AgentEventHub, PersistenceMessage};
 
 /// Spawn a background task that persists the rollout items for `thread_id`.
 ///
 /// Intended to be called at most once per thread (the caller guards with a
-/// `DashSet`). Subscribe to the harness-protocol stream, drain the replay buffer,
-/// then loop on the live receiver. On broadcast lag it logs and continues (a
-/// lagged turn may drop some events — acceptable degradation, not corruption);
-/// on channel close it exits.
+/// `DashSet`). Subscribe to the DEDICATED UNBOUNDED persistence channel, drain
+/// the spawn-race replay snapshot, then loop on the live mpsc receiver. The mpsc
+/// is unbounded ⇒ there is NO `Lagged` branch (the false-green class is gone).
+/// On channel close (all senders dropped) it exits.
 pub fn spawn_rollout_persistence(
     rollout: Arc<RolloutFileStore>,
     events: Arc<AgentEventHub>,
@@ -49,41 +61,44 @@ pub fn spawn_rollout_persistence(
     mode: EventPersistenceMode,
 ) {
     tokio::spawn(async move {
-        let subscription = events.subscribe_event_msgs(&thread_id);
+        let (replay_snap, mut receiver) = events.persistence_subscribe(&thread_id);
         // Current turn affiliation, tracked from turn-lifecycle events so that
         // a `ContextCompacted` event (which carries no `turn_id`) can stamp the
         // correct `turn_index` on the Compacted marker.
         let mut current_turn: u32 = 0;
 
-        for envelope in &subscription.replay {
-            current_turn =
-                process_event_msg(&rollout, &thread_id, mode, current_turn, &envelope.msg).await;
+        for msg in &replay_snap {
+            process_event_msg(&rollout, &thread_id, mode, &mut current_turn, msg).await;
         }
 
-        let mut receiver = subscription.receiver;
-        loop {
-            match receiver.recv().await {
-                Ok(envelope) => {
-                    current_turn =
-                        process_event_msg(&rollout, &thread_id, mode, current_turn, &envelope.msg)
-                            .await;
+        while let Some(message) = receiver.recv().await {
+            match message {
+                PersistenceMessage::Event(msg) => {
+                    process_event_msg(&rollout, &thread_id, mode, &mut current_turn, &msg).await;
                 }
-                Err(broadcast::error::RecvError::Lagged(missed)) => {
-                    tracing::warn!(
-                        thread_id = %thread_id,
-                        missed,
-                        "rollout persistence observer lagged; some events may be dropped",
-                    );
+                PersistenceMessage::Barrier(reply) => {
+                    // Cross-turn barrier (D2): every prior event on this FIFO
+                    // mpsc has been processed (appended to the recorder). Flush
+                    // so the data is durable, THEN reply — releasing the barrier
+                    // caller (fork/compact/rollback/restore) to re-read the
+                    // rollout with the complete history.
+                    if let Err(error) = rollout.flush(&thread_id).await {
+                        tracing::warn!(
+                            thread_id = %thread_id,
+                            error = %error,
+                            "barrier flush failed; releasing barrier with buffered data",
+                        );
+                    }
+                    let _ = reply.send(());
                 }
-                Err(broadcast::error::RecvError::Closed) => break,
             }
         }
     });
 }
 
-/// Append the rollout line(s) for one event, returning the updated turn index.
+/// Append the rollout line(s) for one event.
 ///
-/// `current_turn` is advanced from turn-lifecycle events (`TurnStarted` /
+/// Advances `current_turn` in place from turn-lifecycle events (`TurnStarted` /
 /// `TurnCompleted` / `TurnAborted`) before persistence so `ContextCompacted`
 /// (which carries no `turn_id` of its own) stamps the correct turn.
 ///
@@ -94,19 +109,24 @@ pub fn spawn_rollout_persistence(
 /// so a subsequent read falls through to an empty SQL fallback and the history
 /// looks unreadable). The flush is best-effort: a transient failure is warned
 /// and never kills the persistence task.
+///
+/// Slice E.2 NOTE: the cross-turn durability barrier is the FIFO `Barrier`
+/// sentinel handled in the `recv()` loop above (flush + oneshot reply), NOT a
+/// durable-turn watch stamped here. This function appends lines and flushes at
+/// boundaries; it does not return a boundary signal.
 async fn process_event_msg(
     rollout: &Arc<RolloutFileStore>,
     thread_id: &str,
     mode: EventPersistenceMode,
-    mut current_turn: u32,
+    current_turn: &mut u32,
     msg: &EventMsg,
-) -> u32 {
+) {
     // Track the active turn from lifecycle events first.
-    current_turn = match msg {
-        EventMsg::TurnStarted(p) => p.turn.id.parse::<u32>().ok().unwrap_or(current_turn),
-        EventMsg::TurnCompleted(p) => p.turn.id.parse::<u32>().ok().unwrap_or(current_turn),
-        EventMsg::TurnAborted(p) => p.turn.id.parse::<u32>().ok().unwrap_or(current_turn),
-        _ => current_turn,
+    *current_turn = match msg {
+        EventMsg::TurnStarted(p) => p.turn.id.parse::<u32>().ok().unwrap_or(*current_turn),
+        EventMsg::TurnCompleted(p) => p.turn.id.parse::<u32>().ok().unwrap_or(*current_turn),
+        EventMsg::TurnAborted(p) => p.turn.id.parse::<u32>().ok().unwrap_or(*current_turn),
+        _ => *current_turn,
     };
 
     // A turn boundary (or a compaction) is a flush point: materialize the file
@@ -122,6 +142,55 @@ async fn process_event_msg(
                 rollout.append(thread_id, RolloutItem::TurnItem(params.item.clone())).await
             {
                 tracing::warn!(thread_id, error = %error, "failed to persist turn item to rollout");
+            }
+        }
+        EventMsg::MessageAppended(params) => {
+            // Slice E.2 (D1): conversation message write path. Maps 1:1 to the
+            // rollout TurnContext::MessageAppend line, preserving F3 (id /
+            // created_at). Replaces the old slab-agent store-trait
+            // `insert_thread_message` route.
+            use slab_agent_rollout::TurnContextPayload;
+            if let Err(error) = rollout
+                .append(
+                    thread_id,
+                    RolloutItem::TurnContext(TurnContextPayload::MessageAppend {
+                        turn_index: params.turn_index,
+                        message: params.message.clone(),
+                        id: Some(params.id.clone()),
+                        created_at: Some(params.created_at.clone()),
+                    }),
+                )
+                .await
+            {
+                tracing::warn!(thread_id, error = %error, "failed to persist message append to rollout");
+            }
+        }
+        EventMsg::TurnStateChanged(params) => {
+            // Slice E.2 (D1): turn-state write path. Maps 1:1 to the rollout
+            // TurnContext::TurnState line, preserving F4 (started_at). The input
+            // messages travel as a typed vec (NOT a json blob) so the F6
+            // raw-blob recovery path is dead here — `input_messages_raw` is
+            // always None. Replaces the old slab-agent store-trait
+            // `upsert_turn_state` route.
+            use slab_agent_rollout::TurnContextPayload;
+            if let Err(error) = rollout
+                .append(
+                    thread_id,
+                    RolloutItem::TurnContext(TurnContextPayload::TurnState {
+                        turn_index: params.turn_index,
+                        status: params.status.clone(),
+                        input_messages: params.input_messages.clone(),
+                        tool_specs_json: params.tool_specs_json.clone(),
+                        llm_response_json: params.llm_response_json.clone(),
+                        error: params.error.clone(),
+                        completed_at: params.completed_at.clone(),
+                        started_at: Some(params.started_at.clone()),
+                        input_messages_raw: None,
+                    }),
+                )
+                .await
+            {
+                tracing::warn!(thread_id, error = %error, "failed to persist turn state to rollout");
             }
         }
         EventMsg::ContextCompacted(params) => {
@@ -141,7 +210,7 @@ async fn process_event_msg(
                 removed_messages: params.removed_messages.unwrap_or(0),
                 output_tokens: params.output_tokens.unwrap_or(0),
                 status: params.status.clone().unwrap_or_else(|| "compacted".to_owned()),
-                turn_index: current_turn,
+                turn_index: *current_turn,
             };
             if let Err(error) = rollout.append(thread_id, RolloutItem::Compacted(payload)).await {
                 tracing::warn!(thread_id, error = %error, "failed to persist compaction to rollout");
@@ -173,8 +242,6 @@ async fn process_event_msg(
             );
         }
     }
-
-    current_turn
 }
 
 #[cfg(test)]
@@ -182,7 +249,8 @@ mod tests {
     use super::*;
     use slab_agent::port::AgentNotifyPort;
     use slab_agent::protocol::{
-        ContextCompactedParams, ItemCompletedParams, Turn, TurnCompletedParams, TurnStartedParams,
+        ContextCompactedParams, ErrorEvent, ItemCompletedParams, MessageAppendedParams, Turn,
+        TurnCompletedParams, TurnStartedParams, TurnStateChangedParams,
     };
     use slab_agent_rollout::{RolloutItem, SessionMeta, TurnContextPayload};
 
@@ -365,6 +433,53 @@ mod tests {
         assert!(evs.iter().any(|e| matches!(e, EventMsg::TurnCompleted(_))));
     }
 
+    // Slice E.2 regression guard: under the DEFAULT `EventPersistenceMode::Limited`,
+    // `Error` (and `Warning`) events are persisted as `RolloutItem::EventMsg`
+    // lines via the observer's `should_persist` fallback arm. `Error` is NOT in
+    // the structural `is_persistence_grade` set, so this only works because
+    // `on_event_msg` routes EVERY event to the dedicated persistence channel
+    // (not just the structural subset). Routing only the structural variants
+    // would silently drop Error/Warning from the rollout timeline under Limited
+    // — the exact regression this test pins.
+    //
+    // Mutation that MUST fail: gate routing in `on_event_msg` on
+    // `is_persistence_grade(msg)` again. `Error` is non-structural, so it is
+    // never routed to the persistence channel → the observer never sees it →
+    // `read_events` returns empty → the assertion fails.
+    #[tokio::test]
+    async fn limited_mode_persists_error_event_via_should_persist_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let (rollout, events) = harness(&dir);
+        spawn_rollout_persistence(
+            Arc::clone(&rollout),
+            Arc::clone(&events),
+            "t".to_owned(),
+            EventPersistenceMode::Limited,
+        );
+
+        events
+            .on_event_msg("t", &EventMsg::Error(ErrorEvent::new("boom").with_code("turn_failed")))
+            .await;
+
+        let assertion = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                rollout.flush("t").await.unwrap();
+                if rollout.read_events("t").await.iter().any(|e| matches!(e, EventMsg::Error(_))) {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        assertion.expect("Error event was not persisted under Limited mode");
+
+        let evs = rollout.read_events("t").await;
+        assert!(
+            evs.iter().any(|e| matches!(e, EventMsg::Error(_))),
+            "Limited mode persists Error via the should_persist fallback (non-structural event)"
+        );
+    }
+
     #[tokio::test]
     async fn compacted_marker_turn_gated_on_truncate() {
         // H3 regression: a Compacted marker whose turn is rolled back must be
@@ -536,6 +651,194 @@ mod tests {
         assert_eq!(items[0].turn_index, 0, "M5: turn-0 item attributed to turn 0");
         assert_eq!(items[1].id, "a1");
         assert_eq!(items[1].turn_index, 1, "M5: turn-1 item attributed to turn 1");
+    }
+
+    // P6 — TurnState-anchored attribution (Slice E.2).
+    //
+    // `read_turn_items` advances `current_turn` on ANY `TurnContext` line
+    // (MessageAppend OR TurnState) with a new turn_index. Slice E.2 makes
+    // `TurnStateChanged` the turn-state write path (replacing the slab-agent
+    // store `upsert_turn_state`), so a `TurnStateChanged` alone must anchor
+    // attribution for the items that follow — even with NO `MessageAppend` for
+    // that turn. This test drives exactly that: emit `TurnStateChanged(2)`,
+    // then an `ItemCompleted`, and assert the item lands at turn 2.
+    //
+    // Mutation that MUST fail: change `read_turn_items` to advance
+    // `current_turn` on `TurnItem` instead of `TurnContext` (or skip the
+    // TurnContext branch). Then `current_turn` stays 0 until the first
+    // `TurnItem`, so the item is attributed to turn 0 (wrong) → the
+    // `turn_index == 2` assertion fails. This is the attribution false-green
+    // the TurnContext-advance rule exists to prevent.
+    #[tokio::test]
+    async fn turn_state_changed_alone_anchors_turn_item_attribution() {
+        let dir = tempfile::tempdir().unwrap();
+        let (rollout, events) = harness(&dir);
+        spawn_rollout_persistence(
+            Arc::clone(&rollout),
+            Arc::clone(&events),
+            "t".to_owned(),
+            EventPersistenceMode::Limited,
+        );
+
+        // Seed a turn-0 baseline message so the rollout file is non-empty, then
+        // emit TurnStateChanged(turn=2) — the new write path — and an item.
+        rollout
+            .append(
+                "t",
+                RolloutItem::TurnContext(TurnContextPayload::MessageAppend {
+                    turn_index: 0,
+                    message: user_msg("baseline"),
+                    id: None,
+                    created_at: None,
+                }),
+            )
+            .await
+            .unwrap();
+        events
+            .on_event_msg(
+                "t",
+                &EventMsg::TurnStateChanged(TurnStateChangedParams {
+                    thread_id: "t".to_owned(),
+                    turn_index: 2,
+                    status: "running".to_owned(),
+                    input_messages: vec![user_msg("turn-2-input")],
+                    tool_specs_json: None,
+                    llm_response_json: None,
+                    error: None,
+                    started_at: "2026-01-01T00:00:00Z".to_owned(),
+                    completed_at: None,
+                }),
+            )
+            .await;
+        events
+            .on_event_msg(
+                "t",
+                &EventMsg::ItemCompleted(ItemCompletedParams {
+                    item: assistant_item("a2", "r"),
+                    thread_id: "t".to_owned(),
+                    turn_id: "2".to_owned(),
+                }),
+            )
+            .await;
+
+        let wait = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                rollout.flush("t").await.unwrap();
+                if rollout.read_turn_items("t").await.iter().any(|i| i.id == "a2") {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        wait.expect("observer did not persist the turn item in time");
+
+        let items = rollout.read_turn_items("t").await;
+        let a2 = items.iter().find(|i| i.id == "a2").expect("item a2 present");
+        assert_eq!(
+            a2.turn_index, 2,
+            "TurnStateChanged(2) alone must anchor attribution: item attributed to turn 2"
+        );
+    }
+
+    // Test A (P7) — attribution under the FULLY event-driven write path,
+    // INCLUDING turn 0 of a fresh thread (the SpawnRequest path).
+    //
+    // Slice E.2 routes BOTH the message append AND the item completion through
+    // the same dedicated unbounded persistence mpsc (FIFO ⇒ file order). This
+    // test drives a 2-turn conversation entirely via `on_event_msg` (no direct
+    // rollout writes) — turn 0 of a FRESH thread (the M5 anchor: the user
+    // MessageAppended lands before the turn's ItemCompleted) and turn 1 — and
+    // asserts `read_turn_items` attributes every item to the correct turn AND
+    // `read_messages` retains the user messages.
+    //
+    // Mutations that MUST fail:
+    //  (a) make `read_turn_items` advance `current_turn` on `TurnItem` instead
+    //      of `TurnContext` → the turn-1 user MessageAppended no longer advances
+    //      the turn before the turn-1 item → misattribution (turn-1 item lands
+    //      at turn 0) → the `a1.turn_index == 1` assertion fails.
+    //  (b) revert the persistence channel to the bounded broadcast and flood
+    //      300 persistence-grade events between the MessageAppended and the
+    //      ItemCompleted → the broadcast `Lagged`-drops the MessageAppended →
+    //      `read_messages` loses the user message (the no-Lag guarantee is
+    //      pinned separately by `persistence_channel_delivers_all_events_under_flood_no_lag`).
+    #[tokio::test]
+    async fn event_driven_attribution_includes_turn_zero_of_fresh_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        let (rollout, events) = harness(&dir);
+        spawn_rollout_persistence(
+            Arc::clone(&rollout),
+            Arc::clone(&events),
+            "t".to_owned(),
+            EventPersistenceMode::Limited,
+        );
+
+        for (turn, item_id, user_text) in [(0u32, "a0", "u0"), (1, "a1", "u1")] {
+            // The user MessageAppended (M5 anchor) — emitted BEFORE the turn's
+            // ItemCompleted, exactly as slab-agent's `emit_from` loop does.
+            events
+                .on_event_msg(
+                    "t",
+                    &EventMsg::MessageAppended(MessageAppendedParams {
+                        thread_id: "t".to_owned(),
+                        turn_index: turn,
+                        message: user_msg(user_text),
+                        id: format!("m{turn}"),
+                        created_at: "2026-01-01T00:00:00Z".to_owned(),
+                    }),
+                )
+                .await;
+            events
+                .on_event_msg(
+                    "t",
+                    &EventMsg::ItemCompleted(ItemCompletedParams {
+                        item: assistant_item(item_id, "r"),
+                        thread_id: "t".to_owned(),
+                        turn_id: turn.to_string(),
+                    }),
+                )
+                .await;
+
+            // Poll-until-present: the within-turn guarantee is FIFO (the observer
+            // consumes the ordered mpsc), so each turn's item is durable before
+            // the next turn begins.
+            let wait = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                loop {
+                    rollout.flush("t").await.unwrap();
+                    if rollout.read_turn_items("t").await.iter().any(|i| i.id == item_id) {
+                        return;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+            })
+            .await;
+            wait.expect("observer did not persist the turn item in time");
+        }
+
+        let items = rollout.read_turn_items("t").await;
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items.iter().find(|i| i.id == "a0").unwrap().turn_index,
+            0,
+            "turn-0 item attributed to turn 0"
+        );
+        assert_eq!(
+            items.iter().find(|i| i.id == "a1").unwrap().turn_index,
+            1,
+            "turn-1 item attributed to turn 1 (MessageAppended advanced the turn)"
+        );
+
+        // The user messages survived (no Lag drop on the persistence channel).
+        let messages = rollout.read_messages("t").await;
+        let texts: Vec<String> = messages
+            .iter()
+            .map(|m| match &m.content {
+                slab_types::ConversationMessageContent::Text(t) => t.clone(),
+                _ => String::new(),
+            })
+            .collect();
+        assert!(texts.contains(&"u0".to_owned()), "turn-0 user message retained");
+        assert!(texts.contains(&"u1".to_owned()), "turn-1 user message retained");
     }
 
     // 2e — auto-compaction via maybe_compact IS persisted by the single

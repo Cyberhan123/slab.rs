@@ -30,7 +30,7 @@ use crate::{
     risk::ToolRiskAnalyzer,
     state::ThreadStateMachine,
     tool::{AgentThreadContext, ToolRouter},
-    turn::{TurnExecutionContext, TurnOutcome, execute_turn, persist_thread_message},
+    turn::{TurnExecutionContext, TurnOutcome, emit_message_appended, execute_turn},
 };
 
 // ── Harness-protocol (EventMsg) lifecycle emits ───────────────────────────────
@@ -198,7 +198,7 @@ impl AgentThread {
         mut messages: Vec<ConversationMessage>,
         runtime: AgentThreadRuntime,
         starting_turn_index: u32,
-        persist_messages_from: Option<usize>,
+        emit_from: Option<usize>,
     ) -> Result<String, AgentError> {
         let AgentThreadRuntime {
             llm,
@@ -253,7 +253,7 @@ impl AgentThread {
                 "parent_id": self.parent_id,
                 "depth": self.depth,
                 "starting_turn_index": starting_turn_index,
-                "persist_messages_from": persist_messages_from,
+                "emit_from": emit_from,
                 "config": self.config,
                 "initial_messages": messages,
             }),
@@ -342,9 +342,9 @@ impl AgentThread {
             hook_observation_messages(start_effects.observations),
         );
 
-        if let Some(start) = persist_messages_from {
+        if let Some(start) = emit_from {
             for message in messages.iter().skip(start) {
-                persist_thread_message(store.as_ref(), &thread_id, starting_turn_index, message)
+                emit_message_appended(notify.as_ref(), &thread_id, starting_turn_index, message)
                     .await;
                 record_json(
                     trace.as_ref(),
@@ -395,7 +395,6 @@ impl AgentThread {
                     config: &self.config,
                     llm: llm.as_ref(),
                     tools: tools.as_ref(),
-                    store: store.as_ref(),
                     notify: notify.as_ref(),
                     approval: approval.as_ref(),
                     exec_policy: exec_policy.as_ref(),

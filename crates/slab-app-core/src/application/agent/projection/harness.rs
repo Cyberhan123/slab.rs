@@ -43,6 +43,9 @@ pub fn event_msg_to_notification(msg: EventMsg) -> Option<ServerNotification> {
         }
         EventMsg::ContextCompacting(p) => Some(ServerNotification::ContextCompacting(p)),
         EventMsg::ContextCompacted(p) => Some(ServerNotification::ContextCompacted(p)),
+        // Slice E.2: persistence-grade conversation events. They carry data for
+        // the rollout observer only — no UI notification maps to them.
+        EventMsg::MessageAppended(_) | EventMsg::TurnStateChanged(_) => None,
         EventMsg::Error(_) | EventMsg::Warning(_) | EventMsg::TurnAborted(_) => None,
         // `EventMsg` is `#[non_exhaustive]`; future variants added in slab-agent
         // have no wire-notification mapping yet — drop them rather than failing

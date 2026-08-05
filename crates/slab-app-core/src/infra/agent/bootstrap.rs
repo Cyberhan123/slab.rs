@@ -102,7 +102,7 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         compact,
         Arc::clone(&rollout),
         Arc::clone(&rollout_store)
-            as Arc<dyn crate::domain::services::agent::RolloutConversationReader>,
+            as Arc<dyn crate::domain::services::agent::RolloutConversationStore>,
         trace_dir,
     );
     let runtime = AgentRuntimeReloader::new(

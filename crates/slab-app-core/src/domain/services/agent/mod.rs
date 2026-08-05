@@ -31,27 +31,54 @@ use slab_agent::error::AgentError;
 use slab_agent::port::{
     AgentStorePort, ThreadMessageRecord, ThreadSnapshot, TurnItemRecord, TurnStateRecord,
 };
-use slab_types::ConversationMessage;
+use slab_types::{ConversationMessage, ConversationMessageContent};
+
+use slab_agent_rollout::RolloutStore;
 
 use crate::error::AppCoreError;
 use crate::infra::agent::event_hub::{AgentEventHub, AgentEventMsgSubscription};
 use crate::infra::agent::rollout_persistence;
 
-/// app-core-internal reader for the rollout-native turn-state / turn-item
-/// streams. Slice E moved these reads OFF the slab-agent `AgentStorePort` trait
-/// (slab-agent never calls them in production) and onto this trait so
-/// `HarnessService::list_turn_states` / `list_turn_items` (the `thread/resume`
-/// path) keep a typed, mockable handle without polluting the slab-agent
-/// surface. Implemented by `RolloutBackedAgentStore` (rollout replay is the
-/// only source); mocked in harness tests.
+/// app-core-internal read+write handle over the rollout-native conversation +
+/// turn-state / turn-item streams. Slice E moved the turn-state / turn-item
+/// reads OFF the slab-agent `AgentStorePort` trait (slab-agent never calls them
+/// in production) and onto this trait so `HarnessService::list_turn_states` /
+/// `list_turn_items` (the `thread/resume` path) keep a typed, mockable handle
+/// without polluting the slab-agent surface. Slice E.2 makes this the SOLE
+/// conversation read/write path for app-core-internal callers that do NOT flow
+/// through the slab-agent event stream (notably `single_shot`, which has no
+/// turn loop and emits no `EventMsg` — its out-of-band writes go directly
+/// through `append_message` / `append_turn_state`). slab-agent itself emits
+/// conversation data via `EventMsg` (observed by the rollout persistence
+/// observer); it never touches this trait. Implemented by
+/// `RolloutBackedAgentStore` (rollout replay is the only source); mocked in
+/// harness tests.
 #[async_trait]
-pub(crate) trait RolloutConversationReader: Send + Sync {
+pub(crate) trait RolloutConversationStore: Send + Sync {
     /// Persisted full-fidelity `TurnItem` snapshots for a thread, ordered by
     /// `(turn_index, seq)` for deterministic replay.
     async fn list_turn_items(&self, thread_id: &str) -> Result<Vec<TurnItemRecord>, AgentError>;
 
     /// Persisted turn-state records for a thread ordered by `turn_index`.
     async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError>;
+
+    /// Persisted conversation messages for a thread in replay order (read).
+    async fn list_thread_messages(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<ThreadMessageRecord>, AgentError>;
+
+    /// Append a conversation message out-of-band (single_shot write path; NOT
+    /// the slab-agent turn loop, which emits `MessageAppended` via `EventMsg`).
+    async fn append_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError>;
+
+    /// Append a turn-state snapshot out-of-band (single_shot write path; NOT
+    /// the slab-agent turn loop, which emits `TurnStateChanged` via `EventMsg`).
+    /// Currently exercised by the harness mock + the round-trip test; kept on
+    /// the trait so a future single_shot turn-state write has a home without
+    /// re-polluting the slab-agent surface.
+    #[allow(dead_code)]
+    async fn append_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError>;
 }
 /// Shared core held by both the harness and response services.
 ///
@@ -79,7 +106,9 @@ pub(crate) struct AgentCore {
     /// `thread/resume` path). These reads left the slab-agent `AgentStorePort`
     /// trait; `HarnessService` reaches them through this handle. Backed by the
     /// same `RolloutBackedAgentStore` Arc wired as the runtime store.
-    reader: Arc<dyn RolloutConversationReader>,
+    /// Slice E.2: renamed to `RolloutConversationStore` (read+write); the
+    /// accessor stays `reader()` to avoid touching callers.
+    reader: Arc<dyn RolloutConversationStore>,
     /// The trace directory configured from `agent.debug` (Slice 11b), threaded
     /// in so the harness can apply the SAME root-vs-child `trace_path` rule as
     /// `RolloutBackedAgentStore::upsert_thread` when it reconstructs a
@@ -107,7 +136,7 @@ impl AgentCore {
         events: Arc<AgentEventHub>,
         compact: Arc<dyn CompactPort>,
         rollout: Arc<slab_agent_rollout::RolloutFileStore>,
-        reader: Arc<dyn RolloutConversationReader>,
+        reader: Arc<dyn RolloutConversationStore>,
         trace_dir: Option<PathBuf>,
     ) -> Self {
         Self {
@@ -134,7 +163,7 @@ impl AgentCore {
         &self.store
     }
 
-    pub(crate) fn reader(&self) -> &Arc<dyn RolloutConversationReader> {
+    pub(crate) fn reader(&self) -> &Arc<dyn RolloutConversationStore> {
         &self.reader
     }
 
@@ -190,12 +219,40 @@ impl AgentCore {
     }
 
     /// Append user input to an existing agent thread and run the next turn.
+    ///
+    /// Slice E.2: the conversation read + sort + max-turn + user-content append
+    /// is HOISTED here (out of slab-agent). slab-agent's `resume_thread` receives
+    /// the pre-built message vec + the `emit_from` anchor (index of the first
+    /// new message — the M5 within-turn attribution anchor that slab-agent emits
+    /// as `MessageAppended` before the turn loop).
     pub(crate) async fn send_input(
         &self,
         thread_id: &str,
         content: String,
     ) -> Result<(), AppCoreError> {
-        self.runtime.append_input(thread_id, content).await.map_err(AppCoreError::from)?;
+        let mut records = self.reader().list_thread_messages(thread_id).await?;
+        records.sort_by(|left, right| {
+            left.turn_index
+                .cmp(&right.turn_index)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let starting_turn_index =
+            records.iter().map(|record| record.turn_index).max().map_or(0, |index| index + 1);
+        let mut messages: Vec<ConversationMessage> =
+            records.into_iter().map(|record| record.message).collect();
+        let emit_from = messages.len();
+        messages.push(ConversationMessage {
+            role: "user".to_owned(),
+            content: ConversationMessageContent::Text(content),
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![],
+        });
+        self.runtime
+            .resume_thread(thread_id, messages, starting_turn_index, Some(emit_from))
+            .await
+            .map_err(AppCoreError::from)?;
         self.ensure_rollout_persistence(thread_id);
         Ok(())
     }
@@ -207,7 +264,14 @@ impl AgentCore {
     ) -> Result<RestoredAgentSession, AppCoreError> {
         let thread = self.list_session_threads(session_id).await?.into_iter().next();
         let messages = match thread.as_ref() {
-            Some(thread) => self.list_thread_messages(&thread.id).await?,
+            Some(thread) => {
+                // Slice E.2 (D2): cross-turn barrier — a thread that was active
+                // shortly before restore may still have its observer draining.
+                // Wait for quiescence so the replayed messages reflect the
+                // latest emitted conversation data.
+                self.await_durable(&thread.id).await;
+                self.list_thread_messages(&thread.id).await?
+            }
             None => Vec::new(),
         };
         // response_json persistence was removed — only complete messages and
@@ -229,6 +293,9 @@ impl AgentCore {
     }
 
     /// List persisted messages for a thread in replay order.
+    ///
+    /// Slice E.2: reads now flow through the `RolloutConversationStore` reader
+    /// (rollout is the sole conversation source), not the slab-agent store trait.
     pub(crate) async fn list_thread_messages(
         &self,
         thread_id: &str,
@@ -243,7 +310,7 @@ impl AgentCore {
             return Err(AppCoreError::NotFound(format!("agent thread not found: {thread_id}")));
         }
 
-        self.store
+        self.reader()
             .list_thread_messages(thread_id)
             .await
             .map_err(|e| AppCoreError::Internal(e.to_string()))
@@ -298,5 +365,30 @@ impl AgentCore {
     /// WS fan-out and turn-item persistence.
     pub(crate) fn subscribe_event_msgs(&self, thread_id: &str) -> AgentEventMsgSubscription {
         self.events.subscribe_event_msgs(thread_id)
+    }
+
+    /// Slice E.2 (D2): cross-turn durability barrier. Enqueue a FIFO sentinel on
+    /// the persistence channel and await the observer's reply — which (FIFO
+    /// ordering) means EVERY persistence event emitted for `thread_id` so far
+    /// has been appended + flushed to the rollout. Call this BEFORE any
+    /// cross-turn re-read that must reflect already-emitted events
+    /// (`fork_thread` / `compact_thread` / `rollback_thread` / `restore_session`).
+    ///
+    /// Within a turn, FIFO ordering of the DEDICATED UNBOUNDED persistence mpsc
+    /// is the guarantee (no await needed). ACROSS turns, this barrier closes the
+    /// timing window deterministically: the sentinel fences exactly the events
+    /// already emitted, with no quiescence/timing heuristic (which a slow
+    /// observer would defeat). If no observer is running for the thread (e.g. a
+    /// session restored from disk whose observer never started), there is nothing
+    /// to wait for — just flush the recorder and return. A bounded timeout keeps
+    /// a still-running thread (fork of a live parent) from blocking forever.
+    pub(crate) async fn await_durable(&self, thread_id: &str) {
+        if let Some(rx) = self.events.persistence_barrier(thread_id) {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(10), rx).await;
+        }
+        // Belt-and-suspenders flush of the recorder (the barrier flush already
+        // ran inside the observer; this catches any tail append a concurrent
+        // writer made after the barrier reply).
+        let _ = self.rollout.flush(thread_id).await;
     }
 }

@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
+use tracing::debug;
 use uuid::Uuid;
 
 use slab_agent_tracing::{AgentTraceContext, AgentTraceSink, record_json};
@@ -16,12 +16,13 @@ use crate::{
     error::AgentError,
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
-        AgentNotifyPort, AgentStorePort, ApprovalPort, ExecPolicyPort, LlmPort, LlmStreamObserver,
-        LlmUsage, ParsedToolCall, ThreadMessageRecord, ToolSpec, TurnStateRecord,
+        AgentNotifyPort, ApprovalPort, ExecPolicyPort, LlmPort, LlmStreamObserver, LlmUsage,
+        ParsedToolCall, ToolSpec,
     },
     protocol::{
-        AgentMessageDeltaParams, EventMsg, ItemCompletedParams, ItemStartedParams, ReasoningText,
-        ReasoningTextDeltaParams, TurnItem,
+        AgentMessageDeltaParams, EventMsg, ItemCompletedParams, ItemStartedParams,
+        MessageAppendedParams, ReasoningText, ReasoningTextDeltaParams, TurnItem,
+        TurnStateChangedParams,
     },
     repetition_guard::ToolCallSignature,
     risk::ToolRiskAnalyzer,
@@ -43,7 +44,6 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub config: &'a AgentConfig,
     pub llm: &'a dyn LlmPort,
     pub tools: &'a ToolRouter,
-    pub store: &'a dyn AgentStorePort,
     pub notify: &'a dyn AgentNotifyPort,
     pub approval: &'a dyn ApprovalPort,
     pub exec_policy: &'a dyn ExecPolicyPort,
@@ -92,7 +92,7 @@ pub(crate) async fn execute_turn(
     .await;
     insert_injected_messages(messages, llm_start_effects.injected_messages);
     append_observations(messages, llm_start_effects.observations);
-    persist_turn_state(
+    emit_turn_state_changed(
         &context,
         "running",
         Some(messages.as_slice()),
@@ -158,7 +158,7 @@ pub(crate) async fn execute_turn(
     let response = match response_result {
         Ok(response) => response,
         Err(error) => {
-            persist_turn_state(
+            emit_turn_state_changed(
                 &context,
                 "failed",
                 Some(messages.as_slice()),
@@ -188,7 +188,7 @@ pub(crate) async fn execute_turn(
             "usage": response.usage,
         }),
     );
-    persist_turn_state(
+    emit_turn_state_changed(
         &context,
         "llm_completed",
         Some(messages.as_slice()),
@@ -219,7 +219,7 @@ pub(crate) async fn execute_turn(
         context.consumed_tokens,
         token_usage,
     ) {
-        persist_turn_state(
+        emit_turn_state_changed(
             &context,
             "budget_exhausted",
             Some(messages.as_slice()),
@@ -246,7 +246,7 @@ pub(crate) async fn execute_turn(
 
     if response.tool_calls.is_empty() {
         if let Err(error) = reject_missing_required_tool_call(&context) {
-            persist_turn_state(
+            emit_turn_state_changed(
                 &context,
                 "failed",
                 Some(messages.as_slice()),
@@ -259,7 +259,7 @@ pub(crate) async fn execute_turn(
             return Err(error);
         }
         persist_final_answer(&context, messages, response.content.unwrap_or_default()).await;
-        persist_turn_state(
+        emit_turn_state_changed(
             &context,
             "completed",
             Some(messages.as_slice()),
@@ -302,7 +302,7 @@ pub(crate) async fn execute_turn(
             // summary as the final answer and end the run (alongside the
             // existing `tool_calls.is_empty()` Final path).
             persist_final_answer(&context, messages, completion.summary).await;
-            persist_turn_state(
+            emit_turn_state_changed(
                 &context,
                 "completed",
                 Some(messages.as_slice()),
@@ -323,7 +323,7 @@ pub(crate) async fn execute_turn(
         }
     }
 
-    persist_turn_state(
+    emit_turn_state_changed(
         &context,
         "tool_calls_completed",
         Some(messages.as_slice()),
@@ -494,7 +494,7 @@ async fn persist_final_answer(
         tool_call_id: None,
         tool_calls: vec![],
     };
-    persist_thread_message(context.store, context.thread_id, context.turn_index, &message).await;
+    emit_message_appended(context.notify, context.thread_id, context.turn_index, &message).await;
     record_json(
         context.trace,
         &context.trace_context,
@@ -555,8 +555,8 @@ async fn persist_assistant_tool_request(
         tool_call_id: None,
         tool_calls: assistant_tool_calls,
     };
-    persist_thread_message(
-        context.store,
+    emit_message_appended(
+        context.notify,
         context.thread_id,
         context.turn_index,
         &assistant_message,
@@ -575,25 +575,35 @@ async fn persist_assistant_tool_request(
     messages.push(assistant_message);
 }
 
-pub(crate) async fn persist_thread_message(
-    store: &dyn AgentStorePort,
+/// Slice E.2: emit a conversation message append as a persistence-grade
+/// `MessageAppended` event. The app-core rollout observer lands it in the
+/// rollout true source (`TurnContext::MessageAppend`), replacing the old
+/// slab-agent store-trait `insert_thread_message` route. Carries the original
+/// record `id` + `created_at` (F3) so replay recovers them verbatim.
+pub(crate) async fn emit_message_appended(
+    notify: &dyn AgentNotifyPort,
     thread_id: &str,
     turn_index: u32,
     message: &ConversationMessage,
 ) {
-    let record = ThreadMessageRecord {
-        id: Uuid::new_v4().to_string(),
+    let id = Uuid::new_v4().to_string();
+    let created_at = Utc::now().to_rfc3339();
+    let event = EventMsg::MessageAppended(MessageAppendedParams {
         thread_id: thread_id.to_owned(),
         turn_index,
         message: message.clone(),
-        created_at: Utc::now().to_rfc3339(),
-    };
-    if let Err(error) = store.insert_thread_message(&record).await {
-        warn!(error = %error, thread_id, "failed to persist thread message");
-    }
+        id,
+        created_at,
+    });
+    notify.on_event_msg(thread_id, &event).await;
 }
 
-async fn persist_turn_state(
+/// Slice E.2: emit a turn-state snapshot as a persistence-grade `TurnStateChanged`
+/// event. The app-core rollout observer lands it in the rollout true source
+/// (`TurnContext::TurnState`), replacing the old slab-agent store-trait
+/// `upsert_turn_state` route. Carries the typed input-messages vec directly (so
+/// the F6 raw-blob recovery path is dead here).
+async fn emit_turn_state_changed(
     context: &TurnExecutionContext<'_>,
     status: &str,
     messages: Option<&[ConversationMessage]>,
@@ -602,23 +612,23 @@ async fn persist_turn_state(
     error: Option<&str>,
     completed_at: Option<String>,
 ) {
-    let input_messages_json = messages.and_then(|messages| serde_json::to_string(messages).ok());
     let tool_specs_json = tool_specs.and_then(|tool_specs| serde_json::to_string(tool_specs).ok());
     let llm_response_json = response.and_then(|response| serde_json::to_string(response).ok());
-    let record = TurnStateRecord {
+    let event = EventMsg::TurnStateChanged(TurnStateChangedParams {
         thread_id: context.thread_id.to_owned(),
         turn_index: context.turn_index,
         status: status.to_owned(),
-        input_messages_json,
+        input_messages: messages.unwrap_or(&[]).to_vec(),
         tool_specs_json,
         llm_response_json,
         error: error.map(str::to_owned),
+        // F4: started_at is stamped at emit time (matches the legacy
+        // `persist_turn_state` behavior, which used `Utc::now()` at the persist
+        // call as the turn-start proxy).
         started_at: Utc::now().to_rfc3339(),
         completed_at,
-    };
-    if let Err(error) = context.store.upsert_turn_state(&record).await {
-        warn!(error = %error, thread_id = context.thread_id, "failed to persist turn state");
-    }
+    });
+    context.notify.on_event_msg(context.thread_id, &event).await;
 }
 
 fn insert_injected_messages(

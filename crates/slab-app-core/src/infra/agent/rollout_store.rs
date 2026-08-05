@@ -4,13 +4,16 @@
 //! Slice 4 wired this adapter as the **only** `AgentStorePort` impl in the
 //! agent runtime. Slice E made the rollout JSONL the SOLE source: the legacy
 //! conversation + audit tables were dropped, the SQL read fallback + the startup
-//! backfill were removed, and the `AgentStorePort` trait was slimmed to the
-//! surface slab-agent actually calls in production (thread metadata + the three
-//! conversation/turn methods). Turn-state / turn-item READS moved off the
-//! slab-agent trait entirely (slab-agent does not call them) and onto the
-//! app-core-internal [`RolloutConversationReader`] trait, implemented below.
+//! backfill were removed. Slice E.2 finished the job: the three conversation
+//! methods (`insert_thread_message` / `list_thread_messages` /
+//! `upsert_turn_state`) were REMOVED from `AgentStorePort` (now pure metadata),
+//! and ALL conversation data flows out of slab-agent via its `EventMsg` protocol
+//! (`MessageAppended` / `TurnStateChanged`), landed in rollout by the
+//! persistence observer. The app-core-internal [`RolloutConversationStore`]
+//! trait (read + out-of-band write for the `single_shot` Responses path) is
+//! implemented below.
 //!
-//! # Routing (Slice E — rollout is the only source)
+//! # Routing (Slice E.2 — rollout is the only source)
 //! - **Thread metadata** (`upsert_thread` / `get_thread` / `list_session_threads` /
 //!   `update_thread_status` / `archive_thread`) → always `SqlxStore`
 //!   (`agent_threads` stays the metadata truth source). `upsert_thread` also
@@ -21,13 +24,13 @@
 //!   `backfill_status = "completed"` whose rollout file has gone missing — and,
 //!   when the DB is unavailable, fall back to a best-effort filesystem scan
 //!   (Slice D2a). See [`RolloutBackedAgentStore::list_session_threads_filtered`].
-//! - **Conversation writes/reads** (`insert_thread_message` /
-//!   `upsert_turn_state` / `list_thread_messages`) → rollout only
-//!   (`TurnContext` / `TurnItem`). A missing rollout file replays to an empty
-//!   history (the de-facto behavior of a brand-new thread before its first
-//!   append).
-//! - **Turn-state / turn-item reads** (`list_turn_states` / `list_turn_items`,
-//!   on [`RolloutConversationReader`]) → rollout replay only.
+//! - **Conversation writes** (slab-agent turn loop) → `EventMsg`
+//!   (`MessageAppended` / `TurnStateChanged`) → rollout persistence observer →
+//!   rollout (`TurnContext`). `single_shot` writes out-of-band via
+//!   [`RolloutConversationStore::append_message`] / `append_turn_state`.
+//! - **Conversation + turn-state / turn-item reads**
+//!   (`list_thread_messages` / `list_turn_states` / `list_turn_items`, on
+//!   [`RolloutConversationStore`]) → rollout replay only.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -47,7 +50,7 @@ use slab_agent_rollout::{
 // crate, so the fallback reuses `RolloutFileStore::list_all_session_metas`.
 use slab_types::ConversationMessage;
 
-use crate::domain::services::agent::RolloutConversationReader;
+use crate::domain::services::agent::RolloutConversationStore;
 use crate::infra::db::repository::rollout_index::RolloutIndex;
 
 /// `AgentStorePort` impl that backs reads/writes with the rollout JSONL true
@@ -546,10 +549,39 @@ impl AgentStorePort for RolloutBackedAgentStore {
     async fn archive_thread(&self, id: &str, archived_at: Option<&str>) -> Result<(), AgentError> {
         self.sqlx.archive_thread(id, archived_at).await
     }
+}
 
-    // ── Conversation writes → rollout (sole source since Slice E) ─────────
+// ── Slice E.2: turn-state / turn-item reads AND the conversation read/write
+//    live on the app-core-internal `RolloutConversationStore` trait (slab-agent
+//    does not call them; only `HarnessService::thread/resume` + `single_shot`
+//    do). Rollout replay is the only source. The conversation-write arms are
+//    the SOLE out-of-band write path for `single_shot` (option c): single_shot
+//    has no turn loop and emits no `EventMsg`, so it writes its assistant /
+//    user messages + turn state directly through this trait.
 
-    async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError> {
+#[async_trait]
+impl RolloutConversationStore for RolloutBackedAgentStore {
+    async fn list_turn_items(&self, thread_id: &str) -> Result<Vec<TurnItemRecord>, AgentError> {
+        let _ = self.rollout.flush(thread_id).await;
+        Ok(self.rollout.read_turn_items(thread_id).await)
+    }
+
+    async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError> {
+        let _ = self.rollout.flush(thread_id).await;
+        let lines = read_rollout_lines(&self.rollout.resolve_path(thread_id));
+        Ok(replay_turn_states(thread_id, &lines))
+    }
+
+    async fn list_thread_messages(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
+        // Delegates to the shared read path (also used by the memory pipeline)
+        // so the runtime and the memory model observe the SAME conversation.
+        self.read_thread_messages(thread_id).await
+    }
+
+    async fn append_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError> {
         self.rollout
             .append(
                 &record.thread_id,
@@ -569,7 +601,7 @@ impl AgentStorePort for RolloutBackedAgentStore {
         Ok(())
     }
 
-    async fn upsert_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError> {
+    async fn append_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError> {
         // Deserialize the persisted input-message blob back to the typed list
         // the rollout TurnState carries. Missing/empty → empty vec (the summary
         // baseline arrives via a separate MessageAppend or a later TurnState).
@@ -613,41 +645,6 @@ impl AgentStorePort for RolloutBackedAgentStore {
             .await
             .map_err(|e| AgentError::Store(e.to_string()))?;
         Ok(())
-    }
-
-    // ── Reads → rollout only (sole source since Slice E) ───────────────────
-    //
-    // The flush below runs UNCONDITIONALLY before the read (F2): the recorder
-    // is lazy (it only writes on Persist/Shutdown/Truncate), so without this
-    // flush a freshly-written thread's pending items are not durable and the
-    // rollout read would miss them. The flush is a no-op when no recorder
-    // exists. A missing rollout file replays to an empty history.
-
-    async fn list_thread_messages(
-        &self,
-        thread_id: &str,
-    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
-        // Delegates to the shared read path (also used by the memory pipeline)
-        // so the runtime and the memory model observe the SAME conversation.
-        self.read_thread_messages(thread_id).await
-    }
-}
-
-// ── Slice E: turn-state / turn-item reads live on the app-core-internal
-//    `RolloutConversationReader` trait (slab-agent does not call them; only
-//    `HarnessService::thread/resume` does). Rollout replay is the only source.
-
-#[async_trait]
-impl RolloutConversationReader for RolloutBackedAgentStore {
-    async fn list_turn_items(&self, thread_id: &str) -> Result<Vec<TurnItemRecord>, AgentError> {
-        let _ = self.rollout.flush(thread_id).await;
-        Ok(self.rollout.read_turn_items(thread_id).await)
-    }
-
-    async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError> {
-        let _ = self.rollout.flush(thread_id).await;
-        let lines = read_rollout_lines(&self.rollout.resolve_path(thread_id));
-        Ok(replay_turn_states(thread_id, &lines))
     }
 }
 
@@ -800,7 +797,13 @@ mod tests {
     /// map drives the D2a list ghost-gate (the list-path readability classifier
     /// runs against this mock + the real `RolloutFileStore`).
     struct MockStore {
+        // Slice E.2: the conversation trait methods that read these moved off
+        // `AgentStorePort` (the 3 conversation methods are gone from the trait).
+        // Retained for direct-push seeding in tests; UNREAD since the reader
+        // path now replays the rollout file. Allow dead_code.
+        #[allow(dead_code)]
         messages: std::sync::Mutex<Vec<ThreadMessageRecord>>,
+        #[allow(dead_code)]
         states: std::sync::Mutex<Vec<TurnStateRecord>>,
         backfill: std::sync::Mutex<std::collections::HashMap<String, (String, i64)>>,
         /// When true, `rollout_backfill_status` returns a synthetic SQLite error
@@ -908,37 +911,12 @@ mod tests {
         ) -> Result<(), AgentError> {
             Ok(())
         }
-        async fn insert_thread_message(
-            &self,
-            record: &ThreadMessageRecord,
-        ) -> Result<(), AgentError> {
-            self.messages.lock().unwrap().push(record.clone());
-            Ok(())
-        }
-        async fn list_thread_messages(
-            &self,
-            _thread_id: &str,
-        ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
-            Ok(self.messages.lock().unwrap().clone())
-        }
-        async fn upsert_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError> {
-            let mut states = self.states.lock().unwrap();
-            if let Some(existing) = states
-                .iter_mut()
-                .find(|s| s.thread_id == record.thread_id && s.turn_index == record.turn_index)
-            {
-                *existing = record.clone();
-            } else {
-                states.push(record.clone());
-            }
-            Ok(())
-        }
     }
 
     // Slice E: list_turn_states / list_turn_items moved off `AgentStorePort`
-    // onto the app-core-internal `RolloutConversationReader` trait. The adapter
+    // onto the app-core-internal `RolloutConversationStore` trait. The adapter
     // (`RolloutBackedAgentStore`) implements it above; `MockStore` is never cast
-    // as `Arc<dyn RolloutConversationReader>` (production wires the adapter, not
+    // as `Arc<dyn RolloutConversationStore>` (production wires the adapter, not
     // the SQL mock), so no impl is needed here.
 
     fn user_msg(text: &str) -> ConversationMessage {
@@ -1001,16 +979,18 @@ mod tests {
         // recorder; the file materializes on first write).
         store.upsert_thread(&snapshot("t-new")).await.expect("upsert");
         // Insert a message + a turn item through the adapter.
-        store
-            .insert_thread_message(&ThreadMessageRecord {
+        RolloutConversationStore::append_message(
+            &store,
+            &ThreadMessageRecord {
                 id: "m1".to_owned(),
                 thread_id: "t-new".to_owned(),
                 turn_index: 0,
                 message: user_msg("hello"),
                 created_at: "2026-01-01T00:00:00Z".to_owned(),
-            })
-            .await
-            .expect("insert message");
+            },
+        )
+        .await
+        .expect("insert message");
         // Seed a TurnItem directly through the rollout (Slice E removed the
         // adapter's `insert_turn_item`; production writes TurnItems via the
         // rollout persistence observer, not the store trait).
@@ -1027,7 +1007,9 @@ mod tests {
 
         // No manual flush — the read methods flush before the file_exists check
         // (F2), so the lazy-materialized file is durable in time for the read.
-        let messages = store.list_thread_messages("t-new").await.expect("list messages");
+        let messages = RolloutConversationStore::list_thread_messages(&store, "t-new")
+            .await
+            .expect("list messages");
         assert_eq!(messages.len(), 1, "message read back from rollout");
         assert_eq!(messages[0].message.role, "user");
         assert_eq!(messages[0].turn_index, 0);
@@ -1054,16 +1036,18 @@ mod tests {
         let store = adapter(Arc::new(MockStore::new()), Arc::clone(&rollout));
 
         store.upsert_thread(&snapshot("t-noflush")).await.expect("upsert");
-        store
-            .insert_thread_message(&ThreadMessageRecord {
+        RolloutConversationStore::append_message(
+            &store,
+            &ThreadMessageRecord {
                 id: "msg-9".to_owned(),
                 thread_id: "t-noflush".to_owned(),
                 turn_index: 0,
                 message: user_msg("payload"),
                 created_at: "2026-02-02T00:00:00Z".to_owned(),
-            })
-            .await
-            .expect("insert message");
+            },
+        )
+        .await
+        .expect("insert message");
         // Seed a TurnItem directly through the rollout (Slice E removed the
         // adapter's `insert_turn_item`).
         rollout
@@ -1078,7 +1062,9 @@ mod tests {
             .expect("append turn item");
 
         // NO manual flush anywhere below — mirrors production.
-        let messages = store.list_thread_messages("t-noflush").await.expect("list messages");
+        let messages = RolloutConversationStore::list_thread_messages(&store, "t-noflush")
+            .await
+            .expect("list messages");
         assert_eq!(messages.len(), 1, "read hole fixed: readable without manual flush");
         // F3: the carried record id + created_at are recovered verbatim.
         assert_eq!(messages[0].id, "msg-9", "F3: original message id recovered");
@@ -1115,26 +1101,30 @@ mod tests {
         let store = adapter(Arc::new(MockStore::new()), Arc::clone(&rollout));
 
         store.upsert_thread(&snapshot("t-skip")).await.expect("upsert");
-        store
-            .insert_thread_message(&ThreadMessageRecord {
+        RolloutConversationStore::append_message(
+            &store,
+            &ThreadMessageRecord {
                 id: "keep-1".to_owned(),
                 thread_id: "t-skip".to_owned(),
                 turn_index: 0,
                 message: user_msg("keep1"),
                 created_at: "2026-03-03T00:00:00Z".to_owned(),
-            })
-            .await
-            .expect("insert keep1");
-        store
-            .insert_thread_message(&ThreadMessageRecord {
+            },
+        )
+        .await
+        .expect("insert keep1");
+        RolloutConversationStore::append_message(
+            &store,
+            &ThreadMessageRecord {
                 id: "keep-2".to_owned(),
                 thread_id: "t-skip".to_owned(),
                 turn_index: 0,
                 message: user_msg("keep2"),
                 created_at: "2026-03-03T00:00:00Z".to_owned(),
-            })
-            .await
-            .expect("insert keep2");
+            },
+        )
+        .await
+        .expect("insert keep2");
 
         // Append a skipped Compacted marker exactly as the observer writes it
         // (status preserved from slab-agent's emit_compacted_skipped; empty
@@ -1154,7 +1144,9 @@ mod tests {
             .await
             .expect("append skipped compacted");
 
-        let messages = store.list_thread_messages("t-skip").await.expect("list messages");
+        let messages = RolloutConversationStore::list_thread_messages(&store, "t-skip")
+            .await
+            .expect("list messages");
         assert_eq!(
             messages.len(),
             2,
@@ -1180,8 +1172,9 @@ mod tests {
         store.upsert_thread(&snapshot("t-state")).await.expect("upsert");
         let input = vec![user_msg("in")];
         let input_json = serde_json::to_string(&input).unwrap();
-        store
-            .upsert_turn_state(&TurnStateRecord {
+        RolloutConversationStore::append_turn_state(
+            &store,
+            &TurnStateRecord {
                 thread_id: "t-state".to_owned(),
                 turn_index: 7,
                 status: "completed".to_owned(),
@@ -1191,9 +1184,10 @@ mod tests {
                 error: None,
                 started_at: "2026-04-04T00:00:00Z".to_owned(),
                 completed_at: Some("2026-04-04T00:00:05Z".to_owned()),
-            })
-            .await
-            .expect("upsert turn state");
+            },
+        )
+        .await
+        .expect("upsert turn state");
 
         let states = store.list_turn_states("t-state").await.expect("list states");
         assert_eq!(states.len(), 1);
@@ -1219,8 +1213,9 @@ mod tests {
 
         store.upsert_thread(&snapshot("t-bad")).await.expect("upsert");
         let malformed = "{not valid json";
-        store
-            .upsert_turn_state(&TurnStateRecord {
+        RolloutConversationStore::append_turn_state(
+            &store,
+            &TurnStateRecord {
                 thread_id: "t-bad".to_owned(),
                 turn_index: 1,
                 status: "running".to_owned(),
@@ -1230,9 +1225,10 @@ mod tests {
                 error: None,
                 started_at: "2026-05-05T00:00:00Z".to_owned(),
                 completed_at: None,
-            })
-            .await
-            .expect("upsert turn state");
+            },
+        )
+        .await
+        .expect("upsert turn state");
 
         let states = store.list_turn_states("t-bad").await.expect("list states");
         assert_eq!(states.len(), 1);

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use super::item::TurnItem;
 use super::thread::Thread;
 use super::turn::Turn;
+use slab_types::ConversationMessage;
 
 // ---- lifecycle ----
 
@@ -93,6 +94,57 @@ pub struct ContextCompactedParams {
     pub removed_messages: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u32>,
+}
+
+// ---- Slice E.2: persistence-grade conversation events ----
+//
+// These two variants carry conversation data (a message append / a turn-state
+// snapshot) out of slab-agent via the `EventMsg` protocol so the app-core
+// rollout persistence observer can land it in the rollout true source — the
+// sole conversation write path once the slab-agent `AgentStorePort` conversation
+// methods are removed. They are NOT UI notifications (the projection maps them
+// to `None`); they are persistence-only. slab-agent's existing `Turn*` lifecycle
+// events carry no TurnState fields, so dedicated variants are required.
+
+/// A conversation message was appended to a thread (user / injected /
+/// assistant / tool-result). Carries the full `ThreadMessageRecord` shape so the
+/// observer can build a `TurnContext::MessageAppend` rollout line preserving
+/// F3 (the original record `id` + `created_at`).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageAppendedParams {
+    pub thread_id: String,
+    pub turn_index: u32,
+    pub message: ConversationMessage,
+    /// Original record id (F3). Carried through so replay recovers the React
+    /// key instead of a synthetic `{thread_id}-r{seq}`.
+    pub id: String,
+    /// RFC 3339 creation timestamp (F3).
+    pub created_at: String,
+}
+
+/// A turn-state snapshot was upserted (running / llm_completed / completed /
+/// failed / ...). Carries the full `TurnStateRecord` shape so the observer can
+/// build a `TurnContext::TurnState` rollout line. The input messages travel as
+/// a typed vec (NOT a json blob), so the F6 raw-blob recovery path is dead for
+/// this event — `input_messages_raw` is intentionally absent.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnStateChangedParams {
+    pub thread_id: String,
+    pub turn_index: u32,
+    pub status: String,
+    pub input_messages: Vec<ConversationMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_specs_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_response_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// RFC 3339 turn-start timestamp (F4).
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
 }
 
 // ---- items ----

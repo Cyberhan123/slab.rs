@@ -2,9 +2,7 @@
 
 use async_trait::async_trait;
 use slab_agent::port::ThreadStatus;
-use slab_agent::port::{
-    AgentStorePort, ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, TurnStateRecord,
-};
+use slab_agent::port::{AgentStorePort, ThreadListFilter, ThreadSnapshot};
 
 use super::SqlxStore;
 
@@ -198,45 +196,15 @@ impl AgentStorePort for SqlxStore {
         Ok(())
     }
 
-    // ── Conversation surface (Slice E) ─────────────────────────────────────
-    //
-    // The legacy `agent_thread_messages` / `agent_turn_states` / `agent_turn_items`
-    // tables were DROPPED in Slice E — rollout is the only conversation/turn
-    // source. These three methods remain on `AgentStorePort` (required, no
-    // default, so the rollout adapter is forced to provide real impls), but
-    // `SqlxStore` is only the METADATA delegate inside the rollout adapter now,
-    // so it never serves conversation reads/writes. The bodies therefore return
-    // a loud error instead of executing SQL against the dropped tables: a
-    // future code path that accidentally wires `SqlxStore` as the conversation
-    // store fails immediately rather than silently no-opping or hitting a
-    // `no such table` runtime error deep in a turn.
-
-    async fn insert_thread_message(
-        &self,
-        _record: &ThreadMessageRecord,
-    ) -> Result<(), slab_agent::AgentError> {
-        Err(slab_agent::AgentError::Store(
-            "agent_thread_messages was dropped in Slice E; rollout adapter is the only conversation writer".to_owned(),
-        ))
-    }
-
-    async fn list_thread_messages(
-        &self,
-        _thread_id: &str,
-    ) -> Result<Vec<ThreadMessageRecord>, slab_agent::AgentError> {
-        Err(slab_agent::AgentError::Store(
-            "agent_thread_messages was dropped in Slice E; rollout adapter is the only conversation reader".to_owned(),
-        ))
-    }
-
-    async fn upsert_turn_state(
-        &self,
-        _record: &TurnStateRecord,
-    ) -> Result<(), slab_agent::AgentError> {
-        Err(slab_agent::AgentError::Store(
-            "agent_turn_states was dropped in Slice E; rollout adapter is the only turn-state writer".to_owned(),
-        ))
-    }
+    // Slice E.2: the conversation surface (`insert_thread_message` /
+    // `list_thread_messages` / `upsert_turn_state`) was REMOVED from
+    // `AgentStorePort` — the trait is now pure metadata. The legacy
+    // `agent_thread_messages` / `agent_turn_states` / `agent_turn_items` tables
+    // were DROPPED in Slice E; rollout is the sole conversation/turn source.
+    // slab-agent emits conversation data via `EventMsg` (`MessageAppended` /
+    // `TurnStateChanged`); the app-core observer lands it in rollout. The
+    // `single_shot` Responses-API path writes out-of-band through the
+    // app-core-internal `RolloutConversationStore::append_*` trait.
 
     async fn archive_thread(
         &self,

@@ -22,9 +22,9 @@ pub(crate) struct AgentRuntimeReloader {
     /// `rollout_store` (the production read path).
     rollout: Arc<RolloutFileStore>,
     /// Shared rollout-backed store (the production read path). A reloaded memory
-    /// pipeline reads the conversation through this — the SAME `list_thread_messages`
-    /// path the runtime uses — so the memory model and the runtime never diverge
-    /// (closes the G5 orphan window for memory).
+    /// pipeline reads the conversation through this — the SAME
+    /// `read_thread_messages` path the runtime uses — so the memory model and
+    /// the runtime never diverge (closes the G5 orphan window for memory).
     rollout_store: Arc<RolloutBackedAgentStore>,
 }
 

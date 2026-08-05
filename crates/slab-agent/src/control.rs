@@ -11,7 +11,7 @@ use tracing::warn;
 
 use chrono::Utc;
 use slab_agent_tracing::{AgentTraceSink, NoopAgentTraceSink};
-use slab_types::{ConversationMessage, ConversationMessageContent};
+use slab_types::ConversationMessage;
 use uuid::Uuid;
 
 use crate::{
@@ -44,7 +44,7 @@ struct SpawnRequest {
     config: AgentConfig,
     messages: Vec<ConversationMessage>,
     starting_turn_index: u32,
-    persist_messages_from: Option<usize>,
+    emit_from: Option<usize>,
 }
 
 /// Defensive upper bound on parent-chain walks (e.g. [`crate::thread::resolve_root_thread_id`]).
@@ -265,7 +265,7 @@ impl AgentControl {
             config,
             messages,
             starting_turn_index: 0,
-            persist_messages_from: Some(0),
+            emit_from: Some(0),
         })
         .await
     }
@@ -292,7 +292,7 @@ impl AgentControl {
             config,
             messages,
             starting_turn_index: 0,
-            persist_messages_from: Some(0),
+            emit_from: Some(0),
         })
         .await
     }
@@ -418,8 +418,23 @@ impl AgentControl {
         self.wait_for_persisted_terminal_snapshot(thread_id).await
     }
 
-    /// Append user input to a persisted thread and run another agent turn.
-    pub async fn send_input(&self, thread_id: &str, content: String) -> Result<(), AgentError> {
+    /// Resume a persisted thread with a pre-built message history and run the
+    /// next turn.
+    ///
+    /// Slice E.2: the conversation read + sort + max-turn + user-content append
+    /// was HOISTED into the app-core caller (`AgentCore::send_input`); slab-agent
+    /// no longer reads conversation data (it leaves via the `EventMsg` protocol
+    /// only). This entry point receives the FULL message vec (history + the new
+    /// user message already appended), the `starting_turn_index`, and `emit_from`
+    /// — the index of the first NEW message to emit as `MessageAppended` before
+    /// the turn loop (the M5 within-turn attribution anchor).
+    pub async fn resume_thread(
+        &self,
+        thread_id: &str,
+        messages: Vec<ConversationMessage>,
+        starting_turn_index: u32,
+        emit_from: Option<usize>,
+    ) -> Result<(), AgentError> {
         if self.threads.read().await.contains_key(thread_id) {
             return Err(AgentError::ThreadBusy(thread_id.to_owned()));
         }
@@ -438,24 +453,6 @@ impl AgentControl {
         let config = serde_json::from_str::<AgentConfig>(&snapshot.config_json).map_err(|e| {
             AgentError::Internal(format!("failed to deserialize agent config: {e}"))
         })?;
-        let mut records = self.store.list_thread_messages(thread_id).await?;
-        records.sort_by(|left, right| {
-            left.turn_index
-                .cmp(&right.turn_index)
-                .then_with(|| left.created_at.cmp(&right.created_at))
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        let starting_turn_index =
-            records.iter().map(|record| record.turn_index).max().map_or(0, |index| index + 1);
-        let mut messages = records.into_iter().map(|record| record.message).collect::<Vec<_>>();
-        let persist_from = messages.len();
-        messages.push(ConversationMessage {
-            role: "user".to_owned(),
-            content: ConversationMessageContent::Text(content),
-            name: None,
-            tool_call_id: None,
-            tool_calls: vec![],
-        });
 
         let (thread, status_rx) = AgentThread::new_with_id(
             snapshot.id.clone(),
@@ -464,8 +461,7 @@ impl AgentControl {
             snapshot.depth,
             config,
         );
-        self.start_thread(thread, status_rx, messages, starting_turn_index, Some(persist_from))
-            .await?;
+        self.start_thread(thread, status_rx, messages, starting_turn_index, emit_from).await?;
         Ok(())
     }
 
@@ -603,12 +599,11 @@ impl AgentControl {
             config,
             messages,
             starting_turn_index,
-            persist_messages_from,
+            emit_from,
         } = request;
 
         let (thread, status_rx) = AgentThread::new(session_id, parent_id, depth, config);
-        self.start_thread(thread, status_rx, messages, starting_turn_index, persist_messages_from)
-            .await
+        self.start_thread(thread, status_rx, messages, starting_turn_index, emit_from).await
     }
 
     async fn start_thread(
@@ -617,7 +612,7 @@ impl AgentControl {
         status_rx: watch::Receiver<ThreadStatus>,
         messages: Vec<ConversationMessage>,
         starting_turn_index: u32,
-        persist_messages_from: Option<usize>,
+        emit_from: Option<usize>,
     ) -> Result<String, AgentError> {
         // Memory circuit breaker (INFRA-05): pause spawns while the host reports
         // process RSS above the configured threshold.
@@ -672,8 +667,7 @@ impl AgentControl {
         // into the task and dropped on completion or abort.
         let join_handle = tokio::spawn(async move {
             let _permit = permit;
-            let result =
-                thread.run(messages, runtime, starting_turn_index, persist_messages_from).await;
+            let result = thread.run(messages, runtime, starting_turn_index, emit_from).await;
             if let Err(ref e) = result {
                 warn!(thread_id = %id_cleanup, error = %e, "agent thread finished with error");
             }

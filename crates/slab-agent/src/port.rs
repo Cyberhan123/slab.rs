@@ -303,18 +303,6 @@ pub trait AgentStorePort: Send + Sync {
         completion_text: Option<&str>,
     ) -> Result<(), AgentError>;
 
-    /// Insert a conversation message for a thread.
-    async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError>;
-
-    /// Return persisted conversation messages for a thread in replay order.
-    async fn list_thread_messages(
-        &self,
-        thread_id: &str,
-    ) -> Result<Vec<ThreadMessageRecord>, AgentError>;
-
-    /// Insert or update detailed state for a single agent turn.
-    async fn upsert_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError>;
-
     /// Mark a thread archived (`Some`) or restore it (`None`).
     ///
     /// Hosts that do not support archiving can keep this default no-op.

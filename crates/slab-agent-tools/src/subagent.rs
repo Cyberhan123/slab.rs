@@ -276,7 +276,7 @@ mod tests {
 
     use slab_agent::port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-        ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec, TurnStateRecord,
+        ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec,
     };
     use slab_agent::{AgentControlLimits, ToolContext, ToolRouter, WorkspaceRef};
     use slab_agent_tracing::AgentTraceContext;
@@ -309,6 +309,10 @@ mod tests {
     #[derive(Default)]
     struct MemoryStore {
         threads: Mutex<HashMap<String, ThreadSnapshot>>,
+        // Slice E.2: the slab-agent `insert_thread_message` trait method is gone;
+        // retained for direct-push seeding in tests. Unread — tests verify
+        // emission via `RecordingNotify`.
+        #[allow(dead_code)]
         messages: Mutex<Vec<ThreadMessageRecord>>,
     }
 
@@ -366,25 +370,6 @@ mod tests {
             snapshot.completion_text = completion_text.map(str::to_owned);
             Ok(())
         }
-
-        async fn insert_thread_message(
-            &self,
-            record: &ThreadMessageRecord,
-        ) -> Result<(), AgentError> {
-            self.messages.lock().unwrap().push(record.clone());
-            Ok(())
-        }
-
-        async fn list_thread_messages(
-            &self,
-            _thread_id: &str,
-        ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
-            Ok(Vec::new())
-        }
-
-        async fn upsert_turn_state(&self, _record: &TurnStateRecord) -> Result<(), AgentError> {
-            Ok(())
-        }
     }
 
     struct NoopNotify;
@@ -392,6 +377,55 @@ mod tests {
     #[async_trait]
     impl AgentNotifyPort for NoopNotify {
         async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
+    }
+
+    /// Slice E.2: a notify port that records emitted `EventMsg`s so tests can
+    /// verify emission (slab-agent no longer writes conversation data to the
+    /// store — it emits `MessageAppended` / `TurnStateChanged` events).
+    #[derive(Default)]
+    struct RecordingNotify {
+        events: std::sync::Mutex<Vec<slab_agent::protocol::EventMsg>>,
+    }
+
+    #[async_trait]
+    impl AgentNotifyPort for RecordingNotify {
+        async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
+
+        async fn on_event_msg(&self, _thread_id: &str, msg: &slab_agent::protocol::EventMsg) {
+            self.events.lock().unwrap().push(msg.clone());
+        }
+    }
+
+    #[async_trait]
+    impl ApprovalPort for RecordingNotify {
+        async fn request_approval(
+            &self,
+            _thread_id: &str,
+            _call_id: &str,
+            _tool_name: &str,
+            _descriptor: &slab_agent::OperationDescriptor,
+            _risk: Option<slab_agent::ToolRiskAssessment>,
+        ) -> ApprovalDecision {
+            ApprovalDecision::Approved(slab_agent::ApprovalScope::RunOnce)
+        }
+    }
+
+    impl RecordingNotify {
+        /// Emitted `MessageAppended` conversation messages for a thread.
+        fn emitted_messages(&self, thread_id: &str) -> Vec<slab_types::ConversationMessage> {
+            use slab_agent::protocol::EventMsg;
+            self.events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|event| match event {
+                    EventMsg::MessageAppended(p) if p.thread_id == thread_id => {
+                        Some(p.message.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
     }
 
     #[async_trait]
@@ -459,12 +493,12 @@ mod tests {
 
         let store = Arc::new(MemoryStore::default());
         store.insert_parent(1);
-        let notify = Arc::new(NoopNotify);
+        let notify = Arc::new(RecordingNotify::default());
         let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
             Arc::new(FinalLlm),
             store.clone(),
             notify.clone(),
-            notify,
+            notify.clone(),
             Arc::new(ToolRouter::new()),
             AgentControlLimits { max_threads: 4, max_depth: 4 },
             Vec::new(),
@@ -498,15 +532,14 @@ mod tests {
         assert_eq!(artifact["completion_text"], "child result");
 
         let child_id = value["child_thread_id"].as_str().expect("child id");
-        let child_prompt = {
-            let messages = store.messages.lock().unwrap();
-            messages
-                .iter()
-                .find(|record| record.thread_id == child_id && record.message.role == "user")
-                .expect("child prompt")
-                .message
-                .rendered_text()
-        };
+        // Slice E.2: slab-agent emits `MessageAppended` (no store writes); read
+        // the emitted child-prompt message from the recording notify.
+        let child_prompt = notify
+            .emitted_messages(child_id)
+            .iter()
+            .find(|message| message.role == "user")
+            .expect("emitted child prompt")
+            .rendered_text();
         assert!(child_prompt.contains("Objective:\nsummarize"));
         assert!(child_prompt.contains("workspace-relative scope: src"));
         assert!(child_prompt.contains("Required output format:"));

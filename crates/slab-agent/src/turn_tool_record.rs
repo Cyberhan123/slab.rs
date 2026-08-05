@@ -11,7 +11,7 @@ use slab_types::ConversationMessage;
 
 use crate::{
     port::ParsedToolCall,
-    turn::{TurnExecutionContext, persist_thread_message},
+    turn::{TurnExecutionContext, emit_message_appended},
 };
 
 pub(crate) async fn record_failed_tool_call(
@@ -60,7 +60,7 @@ pub(crate) async fn persist_tool_message_record(
     message: ConversationMessage,
     messages: &mut Vec<ConversationMessage>,
 ) {
-    persist_thread_message(context.store, context.thread_id, context.turn_index, &message).await;
+    emit_message_appended(context.notify, context.thread_id, context.turn_index, &message).await;
     record_json(
         context.trace,
         &context.trace_context,

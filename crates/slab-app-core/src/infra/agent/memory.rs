@@ -700,10 +700,10 @@ async fn record_memory_usage_in_pool(
 
 /// Build the phase1 input for a candidate thread, reading the conversation
 /// through the SAME production read path the agent runtime uses
-/// ([`RolloutBackedAgentStore::read_thread_messages`], which
-/// [`AgentStorePort::list_thread_messages`](slab_agent::port::AgentStorePort::list_thread_messages)
-/// also delegates to). The memory model and the runtime therefore share ONE
-/// code path and can never diverge on what the conversation was.
+/// ([`RolloutBackedAgentStore::read_thread_messages`], which the app-core
+/// `RolloutConversationStore::list_thread_messages` trait method also delegates
+/// to). The memory model and the runtime therefore share ONE code path and can
+/// never diverge on what the conversation was.
 ///
 /// Slice E: rollout is the ONLY source, so this always replays the rollout file
 /// and stamps the real on-disk `rollout_path`. A missing rollout file (a
