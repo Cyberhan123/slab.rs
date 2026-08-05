@@ -48,7 +48,7 @@ describe("useWorkspaceEditorDirty", () => {
       },
     }
     const { result, rerender } = await renderHook(
-      ({ props }: { props: DirtyProps }) => useWorkspaceEditorDirty(props),
+      (initialProps?: { props: DirtyProps }) => useWorkspaceEditorDirty(initialProps!.props),
       { initialProps: initial },
     )
 
@@ -74,7 +74,7 @@ describe("useWorkspaceEditorDirty", () => {
       },
     }
     const { result, act } = await renderHook(
-      ({ props }: { props: DirtyProps }) => useWorkspaceEditorDirty(props),
+      (initialProps?: { props: DirtyProps }) => useWorkspaceEditorDirty(initialProps!.props),
       { initialProps: initial },
     )
 
@@ -106,7 +106,7 @@ describe("useWorkspaceEditorDirty", () => {
       },
     }
     const { result, rerender, act } = await renderHook(
-      ({ props }: { props: DirtyProps }) => useWorkspaceEditorDirty(props),
+      (initialProps?: { props: DirtyProps }) => useWorkspaceEditorDirty(initialProps!.props),
       { initialProps: initial },
     )
 

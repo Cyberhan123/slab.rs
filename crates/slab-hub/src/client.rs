@@ -129,6 +129,33 @@ impl HubClient {
         .await
     }
 
+    /// Returns the local cache path for a file if already present — cache-only,
+    /// no network, no download. Tries each enabled provider's cache; the first
+    /// hit wins. Used to skip re-downloading when the file already exists (e.g.
+    /// downloaded by the hf CLI or a previous run that wrote elsewhere).
+    pub async fn cached_file_path(&self, repo_id: &str, filename: &str) -> Option<PathBuf> {
+        let providers = match self.enabled_providers() {
+            Ok(providers) => providers,
+            Err(_) => return None,
+        };
+        for provider in providers {
+            let path = match provider {
+                #[cfg(feature = "provider-hf-hub")]
+                HubProvider::HfHub => self.cached_file_with_hf_hub(repo_id, filename).await,
+                #[cfg(feature = "provider-models-cat")]
+                HubProvider::ModelsCat => self.cached_file_with_models_cat(repo_id, filename).await,
+                #[cfg(feature = "provider-huggingface-hub-rust")]
+                HubProvider::HuggingfaceHubRust => None,
+                #[allow(unreachable_patterns)]
+                _ => None,
+            };
+            if path.is_some() {
+                return path;
+            }
+        }
+        None
+    }
+
     pub(crate) async fn run_with_provider_fallback<T, F, Fut>(
         &self,
         mut operation: F,

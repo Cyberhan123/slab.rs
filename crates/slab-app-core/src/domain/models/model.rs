@@ -670,6 +670,13 @@ pub struct ModelConfigDocument {
 pub struct UpdateModelConfigSelectionCommand {
     pub selected_preset_id: Option<String>,
     pub selected_variant_id: Option<String>,
+    /// Load parameter overrides as a raw JSON value (validated as an object
+    /// with whitelisted keys in `update_model_config_selection`). `None` keeps
+    /// stored overrides unchanged; `Some(Value::Object({}))` clears them.
+    pub load_overrides: Option<serde_json::Value>,
+    /// Inference parameter overrides, same shape and semantics as
+    /// `load_overrides`.
+    pub inference_overrides: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default)]

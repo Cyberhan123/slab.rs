@@ -67,6 +67,17 @@ impl HubClient {
         })
     }
 
+    /// Cache-only lookup (no network, no download). Returns the local path if
+    /// the file is already in the models-cat cache, `None` otherwise.
+    pub(crate) async fn cached_file_with_models_cat(
+        &self,
+        repo_id: &str,
+        filename: &str,
+    ) -> Option<PathBuf> {
+        let repo = self.models_cat_repo(repo_id);
+        find_models_cat_downloaded_path(&repo, filename).ok().flatten()
+    }
+
     fn models_cat_repo(&self, repo_id: &str) -> models_cat::Repo {
         let mut repo = models_cat::Repo::new_model(repo_id);
         if let Some(cache_dir) = self.cache_dir.as_ref() {

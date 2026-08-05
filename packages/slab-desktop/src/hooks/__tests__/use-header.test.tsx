@@ -185,7 +185,7 @@ describe('useHeader', () => {
 
     // Raw DOM click on a disabled button: spec-mandated no-op (dispatches no
     // click event), and avoids the Locator click's actionability auto-wait.
-    historyButton.element().click();
+    (historyButton.element() as HTMLElement).click();
 
     expect(onHistoryClick).not.toHaveBeenCalled();
   });

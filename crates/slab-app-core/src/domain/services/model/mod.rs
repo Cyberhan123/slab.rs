@@ -24,6 +24,7 @@ use crate::domain::models::{
     ModelConfigSectionView, ModelConfigSourceSummary, ModelConfigValueType, UnifiedModel,
 };
 use crate::error::AppCoreError;
+use crate::infra::db::ModelConfigStateStore;
 use crate::infra::model_packs;
 
 use config_document::{
@@ -52,6 +53,7 @@ impl ModelService {
         runtime::resolve_local_backend_from_model(&model)?;
 
         let context = self.load_model_pack_context(id).await?;
+        let config_state = self.model_state.store().get_model_config_state(id).await?;
         let selection = self.resolve_model_pack_selection(id, &context.resolved).await?;
         let command =
             pack::build_model_command_from_pack_context(&context, &selection.selected_preset)?;
@@ -69,6 +71,17 @@ impl ModelService {
                     &mut bridge,
                     context.persisted.as_ref(),
                     selection.selected_preset.variant.effective_sources.first(),
+                );
+                let load_overrides = pack::parse_overrides_map(
+                    config_state.as_ref().and_then(|state| state.load_overrides.as_deref()),
+                );
+                let inference_overrides = pack::parse_overrides_map(
+                    config_state.as_ref().and_then(|state| state.inference_overrides.as_deref()),
+                );
+                pack::apply_user_load_overrides_to_bridge(&mut bridge, load_overrides.as_ref());
+                pack::apply_user_inference_overrides_to_bridge(
+                    &mut bridge,
+                    inference_overrides.as_ref(),
                 );
                 let source_summary = build_model_config_source_summary(&bridge.model_spec.source);
                 let resolved_load_spec = self
@@ -369,8 +382,22 @@ impl ModelService {
             _ => {}
         }
 
-        let inference_fields =
+        // Whitelisted load fields are user-editable (overrides persisted via
+        // update_model_config_selection). chat_template / gbnf stay locked
+        // (asset-ref vs. raw-source gap, deferred to a follow-up).
+        for field in &mut load_fields {
+            if is_user_editable_load_path(&field.path) {
+                field.editable = true;
+                field.locked = false;
+            }
+        }
+
+        let mut inference_fields =
             build_model_config_inference_fields(resolved, resolved_inference_spec);
+        for field in &mut inference_fields {
+            field.editable = true;
+            field.locked = false;
+        }
 
         let advanced_fields = vec![
             build_model_config_field(
@@ -524,6 +551,24 @@ impl ModelService {
             ),
         ])
     }
+}
+
+fn is_user_editable_load_path(path: &str) -> bool {
+    matches!(
+        path,
+        "load.num_workers"
+            | "load.context_length"
+            | "load.diffusion_model_path"
+            | "load.vae_path"
+            | "load.taesd_path"
+            | "load.clip_l_path"
+            | "load.clip_g_path"
+            | "load.t5xxl_path"
+            | "load.flash_attn"
+            | "load.offload_params_to_cpu"
+            | "load.vae_device"
+            | "load.clip_device"
+    )
 }
 
 #[cfg(test)]

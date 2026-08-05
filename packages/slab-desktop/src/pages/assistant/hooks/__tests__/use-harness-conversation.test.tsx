@@ -292,7 +292,7 @@ describe("useHarnessConversation", () => {
 
   it("resets approval + live-output state when the session changes", async () => {
     const { result, rerender, unmount } = await renderHook(
-      ({ sid }) => useHarnessConversation(sid, "m1"),
+      (props?: { sid: string | undefined }) => useHarnessConversation(props?.sid, "m1"),
       {
         initialProps: { sid: "s1" as string | undefined },
       },

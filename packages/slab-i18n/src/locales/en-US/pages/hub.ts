@@ -128,7 +128,7 @@ export const hub = {
   sheet: {
     title: 'Model config document',
     description:
-      'Pack declarations stay as the source of truth. You can only switch preset and variant here; backend fields remain locked and read-only.',
+      'Pack declarations are the baseline. Switch preset and variant, or edit load and inference parameters directly; load-parameter changes need a model reload to take effect.',
     loading: 'Loading model config document...',
     failedLoadTitle: 'Failed to load enhancement config',
     selectionWarningTitle: 'Selection warning',
@@ -142,6 +142,8 @@ export const hub = {
       close: 'Close',
       saveSelection: 'Save selection',
       packLocked: 'Pack locked',
+      edited: 'Edited',
+      resetToPack: 'Reset to default',
       notSet: 'Not set',
       enabled: 'Enabled',
       disabled: 'Disabled',
@@ -153,6 +155,13 @@ export const hub = {
         pmid_fallback: 'PMID fallback',
         derived: 'Derived',
       },
+    },
+    reload: {
+      title: 'Reload model?',
+      description:
+        'Load-parameter changes need a model reload to take effect. This briefly interrupts the current model.',
+      confirm: 'Reload',
+      skip: 'Later',
     },
   },
   toast: {

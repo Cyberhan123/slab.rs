@@ -249,6 +249,7 @@ export default function Hub() {
           }
         }}
         onSaved={() => void hub.refetch()}
+        onReload={(model) => void hub.loadModel(model)}
       />
     </div>
   );

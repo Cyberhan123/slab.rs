@@ -170,9 +170,9 @@ describe("rollout persistence e2e", () => {
 
     // The rollout file must no longer carry turn items at turn >= the retracted one.
     const lines = readRolloutLines(testEnv.sessionStateDir, threadId)
-    const retractedTurn = Number(before.messages.at(-1)?.turnIndex ?? 0)
+    const retractedTurn = Number(before.messages.at(-1)?.turn_index ?? 0)
     const beyond = lines.filter((line: RolloutLine) => {
-      const idx = Number(line.item.turnIndex ?? -1)
+      const idx = Number(line.item.turn_index ?? -1)
       return !Number.isNaN(idx) && idx >= retractedTurn
     })
     expect(beyond.length).toBe(0)

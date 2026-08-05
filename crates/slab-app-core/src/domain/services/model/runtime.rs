@@ -475,6 +475,8 @@ async fn persist_selected_engine_id(
             selected_preset_id: None,
             selected_variant_id: None,
             selected_engine_id: None,
+            load_overrides: None,
+            inference_overrides: None,
             updated_at: chrono::Utc::now(),
         }
     });
@@ -745,6 +747,10 @@ async fn build_selected_model_pack_load_target(
         persisted.as_ref(),
         selected_preset.variant.effective_sources.first(),
     );
+    let load_overrides = pack::parse_overrides_map(
+        state_record.as_ref().and_then(|record| record.load_overrides.as_deref()),
+    );
+    pack::apply_user_load_overrides_to_bridge(&mut bridge, load_overrides.as_ref());
     let preset_id = effective_selection
         .preset_id
         .clone()

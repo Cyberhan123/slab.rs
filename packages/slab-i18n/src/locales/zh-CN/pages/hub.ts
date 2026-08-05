@@ -122,7 +122,7 @@ export const hub = {
   },
   sheet: {
     title: '模型配置文档',
-    description: '模型包声明仍是唯一事实来源。你只能在这里切换预设和变体，后端字段保持锁定且只读。',
+    description: '模型包声明是基础。你可以切换预设与变体，也可以直接编辑加载和推理参数；修改加载参数后需要重新加载模型才会生效。',
     loading: '正在加载模型配置文档...',
     failedLoadTitle: '加载增强配置失败',
     selectionWarningTitle: '选择警告',
@@ -136,6 +136,8 @@ export const hub = {
       close: '关闭',
       saveSelection: '保存选择',
       packLocked: '模型包已锁定',
+      edited: '已编辑',
+      resetToPack: '恢复默认',
       notSet: '未设置',
       enabled: '已启用',
       disabled: '已禁用',
@@ -147,6 +149,12 @@ export const hub = {
         pmid_fallback: 'PMID 回退',
         derived: '派生',
       },
+    },
+    reload: {
+      title: '重新加载模型？',
+      description: '加载参数的修改需要重新加载模型才能生效。这会短暂中断当前模型的使用。',
+      confirm: '重新加载',
+      skip: '稍后',
     },
   },
   toast: {

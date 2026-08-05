@@ -221,6 +221,14 @@ pub struct UpdateModelConfigSelectionRequest {
     pub selected_preset_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub selected_variant_id: Option<String>,
+    /// Load parameter overrides (JSON object, e.g. `{"num_workers":4}`). Omit
+    /// to keep stored overrides; `{}` clears them back to pack defaults.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub load_overrides: Option<serde_json::Value>,
+    /// Inference parameter overrides (JSON object, e.g.
+    /// `{"temperature":0.6}`). Same semantics as `load_overrides`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub inference_overrides: Option<serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1091,6 +1099,8 @@ impl From<UpdateModelConfigSelectionRequest> for DomainUpdateModelConfigSelectio
         Self {
             selected_preset_id: req.selected_preset_id,
             selected_variant_id: req.selected_variant_id,
+            load_overrides: req.load_overrides,
+            inference_overrides: req.inference_overrides,
         }
     }
 }

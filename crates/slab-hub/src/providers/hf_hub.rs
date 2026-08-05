@@ -51,6 +51,17 @@ impl HubClient {
         })
     }
 
+    /// Cache-only lookup (no network, no download). Returns the local path if
+    /// the file is already in the HF cache, `None` otherwise.
+    pub(crate) async fn cached_file_with_hf_hub(
+        &self,
+        repo_id: &str,
+        filename: &str,
+    ) -> Option<PathBuf> {
+        let repo = self.hf_hub_repo(HubProvider::HfHub, repo_id).ok()?;
+        repo.download_file().filename(filename.to_owned()).local_files_only(true).send().await.ok()
+    }
+
     fn hf_hub_repo(
         &self,
         provider: HubProvider,

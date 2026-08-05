@@ -3,12 +3,13 @@ mod source;
 use source::preview_from_pack_candidate_or_model_source;
 pub(super) use source::{
     apply_materialized_source_to_bridge, apply_selected_download_source_to_spec,
-    materialized_model_source, same_model_download_source, source_preview_from_pack_source,
+    apply_user_inference_overrides_to_bridge, apply_user_load_overrides_to_bridge,
+    materialized_model_source, parse_overrides_map, same_model_download_source,
+    source_preview_from_pack_source,
 };
 
 use std::path::Path;
 
-use chrono::Utc;
 use tracing::{info, warn};
 
 use crate::domain::models::{
@@ -16,7 +17,7 @@ use crate::domain::models::{
     StoredModelConfig, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
 };
 use crate::error::AppCoreError;
-use crate::infra::db::{ModelConfigStateRecord, ModelConfigStateStore, ModelStore};
+use crate::infra::db::{ModelConfigStateStore, ModelStore};
 use crate::infra::model_packs;
 
 use super::{ModelService, catalog};
@@ -551,35 +552,6 @@ pub(super) fn effective_model_pack_selection(
             .variant_id
             .clone()
             .or_else(|| non_empty_variant_id(&selected_preset.variant.document.id)),
-    }
-}
-
-pub(super) fn selection_state_record_for_storage(
-    model_id: &str,
-    resolved: &slab_model_pack::ResolvedModelPack,
-    explicit_selection: &ModelPackSelection,
-    effective_selection: &ModelPackSelection,
-) -> Option<ModelConfigStateRecord> {
-    (effective_selection != &default_model_pack_selection(resolved)).then(|| {
-        model_config_state_record(
-            model_id,
-            explicit_selection.preset_id.clone(),
-            explicit_selection.variant_id.clone(),
-        )
-    })
-}
-
-pub(super) fn model_config_state_record(
-    model_id: &str,
-    selected_preset_id: Option<String>,
-    selected_variant_id: Option<String>,
-) -> ModelConfigStateRecord {
-    ModelConfigStateRecord {
-        model_id: model_id.to_owned(),
-        selected_preset_id,
-        selected_variant_id,
-        selected_engine_id: None,
-        updated_at: Utc::now(),
     }
 }
 

@@ -3051,6 +3051,16 @@ export interface components {
         };
         /** @description Request body for `PUT /v1/models/{id}/config-selection`. */
         UpdateModelConfigSelectionRequest: {
+            /**
+             * @description Inference parameter overrides (JSON object, e.g.
+             *     `{"temperature":0.6}`). Same semantics as `load_overrides`.
+             */
+            inference_overrides?: unknown;
+            /**
+             * @description Load parameter overrides (JSON object, e.g. `{"num_workers":4}`). Omit
+             *     to keep stored overrides; `{}` clears them back to pack defaults.
+             */
+            load_overrides?: unknown;
             selected_preset_id?: string | null;
             selected_variant_id?: string | null;
         };
