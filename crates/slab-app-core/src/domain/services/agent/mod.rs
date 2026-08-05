@@ -22,18 +22,37 @@ pub use response::ResponseService;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use dashmap::DashSet;
 use slab_agent::AgentRuntime;
 use slab_agent::CompactPort;
 use slab_agent::config::AgentConfig;
 use slab_agent::error::AgentError;
-use slab_agent::port::{AgentStorePort, ThreadMessageRecord, ThreadSnapshot};
+use slab_agent::port::{
+    AgentStorePort, ThreadMessageRecord, ThreadSnapshot, TurnItemRecord, TurnStateRecord,
+};
 use slab_types::ConversationMessage;
 
 use crate::error::AppCoreError;
 use crate::infra::agent::event_hub::{AgentEventHub, AgentEventMsgSubscription};
 use crate::infra::agent::rollout_persistence;
 
+/// app-core-internal reader for the rollout-native turn-state / turn-item
+/// streams. Slice E moved these reads OFF the slab-agent `AgentStorePort` trait
+/// (slab-agent never calls them in production) and onto this trait so
+/// `HarnessService::list_turn_states` / `list_turn_items` (the `thread/resume`
+/// path) keep a typed, mockable handle without polluting the slab-agent
+/// surface. Implemented by `RolloutBackedAgentStore` (rollout replay is the
+/// only source); mocked in harness tests.
+#[async_trait]
+pub(crate) trait RolloutConversationReader: Send + Sync {
+    /// Persisted full-fidelity `TurnItem` snapshots for a thread, ordered by
+    /// `(turn_index, seq)` for deterministic replay.
+    async fn list_turn_items(&self, thread_id: &str) -> Result<Vec<TurnItemRecord>, AgentError>;
+
+    /// Persisted turn-state records for a thread ordered by `turn_index`.
+    async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError>;
+}
 /// Shared core held by both the harness and response services.
 ///
 /// INVARIANT: every field must be `Arc`-backed — cloning yields another handle
@@ -56,6 +75,11 @@ pub(crate) struct AgentCore {
     /// harness so `compact_thread` / `fork_thread` / `rollback_thread` can
     /// access the rollout directly (Slice 6).
     rollout: Arc<slab_agent_rollout::RolloutFileStore>,
+    /// Slice E: app-core-internal reader for turn states + turn items (the
+    /// `thread/resume` path). These reads left the slab-agent `AgentStorePort`
+    /// trait; `HarnessService` reaches them through this handle. Backed by the
+    /// same `RolloutBackedAgentStore` Arc wired as the runtime store.
+    reader: Arc<dyn RolloutConversationReader>,
     /// The trace directory configured from `agent.debug` (Slice 11b), threaded
     /// in so the harness can apply the SAME root-vs-child `trace_path` rule as
     /// `RolloutBackedAgentStore::upsert_thread` when it reconstructs a
@@ -83,6 +107,7 @@ impl AgentCore {
         events: Arc<AgentEventHub>,
         compact: Arc<dyn CompactPort>,
         rollout: Arc<slab_agent_rollout::RolloutFileStore>,
+        reader: Arc<dyn RolloutConversationReader>,
         trace_dir: Option<PathBuf>,
     ) -> Self {
         Self {
@@ -91,6 +116,7 @@ impl AgentCore {
             events,
             compact,
             rollout,
+            reader,
             trace_dir,
             rollout_observers: Arc::new(DashSet::new()),
         }
@@ -106,6 +132,10 @@ impl AgentCore {
 
     pub(crate) fn store(&self) -> &Arc<dyn AgentStorePort> {
         &self.store
+    }
+
+    pub(crate) fn reader(&self) -> &Arc<dyn RolloutConversationReader> {
+        &self.reader
     }
 
     pub(crate) fn events(&self) -> &Arc<AgentEventHub> {

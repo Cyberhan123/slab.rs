@@ -10,7 +10,6 @@ use async_trait::async_trait;
 
 use slab_agent_tracing::AgentTraceContext;
 use slab_types::ConversationMessage;
-use slab_types::agent::ToolCallStatus;
 
 use crate::config::AgentConfig;
 use crate::error::AgentError;
@@ -89,22 +88,6 @@ pub struct ThreadSnapshot {
     /// Archived threads are excluded from `list_session_threads_filtered`
     /// unless the filter opts in via `include_archived`.
     pub archived_at: Option<String>,
-}
-
-/// Audit record for a single tool call within an agent thread.
-#[derive(Debug, Clone)]
-pub struct ToolCallRecord {
-    pub id: String,
-    pub thread_id: String,
-    pub tool_name: String,
-    /// JSON-encoded arguments string.
-    pub arguments: String,
-    pub output: Option<String>,
-    pub status: ToolCallStatus,
-    /// RFC 3339 creation timestamp.
-    pub created_at: String,
-    /// RFC 3339 completion timestamp, if finished.
-    pub completed_at: Option<String>,
 }
 
 /// Persisted conversation message for an agent thread.
@@ -320,25 +303,6 @@ pub trait AgentStorePort: Send + Sync {
         completion_text: Option<&str>,
     ) -> Result<(), AgentError>;
 
-    /// Insert a new tool call audit record.
-    async fn insert_tool_call(&self, record: &ToolCallRecord) -> Result<(), AgentError>;
-
-    /// Update only the status of an existing tool call audit record.
-    async fn update_tool_call_status(
-        &self,
-        id: &str,
-        status: ToolCallStatus,
-    ) -> Result<(), AgentError>;
-
-    /// Update an existing tool call record with its output and final status.
-    async fn update_tool_call(
-        &self,
-        id: &str,
-        output: Option<&str>,
-        status: ToolCallStatus,
-        completed_at: &str,
-    ) -> Result<(), AgentError>;
-
     /// Insert a conversation message for a thread.
     async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError>;
 
@@ -349,70 +313,7 @@ pub trait AgentStorePort: Send + Sync {
     ) -> Result<Vec<ThreadMessageRecord>, AgentError>;
 
     /// Insert or update detailed state for a single agent turn.
-    ///
-    /// Hosts that do not need turn-level state can keep this default no-op.
-    async fn upsert_turn_state(&self, _record: &TurnStateRecord) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    /// Return persisted turn-state records for a thread ordered by `turn_index`.
-    ///
-    /// Hosts that do not store turn-level state return an empty list.
-    async fn list_turn_states(&self, _thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError> {
-        Ok(Vec::new())
-    }
-
-    /// Delete turn-state records with `turn_index >= from_turn_index`.
-    ///
-    /// Used by thread rollback to discard turns after a target index. Hosts that
-    /// do not store turn-level state can keep this default no-op.
-    async fn delete_turn_states_from(
-        &self,
-        _thread_id: &str,
-        _from_turn_index: u32,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    /// Delete persisted messages with `turn_index >= from_turn_index`.
-    ///
-    /// Used by thread rollback to discard messages after a target index. Hosts
-    /// that do not store messages can keep this default no-op.
-    async fn delete_thread_messages_from(
-        &self,
-        _thread_id: &str,
-        _from_turn_index: u32,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    /// Insert one finalized `TurnItem` snapshot.
-    ///
-    /// Idempotent: re-inserting the same `(thread_id, id)` is a no-op so
-    /// replay-safe observers (which may reprocess the event history) are
-    /// tolerated. Hosts that do not persist turn items can keep this default.
-    async fn insert_turn_item(&self, _record: &TurnItemRecord) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    /// Return persisted `TurnItem` snapshots for a thread, ordered by
-    /// `(turn_index, seq)` for deterministic replay. Hosts that do not persist
-    /// turn items return an empty list.
-    async fn list_turn_items(&self, _thread_id: &str) -> Result<Vec<TurnItemRecord>, AgentError> {
-        Ok(Vec::new())
-    }
-
-    /// Delete `TurnItem` snapshots with `turn_index >= from_turn_index`.
-    ///
-    /// Used by thread rollback. Hosts that do not persist turn items can keep
-    /// this default no-op.
-    async fn delete_turn_items_from(
-        &self,
-        _thread_id: &str,
-        _from_turn_index: u32,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
+    async fn upsert_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError>;
 
     /// Mark a thread archived (`Some`) or restore it (`None`).
     ///

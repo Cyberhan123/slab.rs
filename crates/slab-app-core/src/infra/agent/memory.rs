@@ -41,13 +41,10 @@ pub struct AgentMemoryPipeline {
     /// what the runtime replayed.
     rollout: Arc<RolloutFileStore>,
     /// The rollout-backed store that owns the production read path
-    /// (`list_thread_messages` / `read_thread_messages_with_source`): the
-    /// `is_rollout_ready` gate (`backfill_status == "completed"`, file_exists
-    /// fallback on index error) + `replay_messages` + SQL fallback. Routing the
-    /// phase1 read through here closes the G5 orphan window: a legacy thread
-    /// whose backfill has not completed reads the FULL SQL history in BOTH the
-    /// runtime and the memory model (instead of memory reading a partial rollout
-    /// tail via a bare `file_exists` gate).
+    /// (`list_thread_messages` / `read_thread_messages`): rollout flush +
+    /// `replay_messages`. Slice E made the rollout JSONL the sole source, so
+    /// routing the phase1 read through here keeps the memory model on the SAME
+    /// replay the runtime observes — the two cannot diverge.
     rollout_store: Arc<RolloutBackedAgentStore>,
     /// App-wide workspace root, surfaced as `rollout_cwd` in the phase1 prompt
     /// so the memory model knows where the session ran. `None` when no
@@ -703,23 +700,15 @@ async fn record_memory_usage_in_pool(
 
 /// Build the phase1 input for a candidate thread, reading the conversation
 /// through the SAME production read path the agent runtime uses
-/// ([`RolloutBackedAgentStore::read_thread_messages_with_source`], which
+/// ([`RolloutBackedAgentStore::read_thread_messages`], which
 /// [`AgentStorePort::list_thread_messages`](slab_agent::port::AgentStorePort::list_thread_messages)
 /// also delegates to). The memory model and the runtime therefore share ONE
-/// code path — `is_rollout_ready` gate + `replay_messages` + SQL fallback — and
-/// can never diverge on what the conversation was.
+/// code path and can never diverge on what the conversation was.
 ///
-/// This closes the G5 orphan window for memory: when a legacy thread's startup
-/// backfill has not reached `backfill_status = "completed"` (the rollout file
-/// may already be materialized with only a post-migration tail), BOTH the
-/// runtime and the memory model read the FULL SQL history. The earlier Slice-F
-/// implementation gated on a bare `rollout.file_exists`, which read the partial
-/// rollout tail and silently corrupted memory.
-///
-/// `rollout_path` is stamped with the real rollout file path when the read came
-/// from rollout; it stays `None` for the SQL fallback (the prompt renders
-/// `"state-db"`, matching the pre-Slice-F behaviour). `rollout_cwd` is always
-/// the app-wide workspace root when one is bound.
+/// Slice E: rollout is the ONLY source, so this always replays the rollout file
+/// and stamps the real on-disk `rollout_path`. A missing rollout file (a
+/// brand-new thread before its first append) replays to an empty conversation.
+/// `rollout_cwd` is always the app-wide workspace root when one is bound.
 ///
 /// Extracted as a free function so the shared read path is unit-testable
 /// without constructing the full [`ModelState`]-backed pipeline.
@@ -733,14 +722,12 @@ async fn build_phase1_input(
     // ran in this workspace whether its conversation now lives in rollout or SQL.
     candidate.rollout_cwd = workspace_root.map(|root| root.to_string_lossy().into_owned());
 
-    let (records, from_rollout) = rollout_store
-        .read_thread_messages_with_source(&candidate.thread_id)
+    let records = rollout_store
+        .read_thread_messages(&candidate.thread_id)
         .await
         .map_err(|error| error.to_string())?;
-    if from_rollout {
-        candidate.rollout_path =
-            Some(rollout.resolve_path(&candidate.thread_id).to_string_lossy().into_owned());
-    }
+    candidate.rollout_path =
+        Some(rollout.resolve_path(&candidate.thread_id).to_string_lossy().into_owned());
     let items = records
         .into_iter()
         .map(|record| {
@@ -1034,29 +1021,6 @@ mod tests {
         .expect("mark rollout session index");
     }
 
-    async fn insert_sql_message(
-        store: &AnyStore,
-        thread_id: &str,
-        id: &str,
-        turn_index: i64,
-        message: ConversationMessage,
-        created_at: &str,
-    ) {
-        sqlx::query(
-            "INSERT INTO agent_thread_messages (id, thread_id, turn_index, role, content, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        )
-        .bind(id)
-        .bind(thread_id)
-        .bind(turn_index)
-        .bind(&message.role)
-        .bind(serde_json::to_string(&message).unwrap())
-        .bind(created_at)
-        .execute(&store.pool)
-        .await
-        .expect("insert sql message");
-    }
-
     fn compacted_marker(
         thread_id: &str,
         turn_index: u32,
@@ -1157,249 +1121,6 @@ mod tests {
         assert!(prompt.contains(&format!("rollout_path: {expected_path}")));
         assert!(prompt.contains("rollout_cwd: C:/repo"));
         assert!(!prompt.contains("state-db"));
-    }
-
-    // Slice F legacy fallback: when the rollout gate is NOT ready (no rollout
-    // file AND no completed index row — a pre-migration thread whose startup
-    // backfill has not run), the input is read from the SQL `agent_thread_messages`
-    // rows. rollout_path stays None so the prompt renders "state-db" (matching
-    // the pre-Slice-F behaviour). Memory and the runtime take the SAME branch.
-    #[tokio::test]
-    async fn build_phase1_input_falls_back_to_sql_when_no_rollout_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
-        let store = Arc::new(AnyStore::connect("sqlite::memory:").await.expect("store"));
-        let backed = rollout_backed_store(Arc::clone(&store), Arc::clone(&rollout));
-        let thread_id = "t-legacy";
-        insert_thread(&store, thread_id).await;
-        insert_sql_message(
-            &store,
-            thread_id,
-            "m-legacy",
-            0,
-            text_msg("user", "legacy hello"),
-            "2026-01-01T00:00:00Z",
-        )
-        .await;
-
-        // No rollout file AND no rollout_session_index row -> gate false -> SQL.
-        assert!(!rollout.file_exists(thread_id).await);
-
-        let candidate = RolloutCandidate {
-            thread_id: thread_id.to_owned(),
-            session_id: "session-1".to_owned(),
-            rollout_path: None,
-            rollout_cwd: None,
-            source_updated_at: Utc::now(),
-        };
-        let input = build_phase1_input(&backed, rollout.as_ref(), None, candidate)
-            .await
-            .expect("phase1 input");
-
-        // SQL fallback: rollout_path stays None, rollout_cwd None (no workspace).
-        assert!(input.candidate.rollout_path.is_none());
-        assert!(input.candidate.rollout_cwd.is_none());
-        assert_eq!(input.items.len(), 1);
-        assert_eq!(input.items[0].role, "user");
-        assert_eq!(input.items[0].content, "legacy hello");
-        assert_eq!(input.items[0].created_at, "2026-01-01T00:00:00Z");
-
-        let prompt = input.render_user_prompt().expect("prompt");
-        assert!(prompt.contains("rollout_path: state-db"));
-        assert!(prompt.contains("rollout_cwd: unknown"));
-    }
-
-    // B1/B2 G5 orphan-window regression: a legacy thread whose startup backfill
-    // has NOT completed has its full legacy prefix in SQL and only a post-migration
-    // tail in the rollout file. The memory pipeline MUST read the SAME source the
-    // runtime does (the SQL legacy prefix) — NOT the partial rollout tail — so the
-    // memory model never silently consumes a truncated conversation.
-    //
-    // Pre-fix the memory gate was a bare `rollout.file_exists`, which (once the
-    // post-migration write materialized the rollout file) read ONLY the tail while
-    // the runtime served the full SQL prefix -> permanent silent memory corruption
-    // (memory marked succeeded, never re-run). This test pins the fix: it MUST
-    // fail if the gate is reverted to `file_exists` (see mutation note below).
-    //
-    // Real path (no mock): real SqlxStore index gate, real rollout JSONL, real SQL.
-    #[tokio::test]
-    async fn g5_orphan_window_reads_full_sql_not_partial_rollout_tail() {
-        let dir = tempfile::tempdir().unwrap();
-        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
-        let store = Arc::new(AnyStore::connect("sqlite::memory:").await.expect("store"));
-        let backed = rollout_backed_store(Arc::clone(&store), Arc::clone(&rollout));
-        let thread_id = "t-orphan";
-        insert_thread(&store, thread_id).await;
-
-        // SQL: the full LEGACY prefix (3 messages). This is what the runtime reads
-        // while the backfill is incomplete — it is the production truth here.
-        let legacy = [
-            ("user", "legacy question", "2026-01-01T00:00:01Z"),
-            ("assistant", "legacy answer", "2026-01-01T00:00:02Z"),
-            ("tool", "legacy tool output", "2026-01-01T00:00:03Z"),
-        ];
-        for (i, (role, text, ts)) in legacy.iter().enumerate() {
-            insert_sql_message(
-                &store,
-                thread_id,
-                &format!("legacy-{i}"),
-                0,
-                text_msg(role, text),
-                ts,
-            )
-            .await;
-        }
-
-        // Rollout: only the POST-MIGRATION tail materialized (backfill not yet
-        // merged the legacy prefix into the rollout file).
-        rollout.create_session(SessionMeta {
-            thread_id: thread_id.to_owned(),
-            session_id: "session-1".to_owned(),
-            parent_id: None,
-            started_at: "2026-08-03T00:00:00Z".to_owned(),
-            config_json: serde_json::json!({}),
-            rollout_version: SessionMeta::CURRENT_VERSION,
-            role_name: None,
-            trace_path: None,
-        });
-        rollout
-            .append(
-                thread_id,
-                append_message(
-                    1,
-                    text_msg("user", "post-migration tail"),
-                    "m-tail",
-                    "2026-08-03T00:00:01Z",
-                ),
-            )
-            .await
-            .unwrap();
-
-        // G5 orphan window: backfill started but NOT completed. The rollout file
-        // IS materialized (file_exists would be true), but the gate is NOT ready.
-        let file_path = rollout.resolve_path(thread_id).to_string_lossy().into_owned();
-        mark_rollout_session(&store, thread_id, "session-1", &file_path, "in_progress").await;
-
-        let candidate = RolloutCandidate {
-            thread_id: thread_id.to_owned(),
-            session_id: "session-1".to_owned(),
-            rollout_path: None,
-            rollout_cwd: None,
-            source_updated_at: Utc::now(),
-        };
-        let input = build_phase1_input(&backed, rollout.as_ref(), None, candidate)
-            .await
-            .expect("phase1 input");
-
-        // Memory read the FULL SQL legacy prefix (3 messages), NOT the 1-item
-        // rollout tail. This is the production truth during the orphan window.
-        assert_eq!(
-            input.items.len(),
-            3,
-            "memory must read the full SQL legacy prefix, not the partial rollout tail"
-        );
-        let contents: Vec<&str> = input.items.iter().map(|i| i.content.as_str()).collect();
-        assert_eq!(contents, vec!["legacy question", "legacy answer", "legacy tool output"]);
-        assert!(
-            !contents.iter().any(|c| c.contains("post-migration")),
-            "the rollout-only tail must NOT leak into memory during the orphan window"
-        );
-        // SQL fallback -> rollout_path stays None (prompt renders "state-db").
-        assert!(input.candidate.rollout_path.is_none());
-
-        // Mutation note: if the gate in read_thread_messages_with_source is
-        // reverted to a bare `rollout.file_exists`, this read returns the 1-item
-        // rollout tail and the assertions above fail (len 1, content
-        // "post-migration tail", rollout_path = real path).
-    }
-
-    // Happy-path parity ONLY (H1/M3): the SAME exchange written to a rollout-
-    // completed thread (read via rollout) and to a SQL-only thread (read via the
-    // SQL fallback) projects to the SAME memory item sequence. This is the
-    // happy-path (both sources carry identical data); the divergence scenario —
-    // legacy prefix in SQL vs partial tail in rollout — is covered by
-    // `g5_orphan_window_reads_full_sql_not_partial_rollout_tail`.
-    #[tokio::test]
-    async fn rollout_and_sql_produce_equivalent_memory_items_happy_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
-        let store = Arc::new(AnyStore::connect("sqlite::memory:").await.expect("store"));
-        let backed = rollout_backed_store(Arc::clone(&store), Arc::clone(&rollout));
-
-        let exchange = [
-            ("user", "what is 2+2", "2026-08-03T01:00:00Z"),
-            ("assistant", "it is 4", "2026-08-03T01:00:01Z"),
-            ("tool", "calculator: 4", "2026-08-03T01:00:02Z"),
-        ];
-
-        // Thread A: rollout-completed (rollout-native, no SQL rows).
-        let rollout_id = "t-rollout-equiv";
-        insert_thread(&store, rollout_id).await;
-        rollout.create_session(SessionMeta {
-            thread_id: rollout_id.to_owned(),
-            session_id: "session-1".to_owned(),
-            parent_id: None,
-            started_at: "2026-08-03T00:00:00Z".to_owned(),
-            config_json: serde_json::json!({}),
-            rollout_version: SessionMeta::CURRENT_VERSION,
-            role_name: None,
-            trace_path: None,
-        });
-        for (i, (role, text, ts)) in exchange.iter().enumerate() {
-            rollout
-                .append(rollout_id, append_message(0, text_msg(role, text), &format!("m-{i}"), ts))
-                .await
-                .unwrap();
-        }
-        let file_path = rollout.resolve_path(rollout_id).to_string_lossy().into_owned();
-        mark_rollout_session(&store, rollout_id, "session-1", &file_path, "completed").await;
-        let rollout_input = build_phase1_input(
-            &backed,
-            rollout.as_ref(),
-            None,
-            RolloutCandidate {
-                thread_id: rollout_id.to_owned(),
-                session_id: "session-1".to_owned(),
-                rollout_path: None,
-                rollout_cwd: None,
-                source_updated_at: Utc::now(),
-            },
-        )
-        .await
-        .expect("rollout phase1 input");
-
-        // Thread B: SQL-only (no rollout file, no index row -> SQL fallback).
-        let sql_id = "t-sql-equiv";
-        insert_thread(&store, sql_id).await;
-        for (i, (role, text, ts)) in exchange.iter().enumerate() {
-            insert_sql_message(&store, sql_id, &format!("m-{i}"), 0, text_msg(role, text), ts)
-                .await;
-        }
-        let sql_input = build_phase1_input(
-            &backed,
-            rollout.as_ref(),
-            None,
-            RolloutCandidate {
-                thread_id: sql_id.to_owned(),
-                session_id: "session-1".to_owned(),
-                rollout_path: None,
-                rollout_cwd: None,
-                source_updated_at: Utc::now(),
-            },
-        )
-        .await
-        .expect("sql phase1 input");
-
-        assert_eq!(rollout_input.items.len(), exchange.len());
-        assert_eq!(sql_input.items.len(), exchange.len());
-        for (rollout_item, sql_item) in rollout_input.items.iter().zip(sql_input.items.iter()) {
-            assert_eq!(rollout_item.role, sql_item.role, "role mismatch");
-            assert_eq!(rollout_item.content, sql_item.content, "content mismatch");
-            assert_eq!(rollout_item.created_at, sql_item.created_at, "created_at mismatch");
-        }
-        // rollout-completed thread stamps the real path; SQL-only stays None.
-        assert!(rollout_input.candidate.rollout_path.is_some());
-        assert!(sql_input.candidate.rollout_path.is_none());
     }
 
     // M2: a Compacted marker (auto/manual) resets the replay baseline to the

@@ -20,10 +20,7 @@ use crate::{
     config::AgentConfig,
     error::AgentError,
     hook::{AgentHook, AgentHookRegistry},
-    port::{
-        AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadMessageRecord,
-        ThreadSnapshot, ThreadStatus, TurnItemRecord, TurnStateRecord,
-    },
+    port::{AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadSnapshot, ThreadStatus},
     protocol::{EventMsg, Turn, TurnAbortedParams},
     risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
     state::ThreadStateMachine,
@@ -376,40 +373,15 @@ impl AgentControl {
         };
         self.store.upsert_thread(&child).await?;
 
-        // Clone the parent's persisted history into the child.
-        let messages = self.store.list_thread_messages(parent_thread_id).await?;
-        for record in messages {
-            let cloned = ThreadMessageRecord {
-                id: Uuid::new_v4().to_string(),
-                thread_id: child_id.clone(),
-                turn_index: record.turn_index,
-                message: record.message,
-                created_at: now.clone(),
-            };
-            self.store.insert_thread_message(&cloned).await?;
-        }
-
-        let turn_states = self.store.list_turn_states(parent_thread_id).await?;
-        for record in turn_states {
-            let cloned = TurnStateRecord { thread_id: child_id.clone(), ..record };
-            self.store.upsert_turn_state(&cloned).await?;
-        }
-
-        // Clone the parent's full-fidelity TurnItem snapshots. PK is
-        // (thread_id, turn_index, seq), so reusing the same logical id under a
-        // new thread_id needs no remapping.
-        let turn_items = self.store.list_turn_items(parent_thread_id).await?;
-        for record in turn_items {
-            let cloned = TurnItemRecord {
-                thread_id: child_id.clone(),
-                id: record.id,
-                turn_index: record.turn_index,
-                seq: record.seq,
-                item_json: record.item_json,
-                created_at: now.clone(),
-            };
-            self.store.insert_turn_item(&cloned).await?;
-        }
+        // NOTE: the parent's persisted history is NOT copied per-record here.
+        // Fork production goes through the harness wholesale `rewrite_session`
+        // path (see `HarnessService::fork_thread`), which snapshots the parent
+        // rollout file into the child in correct interleaved order. The previous
+        // per-record copy (messages → turn states → turn items through the store
+        // adapter) was dead: it batched every TurnContext before every TurnItem,
+        // breaking replay attribution, and was unconditionally overwritten by
+        // the wholesale rewrite. Slice E removed the now-unused store methods it
+        // relied on (`list_turn_states` / `list_turn_items` / `insert_turn_item`).
 
         Ok(child_id)
     }

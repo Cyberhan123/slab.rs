@@ -26,9 +26,7 @@ use crate::{
     },
     turn::TurnExecutionContext,
     turn_tool_record::{
-        insert_tool_call_record, persist_tool_message_record,
-        record_failed_tool_call_without_persisting_message, update_tool_call_record,
-        update_tool_call_status,
+        persist_tool_message_record, record_failed_tool_call_without_persisting_message,
     },
 };
 
@@ -643,7 +641,6 @@ async fn handle_tool_call(
     let initial_status =
         if approval_request.is_some() { ToolCallStatus::Pending } else { ToolCallStatus::Running };
     let mut tool_state = ToolCallStateMachine::new(initial_status);
-    insert_tool_call_record(context, &call_id, tool_call, tool_state.status(), created_at).await;
     let workspace_root = workspace_root_of(context);
     emit_item_started(
         context,
@@ -776,7 +773,6 @@ async fn handle_tool_call(
     )
     .await;
 
-    update_tool_call_record(context, &call_id, Some(&content), call_status).await;
     let message = crate::turn_tool_record::tool_message(tool_call, content);
 
     Ok(ToolCallRunResult { message, status: call_status, task_completion })
@@ -849,8 +845,7 @@ async fn run_tool_with_optional_approval(
             if run.context.cancellation.is_cancelled() {
                 return Err(AgentError::Interrupted);
             }
-            let running_status = run.tool_state.transition(ToolCallStatus::Running)?;
-            update_tool_call_status(run.context, run.call_id, running_status).await;
+            run.tool_state.transition(ToolCallStatus::Running)?;
             emit_tool_execution_started(&run).await;
             Ok(tokio::select! {
                 result = execute_tool_call(

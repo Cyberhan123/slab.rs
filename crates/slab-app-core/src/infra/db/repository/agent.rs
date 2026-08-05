@@ -3,11 +3,8 @@
 use async_trait::async_trait;
 use slab_agent::port::ThreadStatus;
 use slab_agent::port::{
-    AgentStorePort, ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, ToolCallRecord,
-    TurnItemRecord, TurnStateRecord,
+    AgentStorePort, ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, TurnStateRecord,
 };
-use slab_types::agent::ToolCallStatus;
-use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use super::SqlxStore;
 
@@ -36,16 +33,6 @@ struct AgentThreadRow {
     created_at: String,
     updated_at: String,
     archived_at: Option<String>,
-}
-
-#[derive(sqlx::FromRow)]
-struct AgentThreadMessageRow {
-    id: String,
-    thread_id: String,
-    turn_index: i64,
-    role: String,
-    content: String,
-    created_at: String,
 }
 
 impl TryFrom<AgentThreadRow> for ThreadSnapshot {
@@ -78,43 +65,6 @@ impl TryFrom<AgentThreadRow> for ThreadSnapshot {
             updated_at: r.updated_at,
             archived_at: r.archived_at,
         })
-    }
-}
-
-impl AgentThreadMessageRow {
-    fn into_record(self) -> Result<ThreadMessageRecord, slab_agent::AgentError> {
-        let turn_index = u32::try_from(self.turn_index).map_err(|error| {
-            tracing::warn!(
-                message_id = %self.id,
-                thread_id = %self.thread_id,
-                turn_index = self.turn_index,
-                error = %error,
-                "invalid agent thread message turn index in database"
-            );
-            slab_agent::AgentError::Store(format!(
-                "invalid agent thread message turn_index for '{}': {} ({})",
-                self.id, self.turn_index, error
-            ))
-        })?;
-        let Self { id, thread_id, turn_index: _, role, content, created_at } = self;
-        let message =
-            serde_json::from_str::<ConversationMessage>(&content).unwrap_or_else(|error| {
-                tracing::warn!(
-                    message_id = %id,
-                    thread_id = %thread_id,
-                    error = %error,
-                    "failed to decode stored agent thread message content; preserving raw text"
-                );
-                ConversationMessage {
-                    role,
-                    content: ConversationMessageContent::Text(content),
-                    name: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                }
-            });
-
-        Ok(ThreadMessageRecord { id, thread_id, turn_index, message, created_at })
     }
 }
 
@@ -248,235 +198,44 @@ impl AgentStorePort for SqlxStore {
         Ok(())
     }
 
-    async fn insert_tool_call(
-        &self,
-        record: &ToolCallRecord,
-    ) -> Result<(), slab_agent::AgentError> {
-        sqlx::query(
-            "INSERT INTO agent_tool_calls \
-             (id, thread_id, tool_name, arguments, output, status, created_at, completed_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        )
-        .bind(&record.id)
-        .bind(&record.thread_id)
-        .bind(&record.tool_name)
-        .bind(&record.arguments)
-        .bind(&record.output)
-        .bind(record.status.to_string())
-        .bind(&record.created_at)
-        .bind(&record.completed_at)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-        Ok(())
-    }
-
-    async fn update_tool_call_status(
-        &self,
-        id: &str,
-        status: ToolCallStatus,
-    ) -> Result<(), slab_agent::AgentError> {
-        sqlx::query("UPDATE agent_tool_calls SET status = ?1 WHERE id = ?2")
-            .bind(status.to_string())
-            .bind(id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-        Ok(())
-    }
-
-    async fn update_tool_call(
-        &self,
-        id: &str,
-        output: Option<&str>,
-        status: ToolCallStatus,
-        completed_at: &str,
-    ) -> Result<(), slab_agent::AgentError> {
-        sqlx::query(
-            "UPDATE agent_tool_calls SET output = ?1, status = ?2, completed_at = ?3 \
-             WHERE id = ?4",
-        )
-        .bind(output)
-        .bind(status.to_string())
-        .bind(completed_at)
-        .bind(id)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-        Ok(())
-    }
+    // ── Conversation surface (Slice E) ─────────────────────────────────────
+    //
+    // The legacy `agent_thread_messages` / `agent_turn_states` / `agent_turn_items`
+    // tables were DROPPED in Slice E — rollout is the only conversation/turn
+    // source. These three methods remain on `AgentStorePort` (required, no
+    // default, so the rollout adapter is forced to provide real impls), but
+    // `SqlxStore` is only the METADATA delegate inside the rollout adapter now,
+    // so it never serves conversation reads/writes. The bodies therefore return
+    // a loud error instead of executing SQL against the dropped tables: a
+    // future code path that accidentally wires `SqlxStore` as the conversation
+    // store fails immediately rather than silently no-opping or hitting a
+    // `no such table` runtime error deep in a turn.
 
     async fn insert_thread_message(
         &self,
-        record: &ThreadMessageRecord,
+        _record: &ThreadMessageRecord,
     ) -> Result<(), slab_agent::AgentError> {
-        let content = serde_json::to_string(&record.message)
-            .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-        sqlx::query(
-            "INSERT INTO agent_thread_messages \
-             (id, thread_id, turn_index, role, content, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        )
-        .bind(&record.id)
-        .bind(&record.thread_id)
-        .bind(i64::from(record.turn_index))
-        .bind(&record.message.role)
-        .bind(content)
-        .bind(&record.created_at)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-        Ok(())
+        Err(slab_agent::AgentError::Store(
+            "agent_thread_messages was dropped in Slice E; rollout adapter is the only conversation writer".to_owned(),
+        ))
     }
 
     async fn list_thread_messages(
         &self,
-        thread_id: &str,
+        _thread_id: &str,
     ) -> Result<Vec<ThreadMessageRecord>, slab_agent::AgentError> {
-        let rows: Vec<AgentThreadMessageRow> = sqlx::query_as(
-            "SELECT id, thread_id, turn_index, role, content, created_at \
-             FROM agent_thread_messages WHERE thread_id = ?1 \
-             ORDER BY turn_index ASC, created_at ASC, id ASC",
-        )
-        .bind(thread_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-
-        rows.into_iter().map(AgentThreadMessageRow::into_record).collect()
+        Err(slab_agent::AgentError::Store(
+            "agent_thread_messages was dropped in Slice E; rollout adapter is the only conversation reader".to_owned(),
+        ))
     }
 
     async fn upsert_turn_state(
         &self,
-        record: &TurnStateRecord,
+        _record: &TurnStateRecord,
     ) -> Result<(), slab_agent::AgentError> {
-        sqlx::query(
-            "INSERT INTO agent_turn_states \
-             (thread_id, turn_index, status, input_messages_json, tool_specs_json, \
-              llm_response_json, error, started_at, completed_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
-             ON CONFLICT(thread_id, turn_index) DO UPDATE SET \
-               status=excluded.status, \
-               input_messages_json=COALESCE(excluded.input_messages_json, agent_turn_states.input_messages_json), \
-               tool_specs_json=COALESCE(excluded.tool_specs_json, agent_turn_states.tool_specs_json), \
-               llm_response_json=COALESCE(excluded.llm_response_json, agent_turn_states.llm_response_json), \
-               error=excluded.error, \
-               started_at=agent_turn_states.started_at, \
-               completed_at=COALESCE(excluded.completed_at, agent_turn_states.completed_at)",
-        )
-        .bind(&record.thread_id)
-        .bind(i64::from(record.turn_index))
-        .bind(&record.status)
-        .bind(&record.input_messages_json)
-        .bind(&record.tool_specs_json)
-        .bind(&record.llm_response_json)
-        .bind(&record.error)
-        .bind(&record.started_at)
-        .bind(&record.completed_at)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-        Ok(())
-    }
-
-    async fn list_turn_states(
-        &self,
-        thread_id: &str,
-    ) -> Result<Vec<TurnStateRecord>, slab_agent::AgentError> {
-        let rows: Vec<AgentTurnStateRow> = sqlx::query_as(
-            "SELECT thread_id, turn_index, status, input_messages_json, tool_specs_json, \
-             llm_response_json, error, started_at, completed_at \
-             FROM agent_turn_states WHERE thread_id = ?1 ORDER BY turn_index ASC",
-        )
-        .bind(thread_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-
-        rows.into_iter().map(AgentTurnStateRow::into_record).collect()
-    }
-
-    async fn delete_turn_states_from(
-        &self,
-        thread_id: &str,
-        from_turn_index: u32,
-    ) -> Result<(), slab_agent::AgentError> {
-        sqlx::query("DELETE FROM agent_turn_states WHERE thread_id = ?1 AND turn_index >= ?2")
-            .bind(thread_id)
-            .bind(i64::from(from_turn_index))
-            .execute(&self.pool)
-            .await
-            .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-        Ok(())
-    }
-
-    async fn delete_thread_messages_from(
-        &self,
-        thread_id: &str,
-        from_turn_index: u32,
-    ) -> Result<(), slab_agent::AgentError> {
-        sqlx::query("DELETE FROM agent_thread_messages WHERE thread_id = ?1 AND turn_index >= ?2")
-            .bind(thread_id)
-            .bind(i64::from(from_turn_index))
-            .execute(&self.pool)
-            .await
-            .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-        Ok(())
-    }
-
-    async fn insert_turn_item(
-        &self,
-        record: &TurnItemRecord,
-    ) -> Result<(), slab_agent::AgentError> {
-        // INSERT OR IGNORE — idempotent so an observer that replays the event
-        // history (subscribe replay buffer / lag-resubscribe) cannot duplicate
-        // rows. PK is (thread_id, id).
-        sqlx::query(
-            "INSERT OR IGNORE INTO agent_turn_items \
-             (id, thread_id, turn_index, seq, item_json, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        )
-        .bind(&record.id)
-        .bind(&record.thread_id)
-        .bind(i64::from(record.turn_index))
-        .bind(i64::from(record.seq))
-        .bind(&record.item_json)
-        .bind(&record.created_at)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-        Ok(())
-    }
-
-    async fn list_turn_items(
-        &self,
-        thread_id: &str,
-    ) -> Result<Vec<TurnItemRecord>, slab_agent::AgentError> {
-        let rows: Vec<AgentTurnItemRow> = sqlx::query_as(
-            "SELECT id, thread_id, turn_index, seq, item_json, created_at \
-             FROM agent_turn_items WHERE thread_id = ?1 \
-             ORDER BY turn_index ASC, seq ASC",
-        )
-        .bind(thread_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-
-        rows.into_iter().map(AgentTurnItemRow::into_record).collect()
-    }
-
-    async fn delete_turn_items_from(
-        &self,
-        thread_id: &str,
-        from_turn_index: u32,
-    ) -> Result<(), slab_agent::AgentError> {
-        sqlx::query("DELETE FROM agent_turn_items WHERE thread_id = ?1 AND turn_index >= ?2")
-            .bind(thread_id)
-            .bind(i64::from(from_turn_index))
-            .execute(&self.pool)
-            .await
-            .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
-        Ok(())
+        Err(slab_agent::AgentError::Store(
+            "agent_turn_states was dropped in Slice E; rollout adapter is the only turn-state writer".to_owned(),
+        ))
     }
 
     async fn archive_thread(
@@ -497,172 +256,9 @@ impl AgentStorePort for SqlxStore {
     }
 }
 
-/// sqlx row type for the `agent_turn_items` table.
-#[derive(sqlx::FromRow)]
-struct AgentTurnItemRow {
-    id: String,
-    thread_id: String,
-    turn_index: i64,
-    seq: i64,
-    item_json: String,
-    created_at: String,
-}
-
-impl AgentTurnItemRow {
-    fn into_record(self) -> Result<TurnItemRecord, slab_agent::AgentError> {
-        let turn_index = u32::try_from(self.turn_index).map_err(|error| {
-            slab_agent::AgentError::Store(format!(
-                "invalid turn_index for turn item '{}': {} ({})",
-                self.id, self.turn_index, error
-            ))
-        })?;
-        let seq = u32::try_from(self.seq).map_err(|error| {
-            slab_agent::AgentError::Store(format!(
-                "invalid seq for turn item '{}': {} ({})",
-                self.id, self.seq, error
-            ))
-        })?;
-        Ok(TurnItemRecord {
-            id: self.id,
-            thread_id: self.thread_id,
-            turn_index,
-            seq,
-            item_json: self.item_json,
-            created_at: self.created_at,
-        })
-    }
-}
-
-/// sqlx row type for the `agent_turn_states` table.
-#[derive(sqlx::FromRow)]
-struct AgentTurnStateRow {
-    thread_id: String,
-    turn_index: i64,
-    status: String,
-    input_messages_json: Option<String>,
-    tool_specs_json: Option<String>,
-    llm_response_json: Option<String>,
-    error: Option<String>,
-    started_at: String,
-    completed_at: Option<String>,
-}
-
-impl AgentTurnStateRow {
-    fn into_record(self) -> Result<TurnStateRecord, slab_agent::AgentError> {
-        let turn_index = u32::try_from(self.turn_index).map_err(|error| {
-            slab_agent::AgentError::Store(format!(
-                "invalid turn_index for '{}': {} ({})",
-                self.thread_id, self.turn_index, error
-            ))
-        })?;
-        Ok(TurnStateRecord {
-            thread_id: self.thread_id,
-            turn_index,
-            status: self.status,
-            input_messages_json: self.input_messages_json,
-            tool_specs_json: self.tool_specs_json,
-            llm_response_json: self.llm_response_json,
-            error: self.error,
-            started_at: self.started_at,
-            completed_at: self.completed_at,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn turn_state_upsert_preserves_existing_payload_fields() {
-        let store = SqlxStore::connect("sqlite::memory:").await.expect("store");
-        let now = "2026-01-01T00:00:00Z".to_owned();
-        sqlx::query(
-            "INSERT INTO chat_sessions (id, name, created_at, updated_at) \
-             VALUES ('session-1', '', ?1, ?1)",
-        )
-        .bind(&now)
-        .execute(&store.pool)
-        .await
-        .expect("session");
-        store
-            .upsert_thread(&ThreadSnapshot {
-                id: "thread-1".to_owned(),
-                session_id: "session-1".to_owned(),
-                parent_id: None,
-                depth: 0,
-                status: ThreadStatus::Running,
-                role_name: None,
-                config_json: "{}".to_owned(),
-                completion_text: None,
-                created_at: now.clone(),
-                updated_at: now.clone(),
-                archived_at: None,
-            })
-            .await
-            .expect("thread");
-
-        store
-            .upsert_turn_state(&TurnStateRecord {
-                thread_id: "thread-1".to_owned(),
-                turn_index: 0,
-                status: "running".to_owned(),
-                input_messages_json: Some("[{\"role\":\"user\"}]".to_owned()),
-                tool_specs_json: Some("[]".to_owned()),
-                llm_response_json: None,
-                error: None,
-                started_at: now.clone(),
-                completed_at: None,
-            })
-            .await
-            .expect("running state");
-        store
-            .upsert_turn_state(&TurnStateRecord {
-                thread_id: "thread-1".to_owned(),
-                turn_index: 0,
-                status: "completed".to_owned(),
-                input_messages_json: None,
-                tool_specs_json: None,
-                llm_response_json: None,
-                error: None,
-                started_at: "ignored".to_owned(),
-                completed_at: Some(now.clone()),
-            })
-            .await
-            .expect("completed state");
-
-        let row: (String, Option<String>, Option<String>, String, Option<String>) = sqlx::query_as(
-            "SELECT status, input_messages_json, tool_specs_json, started_at, completed_at \
-                 FROM agent_turn_states WHERE thread_id='thread-1' AND turn_index=0",
-        )
-        .fetch_one(&store.pool)
-        .await
-        .expect("state");
-
-        assert_eq!(row.0, "completed");
-        assert_eq!(row.1.as_deref(), Some("[{\"role\":\"user\"}]"));
-        assert_eq!(row.2.as_deref(), Some("[]"));
-        assert_eq!(row.3, now);
-        assert_eq!(row.4.as_deref(), Some("2026-01-01T00:00:00Z"));
-    }
-
-    #[tokio::test]
-    async fn malformed_thread_message_fallback_preserves_raw_content() {
-        let store = seeded_store().await;
-        sqlx::query(
-            "INSERT INTO agent_thread_messages (id, thread_id, turn_index, role, content, created_at) \
-             VALUES ('message-raw', 'thread-1', 0, 'assistant', 'not-json', '2026-01-01T00:00:00Z')",
-        )
-        .execute(&store.pool)
-        .await
-        .expect("insert raw message");
-
-        let messages = store.list_thread_messages("thread-1").await.expect("list messages");
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].message.role, "assistant");
-        assert_eq!(messages[0].message.content.rendered_text(), "not-json");
-        assert!(messages[0].message.tool_calls.is_empty());
-    }
 
     #[test]
     fn thread_depth_overflow_is_rejected_on_read() {
@@ -681,21 +277,6 @@ mod tests {
         })
         .expect_err("invalid depth should fail");
         assert!(error.to_string().contains("invalid agent thread depth"));
-    }
-
-    #[test]
-    fn thread_message_turn_index_overflow_is_rejected_on_read() {
-        let error = AgentThreadMessageRow {
-            id: "message-bad-index".to_owned(),
-            thread_id: "thread-1".to_owned(),
-            turn_index: i64::from(u32::MAX) + 1,
-            role: "assistant".to_owned(),
-            content: "{\"role\":\"assistant\",\"content\":\"ok\"}".to_owned(),
-            created_at: "2026-01-01T00:00:00Z".to_owned(),
-        }
-        .into_record()
-        .expect_err("invalid turn index should fail");
-        assert!(error.to_string().contains("invalid agent thread message turn_index"));
     }
 
     #[tokio::test]
@@ -723,122 +304,6 @@ mod tests {
             .await
             .expect("list");
         assert_eq!(shown.len(), 1, "archived thread visible when include_archived");
-    }
-
-    #[tokio::test]
-    async fn list_and_delete_turn_states_keep_at_or_below_target() {
-        let store = seeded_store().await;
-        let now = "2026-01-01T00:00:00Z".to_owned();
-        for turn_index in 0u32..3 {
-            store
-                .upsert_turn_state(&TurnStateRecord {
-                    thread_id: "thread-1".to_owned(),
-                    turn_index,
-                    status: "completed".to_owned(),
-                    input_messages_json: None,
-                    tool_specs_json: None,
-                    llm_response_json: None,
-                    error: None,
-                    started_at: now.clone(),
-                    completed_at: Some(now.clone()),
-                })
-                .await
-                .expect("upsert turn state");
-        }
-        let listed = store.list_turn_states("thread-1").await.expect("list");
-        assert_eq!(listed.len(), 3);
-        assert_eq!(listed[0].turn_index, 0);
-        assert_eq!(listed[2].turn_index, 2);
-
-        // keep ≤ 1 → delete turn_index >= 2.
-        store.delete_turn_states_from("thread-1", 2).await.expect("delete");
-        let remaining = store.list_turn_states("thread-1").await.expect("list");
-        assert_eq!(remaining.len(), 2);
-        assert_eq!(remaining.iter().map(|r| r.turn_index).collect::<Vec<_>>(), vec![0, 1]);
-    }
-
-    #[tokio::test]
-    async fn delete_thread_messages_from_removes_at_or_above_target() {
-        let store = seeded_store().await;
-        let now = "2026-01-01T00:00:00Z".to_owned();
-        for (id, turn_index) in [("m0", 0u32), ("m1", 1), ("m2", 2)] {
-            store
-                .insert_thread_message(&ThreadMessageRecord {
-                    id: id.to_owned(),
-                    thread_id: "thread-1".to_owned(),
-                    turn_index,
-                    message: ConversationMessage {
-                        role: "user".to_owned(),
-                        content: ConversationMessageContent::Text(id.to_owned()),
-                        name: None,
-                        tool_call_id: None,
-                        tool_calls: vec![],
-                    },
-                    created_at: now.clone(),
-                })
-                .await
-                .expect("insert message");
-        }
-        // keep ≤ 0 → delete turn_index >= 1.
-        store.delete_thread_messages_from("thread-1", 1).await.expect("delete");
-        let remaining = store.list_thread_messages("thread-1").await.expect("list");
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].turn_index, 0);
-    }
-
-    #[tokio::test]
-    async fn insert_turn_item_is_idempotent_and_ordered() {
-        let store = seeded_store().await;
-        let now = "2026-01-01T00:00:00Z".to_owned();
-        let mk = |id: &str, turn_index: u32, seq: u32, item_json: &str| TurnItemRecord {
-            id: id.to_owned(),
-            thread_id: "thread-1".to_owned(),
-            turn_index,
-            seq,
-            item_json: item_json.to_owned(),
-            created_at: now.clone(),
-        };
-        store
-            .insert_turn_item(&mk("i0", 0, 0, r#"{"type":"agentMessage","text":"first"}"#))
-            .await
-            .expect("insert i0");
-        store
-            .insert_turn_item(&mk(
-                "i1",
-                0,
-                1,
-                r#"{"type":"reasoning","summary":"s","content":"c"}"#,
-            ))
-            .await
-            .expect("insert i1");
-        // Re-inserting the same (thread_id, turn_index, seq) is a no-op (PK) even
-        // with a different item id — this is the replay-safety guarantee.
-        store
-            .insert_turn_item(&mk("i0-replay", 0, 0, r#"{"type":"agentMessage","text":"replay"}"#))
-            .await
-            .expect("re-insert at same (turn, seq) ignored");
-        // A second item at the same (turn, seq) is also ignored (seq dedup).
-        store
-            .insert_turn_item(&mk("i0-other", 0, 1, r#"{"type":"webSearch","query":"q"}"#))
-            .await
-            .expect("re-insert at (0,1) ignored");
-
-        let listed = store.list_turn_items("thread-1").await.expect("list");
-        assert_eq!(listed.len(), 2, "duplicate (turn, seq) inserts must not add rows");
-        assert_eq!(listed[0].id, "i0");
-        assert_eq!(listed[0].turn_index, 0);
-        assert_eq!(listed[0].seq, 0);
-        assert_eq!(listed[1].id, "i1");
-
-        // A higher turn exercises turn-scoped delete.
-        store
-            .insert_turn_item(&mk("i2", 2, 0, r#"{"type":"webSearch","query":"q"}"#))
-            .await
-            .expect("insert i2 at turn 2");
-        store.delete_turn_items_from("thread-1", 1).await.expect("delete");
-        let after = store.list_turn_items("thread-1").await.expect("list after");
-        assert_eq!(after.len(), 2);
-        assert!(after.iter().all(|r| r.turn_index == 0));
     }
 
     async fn seeded_store() -> SqlxStore {

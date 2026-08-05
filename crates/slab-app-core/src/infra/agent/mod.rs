@@ -8,7 +8,6 @@ pub(crate) mod hooks;
 pub(crate) mod memory;
 pub(crate) mod memory_breaker;
 pub(crate) mod plugin_capability;
-pub(crate) mod rollout_backfill;
 pub(crate) mod rollout_persistence;
 pub(crate) mod rollout_store;
 pub(crate) mod runtime;

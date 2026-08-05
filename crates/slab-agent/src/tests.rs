@@ -19,8 +19,8 @@ use crate::{
     config::{AgentConfig, AgentToolChoice},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-        LlmUsage, ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus,
-        ToolCallRecord, ToolSpec, TurnStateRecord,
+        LlmUsage, ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec,
+        TurnStateRecord,
     },
     risk::ToolRiskAnalyzer,
 };
@@ -700,28 +700,6 @@ impl AgentStorePort for NoopStore {
         Ok(())
     }
 
-    async fn insert_tool_call(&self, _record: &ToolCallRecord) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn update_tool_call_status(
-        &self,
-        _id: &str,
-        _status: slab_types::agent::ToolCallStatus,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn update_tool_call(
-        &self,
-        _id: &str,
-        _output: Option<&str>,
-        _status: slab_types::agent::ToolCallStatus,
-        _completed_at: &str,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-
     async fn insert_thread_message(&self, _record: &ThreadMessageRecord) -> Result<(), AgentError> {
         Ok(())
     }
@@ -732,13 +710,14 @@ impl AgentStorePort for NoopStore {
     ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
         Ok(Vec::new())
     }
+
+    async fn upsert_turn_state(&self, _record: &TurnStateRecord) -> Result<(), AgentError> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]
-struct RecordingStore {
-    inserted_statuses: Mutex<Vec<slab_types::agent::ToolCallStatus>>,
-    updated_statuses: Mutex<Vec<slab_types::agent::ToolCallStatus>>,
-}
+struct RecordingStore {}
 
 #[async_trait]
 impl AgentStorePort for RecordingStore {
@@ -766,31 +745,6 @@ impl AgentStorePort for RecordingStore {
         Ok(())
     }
 
-    async fn insert_tool_call(&self, record: &ToolCallRecord) -> Result<(), AgentError> {
-        self.inserted_statuses.lock().unwrap().push(record.status);
-        Ok(())
-    }
-
-    async fn update_tool_call_status(
-        &self,
-        _id: &str,
-        status: slab_types::agent::ToolCallStatus,
-    ) -> Result<(), AgentError> {
-        self.updated_statuses.lock().unwrap().push(status);
-        Ok(())
-    }
-
-    async fn update_tool_call(
-        &self,
-        _id: &str,
-        _output: Option<&str>,
-        status: slab_types::agent::ToolCallStatus,
-        _completed_at: &str,
-    ) -> Result<(), AgentError> {
-        self.updated_statuses.lock().unwrap().push(status);
-        Ok(())
-    }
-
     async fn insert_thread_message(&self, _record: &ThreadMessageRecord) -> Result<(), AgentError> {
         Ok(())
     }
@@ -801,14 +755,16 @@ impl AgentStorePort for RecordingStore {
     ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
         Ok(Vec::new())
     }
+
+    async fn upsert_turn_state(&self, _record: &TurnStateRecord) -> Result<(), AgentError> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]
 struct RecordingPersistingStore {
     snapshots: Mutex<HashMap<String, ThreadSnapshot>>,
     messages: Mutex<Vec<ThreadMessageRecord>>,
-    inserted_statuses: Mutex<Vec<slab_types::agent::ToolCallStatus>>,
-    updated_statuses: Mutex<Vec<slab_types::agent::ToolCallStatus>>,
 }
 
 #[async_trait]
@@ -849,31 +805,6 @@ impl AgentStorePort for RecordingPersistingStore {
         Ok(())
     }
 
-    async fn insert_tool_call(&self, record: &ToolCallRecord) -> Result<(), AgentError> {
-        self.inserted_statuses.lock().unwrap().push(record.status);
-        Ok(())
-    }
-
-    async fn update_tool_call_status(
-        &self,
-        _id: &str,
-        status: slab_types::agent::ToolCallStatus,
-    ) -> Result<(), AgentError> {
-        self.updated_statuses.lock().unwrap().push(status);
-        Ok(())
-    }
-
-    async fn update_tool_call(
-        &self,
-        _id: &str,
-        _output: Option<&str>,
-        status: slab_types::agent::ToolCallStatus,
-        _completed_at: &str,
-    ) -> Result<(), AgentError> {
-        self.updated_statuses.lock().unwrap().push(status);
-        Ok(())
-    }
-
     async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError> {
         self.messages.lock().unwrap().push(record.clone());
         Ok(())
@@ -891,6 +822,10 @@ impl AgentStorePort for RecordingPersistingStore {
             .filter(|record| record.thread_id == thread_id)
             .cloned()
             .collect())
+    }
+
+    async fn upsert_turn_state(&self, _record: &TurnStateRecord) -> Result<(), AgentError> {
+        Ok(())
     }
 }
 
@@ -939,28 +874,6 @@ impl AgentStorePort for PersistingStore {
         Ok(())
     }
 
-    async fn insert_tool_call(&self, _record: &ToolCallRecord) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn update_tool_call_status(
-        &self,
-        _id: &str,
-        _status: slab_types::agent::ToolCallStatus,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn update_tool_call(
-        &self,
-        _id: &str,
-        _output: Option<&str>,
-        _status: slab_types::agent::ToolCallStatus,
-        _completed_at: &str,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-
     async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError> {
         self.messages.lock().unwrap().push(record.clone());
         Ok(())
@@ -983,19 +896,6 @@ impl AgentStorePort for PersistingStore {
     async fn upsert_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError> {
         self.turn_states.lock().unwrap().push(record.clone());
         Ok(())
-    }
-
-    async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError> {
-        let mut records: Vec<TurnStateRecord> = self
-            .turn_states
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|record| record.thread_id == thread_id)
-            .cloned()
-            .collect();
-        records.sort_by_key(|record| record.turn_index);
-        Ok(records)
     }
 }
 
@@ -2404,14 +2304,6 @@ async fn approval_required_tool_is_recorded_pending_then_completed() {
     .expect("thread should finish");
 
     assert_eq!(final_status, ThreadStatus::Completed);
-    assert_eq!(
-        store.inserted_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Pending]
-    );
-    assert_eq!(
-        store.updated_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Running, slab_types::agent::ToolCallStatus::Completed,]
-    );
 }
 
 /// Reproduces the post-approval hang with a tool that streams output via
@@ -2570,14 +2462,6 @@ async fn rejected_approval_tool_is_recorded_pending_then_failed() {
     let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
 
     assert_eq!(final_status, ThreadStatus::Completed);
-    assert_eq!(
-        store.inserted_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Pending]
-    );
-    assert_eq!(
-        store.updated_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Failed]
-    );
 }
 
 #[tokio::test]
@@ -2604,14 +2488,6 @@ async fn invalid_tool_arguments_are_recorded_failed() {
     let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
 
     assert_eq!(final_status, ThreadStatus::Completed);
-    assert_eq!(
-        store.inserted_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Running]
-    );
-    assert_eq!(
-        store.updated_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Failed]
-    );
 }
 
 #[tokio::test]
@@ -2649,14 +2525,6 @@ async fn hook_blocked_tool_call_is_recorded_failed() {
     let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
 
     assert_eq!(final_status, ThreadStatus::Completed);
-    assert_eq!(
-        store.inserted_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Running]
-    );
-    assert_eq!(
-        store.updated_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Failed]
-    );
 }
 
 #[tokio::test]
@@ -3225,18 +3093,13 @@ async fn fork_thread_clones_history_at_depth_plus_one() {
         serde_json::from_str(&child.config_json).expect("child config parses");
     assert_eq!(child_config.model, "child-model", "model override applied");
 
-    // History cloned: two messages and one turn state under the child id.
-    let messages = store_port.list_thread_messages(&child_id).await.expect("child messages");
-    assert_eq!(messages.len(), 2, "parent messages cloned into child");
-    let turn_states = store_port.list_turn_states(&child_id).await.expect("turn states");
-    assert_eq!(turn_states.len(), 1, "parent turn state cloned into child");
-    assert_eq!(turn_states[0].turn_index, 1);
-
-    // The fork must not mutate the parent's history.
+    // Slice E: `AgentControl::fork_thread` no longer clones the parent's
+    // per-record history — the production fork path (HarnessService::fork_thread)
+    // snapshots the parent rollout file wholesale into the child. At this layer
+    // the child is just new metadata, so the parent's history stays untouched
+    // under the parent id (no per-record copy into the child).
     let parent_messages = store_port.list_thread_messages("parent-1").await.expect("parent msgs");
-    assert_eq!(parent_messages.len(), 2);
-    let parent_turns = store_port.list_turn_states("parent-1").await.expect("parent turns");
-    assert_eq!(parent_turns.len(), 1);
+    assert_eq!(parent_messages.len(), 2, "parent history untouched by fork");
 }
 
 // ── Error propagation tests ───────────────────────────────────────────────────────────
@@ -3629,14 +3492,6 @@ async fn high_risk_tool_calls_require_approval_even_without_tool_metadata() {
         .expect("terminal snapshot should be available");
 
     assert_eq!(snapshot.status, ThreadStatus::Completed);
-    assert_eq!(
-        store.inserted_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Pending]
-    );
-    assert_eq!(
-        store.updated_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Failed]
-    );
 }
 
 #[tokio::test]

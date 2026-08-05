@@ -57,20 +57,17 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         tracing::info!(migrated, "rollout flat files migrated to date-partitioned layout");
     }
     // The ONLY AgentStorePort wired into the runtime: rollout-backed, with
-    // metadata + tool-call audit delegated to the SQL store and the legacy
-    // three tables no longer written. The same SQL store also backs the
-    // Slice-5 rollout-session index (read gate + new-thread mark).
+    // metadata delegated to the SQL store. The same SQL store also backs the
+    // rollout-session index (D2a list ghost-gate + new-thread mark). Slice E
+    // dropped the legacy conversation + audit tables and the startup backfill:
+    // rollout is the sole conversation/turn-state/item source, so there is no
+    // backfill to schedule.
     let rollout_store = Arc::new(super::rollout_store::RolloutBackedAgentStore::new(
         Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>,
         Arc::clone(&store) as Arc<dyn crate::infra::db::repository::rollout_index::RolloutIndex>,
         Arc::clone(&rollout),
         trace_dir.clone(),
     ));
-    // Slice 5: fire-and-forget backfill of legacy SQL threads into rollout.
-    // Must NOT block app boot — the read gate defaults new threads to
-    // completed and falls back to SQL for un-backfilled legacy threads, so an
-    // async backfill is safe (no orphan window).
-    schedule_rollout_backfill(Arc::clone(&store), Arc::clone(&rollout));
     let store_for_agent: Arc<dyn slab_agent::port::AgentStorePort> =
         rollout_store.clone() as Arc<dyn slab_agent::port::AgentStorePort>;
     let event_hub = Arc::new(AgentEventHub::new());
@@ -104,6 +101,8 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         Arc::clone(&event_hub),
         compact,
         Arc::clone(&rollout),
+        Arc::clone(&rollout_store)
+            as Arc<dyn crate::domain::services::agent::RolloutConversationReader>,
         trace_dir,
     );
     let runtime = AgentRuntimeReloader::new(
@@ -117,28 +116,6 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     let response = ResponseService::new(core, (*ctx.model_state).clone());
 
     AgentBootstrap { harness, response, runtime }
-}
-
-/// Spawn the Slice-5 rollout backfill as a fire-and-forget task. Legacy threads
-/// (pre-migration data still in the three SQL tables) are copied into rollout
-/// JSONL and flipped to `backfill_status = "completed"`. Never blocks app boot.
-fn schedule_rollout_backfill(
-    sqlx: Arc<AnyStore>,
-    rollout: Arc<slab_agent_rollout::RolloutFileStore>,
-) {
-    let Ok(handle) = tokio::runtime::Handle::try_current() else {
-        tracing::warn!(
-            "rollout backfill: no Tokio runtime active; legacy threads stay on the SQL read path until next restart"
-        );
-        return;
-    };
-    handle.spawn(async move {
-        let (succeeded, skipped, failed) =
-            super::rollout_backfill::backfill_all_threads(sqlx, rollout).await;
-        if succeeded + skipped + failed > 0 {
-            tracing::info!(succeeded, skipped, failed, "rollout backfill complete");
-        }
-    });
 }
 
 fn schedule_agent_runtime_reload(agent_runtime: AgentRuntimeReloader) {
@@ -167,7 +144,7 @@ fn build_agent_control(
     trace_dir: Option<PathBuf>,
 ) -> Arc<AgentControl> {
     let llm = Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
-    // memory_store / exec_db stay on the original SQL store (metadata + audit +
+    // memory_store / exec_db stay on the original SQL store (metadata +
     // memory pipeline); only the conversation/turn-state/item surface is backed
     // by rollout via store_adapter.
     let memory_store = Arc::clone(&store);

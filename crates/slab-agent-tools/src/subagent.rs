@@ -276,7 +276,7 @@ mod tests {
 
     use slab_agent::port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-        ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolCallRecord, ToolSpec,
+        ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec, TurnStateRecord,
     };
     use slab_agent::{AgentControlLimits, ToolContext, ToolRouter, WorkspaceRef};
     use slab_agent_tracing::AgentTraceContext;
@@ -367,28 +367,6 @@ mod tests {
             Ok(())
         }
 
-        async fn insert_tool_call(&self, _record: &ToolCallRecord) -> Result<(), AgentError> {
-            Ok(())
-        }
-
-        async fn update_tool_call_status(
-            &self,
-            _id: &str,
-            _status: slab_types::agent::ToolCallStatus,
-        ) -> Result<(), AgentError> {
-            Ok(())
-        }
-
-        async fn update_tool_call(
-            &self,
-            _id: &str,
-            _output: Option<&str>,
-            _status: slab_types::agent::ToolCallStatus,
-            _completed_at: &str,
-        ) -> Result<(), AgentError> {
-            Ok(())
-        }
-
         async fn insert_thread_message(
             &self,
             record: &ThreadMessageRecord,
@@ -402,6 +380,10 @@ mod tests {
             _thread_id: &str,
         ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
             Ok(Vec::new())
+        }
+
+        async fn upsert_turn_state(&self, _record: &TurnStateRecord) -> Result<(), AgentError> {
+            Ok(())
         }
     }
 

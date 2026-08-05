@@ -115,7 +115,7 @@ mod tests {
             assert_foreign_key(&pool, table, "task_id", "tasks", "CASCADE").await;
             assert!(!table_columns(&pool, table).await.contains("result_data"));
         }
-        for table in ["agent_turn_states", "agent_memory_phase1_outputs", "agent_turn_items"] {
+        for table in ["agent_memory_phase1_outputs"] {
             assert_foreign_key(&pool, table, "thread_id", "agent_threads", "CASCADE").await;
         }
 
@@ -141,7 +141,6 @@ mod tests {
             "idx_audio_transcription_tasks_created_at",
             "idx_model_config_state_updated_at",
             "idx_agent_threads_session",
-            "idx_agent_turn_states_status",
             "idx_agent_memory_phase1_status",
             "idx_agent_memory_phase2_runs_status",
             "idx_agent_memory_usage_events_thread",
@@ -151,17 +150,10 @@ mod tests {
             assert_index_exists(&pool, index).await;
         }
 
-        // Slice 5: rollout-session index tables + read gate.
+        // Slice 5: rollout-session index table FK (Slice E dropped
+        // rollout_backfill_state + the legacy conversation tables).
         assert_foreign_key(&pool, "rollout_session_index", "thread_id", "agent_threads", "CASCADE")
             .await;
-        assert_foreign_key(
-            &pool,
-            "rollout_backfill_state",
-            "thread_id",
-            "agent_threads",
-            "CASCADE",
-        )
-        .await;
         // The default backfill_status is 'completed' (new threads are
         // rollout-native from birth without an explicit mark).
         sqlx::query(
@@ -203,43 +195,22 @@ mod tests {
         .execute(&pool)
         .await;
         assert!(invalid_backfill_status.is_err(), "CHECK rejects unknown backfill_status");
-        let invalid_backfill_state_status = sqlx::query(
-            "INSERT INTO rollout_backfill_state (thread_id, status) VALUES ('thread-rollout', 'bogus')",
-        )
-        .execute(&pool)
-        .await;
-        assert!(
-            invalid_backfill_state_status.is_err(),
-            "CHECK rejects unknown rollout_backfill_state status",
-        );
-        // Slice D2b: the backfill lease columns exist and are nullable (the CAS
-        // acquire/release rely on them; NULL means "no lease held"). A row
-        // inserted without specifying them must succeed and read back NULL.
-        let backfill_state_columns = table_columns(&pool, "rollout_backfill_state").await;
-        assert!(
-            backfill_state_columns.contains("lease_owner"),
-            "rollout_backfill_state.lease_owner column exists",
-        );
-        assert!(
-            backfill_state_columns.contains("lease_expires_at"),
-            "rollout_backfill_state.lease_expires_at column exists",
-        );
-        sqlx::query(
-            "INSERT INTO rollout_backfill_state (thread_id, status) \
-             VALUES ('thread-rollout', 'in_progress')",
-        )
-        .execute(&pool)
-        .await
-        .expect("insert backfill_state without lease columns");
-        let (lease_owner, lease_expires_at): (Option<String>, Option<String>) = sqlx::query_as(
-            "SELECT lease_owner, lease_expires_at FROM rollout_backfill_state \
-             WHERE thread_id = 'thread-rollout'",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("read lease columns");
-        assert_eq!(lease_owner, None, "lease_owner defaults to NULL (no lease)");
-        assert_eq!(lease_expires_at, None, "lease_expires_at defaults to NULL");
+        // Slice E: the legacy conversation tables + agent_tool_calls audit table
+        // + rollout_backfill_state were dropped (rollout is the only source).
+        for table in [
+            "agent_thread_messages",
+            "agent_turn_states",
+            "agent_turn_items",
+            "agent_tool_calls",
+            "rollout_backfill_state",
+        ] {
+            assert_table_absent(&pool, table).await;
+        }
+        for index in
+            ["idx_atm_thread", "idx_agent_turn_states_status", "idx_agent_tool_calls_thread"]
+        {
+            assert_index_absent(&pool, index).await;
+        }
         // The zombie agent_thread_responses table + its index are dropped.
         assert_table_absent(&pool, "agent_thread_responses").await;
         assert_index_absent(&pool, "idx_atr_thread").await;
@@ -372,22 +343,6 @@ mod tests {
         .execute(&pool)
         .await;
         assert!(invalid_agent_status.is_err());
-        let invalid_agent_role = sqlx::query(
-            "INSERT INTO agent_thread_messages (id, thread_id, turn_index, role, content, created_at) \
-             VALUES ('message-bad-role', 'thread-defaults', 0, 'moderator', '{}', \
-                '2026-06-17T00:00:00Z')",
-        )
-        .execute(&pool)
-        .await;
-        assert!(invalid_agent_role.is_err());
-        let invalid_turn_item_json = sqlx::query(
-            "INSERT INTO agent_turn_items (id, thread_id, turn_index, seq, item_json, created_at) \
-             VALUES ('item-bad-json', 'thread-defaults', 0, 0, 'not-json', \
-                '2026-06-17T00:00:00Z')",
-        )
-        .execute(&pool)
-        .await;
-        assert!(invalid_turn_item_json.is_err());
 
         let invalid_plugin_enabled = sqlx::query(
             "INSERT INTO plugin_states (plugin_id, source_kind, enabled, runtime_status, installed_at, updated_at) \

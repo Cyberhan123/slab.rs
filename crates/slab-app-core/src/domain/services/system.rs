@@ -112,12 +112,17 @@ impl SystemService {
         })
     }
 
-    /// Aggregate recent agent thread stats + failed tool calls for diagnostics
-    /// (INFRA-08). Thread stats carry only whitelist-safe fields (no message
-    /// content); failed tool calls carry tool name + error only (no arguments).
-    /// The reason field is populated from `completion_text` for non-completed
-    /// threads (where it stores the termination reason) and left `None` for
-    /// completed threads (where it stores the final answer, not a reason).
+    /// Aggregate recent agent thread stats for diagnostics (INFRA-08). Thread
+    /// stats carry only whitelist-safe fields (no message content). The reason
+    /// field is populated from `completion_text` for non-completed threads
+    /// (where it stores the termination reason) and left `None` for completed
+    /// threads (where it stores the final answer, not a reason).
+    ///
+    /// Slice E: the `agent_tool_calls` audit table was dropped, so the
+    /// failed-tool-call list is no longer populated here (the response field is
+    /// retained for API stability and returned empty). Tool failures are now
+    /// captured by the rollout `TurnItem` stream; a rollout-native diagnostics
+    /// reader is deferred to a later slice.
     pub async fn agent_diagnostics(&self) -> Result<AgentDiagnosticsResponse, AppCoreError> {
         let model_state = self.model_state.as_ref().ok_or_else(|| {
             AppCoreError::Internal("agent diagnostics require app state".to_owned())
@@ -126,7 +131,6 @@ impl SystemService {
         const LIMIT: i64 = 50;
 
         let thread_rows = store.list_recent_agent_thread_stats(LIMIT).await?;
-        let failed_rows = store.list_recent_failed_tool_calls(LIMIT).await?;
 
         let threads = thread_rows
             .into_iter()
@@ -147,14 +151,9 @@ impl SystemService {
             .map(Into::into)
             .collect();
 
-        let failed_tool_calls = failed_rows
-            .into_iter()
-            .map(|row| slab_utils::diagnostics::FailedToolCall {
-                tool_name: row.tool_name,
-                error: row.output.unwrap_or_default(),
-            })
-            .map(Into::into)
-            .collect();
+        // Slice E: agent_tool_calls was dropped; failed-tool-call diagnostics
+        // are deferred until a rollout-native reader exists.
+        let failed_tool_calls = Vec::new();
 
         Ok(AgentDiagnosticsResponse { threads, failed_tool_calls })
     }

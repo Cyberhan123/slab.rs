@@ -16,16 +16,17 @@ use slab_agent::compact::{CompactContext, CompactOutcome, CompactPort};
 use slab_agent::config::AgentConfig;
 use slab_agent::port::{
     AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-    ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolCallRecord,
-    TurnItemRecord, TurnStateRecord,
+    ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, TurnItemRecord,
+    TurnStateRecord,
 };
 use slab_agent::{
     AgentControl, AgentError, AgentRuntime, OperationDescriptor, ToolRiskAssessment, ToolRouter,
 };
 use slab_agent_rollout::{RolloutItem, RolloutStore, read_rollout_lines};
-use slab_types::{ConversationMessage, ConversationMessageContent, agent::ToolCallStatus};
+use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use super::AgentCore;
+use super::RolloutConversationReader;
 use super::harness::HarnessService;
 use crate::infra::agent::event_hub::AgentEventHub;
 use crate::infra::agent::rollout_store::RolloutBackedAgentStore;
@@ -33,21 +34,17 @@ use crate::infra::db::repository::rollout_index::RolloutIndex;
 
 // ── in-memory SQL delegate + RolloutIndex mock ──────────────────────────────
 
-/// Minimal in-memory `AgentStorePort` + `RolloutIndex` mock. Stores thread
-/// metadata + messages + items + states so the rollout adapter can delegate
-/// metadata and fall back to SQL for un-backfilled threads. `thread_has_legacy_data`
-/// is configurable per-thread so a test can build either a rollout-native thread
-/// (`false`, the default → `upsert_thread` marks it completed) or a legacy thread
-/// (`true` → left for backfill, reads stay on SQL).
+/// Minimal in-memory mock that implements `AgentStorePort` + `RolloutIndex` +
+/// `RolloutConversationReader`. Stores thread metadata, messages, items, and
+/// states. Slice E dropped the legacy/backfill surface (`thread_has_legacy_data`
+/// and the backfill/lease methods): rollout is the only source, so the mock no
+/// longer tracks a per-thread legacy flag.
 struct HarnessMockStore {
     threads: Mutex<HashMap<String, ThreadSnapshot>>,
     messages: Mutex<Vec<ThreadMessageRecord>>,
     items: Mutex<Vec<TurnItemRecord>>,
     states: Mutex<Vec<TurnStateRecord>>,
     backfill: Mutex<HashMap<String, String>>,
-    /// Per-thread legacy-data probe result (drives whether `upsert_thread`
-    /// marks the thread rollout-native at creation).
-    legacy: Mutex<HashMap<String, bool>>,
 }
 
 impl HarnessMockStore {
@@ -58,17 +55,15 @@ impl HarnessMockStore {
             items: Mutex::new(Vec::new()),
             states: Mutex::new(Vec::new()),
             backfill: Mutex::new(HashMap::new()),
-            legacy: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Seed a thread as a LEGACY thread (SQL data, not yet rollout-native): the
-    /// legacy probe returns `true` so `upsert_thread` does NOT flip the read
-    /// gate, and the rollout file is never created. Reads fall back to SQL.
+    /// Seed a thread WITHOUT creating a rollout file — used by the H4 tests to
+    /// drive the `!file_exists` guard (compact/rollback refuse a thread whose
+    /// rollout file has not materialized).
     fn seed_legacy_thread(&self, snapshot: &ThreadSnapshot, messages: Vec<ThreadMessageRecord>) {
         self.threads.lock().unwrap().insert(snapshot.id.clone(), snapshot.clone());
         self.messages.lock().unwrap().extend(messages);
-        self.legacy.lock().unwrap().insert(snapshot.id.clone(), true);
     }
 }
 
@@ -104,39 +99,6 @@ impl RolloutIndex for HarnessMockStore {
     ) -> sqlx::Result<()> {
         self.backfill.lock().unwrap().insert(thread_id.to_owned(), backfill_status.to_owned());
         Ok(())
-    }
-
-    async fn list_thread_ids_for_backfill(&self) -> sqlx::Result<Vec<(String, String)>> {
-        Ok(Vec::new())
-    }
-
-    async fn mark_backfill_state(
-        &self,
-        _thread_id: &str,
-        _status: &str,
-        _lines_written: u32,
-        _error: Option<&str>,
-    ) -> sqlx::Result<()> {
-        Ok(())
-    }
-
-    async fn try_acquire_backfill_lease(
-        &self,
-        _thread_id: &str,
-        _lease_owner: &str,
-        _lease_ttl_secs: u64,
-    ) -> sqlx::Result<bool> {
-        // This mock backs harness tests that do not exercise backfill lease
-        // contention — always grant the lease.
-        Ok(true)
-    }
-
-    async fn release_backfill_lease(&self, _thread_id: &str) -> sqlx::Result<()> {
-        Ok(())
-    }
-
-    async fn thread_has_legacy_data(&self, thread_id: &str) -> sqlx::Result<bool> {
-        Ok(*self.legacy.lock().unwrap().get(thread_id).unwrap_or(&false))
     }
 }
 
@@ -182,25 +144,6 @@ impl AgentStorePort for HarnessMockStore {
         }
         Ok(())
     }
-    async fn insert_tool_call(&self, _record: &ToolCallRecord) -> Result<(), AgentError> {
-        Ok(())
-    }
-    async fn update_tool_call_status(
-        &self,
-        _id: &str,
-        _status: ToolCallStatus,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-    async fn update_tool_call(
-        &self,
-        _id: &str,
-        _output: Option<&str>,
-        _status: ToolCallStatus,
-        _completed_at: &str,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
     async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError> {
         self.messages.lock().unwrap().push(record.clone());
         Ok(())
@@ -230,6 +173,19 @@ impl AgentStorePort for HarnessMockStore {
         }
         Ok(())
     }
+    async fn archive_thread(&self, id: &str, archived_at: Option<&str>) -> Result<(), AgentError> {
+        let mut threads = self.threads.lock().unwrap();
+        if let Some(t) = threads.get_mut(id) {
+            t.archived_at = archived_at.map(str::to_owned);
+        }
+        Ok(())
+    }
+}
+
+// Slice E: list_turn_states / list_turn_items moved off `AgentStorePort` onto
+// the app-core-internal `RolloutConversationReader` trait.
+#[async_trait]
+impl RolloutConversationReader for HarnessMockStore {
     async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError> {
         Ok(self
             .states
@@ -240,10 +196,6 @@ impl AgentStorePort for HarnessMockStore {
             .cloned()
             .collect())
     }
-    async fn insert_turn_item(&self, record: &TurnItemRecord) -> Result<(), AgentError> {
-        self.items.lock().unwrap().push(record.clone());
-        Ok(())
-    }
     async fn list_turn_items(&self, thread_id: &str) -> Result<Vec<TurnItemRecord>, AgentError> {
         Ok(self
             .items
@@ -253,13 +205,6 @@ impl AgentStorePort for HarnessMockStore {
             .filter(|i| i.thread_id == thread_id)
             .cloned()
             .collect())
-    }
-    async fn archive_thread(&self, id: &str, archived_at: Option<&str>) -> Result<(), AgentError> {
-        let mut threads = self.threads.lock().unwrap();
-        if let Some(t) = threads.get_mut(id) {
-            t.archived_at = archived_at.map(str::to_owned);
-        }
-        Ok(())
     }
 }
 
@@ -370,7 +315,7 @@ impl TestHarness {
         let dir = tempfile::tempdir().expect("tempdir");
         let rollout = Arc::new(slab_agent_rollout::RolloutFileStore::new(dir.path().to_owned()));
         let mock = Arc::new(HarnessMockStore::new());
-        let store_adapter: Arc<dyn AgentStorePort> = Arc::new(RolloutBackedAgentStore::new(
+        let store_adapter: Arc<RolloutBackedAgentStore> = Arc::new(RolloutBackedAgentStore::new(
             Arc::clone(&mock) as Arc<dyn AgentStorePort>,
             Arc::clone(&mock) as Arc<dyn RolloutIndex>,
             Arc::clone(&rollout),
@@ -381,7 +326,7 @@ impl TestHarness {
         let approval: Arc<dyn ApprovalPort> = Arc::new(NoopNotify);
         let control = Arc::new(AgentControl::new(
             Arc::new(StubLlm) as Arc<dyn LlmPort>,
-            Arc::clone(&store_adapter),
+            Arc::clone(&store_adapter) as Arc<dyn AgentStorePort>,
             notify,
             approval,
             Arc::new(ToolRouter::new()),
@@ -391,14 +336,15 @@ impl TestHarness {
         let runtime = AgentRuntime::new(control);
         let core = AgentCore::new(
             runtime,
-            store_adapter.clone(),
+            Arc::clone(&store_adapter) as Arc<dyn AgentStorePort>,
             event_hub,
             compact,
             rollout.clone(),
+            Arc::clone(&store_adapter) as Arc<dyn RolloutConversationReader>,
             None,
         );
         let harness = HarnessService::new(core);
-        Self { harness, store: store_adapter, rollout, mock, _dir: dir }
+        Self { harness, store: store_adapter as Arc<dyn AgentStorePort>, rollout, mock, _dir: dir }
     }
 }
 
@@ -461,17 +407,10 @@ async fn seed_rollout_native_parent(
             id: format!("a{parent_id}-{turn}"),
             text: format!("r{turn}"),
         };
-        store
-            .insert_turn_item(&TurnItemRecord {
-                id: format!("a{parent_id}-{turn}"),
-                thread_id: parent_id.to_owned(),
-                turn_index: turn,
-                seq: 0,
-                item_json: serde_json::to_string(&item).unwrap(),
-                created_at: "2026-08-02T00:00:00Z".to_owned(),
-            })
-            .await
-            .expect("insert item");
+        // Slice E: TurnItems are written via the rollout directly (the adapter's
+        // `insert_turn_item` was removed; production writes via the rollout
+        // persistence observer).
+        rollout.append(parent_id, RolloutItem::TurnItem(item)).await.expect("append turn item");
     }
     // Materialize the rollout file so file_exists flips true (H4 guard).
     rollout.flush(parent_id).await.expect("flush parent");
@@ -531,77 +470,6 @@ async fn h1_fork_preserves_child_session_meta_header() {
     );
 }
 
-// ── H1: legacy parent fork also rebuilds the child with a proper header ─────
-
-// A legacy parent (no rollout file) is rebuilt from the adapter reads (SQL
-// fallback). The child must STILL start with a SessionMeta header carrying
-// parent_id, and replay the parent's items with correct attribution.
-#[tokio::test]
-async fn h1_h2_fork_legacy_parent_rebuilds_child_with_header() {
-    let compact: Arc<dyn CompactPort> = Arc::new(SkipCompact);
-    let th = TestHarness::build(compact).await;
-    let parent_id = "parent-legacy";
-    let parent_snapshot = snapshot(parent_id, "sess-legacy");
-    // Seed the parent as LEGACY: data in SQL, no rollout file, read gate stays
-    // on SQL. Two turns of messages + items.
-    let mut messages = Vec::new();
-    for turn in 0..2u32 {
-        messages.push(ThreadMessageRecord {
-            id: format!("lm{turn}"),
-            thread_id: parent_id.to_owned(),
-            turn_index: turn,
-            message: user_msg(&format!("lu{turn}")),
-            created_at: "2026-08-02T00:00:00Z".to_owned(),
-        });
-    }
-    let mut items = Vec::new();
-    for turn in 0..2u32 {
-        let item = slab_agent::protocol::TurnItem::AgentMessage {
-            id: format!("la{turn}"),
-            text: format!("lr{turn}"),
-        };
-        items.push(TurnItemRecord {
-            id: format!("la{turn}"),
-            thread_id: parent_id.to_owned(),
-            turn_index: turn,
-            seq: 0,
-            item_json: serde_json::to_string(&item).unwrap(),
-            created_at: "2026-08-02T00:00:00Z".to_owned(),
-        });
-    }
-    th.mock.seed_legacy_thread(&parent_snapshot, messages);
-    // Seed items directly into the SQL mock (seed_legacy_thread only seeds
-    // messages + the legacy flag).
-    {
-        let mut guard = th.mock.items.lock().unwrap();
-        guard.extend(items);
-    }
-    // No rollout file for the legacy parent.
-    assert!(!th.rollout.file_exists(parent_id).await);
-
-    let child = th.harness.fork_thread(parent_id, None).await.expect("fork succeeds");
-
-    // H1: child header preserved even for a legacy parent.
-    let child_meta = th
-        .rollout
-        .read_session_meta(&child.id)
-        .await
-        .expect("H1: legacy-fork child has a SessionMeta header");
-    assert_eq!(child_meta.parent_id, Some(parent_id.to_owned()));
-    assert_eq!(child_meta.session_id, "sess-legacy");
-
-    // H2: the legacy rebuild emits items in per-turn interleaved order so
-    // attribution is correct (la0 → turn 0, la1 → turn 1).
-    let child_items = th.rollout.read_turn_items(&child.id).await;
-    let attribution: Vec<(u32, &str)> =
-        child_items.iter().map(|i| (i.turn_index, i.id.as_str())).collect();
-    assert_eq!(
-        attribution,
-        vec![(0, "la0"), (1, "la1")],
-        "H2: legacy rebuild preserves interleaved turn attribution"
-    );
-}
-
 // ── H3: compact_thread is durable as a unit (atomic rewrite) ───────────────
 
 // After compact_thread returns, the rollout file must hold exactly
@@ -650,7 +518,7 @@ async fn h3_compact_thread_leaves_atomic_session_meta_plus_compacted() {
     assert_eq!(msgs.len(), 1, "compacted baseline replaces history");
 }
 
-// ── H4: compact_thread / rollback_thread refuse un-backfilled legacy threads ─
+// ── H4: compact_thread / rollback_thread refuse a thread with no rollout file ─
 
 #[tokio::test]
 async fn h4_compact_thread_refuses_legacy_thread() {
@@ -674,12 +542,12 @@ async fn h4_compact_thread_refuses_legacy_thread() {
     let err = th.harness.compact_thread(thread_id, None).await;
     assert!(
         err.is_err(),
-        "H4: compact_thread must refuse an un-backfilled legacy thread, not silently no-op"
+        "H4: compact_thread must refuse a thread with no rollout file, not silently no-op"
     );
     let msg = format!("{}", err.unwrap_err());
     assert!(
-        msg.contains("not yet migrated") || msg.contains("backfill"),
-        "H4: refuse message explains the backfill requirement: {msg}"
+        msg.contains("no rollout file"),
+        "H4: refuse message explains the missing rollout file: {msg}"
     );
 }
 
@@ -704,12 +572,12 @@ async fn h4_rollback_thread_refuses_legacy_thread() {
     let err = th.harness.rollback_thread(thread_id, 0).await;
     assert!(
         err.is_err(),
-        "H4: rollback_thread must refuse an un-backfilled legacy thread, not silently no-op"
+        "H4: rollback_thread must refuse a thread with no rollout file, not silently no-op"
     );
     let msg = format!("{}", err.unwrap_err());
     assert!(
-        msg.contains("not yet migrated") || msg.contains("backfill"),
-        "H4: refuse message explains the backfill requirement: {msg}"
+        msg.contains("no rollout file"),
+        "H4: refuse message explains the missing rollout file: {msg}"
     );
 }
 
@@ -731,4 +599,57 @@ async fn h4_rollback_rollout_native_thread_truncates() {
     assert_eq!(ids, vec!["anative-rollback-0"], "H4 happy path: turns 1+ dropped");
     // Header survived.
     assert!(th.rollout.read_session_meta(thread_id).await.is_some());
+}
+
+// ── HarnessService::list_turn_states / list_turn_items reader delegation ────
+
+// `HarnessService::list_turn_states` / `list_turn_items` are one-line delegations
+// to `core.reader().list_turn_states/items(...)`. The underlying
+// `RolloutBackedAgentStore` reader impl has its own unit coverage, but WITHOUT
+// this test the wrapper delegation is unguarded — a future refactor that drops
+// the `self.0.reader()` delegation (e.g. returns an empty Vec, or routes through
+// a different surface) would silently break `thread/resume` while every other
+// harness test stays green. Seeds a rollout-native parent with one TurnState +
+// one TurnItem, then asserts the wrapper returns both (mutation guard below).
+#[tokio::test]
+async fn harness_list_turn_states_and_items_delegate_to_reader() {
+    let compact: Arc<dyn CompactPort> = Arc::new(SkipCompact);
+    let th = TestHarness::build(compact).await;
+    let parent_id = "reader-delegate";
+    seed_rollout_native_parent(&th.store, &th.rollout, parent_id, "sess-rd", 1).await;
+    // seed_rollout_native_parent writes a MessageAppend + a TurnItem per turn but
+    // no TurnState — write one through the adapter so list_turn_states has a row
+    // to find via the reader delegation.
+    th.store
+        .upsert_turn_state(&TurnStateRecord {
+            thread_id: parent_id.to_owned(),
+            turn_index: 0,
+            status: "completed".to_owned(),
+            input_messages_json: None,
+            tool_specs_json: None,
+            llm_response_json: None,
+            error: None,
+            started_at: "2026-08-02T00:00:00Z".to_owned(),
+            completed_at: Some("2026-08-02T00:00:05Z".to_owned()),
+        })
+        .await
+        .expect("upsert turn state");
+
+    // The wrapper delegation reads through `core.reader()` → the adapter → the
+    // rollout replay. Both must return the seeded row.
+    let states = th.harness.list_turn_states(parent_id).await.expect("list turn states");
+    assert_eq!(
+        states.len(),
+        1,
+        "list_turn_states delegated to the reader and observed the seeded TurnState",
+    );
+    assert_eq!(states[0].turn_index, 0);
+
+    let items = th.harness.list_turn_items(parent_id).await.expect("list turn items");
+    assert_eq!(
+        items.len(),
+        1,
+        "list_turn_items delegated to the reader and observed the seeded TurnItem",
+    );
+    assert_eq!(items[0].id, "areader-delegate-0");
 }

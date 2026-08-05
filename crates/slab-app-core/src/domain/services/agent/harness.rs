@@ -3,7 +3,6 @@
 //! Drives the slab-agent turn loop and exposes thread lifecycle / control
 //! operations. Holds a cheap clone of the shared [`AgentCore`].
 
-use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -15,8 +14,7 @@ use slab_agent::port::{
     ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, TurnItemRecord, TurnStateRecord,
 };
 use slab_agent_rollout::{
-    CompactedPayload, RolloutItem, RolloutLine, RolloutStore, TurnContextPayload,
-    read_rollout_lines,
+    CompactedPayload, RolloutItem, RolloutLine, RolloutStore, read_rollout_lines,
 };
 use slab_types::ConversationMessage;
 use slab_utils::session_snapshot::{
@@ -180,26 +178,19 @@ impl HarnessService {
             self.0.trace_dir(),
         )));
 
-        // H2: the wholesale rewrite is UNCONDITIONAL. For a rollout-native
-        // parent (the common case) reuse its exact on-disk interleaved order —
-        // the production write order read_turn_items / read_messages already
-        // attribute correctly — swapping the parent SessionMeta for the child's.
-        // For a legacy parent with no rollout file yet, rebuild from the adapter
-        // reads (which fall back to SQL) in correct per-turn interleaved order.
+        // H2: the wholesale rewrite reuses the parent's exact on-disk
+        // interleaved order (the production write order read_turn_items /
+        // read_messages already attribute correctly), swapping the parent
+        // SessionMeta for the child's. Slice E dropped the legacy branch: a
+        // parent with no rollout data (no non-SessionMeta lines) yields a child
+        // that carries only the child SessionMeta header — the correct empty
+        // child (there is no legacy SQL to rebuild from anymore).
         let parent_lines = read_rollout_lines(&rollout.resolve_path(parent_thread_id));
-        let has_parent_rollout_data =
-            parent_lines.iter().any(|l| !matches!(l.item, RolloutItem::SessionMeta(_)));
-        let rebuilt = if has_parent_rollout_data {
-            let mut v: Vec<RolloutLine> = Vec::with_capacity(parent_lines.len() + 1);
-            v.push(child_meta_line);
-            v.extend(
-                parent_lines.into_iter().filter(|l| !matches!(l.item, RolloutItem::SessionMeta(_))),
-            );
-            v
-        } else {
-            rebuild_child_lines_from_legacy_parent(&self.0, parent_thread_id, child_meta_line)
-                .await?
-        };
+        let mut rebuilt: Vec<RolloutLine> = Vec::with_capacity(parent_lines.len() + 1);
+        rebuilt.push(child_meta_line);
+        rebuilt.extend(
+            parent_lines.into_iter().filter(|l| !matches!(l.item, RolloutItem::SessionMeta(_))),
+        );
         rollout
             .rewrite_session(&child_id, rebuilt)
             .await
@@ -241,14 +232,16 @@ impl HarnessService {
             ));
         }
         // H4: rollback writes the rollout file directly, but reads flow through
-        // the gate-aware adapter. An un-backfilled legacy thread (no rollout
-        // file) would be a SILENT no-op here (truncate returns Ok early on a
-        // missing file) yet report success — refuse cleanly instead so the
-        // caller retries after startup backfill flips the thread rollout-native.
+        // the rollout-only adapter. A missing rollout file means there is no
+        // persisted history to roll back — truncate would be a SILENT no-op on
+        // a missing file yet report success. The only reachable case post-Slice-E
+        // is a brand-new thread before its first append materializes the rollout
+        // file (Slice E removed the legacy backfill, so there is no migration to
+        // wait for); refuse cleanly instead of silently succeeding.
         if !self.0.rollout().file_exists(thread_id).await {
             return Err(AppCoreError::Internal(format!(
-                "thread {thread_id} is not yet migrated to the rollout true source; \
-                 retry after backfill completes"
+                "thread {thread_id} has no rollout file yet (brand-new thread before first \
+                 append); cannot roll back an empty thread"
             )));
         }
         let from = to_turn_index
@@ -276,8 +269,9 @@ impl HarnessService {
     /// compacted messages are NOT re-inserted as separate `MessageAppend` lines
     /// (the `Compacted` line carries them; re-inserting would duplicate them on
     /// the next read). Refuses while the thread is running (interrupt it first)
-    /// and refuses an un-backfilled legacy thread (H4 — the rollout file is the
-    /// only place the compact is visible to the gate-aware reads).
+    /// and refuses a thread with no rollout file (H4 — the rollout file is the
+    /// only place the compact is visible to the rollout-only reads; a missing
+    /// file means there is no history to compact).
     ///
     /// Returns the refreshed snapshot, the number of removed messages, and the
     /// estimated token count of the compacted set.
@@ -293,13 +287,15 @@ impl HarnessService {
             ));
         }
         // H4: compact writes the rollout file directly, but reads flow through
-        // the gate-aware adapter. For an un-backfilled legacy thread the compact
-        // would be invisible (reads fall back to SQL with un-compacted history),
-        // so refuse cleanly until backfill completes.
+        // the rollout-only adapter. With no rollout file there is no persisted
+        // history to compact — the compact would be a no-op yet report success.
+        // The only reachable case post-Slice-E is a brand-new thread before its
+        // first append materializes the rollout file (Slice E removed the legacy
+        // backfill); refuse cleanly instead.
         if !self.0.rollout().file_exists(thread_id).await {
             return Err(AppCoreError::Internal(format!(
-                "thread {thread_id} is not yet migrated to the rollout true source; \
-                 retry after backfill completes"
+                "thread {thread_id} has no rollout file yet (brand-new thread before first \
+                 append); cannot compact an empty thread"
             )));
         }
 
@@ -401,7 +397,7 @@ impl HarnessService {
         thread_id: &str,
     ) -> Result<Vec<TurnStateRecord>, AppCoreError> {
         self.0
-            .store()
+            .reader()
             .list_turn_states(thread_id)
             .await
             .map_err(|e| AppCoreError::Internal(e.to_string()))
@@ -424,7 +420,7 @@ impl HarnessService {
             return Err(AppCoreError::NotFound(format!("agent thread not found: {thread_id}")));
         }
         self.0
-            .store()
+            .reader()
             .list_turn_items(thread_id)
             .await
             .map_err(|e| AppCoreError::Internal(e.to_string()))
@@ -456,97 +452,3 @@ impl HarnessService {
 }
 
 // ── fork/compact helpers ───────────────────────────────────────────────────
-
-/// Rebuild a child rollout line set from a **legacy** parent (one with no
-/// rollout file yet, read through the gate-aware adapter which falls back to
-/// SQL). Returns `[child_meta_line, ...data lines]` in the production
-/// per-turn interleaved order (messages, then turn state, then items) so
-/// `read_turn_items`'s running-turn heuristic and `read_messages`'s
-/// replace/append replay both attribute the child's history correctly (H2).
-async fn rebuild_child_lines_from_legacy_parent(
-    core: &AgentCore,
-    parent_thread_id: &str,
-    child_meta_line: RolloutLine,
-) -> Result<Vec<RolloutLine>, AppCoreError> {
-    let messages = core
-        .store()
-        .list_thread_messages(parent_thread_id)
-        .await
-        .map_err(|e| AppCoreError::Internal(e.to_string()))?;
-    let states = core
-        .store()
-        .list_turn_states(parent_thread_id)
-        .await
-        .map_err(|e| AppCoreError::Internal(e.to_string()))?;
-    let items = core
-        .store()
-        .list_turn_items(parent_thread_id)
-        .await
-        .map_err(|e| AppCoreError::Internal(e.to_string()))?;
-
-    // Union of turn indices across the three record sets, ordered ascending so
-    // the rebuilt file walks turns in order (each turn's TurnContext stamps the
-    // running turn before that turn's TurnItems).
-    let mut turns: BTreeSet<u32> = BTreeSet::new();
-    for m in &messages {
-        turns.insert(m.turn_index);
-    }
-    for s in &states {
-        turns.insert(s.turn_index);
-    }
-    for i in &items {
-        turns.insert(i.turn_index);
-    }
-
-    let mut rebuilt: Vec<RolloutLine> =
-        Vec::with_capacity(messages.len() + states.len() + items.len() + 1);
-    rebuilt.push(child_meta_line);
-    for turn in turns {
-        for m in messages.iter().filter(|m| m.turn_index == turn) {
-            rebuilt.push(RolloutLine::now(RolloutItem::TurnContext(
-                TurnContextPayload::MessageAppend {
-                    turn_index: turn,
-                    message: m.message.clone(),
-                    id: Some(m.id.clone()),
-                    created_at: Some(m.created_at.clone()),
-                },
-            )));
-        }
-        for s in states.iter().filter(|s| s.turn_index == turn) {
-            rebuilt.push(RolloutLine::now(RolloutItem::TurnContext(
-                turn_state_payload_from_record(s),
-            )));
-        }
-        for it in items.iter().filter(|i| i.turn_index == turn) {
-            let item: slab_agent::protocol::TurnItem = serde_json::from_str(&it.item_json)
-                .map_err(|e| AppCoreError::Internal(format!("failed to decode TurnItem: {e}")))?;
-            rebuilt.push(RolloutLine::now(RolloutItem::TurnItem(item)));
-        }
-    }
-    Ok(rebuilt)
-}
-
-/// Reconstruct a rollout [`TurnContextPayload::TurnState`] from a persisted
-/// [`TurnStateRecord`], mirroring `RolloutBackedAgentStore::upsert_turn_state`
-/// (including the F6 raw-blob preservation when the typed list fails to parse).
-fn turn_state_payload_from_record(record: &TurnStateRecord) -> TurnContextPayload {
-    let mut input_messages = Vec::new();
-    let mut input_messages_raw = None;
-    if let Some(json) = &record.input_messages_json {
-        match serde_json::from_str::<Vec<ConversationMessage>>(json) {
-            Ok(parsed) => input_messages = parsed,
-            Err(_) => input_messages_raw = Some(json.clone()),
-        }
-    }
-    TurnContextPayload::TurnState {
-        turn_index: record.turn_index,
-        status: record.status.clone(),
-        input_messages,
-        tool_specs_json: record.tool_specs_json.clone(),
-        llm_response_json: record.llm_response_json.clone(),
-        error: record.error.clone(),
-        completed_at: record.completed_at.clone(),
-        started_at: Some(record.started_at.clone()),
-        input_messages_raw,
-    }
-}

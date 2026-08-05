@@ -82,10 +82,6 @@ impl ToolCallStateMachine {
         Self { status }
     }
 
-    pub(crate) fn status(&self) -> ToolCallStatus {
-        self.status
-    }
-
     pub(crate) fn transition(
         &mut self,
         next: ToolCallStatus,

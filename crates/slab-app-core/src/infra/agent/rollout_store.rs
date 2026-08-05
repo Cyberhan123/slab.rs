@@ -1,51 +1,33 @@
-//! Rollout-backed [`AgentStorePort`] adapter — the new true source for agent
-//! conversation, turn state, and finalized items.
+//! Rollout-backed [`AgentStorePort`] adapter — the true source for agent
+//! conversation and turn state.
 //!
 //! Slice 4 wired this adapter as the **only** `AgentStorePort` impl in the
-//! agent runtime; Slice 5 replaces the bare `rollout.file_exists` read gate
-//! with a `rollout_session_index.backfill_status == "completed"` gate so a
-//! legacy thread keeps reading from SQL until its backfill copies the legacy
-//! rows into the rollout file (resolving the pre-W2B legacy-orphan window).
+//! agent runtime. Slice E made the rollout JSONL the SOLE source: the legacy
+//! conversation + audit tables were dropped, the SQL read fallback + the startup
+//! backfill were removed, and the `AgentStorePort` trait was slimmed to the
+//! surface slab-agent actually calls in production (thread metadata + the three
+//! conversation/turn methods). Turn-state / turn-item READS moved off the
+//! slab-agent trait entirely (slab-agent does not call them) and onto the
+//! app-core-internal [`RolloutConversationReader`] trait, implemented below.
 //!
-//! # Routing
+//! # Routing (Slice E — rollout is the only source)
 //! - **Thread metadata** (`upsert_thread` / `get_thread` / `list_session_threads` /
 //!   `update_thread_status` / `archive_thread`) → always `SqlxStore`
 //!   (`agent_threads` stays the metadata truth source). `upsert_thread` also
-//!   stamps the rollout `SessionMeta` header on first upsert, and marks the
-//!   thread rollout-native (`backfill_status = "completed"`) when it carries
-//!   no legacy SQL conversation data — i.e. a brand-new thread born on rollout.
+//!   stamps the rollout `SessionMeta` header on first upsert and marks the
+//!   thread rollout-native (`backfill_status = "completed"`) at creation.
 //!   `list_session_threads[_filtered]` are the EXCEPTION: they read the DB
 //!   metadata list but then drop TRUE GHOSTS — threads the index claims are
 //!   `backfill_status = "completed"` whose rollout file has gone missing — and,
 //!   when the DB is unavailable, fall back to a best-effort filesystem scan
 //!   (Slice D2a). See [`RolloutBackedAgentStore::list_session_threads_filtered`].
-//! - **Tool-call audit** (`insert_tool_call` / `update_tool_call*`) → always
-//!   `SqlxStore` (`agent_tool_calls` is still written).
-//! - **Writes** (`insert_thread_message` / `upsert_turn_state` /
-//!   `insert_turn_item`) → rollout (`TurnContext` / `TurnItem`). The legacy
-//!   three tables are no longer written.
-//! - **Reads** (`list_thread_messages` / `list_turn_items` / `list_turn_states`)
-//!   → rollout-first ONLY when the index row is `backfill_status = "completed"`
-//!   (a new thread stamped at creation, or a legacy thread whose startup
-//!   backfill finished); otherwise fall back to `SqlxStore` so an
-//!   un-backfilled legacy thread stays fully recoverable. There is no orphan
-//!   window: a legacy thread reads SQL right up until its backfill flips the
-//!   gate, then reads rollout.
-//! - **Deletes** (`delete_*_from`) → `rollout.truncate_from_turn` (all three
-//!   collapse to one atomic file truncation).
-//!
-//! # Known transient backfill-window gap (G5)
-//! For a legacy thread that is actively used BEFORE its startup backfill
-//! completes: writes go to the rollout file, but reads fall back to SQL (the
-//! gate is not yet `completed`), so the just-written post-migration turn is
-//! INVISIBLE to reads until backfill flips the gate. This is a TRANSIENT gap —
-//! backfill runs once at startup and the legacy history is small on desktop, so
-//! the window closes quickly. Once backfill completes, the gate flips and the
-//! rollout read serves the merged legacy prefix + post-migration tail (so the
-//! previously-invisible turn reappears). This is NOT the permanent orphan the
-//! pre-G1 mixed-case shortcut caused (that shortcut dropped the legacy prefix
-//! entirely once any post-migration write materialized the rollout file); G1's
-//! atomic rewrite merges both, eliminating the permanent orphan.
+//! - **Conversation writes/reads** (`insert_thread_message` /
+//!   `upsert_turn_state` / `list_thread_messages`) → rollout only
+//!   (`TurnContext` / `TurnItem`). A missing rollout file replays to an empty
+//!   history (the de-facto behavior of a brand-new thread before its first
+//!   append).
+//! - **Turn-state / turn-item reads** (`list_turn_states` / `list_turn_items`,
+//!   on [`RolloutConversationReader`]) → rollout replay only.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -53,8 +35,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use slab_agent::error::AgentError;
 use slab_agent::port::{
-    AgentStorePort, ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, ToolCallRecord,
-    TurnItemRecord, TurnStateRecord,
+    AgentStorePort, ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, TurnItemRecord,
+    TurnStateRecord,
 };
 use slab_agent_rollout::{
     RolloutFileStore, RolloutItem, RolloutLine, RolloutStore, SessionMeta, TurnContextPayload,
@@ -64,19 +46,20 @@ use slab_agent_rollout::{
 // filesystem fallback; `read_first_line_session_meta` is private to the rollout
 // crate, so the fallback reuses `RolloutFileStore::list_all_session_metas`.
 use slab_types::ConversationMessage;
-use slab_types::agent::ToolCallStatus;
 
+use crate::domain::services::agent::RolloutConversationReader;
 use crate::infra::db::repository::rollout_index::RolloutIndex;
 
 /// `AgentStorePort` impl that backs reads/writes with the rollout JSONL true
-/// source, delegating only metadata + tool-call audit to the SQL store.
+/// source, delegating only thread metadata to the SQL store.
 pub struct RolloutBackedAgentStore {
-    /// SQL delegate for thread metadata + tool-call audit (and the read
-    /// fallback for threads not yet migrated to rollout).
+    /// SQL delegate for thread metadata (`agent_threads` is the metadata truth
+    /// source). Slice E dropped the legacy conversation/audit tables + the SQL
+    /// read fallback, so this delegate no longer serves conversation data.
     sqlx: Arc<dyn AgentStorePort>,
-    /// app-core-internal handle over the `rollout_session_index` /
-    /// `rollout_backfill_state` tables — backs the read gate and the
-    /// new-thread mark. NOT on `AgentStorePort` (slab-agent stays pure).
+    /// app-core-internal handle over the `rollout_session_index` table — backs
+    /// the D2a list ghost-gate + the new-thread `backfill_status = "completed"`
+    /// mark. NOT on `AgentStorePort` (slab-agent stays pure).
     index: Arc<dyn RolloutIndex>,
     /// The append-only rollout true source.
     rollout: Arc<RolloutFileStore>,
@@ -104,64 +87,23 @@ impl RolloutBackedAgentStore {
         Self { sqlx, index, rollout, trace_dir }
     }
 
-    /// The Slice-5 read gate: a thread reads rollout-first ONLY once its
-    /// `rollout_session_index.backfill_status` is `"completed"`.
-    ///
-    /// On an index lookup error, the gate resolves by FILE EXISTENCE rather
-    /// than blindly falling back to SQL (G2): a rollout-native thread (born on
-    /// rollout, no legacy SQL rows) has its data in the rollout file and an
-    /// EMPTY SQL history — a blind SQL fallback would serve empty history. So
-    /// when the index lookup errors, if the rollout file exists we treat the
-    /// thread as rollout-ready; otherwise we fall back to SQL (a legacy thread
-    /// whose data is in SQL).
-    async fn is_rollout_ready(&self, thread_id: &str) -> bool {
-        match self.index.rollout_backfill_status(thread_id).await {
-            Ok(Some(status)) => status == "completed",
-            Ok(None) => false,
-            Err(error) => {
-                // Resolve by file existence: a rollout-native thread has its
-                // data in the rollout file (SQL empty); a legacy thread has its
-                // data in SQL (no rollout file yet). This avoids serving empty
-                // history for a new thread on a transient SQLite error.
-                let file_exists = self.rollout.file_exists(thread_id).await;
-                tracing::warn!(
-                    thread_id = %thread_id,
-                    %error,
-                    file_exists,
-                    "rollout_session_index lookup failed; resolving read gate by file existence",
-                );
-                file_exists
-            }
-        }
-    }
-
     /// The SHARED production read path for the LLM-visible conversation, used by
     /// BOTH the agent runtime (`list_thread_messages` below) AND the agent-memory
     /// phase1 pipeline (`memory::build_phase1_input`).
     ///
-    /// Returns the replayed/fetched records AND whether they came from the
-    /// rollout true source (`true`) or the SQL fallback (`false`). The memory
-    /// pipeline needs the source flag to stamp `rollout_path` truthfully.
-    ///
-    /// Routing memory through THIS method (instead of a bare
-    /// `rollout.file_exists` gate with its own SQL read) closes the G5 orphan
-    /// window: when a legacy thread's backfill is not yet `completed`, BOTH the
-    /// runtime and the memory model fall back to the SAME SQL rows, so the memory
-    /// model can never silently consume a partial rollout tail (post-migration
-    /// only) while the runtime serves the full legacy prefix from SQL.
-    pub(crate) async fn read_thread_messages_with_source(
+    /// Slice E: rollout is the ONLY source, so this flushes the recorder and
+    /// replays the rollout file. A missing rollout file (a brand-new thread
+    /// before its first append) replays to an empty history — the de-facto
+    /// behavior. The memory pipeline stamps `rollout_path` from
+    /// `resolve_path`, which yields the on-disk path whether or not the file
+    /// has materialized yet.
+    pub(crate) async fn read_thread_messages(
         &self,
         thread_id: &str,
-    ) -> Result<(Vec<ThreadMessageRecord>, bool), AgentError> {
+    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
         let _ = self.rollout.flush(thread_id).await;
-        let from_rollout = self.is_rollout_ready(thread_id).await;
-        let records = if from_rollout {
-            let lines = read_rollout_lines(&self.rollout.resolve_path(thread_id));
-            replay_messages(thread_id, &lines)
-        } else {
-            self.sqlx.list_thread_messages(thread_id).await?
-        };
-        Ok((records, from_rollout))
+        let lines = read_rollout_lines(&self.rollout.resolve_path(thread_id));
+        Ok(replay_messages(thread_id, &lines))
     }
 
     // ── Slice D2a: list dual-source scheduling (ghost exclusion + DB fallback) ──
@@ -285,13 +227,13 @@ const THREAD_LIST_OVERFETCH_PAD: usize = 64;
 
 /// Readability verdict for the list-path ghost gate (Slice D2a).
 enum ThreadReadability {
-    /// Keep the thread: rollout file present, OR un-backfilled legacy (SQL
-    /// fallback can still serve it), OR a newborn native thread (empty but
-    /// healthy).
+    /// Keep the thread: rollout file present, OR a newborn native thread
+    /// (`completed` + `line_count == 0`, empty but healthy), OR an index row
+    /// that does not claim `completed` with `line_count > 0`.
     Readable,
     /// Drop the thread: rollout file absent AND index claims `completed` AND
     /// `line_count > 0` — data was supposedly migrated into the now-missing
-    /// file, so neither source can serve it.
+    /// file, so the rollout replay can no longer serve it.
     TrueGhost,
 }
 
@@ -454,56 +396,42 @@ impl AgentStorePort for RolloutBackedAgentStore {
         if !self.rollout.file_exists(&snapshot.id).await {
             self.rollout.create_session(build_session_meta(snapshot, self.trace_dir.as_deref()));
         }
-        // Mark the thread rollout-native when it carries NO legacy SQL
-        // conversation data — i.e. a brand-new thread born on rollout. A
-        // legacy thread (pre-migration rows still in the three tables) is left
-        // for the startup backfill to mark completed; marking it here would
-        // flip the read gate to an empty rollout file and orphan the legacy
-        // prefix. `upsert_thread` is creation-only in practice (thread spawn /
-        // fork / single-shot), so this probe returns false for genuine new
-        // threads and guards the rare re-upsert of a legacy id.
-        let has_legacy = match self.index.thread_has_legacy_data(&snapshot.id).await {
-            Ok(has_legacy) => has_legacy,
-            Err(error) => {
-                tracing::warn!(
-                    thread_id = %snapshot.id,
-                    %error,
-                    "failed to probe legacy conversation data; skipping rollout_session_index mark",
-                );
-                return Ok(());
-            }
-        };
-        if !has_legacy {
-            // The rollout file materializes (lazily) at the date-partitioned
-            // path_for_new location derived from snapshot.created_at. If a file
-            // already exists somewhere in the lookup chain (e.g. a migrated flat
-            // file), use its real on-disk path; otherwise stamp the path the
-            // recorder WILL write so the DB points where the bytes land.
-            let file_path = self
-                .rollout
-                .lookup_path(&snapshot.id)
-                .unwrap_or_else(|| self.rollout.path_for_new(&snapshot.id, &snapshot.created_at))
-                .to_string_lossy()
-                .into_owned();
-            if let Err(error) = self
-                .index
-                .mark_rollout_session(
-                    &snapshot.id,
-                    &snapshot.session_id,
-                    &file_path,
-                    0,
-                    None,
-                    0,
-                    "completed",
-                )
-                .await
-            {
-                tracing::warn!(
-                    thread_id = %snapshot.id,
-                    %error,
-                    "failed to stamp rollout_session_index; read gate will fall back to SQL",
-                );
-            }
+        // Slice E: every thread is rollout-native now (the legacy conversation
+        // tables + the startup backfill are gone), so unconditionally stamp the
+        // index row `backfill_status = "completed"` + `line_count = 0` (the
+        // recorder's first append materializes the file + bumps line_count
+        // later). Pre-Slice-E this probed `thread_has_legacy_data` to avoid
+        // orphaning a legacy prefix; that probe + the legacy tables are gone.
+        //
+        // The rollout file materializes (lazily) at the date-partitioned
+        // path_for_new location derived from snapshot.created_at. If a file
+        // already exists somewhere in the lookup chain (e.g. a migrated flat
+        // file), use its real on-disk path; otherwise stamp the path the
+        // recorder WILL write so the DB points where the bytes land.
+        let file_path = self
+            .rollout
+            .lookup_path(&snapshot.id)
+            .unwrap_or_else(|| self.rollout.path_for_new(&snapshot.id, &snapshot.created_at))
+            .to_string_lossy()
+            .into_owned();
+        if let Err(error) = self
+            .index
+            .mark_rollout_session(
+                &snapshot.id,
+                &snapshot.session_id,
+                &file_path,
+                0,
+                None,
+                0,
+                "completed",
+            )
+            .await
+        {
+            tracing::warn!(
+                thread_id = %snapshot.id,
+                %error,
+                "failed to stamp rollout_session_index",
+            );
         }
         Ok(())
     }
@@ -619,31 +547,7 @@ impl AgentStorePort for RolloutBackedAgentStore {
         self.sqlx.archive_thread(id, archived_at).await
     }
 
-    // ── Tool-call audit (always SQL) ───────────────────────────────────────
-
-    async fn insert_tool_call(&self, record: &ToolCallRecord) -> Result<(), AgentError> {
-        self.sqlx.insert_tool_call(record).await
-    }
-
-    async fn update_tool_call_status(
-        &self,
-        id: &str,
-        status: ToolCallStatus,
-    ) -> Result<(), AgentError> {
-        self.sqlx.update_tool_call_status(id, status).await
-    }
-
-    async fn update_tool_call(
-        &self,
-        id: &str,
-        output: Option<&str>,
-        status: ToolCallStatus,
-        completed_at: &str,
-    ) -> Result<(), AgentError> {
-        self.sqlx.update_tool_call(id, output, status, completed_at).await
-    }
-
-    // ── Writes → rollout (legacy three tables stop being written) ──────────
+    // ── Conversation writes → rollout (sole source since Slice E) ─────────
 
     async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError> {
         self.rollout
@@ -654,8 +558,8 @@ impl AgentStorePort for RolloutBackedAgentStore {
                     message: record.message.clone(),
                     // F3: carry the record id + created_at through the rollout so
                     // replay recovers the original values (frontends use message.id
-                    // as a React key; the SQL fallback returns real ids, so without
-                    // these the two paths diverge).
+                    // as a React key; without these the replay substitutes a
+                    // synthetic `{thread_id}-r{seq}` id + the line write-time).
                     id: Some(record.id.clone()),
                     created_at: Some(record.created_at.clone()),
                 }),
@@ -671,7 +575,7 @@ impl AgentStorePort for RolloutBackedAgentStore {
         // baseline arrives via a separate MessageAppend or a later TurnState).
         // On parse failure (F6) the raw blob is preserved verbatim in
         // `input_messages_raw` so a malformed blob is recoverable instead of
-        // being silently emptied (the SQL store preserved it verbatim).
+        // being silently emptied.
         let mut input_messages = Vec::new();
         let mut input_messages_raw = None;
         if let Some(json) = &record.input_messages_json {
@@ -711,35 +615,13 @@ impl AgentStorePort for RolloutBackedAgentStore {
         Ok(())
     }
 
-    async fn insert_turn_item(&self, record: &TurnItemRecord) -> Result<(), AgentError> {
-        let item: slab_agent::protocol::TurnItem = serde_json::from_str(&record.item_json)
-            .map_err(|e| {
-                AgentError::Store(format!("failed to decode TurnItem from record: {e}"))
-            })?;
-        self.rollout
-            .append(&record.thread_id, RolloutItem::TurnItem(item))
-            .await
-            .map_err(|e| AgentError::Store(e.to_string()))?;
-        Ok(())
-    }
-
-    // ── Reads → rollout-first (gate: backfill_status), SQL fallback ─────────
+    // ── Reads → rollout only (sole source since Slice E) ───────────────────
     //
-    // The flush below runs UNCONDITIONALLY before the gate check (F2): the
-    // recorder is lazy (it only writes on Persist/Shutdown/Truncate), so
-    // without this flush a freshly-written thread's pending items are not
-    // durable and the rollout read would miss them. The flush is a no-op when
-    // no recorder exists.
-    //
-    // Slice-5 gate: a thread reads rollout-first ONLY when
-    // `rollout_session_index.backfill_status == "completed"` (a new thread
-    // stamped at creation, or a legacy thread whose startup backfill finished).
-    // Otherwise the read delegates to SQL — so an un-backfilled legacy thread
-    // stays fully recoverable and there is no orphan window (the legacy thread
-    // reads SQL right up until its backfill flips the gate, then reads
-    // rollout). This replaces the bare `rollout.file_exists` check, which
-    // orphaned the legacy prefix the moment a post-migration write
-    // materialized the rollout file.
+    // The flush below runs UNCONDITIONALLY before the read (F2): the recorder
+    // is lazy (it only writes on Persist/Shutdown/Truncate), so without this
+    // flush a freshly-written thread's pending items are not durable and the
+    // rollout read would miss them. The flush is a no-op when no recorder
+    // exists. A missing rollout file replays to an empty history.
 
     async fn list_thread_messages(
         &self,
@@ -747,65 +629,25 @@ impl AgentStorePort for RolloutBackedAgentStore {
     ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
         // Delegates to the shared read path (also used by the memory pipeline)
         // so the runtime and the memory model observe the SAME conversation.
-        Ok(self.read_thread_messages_with_source(thread_id).await?.0)
+        self.read_thread_messages(thread_id).await
     }
+}
 
+// ── Slice E: turn-state / turn-item reads live on the app-core-internal
+//    `RolloutConversationReader` trait (slab-agent does not call them; only
+//    `HarnessService::thread/resume` does). Rollout replay is the only source.
+
+#[async_trait]
+impl RolloutConversationReader for RolloutBackedAgentStore {
     async fn list_turn_items(&self, thread_id: &str) -> Result<Vec<TurnItemRecord>, AgentError> {
         let _ = self.rollout.flush(thread_id).await;
-        if self.is_rollout_ready(thread_id).await {
-            Ok(self.rollout.read_turn_items(thread_id).await)
-        } else {
-            self.sqlx.list_turn_items(thread_id).await
-        }
+        Ok(self.rollout.read_turn_items(thread_id).await)
     }
 
     async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError> {
         let _ = self.rollout.flush(thread_id).await;
-        if self.is_rollout_ready(thread_id).await {
-            let lines = read_rollout_lines(&self.rollout.resolve_path(thread_id));
-            Ok(replay_turn_states(thread_id, &lines))
-        } else {
-            self.sqlx.list_turn_states(thread_id).await
-        }
-    }
-
-    // ── Deletes → single atomic rollout truncation ─────────────────────────
-    //
-    // All three collapse to one `truncate_from_turn` (drops every line at or
-    // beyond `from_turn_index`). Idempotent: a second call is a no-op since the
-    // targeted lines are already gone.
-
-    async fn delete_turn_states_from(
-        &self,
-        thread_id: &str,
-        from_turn_index: u32,
-    ) -> Result<(), AgentError> {
-        self.rollout
-            .truncate_from_turn(thread_id, from_turn_index)
-            .await
-            .map_err(|e| AgentError::Store(e.to_string()))
-    }
-
-    async fn delete_thread_messages_from(
-        &self,
-        thread_id: &str,
-        from_turn_index: u32,
-    ) -> Result<(), AgentError> {
-        self.rollout
-            .truncate_from_turn(thread_id, from_turn_index)
-            .await
-            .map_err(|e| AgentError::Store(e.to_string()))
-    }
-
-    async fn delete_turn_items_from(
-        &self,
-        thread_id: &str,
-        from_turn_index: u32,
-    ) -> Result<(), AgentError> {
-        self.rollout
-            .truncate_from_turn(thread_id, from_turn_index)
-            .await
-            .map_err(|e| AgentError::Store(e.to_string()))
+        let lines = read_rollout_lines(&self.rollout.resolve_path(thread_id));
+        Ok(replay_turn_states(thread_id, &lines))
     }
 }
 
@@ -951,15 +793,14 @@ mod tests {
     use slab_agent::port::ThreadStatus;
     use slab_types::ConversationMessageContent;
 
-    /// Minimal in-memory `AgentStorePort` mock used to verify the SQL fallback
-    /// path (rollout file absent → delegate). Stores messages, turn items, and
-    /// turn states so all three read fallback branches can be exercised. Also
-    /// doubles as a [`RolloutIndex`] mock: an in-memory `backfill_status` map
-    /// drives the Slice-5 read gate (a thread the adapter marks via
-    /// `upsert_thread` becomes rollout-ready; an unseeded thread stays on SQL).
+    /// Minimal in-memory `AgentStorePort` mock backing the rollout-native read
+    /// path tests. Stores messages and turn states so the adapter's rollout
+    /// replay can be exercised without a real SqlxStore. Also doubles as a
+    /// [`RolloutIndex`] mock: an in-memory `backfill_status` / `line_count`
+    /// map drives the D2a list ghost-gate (the list-path readability classifier
+    /// runs against this mock + the real `RolloutFileStore`).
     struct MockStore {
         messages: std::sync::Mutex<Vec<ThreadMessageRecord>>,
-        items: std::sync::Mutex<Vec<TurnItemRecord>>,
         states: std::sync::Mutex<Vec<TurnStateRecord>>,
         backfill: std::sync::Mutex<std::collections::HashMap<String, (String, i64)>>,
         /// When true, `rollout_backfill_status` returns a synthetic SQLite error
@@ -981,7 +822,6 @@ mod tests {
         fn new() -> Self {
             Self {
                 messages: std::sync::Mutex::new(Vec::new()),
-                items: std::sync::Mutex::new(Vec::new()),
                 states: std::sync::Mutex::new(Vec::new()),
                 backfill: std::sync::Mutex::new(std::collections::HashMap::new()), // id → (status, line_count)
                 index_error: std::sync::atomic::AtomicBool::new(false),
@@ -1032,41 +872,6 @@ mod tests {
                 .insert(thread_id.to_owned(), (backfill_status.to_owned(), i64::from(line_count)));
             Ok(())
         }
-
-        async fn list_thread_ids_for_backfill(&self) -> sqlx::Result<Vec<(String, String)>> {
-            Ok(Vec::new())
-        }
-
-        async fn mark_backfill_state(
-            &self,
-            _thread_id: &str,
-            _status: &str,
-            _lines_written: u32,
-            _error: Option<&str>,
-        ) -> sqlx::Result<()> {
-            Ok(())
-        }
-
-        async fn try_acquire_backfill_lease(
-            &self,
-            _thread_id: &str,
-            _lease_owner: &str,
-            _lease_ttl_secs: u64,
-        ) -> sqlx::Result<bool> {
-            // This mock backs rollout-store tests that do not exercise backfill
-            // lease contention — always grant the lease.
-            Ok(true)
-        }
-
-        async fn release_backfill_lease(&self, _thread_id: &str) -> sqlx::Result<()> {
-            Ok(())
-        }
-
-        // Mock threads never carry legacy SQL data, so `upsert_thread` always
-        // marks them rollout-ready — matching the production new-thread path.
-        async fn thread_has_legacy_data(&self, _thread_id: &str) -> sqlx::Result<bool> {
-            Ok(false)
-        }
     }
 
     #[async_trait]
@@ -1103,25 +908,6 @@ mod tests {
         ) -> Result<(), AgentError> {
             Ok(())
         }
-        async fn insert_tool_call(&self, _record: &ToolCallRecord) -> Result<(), AgentError> {
-            Ok(())
-        }
-        async fn update_tool_call_status(
-            &self,
-            _id: &str,
-            _status: ToolCallStatus,
-        ) -> Result<(), AgentError> {
-            Ok(())
-        }
-        async fn update_tool_call(
-            &self,
-            _id: &str,
-            _output: Option<&str>,
-            _status: ToolCallStatus,
-            _completed_at: &str,
-        ) -> Result<(), AgentError> {
-            Ok(())
-        }
         async fn insert_thread_message(
             &self,
             record: &ThreadMessageRecord,
@@ -1147,37 +933,13 @@ mod tests {
             }
             Ok(())
         }
-        async fn list_turn_states(
-            &self,
-            thread_id: &str,
-        ) -> Result<Vec<TurnStateRecord>, AgentError> {
-            Ok(self
-                .states
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|s| s.thread_id == thread_id)
-                .cloned()
-                .collect())
-        }
-        async fn insert_turn_item(&self, record: &TurnItemRecord) -> Result<(), AgentError> {
-            self.items.lock().unwrap().push(record.clone());
-            Ok(())
-        }
-        async fn list_turn_items(
-            &self,
-            thread_id: &str,
-        ) -> Result<Vec<TurnItemRecord>, AgentError> {
-            Ok(self
-                .items
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|i| i.thread_id == thread_id)
-                .cloned()
-                .collect())
-        }
     }
+
+    // Slice E: list_turn_states / list_turn_items moved off `AgentStorePort`
+    // onto the app-core-internal `RolloutConversationReader` trait. The adapter
+    // (`RolloutBackedAgentStore`) implements it above; `MockStore` is never cast
+    // as `Arc<dyn RolloutConversationReader>` (production wires the adapter, not
+    // the SQL mock), so no impl is needed here.
 
     fn user_msg(text: &str) -> ConversationMessage {
         ConversationMessage {
@@ -1249,22 +1011,19 @@ mod tests {
             })
             .await
             .expect("insert message");
-        let item_json = serde_json::to_string(&slab_agent::protocol::TurnItem::AgentMessage {
-            id: "a1".to_owned(),
-            text: "hi".to_owned(),
-        })
-        .unwrap();
-        store
-            .insert_turn_item(&TurnItemRecord {
-                id: "a1".to_owned(),
-                thread_id: "t-new".to_owned(),
-                turn_index: 0,
-                seq: 0,
-                item_json,
-                created_at: "2026-01-01T00:00:00Z".to_owned(),
-            })
+        // Seed a TurnItem directly through the rollout (Slice E removed the
+        // adapter's `insert_turn_item`; production writes TurnItems via the
+        // rollout persistence observer, not the store trait).
+        rollout
+            .append(
+                "t-new",
+                RolloutItem::TurnItem(slab_agent::protocol::TurnItem::AgentMessage {
+                    id: "a1".to_owned(),
+                    text: "hi".to_owned(),
+                }),
+            )
             .await
-            .expect("insert turn item");
+            .expect("append turn item");
 
         // No manual flush — the read methods flush before the file_exists check
         // (F2), so the lazy-materialized file is durable in time for the read.
@@ -1277,7 +1036,6 @@ mod tests {
         let items = store.list_turn_items("t-new").await.expect("list items");
         assert_eq!(items.len(), 1, "turn item read back from rollout");
         assert_eq!(items[0].id, "a1");
-        assert_eq!(items[0].turn_index, 0);
 
         // The reads flushed before the file_exists check (F2), so the rollout
         // file is now materialized → reads came from rollout, not MockStore.
@@ -1286,71 +1044,6 @@ mod tests {
             "read-side flush materialized the rollout file"
         );
     }
-
-    // (b) Fallback: when no rollout file exists, list_thread_messages delegates
-    // to the SQL store.
-    #[tokio::test]
-    async fn unmigrated_thread_falls_back_to_sqlx() {
-        let dir = tempfile::tempdir().unwrap();
-        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
-        let mock = Arc::new(MockStore::new());
-        // Seed the mock with a pre-existing (legacy) message.
-        mock.insert_thread_message(&ThreadMessageRecord {
-            id: "legacy-1".to_owned(),
-            thread_id: "t-legacy".to_owned(),
-            turn_index: 0,
-            message: user_msg("old"),
-            created_at: "2026-01-01T00:00:00Z".to_owned(),
-        })
-        .await
-        .unwrap();
-
-        let store = adapter(mock, Arc::clone(&rollout));
-        // No rollout file for the legacy thread.
-        assert!(!store.rollout.file_exists("t-legacy").await);
-
-        let messages = store.list_thread_messages("t-legacy").await.expect("list");
-        assert_eq!(messages.len(), 1, "delegated to SQL store");
-        assert_eq!(messages[0].id, "legacy-1");
-        assert_eq!(messages[0].message.role, "user");
-    }
-
-    // (c) delete_*_from routes to truncate; afterwards list_* is empty.
-    #[tokio::test]
-    async fn delete_from_routes_to_truncate() {
-        let dir = tempfile::tempdir().unwrap();
-        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
-        let store = adapter(Arc::new(MockStore::new()), Arc::clone(&rollout));
-
-        store.upsert_thread(&snapshot("t-trunc")).await.unwrap();
-        // Turn 0 + turn 1 messages.
-        for turn in 0..2u32 {
-            store
-                .insert_thread_message(&ThreadMessageRecord {
-                    id: format!("m{turn}"),
-                    thread_id: "t-trunc".to_owned(),
-                    turn_index: turn,
-                    message: user_msg(&format!("t{turn}")),
-                    created_at: "2026-01-01T00:00:00Z".to_owned(),
-                })
-                .await
-                .unwrap();
-        }
-
-        // Drop turn 1+.
-        store.delete_thread_messages_from("t-trunc", 1).await.expect("delete");
-        // Idempotent: a second call is a no-op.
-        store.delete_turn_states_from("t-trunc", 1).await.expect("delete again");
-
-        let messages = store.list_thread_messages("t-trunc").await.expect("list");
-        assert_eq!(messages.len(), 1, "only turn 0 survives");
-        assert_eq!(messages[0].turn_index, 0);
-
-        // Session header survives the truncation.
-        assert!(store.rollout.read_session_meta("t-trunc").await.is_some());
-    }
-
-    // (d) F8 regression: a brand-new rollout-era thread's writes are readable
     // through the adapter with NO manual pre-flush (the false-green hole). The
     // read methods flush before the file_exists check (F2), so a thread that
     // has only ever been written through the adapter reads back correctly.
@@ -1371,22 +1064,18 @@ mod tests {
             })
             .await
             .expect("insert message");
-        let item_json = serde_json::to_string(&slab_agent::protocol::TurnItem::AgentMessage {
-            id: "it-9".to_owned(),
-            text: "reply".to_owned(),
-        })
-        .unwrap();
-        store
-            .insert_turn_item(&TurnItemRecord {
-                id: "it-9".to_owned(),
-                thread_id: "t-noflush".to_owned(),
-                turn_index: 0,
-                seq: 0,
-                item_json,
-                created_at: "2026-02-02T00:00:00Z".to_owned(),
-            })
+        // Seed a TurnItem directly through the rollout (Slice E removed the
+        // adapter's `insert_turn_item`).
+        rollout
+            .append(
+                "t-noflush",
+                RolloutItem::TurnItem(slab_agent::protocol::TurnItem::AgentMessage {
+                    id: "it-9".to_owned(),
+                    text: "reply".to_owned(),
+                }),
+            )
             .await
-            .expect("insert turn item");
+            .expect("append turn item");
 
         // NO manual flush anywhere below — mirrors production.
         let messages = store.list_thread_messages("t-noflush").await.expect("list messages");
@@ -1403,11 +1092,10 @@ mod tests {
         assert_eq!(items[0].id, "it-9");
 
         let states = store.list_turn_states("t-noflush").await.expect("list states");
-        // No turn state written → empty (but the read must not error / fall
-        // through to SQL, and the file must be materialized).
+        // No turn state written → empty (the reader replays an empty TurnState set).
         assert!(states.is_empty(), "no turn states written");
-        // The reads above proved the rollout file was materialized (else they
-        // would have delegated to the empty MockStore).
+        // The reads above proved the rollout file was materialized (else the
+        // message read would have replayed empty).
         assert!(
             store.rollout.file_exists("t-noflush").await,
             "rollout file materialized by the read-side flush"
@@ -1481,107 +1169,6 @@ mod tests {
             .collect();
         assert_eq!(texts, vec!["keep1", "keep2"]);
     }
-
-    // (e) F9: list_turn_items + list_turn_states fall back to SQL when no
-    // rollout file exists. Covers the SQL-fallback branch for all three read
-    // methods (messages are covered by (b)).
-    #[tokio::test]
-    async fn unmigrated_thread_falls_back_to_sqlx_for_items_and_states() {
-        let dir = tempfile::tempdir().unwrap();
-        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
-        let mock = Arc::new(MockStore::new());
-        // Seed the mock with a pre-existing (legacy) item + state.
-        mock.insert_turn_item(&TurnItemRecord {
-            id: "legacy-item".to_owned(),
-            thread_id: "t-legacy2".to_owned(),
-            turn_index: 3,
-            seq: 1,
-            item_json: serde_json::to_string(&slab_agent::protocol::TurnItem::AgentMessage {
-                id: "legacy-item".to_owned(),
-                text: "old-item".to_owned(),
-            })
-            .unwrap(),
-            created_at: "2026-01-01T00:00:00Z".to_owned(),
-        })
-        .await
-        .unwrap();
-        mock.upsert_turn_state(&TurnStateRecord {
-            thread_id: "t-legacy2".to_owned(),
-            turn_index: 3,
-            status: "completed".to_owned(),
-            input_messages_json: Some("[]".to_owned()),
-            tool_specs_json: None,
-            llm_response_json: None,
-            error: None,
-            started_at: "2026-01-01T00:00:00Z".to_owned(),
-            completed_at: Some("2026-01-01T00:01:00Z".to_owned()),
-        })
-        .await
-        .unwrap();
-
-        let store = adapter(mock, Arc::clone(&rollout));
-        assert!(!store.rollout.file_exists("t-legacy2").await);
-
-        let items = store.list_turn_items("t-legacy2").await.expect("list items");
-        assert_eq!(items.len(), 1, "items delegated to SQL store");
-        assert_eq!(items[0].id, "legacy-item");
-        assert_eq!(items[0].turn_index, 3);
-
-        let states = store.list_turn_states("t-legacy2").await.expect("list states");
-        assert_eq!(states.len(), 1, "states delegated to SQL store");
-        assert_eq!(states[0].turn_index, 3);
-        assert_eq!(states[0].status, "completed");
-    }
-
-    // (f) F9: rollout-first for items + states when the file exists (mirrors (a)
-    // for the two read methods not previously covered end-to-end).
-    #[tokio::test]
-    async fn migrated_thread_reads_items_and_states_from_rollout() {
-        let dir = tempfile::tempdir().unwrap();
-        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
-        // Pre-seed the SQL mock so a fall-through would be detectable.
-        let mock = Arc::new(MockStore::new());
-        mock.insert_turn_item(&TurnItemRecord {
-            id: "SQL-SHOULD-NOT-APPEAR".to_owned(),
-            thread_id: "t-migrated".to_owned(),
-            turn_index: 0,
-            seq: 0,
-            item_json: "{}".to_owned(),
-            created_at: "x".to_owned(),
-        })
-        .await
-        .unwrap();
-        let store = adapter(mock, Arc::clone(&rollout));
-
-        store.upsert_thread(&snapshot("t-migrated")).await.expect("upsert");
-        let item_json = serde_json::to_string(&slab_agent::protocol::TurnItem::AgentMessage {
-            id: "rl-item".to_owned(),
-            text: "from-rollout".to_owned(),
-        })
-        .unwrap();
-        store
-            .insert_turn_item(&TurnItemRecord {
-                id: "rl-item".to_owned(),
-                thread_id: "t-migrated".to_owned(),
-                turn_index: 0,
-                seq: 0,
-                item_json,
-                created_at: "2026-03-03T00:00:00Z".to_owned(),
-            })
-            .await
-            .expect("insert item");
-
-        let items = store.list_turn_items("t-migrated").await.expect("list items");
-        assert_eq!(items.len(), 1, "rollout-first, not SQL");
-        assert_eq!(items[0].id, "rl-item");
-        // The SQL-seeded item did NOT leak through.
-        assert!(
-            !items.iter().any(|i| i.id == "SQL-SHOULD-NOT-APPEAR"),
-            "rollout-first must not fall through to SQL"
-        );
-    }
-
-    // (g) F9: upsert_turn_state -> list_turn_states round-trip through the
     // adapter asserts full field fidelity (including F4 started_at and the F6
     // raw-blob recovery path).
     #[tokio::test]
@@ -1656,69 +1243,6 @@ mod tests {
             "F6: malformed blob preserved verbatim, not emptied"
         );
     }
-
-    // G2: when the rollout_session_index lookup errors, the read gate must
-    // resolve by FILE EXISTENCE — a rollout-native thread (file present, SQL
-    // empty) reads from rollout, NOT an empty SQL fallback. Pre-fix the gate
-    // returned false on any index error, serving empty history for a new
-    // thread on a transient SQLite hiccup.
-    #[tokio::test]
-    async fn index_lookup_error_resolves_by_file_existence() {
-        let dir = tempfile::tempdir().unwrap();
-        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
-        let mock = Arc::new(MockStore::new());
-        // Make the index lookup fail for every thread.
-        mock.index_error.store(true, std::sync::atomic::Ordering::Relaxed);
-
-        let store = adapter(Arc::clone(&mock), Arc::clone(&rollout));
-
-        // (a) A rollout-native thread: a write materializes the rollout file
-        // (lazily, on flush). The index lookup errors, but the file exists →
-        // rollout-ready → the read comes from rollout (not the empty MockStore).
-        store.upsert_thread(&snapshot("t-native")).await.expect("upsert");
-        store
-            .insert_thread_message(&ThreadMessageRecord {
-                id: "native-msg".to_owned(),
-                thread_id: "t-native".to_owned(),
-                turn_index: 0,
-                message: user_msg("from-rollout"),
-                created_at: "2026-06-06T00:00:00Z".to_owned(),
-            })
-            .await
-            .expect("insert");
-        // The MockStore's SQL history is empty for t-native (writes go to
-        // rollout), so a fallback would return []. list_thread_messages flushes
-        // internally (materializing the file) BEFORE the gate check, so the
-        // file_exists gate resolves to true.
-        let messages = store.list_thread_messages("t-native").await.expect("list");
-        assert_eq!(
-            messages.len(),
-            1,
-            "index error + file present → read from rollout, not empty SQL"
-        );
-        assert_eq!(messages[0].id, "native-msg");
-
-        // (b) A legacy thread: no rollout file. The index lookup errors, the
-        // file does NOT exist → fall back to SQL (the legacy data lives there).
-        mock.insert_thread_message(&ThreadMessageRecord {
-            id: "legacy-msg".to_owned(),
-            thread_id: "t-legacy-idx".to_owned(),
-            turn_index: 0,
-            message: user_msg("from-sql"),
-            created_at: "2026-06-06T00:00:00Z".to_owned(),
-        })
-        .await
-        .unwrap();
-        assert!(!store.rollout.file_exists("t-legacy-idx").await);
-        let messages = store.list_thread_messages("t-legacy-idx").await.expect("list");
-        assert_eq!(
-            messages.len(),
-            1,
-            "index error + no file → fall back to SQL for the legacy thread"
-        );
-        assert_eq!(messages[0].id, "legacy-msg");
-    }
-
     // Slice 11b/0: a ROOT thread (no parent) upserted while a trace dir is
     // configured gets trace_path = Some(<per-root-thread bundle dir>) on its
     // SessionMeta; a CHILD thread (with a parent) gets None and is expected to
