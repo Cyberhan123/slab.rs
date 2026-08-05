@@ -55,7 +55,7 @@ impl WebSearchActionOpenPage {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchActionSearch {
-    /// [DEPRECATED] The search query.
+    /// \[DEPRECATED\] The search query.
     #[serde(rename = "query")]
     pub query: String,
     /// The search queries.

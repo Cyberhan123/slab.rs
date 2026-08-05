@@ -245,7 +245,7 @@ pub trait ToolHandler: Send + Sync {
     /// Coarse operation category used for *progressive tool exposure*: tools
     /// whose category the current permission behavior does not permit are
     /// hidden from the LLM's tool list (e.g. shell / file-write / network tools
-    /// in read-only mode). Defaults to [`OperationCategory::ReadOnly`]; mutating
+    /// in read-only mode). Defaults to [`slab_exec_policy::OperationCategory::ReadOnly`]; mutating
     /// tools override this to match their [`ToolHandler::describe_operation`]
     /// category (`Shell` / `FileEdit` / `Network`).
     fn category(&self) -> slab_exec_policy::OperationCategory {

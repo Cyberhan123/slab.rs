@@ -209,6 +209,8 @@ export const assistant = {
     loadingModel: '正在加载模型...',
     copy: '复制',
     copied: '已复制',
+    rollback: '撤回',
+    confirmRollback: '撤回此消息及其后的所有内容？',
     continue: '继续',
     edit: '编辑',
     saveEdit: '发送编辑',

@@ -65,7 +65,7 @@ describe("assistant e2e", () => {
     expect(restored.messages.some((message: AgentThreadMessageResponse) => message.role === "user" && message.content === prompt)).toBe(true)
     expect(restored.messages.some((message: AgentThreadMessageResponse) => message.role === "assistant" && message.content.trim().length > 0)).toBe(true)
 
-    await page.getByTestId("assistant-summary-desktop-new-session-button").click()
+    await page.getByTestId("header-new-session-control").click()
     const secondSessionId = await waitForCurrentAssistantSession(
       testEnv.serverBaseUrl,
       (sessionId) => sessionId !== session.id

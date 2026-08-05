@@ -1,7 +1,7 @@
 //! Server → client notification param shapes and the `ServerNotification` union.
 //!
 //! The notification param structs (the authoritative payloads, also wrapped by
-//! [`crate::harness::EventMsg`]) now live in `slab_agent::protocol::notification`;
+//! `crate::harness::EventMsg`) now live in `slab_agent::protocol::notification`;
 //! this module re-exports them and keeps the wire-envelope union
 //! [`ServerNotification`], which is transport-specific. On-the-wire bytes are
 //! unchanged.

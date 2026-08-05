@@ -172,7 +172,7 @@ impl StreamCtx {
     /// `failed` skeleton to echo the full request config (background, reasoning,
     /// store, temperature, text, tool_choice, tools, top_logprobs, top_p,
     /// truncation, metadata, parallel_tool_calls, ...). The status field is
-    /// overwritten per-event by [`skeleton_with_status`]; the output array is
+    /// overwritten per-event by `skeleton_with_status`; the output array is
     /// cleared for lifecycle skeleton events.
     pub fn set_skeleton(&mut self, skeleton: Response) {
         self.skeleton = skeleton;

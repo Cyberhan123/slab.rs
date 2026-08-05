@@ -9,7 +9,7 @@ import { cargoEnv } from "./env";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
 
-type Mode = "check" | "lint" | "lint-rustc" | "clippy" | "test" | "sandbox";
+type Mode = "check" | "lint" | "lint-rustc" | "clippy" | "test" | "sandbox" | "fmt" | "doc";
 
 const mode = parseMode(process.argv[2]);
 
@@ -23,6 +23,7 @@ try {
       cargoEnv({
         disableTauriExternalBins: true,
         rustWarningsAsErrors: mode === "lint-rustc",
+        rustdocWarningsAsErrors: mode === "doc",
       }),
     );
   }
@@ -39,10 +40,12 @@ function parseMode(value: string | undefined): Mode {
     case "clippy":
     case "test":
     case "sandbox":
+    case "fmt":
+    case "doc":
       return value;
     default:
       throw new Error(
-        "Usage: bun ./scripts/cargo/validate.ts <check|lint|lint-rustc|clippy|test|sandbox>",
+        "Usage: bun ./scripts/cargo/validate.ts <check|lint|lint-rustc|clippy|test|sandbox|fmt|doc>",
       );
   }
 }
@@ -76,5 +79,21 @@ function cargoArgs(cargoMode: Exclude<Mode, "lint">) {
       return ["test", "--workspace", "--color=never"];
     case "sandbox":
       return ["test", "-p", "slab-sandboxing", "--color=never"];
+    case "fmt":
+      return ["fmt", "--all", "--", "--check"];
+    case "doc":
+      // Excluding the vendored FFI `-sys` binding crates: their `src` is
+      // bindgen-generated from upstream C/C++ headers and full of bare-URL doc
+      // comments that aren't slab's to maintain. All slab source crates remain
+      // covered.
+      return [
+        "doc", "--workspace", "--no-deps", "--color=never",
+        "--exclude", "slab-ggml-sys",
+        "--exclude", "slab-llama-sys",
+        "--exclude", "slab-whisper-sys",
+        "--exclude", "slab-diffusion-sys",
+        "--exclude", "slab-mtmd-sys",
+        "--exclude", "slab-parakeet-sys",
+      ];
   }
 }

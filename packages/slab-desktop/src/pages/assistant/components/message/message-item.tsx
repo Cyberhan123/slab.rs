@@ -12,8 +12,9 @@ import { Message, MessageContent, MessageHeader, MessageAvatar, MessageFooter } 
 import { MessageScrollerItem } from "@slab/components/message-scroller"
 import { useTranslation } from "@slab/i18n"
 import { useClipboard } from "@mantine/hooks"
-import { CheckIcon, CopyIcon } from "lucide-react"
+import { CheckIcon, CopyIcon, Undo2Icon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useMessageInteraction } from "@/pages/assistant/components/message-interaction-context"
 import { createMessageParts, MessageParts } from "./message-parts"
 import type { MessagePartComponents, MessagePartItem, MessagePartsResult } from "./message-parts"
 import { Bubble, BubbleContent } from "@slab/components/bubble"
@@ -113,11 +114,19 @@ function MessageRow({
     > & { all: Array<MessagePartItem<TRenderableMessagePart, TMessage>> }
     const { t } = useTranslation()
     const clipboard = useClipboard({ timeout: 2000 })
+    const { userMessageTurnIndex, rollbackToMessage } = useMessageInteraction()
     const plainText = (message.parts ?? [])
         .filter((part) => (part as TMessagePart).type === "text")
         .map((part) => (part as TMessagePart).text ?? "")
         .join("")
         .trim()
+    // Rollback is offered on user messages (except the first turn) when the host
+    // wired the action. Retracting removes that message and everything after it.
+    const canRollback =
+        isUserMessage &&
+        rollbackToMessage !== undefined &&
+        (userMessageTurnIndex.get(message.id) ?? 0) > 0
+    const rollbackLabel = t("pages.assistant.message.rollback")
     return (
         <Message align={isUserMessage ? "end" : "start"} data-testid={`assistant-message-${message.role}`}>
             <MessageAvatar className={cn("items-start self-start group-has-data-[slot=message-footer]/message:-translate-y-0")}>
@@ -136,19 +145,33 @@ function MessageRow({
                         />
                     </BubbleContent>
                 </Bubble>
-                {plainText ? (
+                {plainText || canRollback ? (
                     <MessageFooter>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label="Copy"
-                            title="Copy"
-                            onClick={() => {
-                                clipboard.copy(plainText)
-                            }}
-                        >
-                            {clipboard.copied ? <CheckIcon /> : <CopyIcon />}
-                        </Button>
+                        {plainText ? (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label="Copy"
+                                title="Copy"
+                                onClick={() => {
+                                    clipboard.copy(plainText)
+                                }}
+                            >
+                                {clipboard.copied ? <CheckIcon /> : <CopyIcon />}
+                            </Button>
+                        ) : null}
+                        {canRollback ? (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={rollbackLabel}
+                                title={rollbackLabel}
+                                data-testid="assistant-message-rollback"
+                                onClick={() => rollbackToMessage?.(message.id)}
+                            >
+                                <Undo2Icon />
+                            </Button>
+                        ) : null}
                     </MessageFooter>
                 ) : null}
             </MessageContent>

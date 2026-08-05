@@ -10,7 +10,7 @@
 //! OS file BEFORE the per-line durable count advances. An `fsync` failure after
 //! that point is a **durability gap** (the bytes are already in the OS file), so
 //! it is logged and the write continues rather than triggering a retry that
-//! would duplicate the line. [`RolloutWriterState::write_pending_with_recovery`]
+//! would duplicate the line. `RolloutWriterState::write_pending_with_recovery`
 //! performs a **two-phase retry** — on the first error the writer is dropped
 //! (recovery mode) but the pending items are retained and replayed once after
 //! reopening, so middle events are never lost and never duplicated.

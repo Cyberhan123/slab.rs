@@ -340,4 +340,104 @@ describe("useHarnessConversation", () => {
     expect(result.current.liveOutputByItemId.size).toBe(0)
     unmount()
   })
+
+  it("forks the current thread and rebinds the socket to the child", async () => {
+    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
+    await act(async () => {
+      await driveOpenAndInit()
+      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+      await flush()
+    })
+    await waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+
+    const CHILD: Thread = { ...THREAD, id: "hthread-child", createdAt: 123 }
+
+    await act(async () => {
+      const p = result.current.forkThread()
+      await flush()
+      // thread/fork → returns the child thread (the hook only consumes child.id).
+      const forkReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+      expect(forkReq.method).toBe("thread/fork")
+      FakeWebSocket.last!.simMessage(rpcResponse(forkReq.id, { thread: CHILD }))
+      await flush()
+      // thread/resume of the child → returns the child's copied history.
+      const resumeReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+      expect(resumeReq.method).toBe("thread/resume")
+      expect(resumeReq.params).toMatchObject({ threadId: "hthread-child" })
+      FakeWebSocket.last!.simMessage(rpcResponse(resumeReq.id, { thread: CHILD }))
+      await p
+    })
+
+    expect(result.current.restoredThreadId).toBe("hthread-child")
+    expect(result.current.isForking).toBe(false)
+    expect(result.current.error).toBeNull()
+    expect(result.current.restoredMessages).toHaveLength(2)
+    unmount()
+  })
+
+  it("maps user messages to their turn index after restore", async () => {
+    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
+    await act(async () => {
+      await driveOpenAndInit()
+      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+      await flush()
+    })
+    await waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+    // THREAD's single user message (u1) lives in turn 0.
+    expect(result.current.userMessageTurnIndex.get("u1")).toBe(0)
+    unmount()
+  })
+
+  it("retracts a turn via thread/rollback and re-resumes the thread", async () => {
+    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
+    await act(async () => {
+      await driveOpenAndInit()
+      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+      await flush()
+    })
+    await waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+
+    const emptied: Thread = { ...THREAD, turns: [] }
+    await act(async () => {
+      const p = result.current.rollbackFromTurn(2)
+      await flush()
+      // thread/rollback keeps turns 0..turnIndex-1 (toTurnId = "1").
+      const rbReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+      expect(rbReq.method).toBe("thread/rollback")
+      expect(rbReq.params).toMatchObject({ threadId: "hthread-1", toTurnId: "1" })
+      FakeWebSocket.last!.simMessage(rpcResponse(rbReq.id, { thread: emptied }))
+      await flush()
+      // then a re-resume refreshes the message list.
+      const resumeReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+      expect(resumeReq.method).toBe("thread/resume")
+      FakeWebSocket.last!.simMessage(rpcResponse(resumeReq.id, { thread: emptied }))
+      await p
+    })
+
+    expect(result.current.isRollingBack).toBe(false)
+    expect(result.current.error).toBeNull()
+    expect(result.current.restoredMessages).toHaveLength(0)
+    unmount()
+  })
+
+  it("treats rollback for turn 0 as a no-op (nothing before it to keep)", async () => {
+    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
+    await act(async () => {
+      await driveOpenAndInit()
+      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+      await flush()
+    })
+    await waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+
+    const sentBefore = FakeWebSocket.last!.sent.length
+    await act(async () => {
+      await result.current.rollbackFromTurn(0)
+    })
+    expect(FakeWebSocket.last!.sent.length).toBe(sentBefore)
+    unmount()
+  })
 })

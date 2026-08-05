@@ -356,6 +356,14 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
                 >
                   /compact
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault()
+                    setValue("/fork")
+                  }}
+                >
+                  /fork
+                </DropdownMenuItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>

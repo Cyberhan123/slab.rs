@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::Mtmd;
 use crate::SharedMtmdLib;
 
-/// Kind of a single [`mtmd_input_chunk`] produced by [`MtmdContext::tokenize`].
+/// Kind of a single `mtmd_input_chunk` produced by [`MtmdContext::tokenize`].
 ///
 /// [`MtmdContext::tokenize`]: crate::MtmdContext::tokenize
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

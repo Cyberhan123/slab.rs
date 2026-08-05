@@ -70,8 +70,12 @@ function Assistant() {
         historyCreatedAt,
         compactionMarkers,
         isCompacting,
+        isForking,
         resolveApproval,
         compactThread,
+        forkThread,
+        userMessageTurnIndex,
+        rollbackFromTurn,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
 
     // Context window for the usage consumption bar: prefer the runtime's
@@ -204,9 +208,13 @@ function Assistant() {
                 contextWindow={usageContextWindow}
                 resolveApproval={resolveApproval}
                 onCompact={() => compactThread()}
+                onFork={() => forkThread()}
                 historyCreatedAt={historyCreatedAt}
                 compactionMarkers={compactionMarkers}
                 isCompacting={isCompacting}
+                isForking={isForking}
+                userMessageTurnIndex={userMessageTurnIndex}
+                onRollbackFromTurn={rollbackFromTurn}
             />
 
             <AssistantSessionSheet

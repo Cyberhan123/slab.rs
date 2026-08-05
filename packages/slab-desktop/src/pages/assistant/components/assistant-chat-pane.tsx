@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react"
 import type { UIMessage } from "ai"
 import { MessageCircleDashedIcon } from "lucide-react"
-import { useEffect, useMemo } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 
 import { useTranslation } from "@slab/i18n"
 import { Card, CardContent, CardFooter } from "@slab/components/card"
@@ -23,7 +23,8 @@ import { ModelLoadIndicator } from "@/pages/assistant/components/model-load-indi
 import { TokenUsageIndicator } from "@/pages/assistant/components/token-usage-indicator"
 import Sender from "@/pages/assistant/components/sender.tsx"
 import { MessageInteractionContext } from "@/pages/assistant/components/message-interaction-context"
-import { isCompactCommand } from "@/pages/assistant/lib/assistant-commands"
+import { isCompactCommand, isForkCommand } from "@/pages/assistant/lib/assistant-commands"
+import { useWorkspaceConfirmDialog } from "@/pages/workspace/hooks/use-workspace-confirm"
 import { useGreeting } from "../hooks/use-greeting"
 import type {
     ApprovalRequest,
@@ -55,12 +56,20 @@ export type AssistantChatPaneProps = {
     resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
     /** Manually compact the current thread (triggered by the `/compact` command). */
     onCompact: () => Promise<void>
+    /** Fork the current thread (triggered by the `/fork` command), switching to the child. */
+    onFork: () => Promise<void>
     /** `thread.createdAt` (Unix ms) for the history-restored marker label. */
     historyCreatedAt: number | null
     /** Session-scoped compaction markers rendered as in-stream dividers. */
     compactionMarkers: CompactionMarker[]
     /** True while a manual `/compact` round-trip is in flight. */
     isCompacting: boolean
+    /** True while a `/fork` round-trip is in flight. */
+    isForking: boolean
+    /** userMessage itemId → turn index (drives the per-bubble rollback affordance). */
+    userMessageTurnIndex: ReadonlyMap<string, number>
+    /** Retract a turn (and everything after it) via `thread/rollback`. */
+    onRollbackFromTurn: (turnIndex: number) => Promise<void>
 }
 
 export function AssistantChatPane({
@@ -81,9 +90,13 @@ export function AssistantChatPane({
     contextWindow,
     resolveApproval,
     onCompact,
+    onFork,
     historyCreatedAt,
     compactionMarkers,
     isCompacting,
+    isForking,
+    userMessageTurnIndex,
+    onRollbackFromTurn,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
     const { messages, sendMessage, status, stop } = useChat({
@@ -93,9 +106,39 @@ export function AssistantChatPane({
     const isBusy = status === "submitted" || status === "streaming"
     const greeting = useGreeting()
 
+    const { confirm: confirmRollback, dialog: rollbackConfirmDialog } = useWorkspaceConfirmDialog()
+    const handleRollbackMessage = useCallback(
+        async (messageId: string) => {
+            const turnIndex = userMessageTurnIndex.get(messageId)
+            // Only user messages with a turn index > 0 offer rollback (turn 0
+            // can't be retracted — there is nothing before it to keep).
+            if (turnIndex === undefined || turnIndex <= 0) return
+            const ok = await confirmRollback({
+                messageKey: "pages.assistant.message.confirmRollback",
+                confirmKey: "pages.assistant.message.rollback",
+                tone: "danger",
+            })
+            if (!ok) return
+            await onRollbackFromTurn(turnIndex)
+        },
+        [confirmRollback, onRollbackFromTurn, userMessageTurnIndex],
+    )
+
     const interactionValue = useMemo(
-        () => ({ approvalStatusByItemId, liveOutputByItemId, livePatchByItemId }),
-        [approvalStatusByItemId, liveOutputByItemId, livePatchByItemId],
+        () => ({
+            approvalStatusByItemId,
+            liveOutputByItemId,
+            livePatchByItemId,
+            userMessageTurnIndex,
+            rollbackToMessage: handleRollbackMessage,
+        }),
+        [
+            approvalStatusByItemId,
+            liveOutputByItemId,
+            livePatchByItemId,
+            userMessageTurnIndex,
+            handleRollbackMessage,
+        ],
     )
 
     useEffect(() => {
@@ -138,16 +181,19 @@ export function AssistantChatPane({
                                         </EmptyHeader>
                                     </Empty>
                                 ) : (
-                                    <MessageInteractionContext.Provider value={interactionValue}>
-                                        <MessageList
-                                            messages={messages}
-                                            isBusy={isBusy}
-                                            showHistoryMarker={initialMessages.length > 0}
-                                            historyCount={initialMessages.length}
-                                            historyCreatedAt={historyCreatedAt}
-                                            compactionMarkers={compactionMarkers}
-                                        />
-                                    </MessageInteractionContext.Provider>
+                                    <>
+                                        <MessageInteractionContext.Provider value={interactionValue}>
+                                            <MessageList
+                                                messages={messages}
+                                                isBusy={isBusy}
+                                                showHistoryMarker={initialMessages.length > 0}
+                                                historyCount={initialMessages.length}
+                                                historyCreatedAt={historyCreatedAt}
+                                                compactionMarkers={compactionMarkers}
+                                            />
+                                        </MessageInteractionContext.Provider>
+                                        {rollbackConfirmDialog}
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -162,11 +208,16 @@ export function AssistantChatPane({
                                     await onCompact()
                                     return
                                 }
+                                // `/fork` is a control command — never reaches the model.
+                                if (isForkCommand(value)) {
+                                    await onFork()
+                                    return
+                                }
                                 await onBeforeSubmit(value)
                                 sendMessage({ text: value, files, metadata: { effort, permissionMode } })
                             }}
                             onStop={stop}
-                            loading={disabled || isBusy || isCompacting}
+                            loading={disabled || isBusy || isCompacting || isForking}
                             approvals={approvals}
                             onResolveApproval={resolveApproval}
                         />

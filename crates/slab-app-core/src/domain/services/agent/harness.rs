@@ -1,7 +1,7 @@
 //! Harness service — engine host for `/v1/agent/harness` (WS control plane).
 //!
 //! Drives the slab-agent turn loop and exposes thread lifecycle / control
-//! operations. Holds a cheap clone of the shared [`AgentCore`].
+//! operations. Holds a cheap clone of the shared `AgentCore`.
 
 use std::path::Path;
 use std::sync::Arc;

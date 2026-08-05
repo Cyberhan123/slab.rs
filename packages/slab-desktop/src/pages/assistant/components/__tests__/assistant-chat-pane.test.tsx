@@ -102,6 +102,10 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     historyCreatedAt: null,
     compactionMarkers: [],
     isCompacting: false,
+    onFork: vi.fn(),
+    isForking: false,
+    userMessageTurnIndex: new Map<string, number>(),
+    onRollbackFromTurn: vi.fn(),
     ...overrides,
   }
 }

@@ -2,8 +2,8 @@ use std::ffi::{NulError, c_int};
 use std::str::Utf8Error;
 use thiserror::Error;
 
-/// If you have not configured a logging trampoline with [crate::whisper_sys_log::install_whisper_log_trampoline] or
-/// [crate::whisper_sys_tracing::install_whisper_tracing_trampoline],
+/// If you have not configured a logging trampoline with \[crate::whisper_sys_log::install_whisper_log_trampoline\] or
+/// \[crate::whisper_sys_tracing::install_whisper_tracing_trampoline\],
 /// then `whisper.cpp`'s errors will be output to stderr,
 /// so you can check there for more information upon receiving a `WhisperError`.
 #[derive(Debug, Clone, Error)]

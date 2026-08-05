@@ -240,7 +240,7 @@ impl OpenAICreateRequest {
     /// The Responses `tools` array may carry other tool types (file_search,
     /// web_search, …); only `function` tools reach the chat completion, since
     /// the client-side tool loop only implements function calls. Items are built
-    /// leniently via [`function_tool_from_json`] (the canonical Responses shape
+    /// leniently via `function_tool_from_json` (the canonical Responses shape
     /// omits `strict`/`parameters`); a non-array `tools` value or an item
     /// without a `name` is dropped.
     pub fn function_tools(&self) -> Vec<slab_proto::openai::FunctionTool> {

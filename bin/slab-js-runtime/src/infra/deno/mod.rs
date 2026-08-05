@@ -201,8 +201,8 @@
 //!
 //! A threaded worker can be used to run code in a separate thread, or to allow multiple concurrent runtimes.
 //!
-//! the [`worker`] module provides a simple interface to create and interact with workers.
-//! The [`worker::InnerWorker`] trait can be implemented to provide custom worker behavior.
+//! the `worker` module provides a simple interface to create and interact with workers.
+//! The `worker::InnerWorker` trait can be implemented to provide custom worker behavior.
 //!
 //! It also provides a default worker implementation that can be used without any additional setup:
 //! ```ignore
@@ -273,8 +273,8 @@
 //! |                   |                                                                                                           |                  |                                                                                               |
 //! |`node_experimental`|HIGHLY EXPERIMENTAL nodeJS support backed by `deno_runtime` extensions                                     |**NO**            |For complete list, see Cargo.toml                                                              |
 //! |                   |                                                                                                           |                  |                                                                                               |
-//! |`worker`           |Enables access to the threaded worker API [`worker`]                                                       |yes               |None                                                                                           |
-//! |`snapshot_builder` |Enables access to [`SnapshotBuilder`], a runtime for creating snapshots that can improve start-times       |yes               |None                                                                                           |
+//! |`worker`           |Enables access to the threaded worker API `worker`                                                       |yes               |None                                                                                           |
+//! |`snapshot_builder` |Enables access to `SnapshotBuilder`, a runtime for creating snapshots that can improve start-times       |yes               |None                                                                                           |
 //! |`web_stub`         |Enables a subset of `web` features that do not break sandboxing                                            |yes               |`deno_webidl`                                                                                  |
 //!
 //! ----

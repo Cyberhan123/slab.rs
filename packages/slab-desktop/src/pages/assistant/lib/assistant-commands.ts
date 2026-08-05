@@ -5,6 +5,11 @@ export function isCompactCommand(value: string): boolean {
     return value.trim() === "/compact"
 }
 
+/** True when the composer input is the `/fork` control command (never reaches the model). */
+export function isForkCommand(value: string): boolean {
+    return value.trim() === "/fork"
+}
+
 export type AssistantCommandParseResult = { name: string; args: string } | null
 
 /**

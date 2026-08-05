@@ -584,7 +584,7 @@ impl InnerContextParams {
     }
 }
 
-/// [EXPERIMENTAL] Enable token-level timestamps with DTW.
+/// \[EXPERIMENTAL\] Enable token-level timestamps with DTW.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DtwParameters {
     #[serde(default)]

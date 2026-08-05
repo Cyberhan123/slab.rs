@@ -8,7 +8,7 @@
 //! This module owns:
 //! - the shared outcome / terminal / frame types used across the projections and
 //!   the transport,
-//! - [`synthesize_envelopes`] — the pure mapping from a finalized LLM outcome to a
+//! - `synthesize_envelopes` — the pure mapping from a finalized LLM outcome to a
 //!   slab event sequence + terminal kind,
 //! - the orchestration helpers (resolve model → route → call `llm-service` →
 //!   persist) invoked by `ResponseService`.

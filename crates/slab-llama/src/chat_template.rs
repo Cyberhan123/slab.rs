@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::error::LlamaError;
 
-/// A single `(role, content)` chat message passed to [`apply_chat_template`].
+/// A single `(role, content)` chat message passed to `apply_chat_template`.
 ///
 /// Owns its C strings so the resulting `llama_chat_message` stays valid for the
 /// duration of the FFI call.

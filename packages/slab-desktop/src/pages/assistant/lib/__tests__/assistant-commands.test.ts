@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isCompactCommand, parseAssistantCommand } from '../assistant-commands'
+import { isCompactCommand, isForkCommand, parseAssistantCommand } from '../assistant-commands'
 
 describe('isCompactCommand', () => {
   it('matches /compact with surrounding whitespace', () => {
@@ -13,6 +13,21 @@ describe('isCompactCommand', () => {
     expect(isCompactCommand('/c')).toBe(false)
     expect(isCompactCommand('compact')).toBe(false)
     expect(isCompactCommand('')).toBe(false)
+  })
+})
+
+describe('isForkCommand', () => {
+  it('matches /fork with surrounding whitespace', () => {
+    expect(isForkCommand('/fork')).toBe(true)
+    expect(isForkCommand('  /fork  ')).toBe(true)
+  })
+
+  it('rejects non-exact matches', () => {
+    expect(isForkCommand('/forkx')).toBe(false)
+    expect(isForkCommand('/f')).toBe(false)
+    expect(isForkCommand('fork')).toBe(false)
+    expect(isForkCommand('/compact')).toBe(false)
+    expect(isForkCommand('')).toBe(false)
   })
 })
 

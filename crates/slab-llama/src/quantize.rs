@@ -209,7 +209,7 @@ impl LlamaFtype {
         }
     }
 
-    /// Inverse of [`to_raw`](Self::to_raw): map a raw `llama_ftype` int back to
+    /// Inverse of `to_raw`: map a raw `llama_ftype` int back to
     /// a named variant when it is known, otherwise [`LlamaFtype::Unknown`].
     ///
     /// Used by callers (e.g. the runtime RPC layer) that receive the file type

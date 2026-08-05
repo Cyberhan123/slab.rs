@@ -6,7 +6,7 @@
 //! - [`HarnessService`] drives the turn loop for `/v1/agent/harness` (WS).
 //! - [`ResponseService`] produces the OpenAI Responses wire for `/responses`.
 //!
-//! Both services hold a cheap clone of the shared [`AgentCore`]; they do not
+//! Both services hold a cheap clone of the shared `AgentCore`; they do not
 //! wrap each other.
 
 pub mod compact;

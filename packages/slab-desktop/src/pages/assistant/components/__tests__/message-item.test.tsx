@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { setupSlabI18nMock } from "@slab/test-utils/mocks"
 
+import { MessageInteractionContext } from "../message-interaction-context"
 import { MessageItem, type TMessage } from "../message/message-item"
 
 vi.mock("@slab/i18n", () => setupSlabI18nMock())
@@ -116,5 +117,66 @@ describe("MessageItem", () => {
 
     expect(screen.getByTestId("tool-part")).toHaveTextContent("tool-call")
     expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument()
+  })
+
+  it("shows a rollback button on a retracable user message and emits the message id", () => {
+    const rollbackToMessage = vi.fn()
+    render(
+      <MessageInteractionContext.Provider
+        value={{
+          approvalStatusByItemId: new Map(),
+          liveOutputByItemId: new Map(),
+          livePatchByItemId: new Map(),
+          userMessageTurnIndex: new Map([["mu1", 2]]),
+          rollbackToMessage,
+        }}
+      >
+        <MessageItem
+          message={message({ id: "mu1", role: "user", parts: [{ type: "text", text: "hi" }] })}
+        />
+      </MessageInteractionContext.Provider>,
+    )
+
+    const btn = screen.getByTestId("assistant-message-rollback")
+    fireEvent.click(btn)
+    expect(rollbackToMessage).toHaveBeenCalledWith("mu1")
+  })
+
+  it("hides the rollback button on the first user message (turn 0)", () => {
+    render(
+      <MessageInteractionContext.Provider
+        value={{
+          approvalStatusByItemId: new Map(),
+          liveOutputByItemId: new Map(),
+          livePatchByItemId: new Map(),
+          userMessageTurnIndex: new Map([["mu0", 0]]),
+          rollbackToMessage: vi.fn(),
+        }}
+      >
+        <MessageItem
+          message={message({ id: "mu0", role: "user", parts: [{ type: "text", text: "hi" }] })}
+        />
+      </MessageInteractionContext.Provider>,
+    )
+
+    expect(screen.queryByTestId("assistant-message-rollback")).not.toBeInTheDocument()
+  })
+
+  it("hides the rollback button on assistant messages", () => {
+    render(
+      <MessageInteractionContext.Provider
+        value={{
+          approvalStatusByItemId: new Map(),
+          liveOutputByItemId: new Map(),
+          livePatchByItemId: new Map(),
+          userMessageTurnIndex: new Map([["ma1", 2]]),
+          rollbackToMessage: vi.fn(),
+        }}
+      >
+        <MessageItem message={message({ id: "ma1", role: "assistant" })} />
+      </MessageInteractionContext.Provider>,
+    )
+
+    expect(screen.queryByTestId("assistant-message-rollback")).not.toBeInTheDocument()
   })
 })

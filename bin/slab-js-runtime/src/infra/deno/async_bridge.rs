@@ -29,8 +29,8 @@ impl TokioRuntime {
     ///
     /// This runs the given future on the current thread, blocking until it is complete, and yielding its resolved result. Any tasks or timers which the future spawns internally will be executed on the runtime.
     ///
-    /// When this is used on a `current_thread` runtime, only the [`Runtime::block_on`] method can drive the IO and timer drivers, but the `Handle::block_on` method cannot drive them.
-    /// This means that, when using this method on a `current_thread` runtime, anything that relies on IO or timers will not work unless there is another thread currently calling [`Runtime::block_on`] on the same runtime.
+    /// When this is used on a `current_thread` runtime, only the `Runtime::block_on` method can drive the IO and timer drivers, but the `Handle::block_on` method cannot drive them.
+    /// This means that, when using this method on a `current_thread` runtime, anything that relies on IO or timers will not work unless there is another thread currently calling `Runtime::block_on` on the same runtime.
     pub fn block_on<F, T>(&self, f: F) -> T
     where
         F: std::future::Future<Output = T>,

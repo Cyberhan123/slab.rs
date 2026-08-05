@@ -210,6 +210,8 @@ export const assistant = {
     loadingModel: 'Loading model...',
     copy: 'Copy',
     copied: 'Copied',
+    rollback: 'Rollback',
+    confirmRollback: 'Retract this message and everything after it?',
     continue: 'Continue',
     edit: 'Edit',
     saveEdit: 'Send edit',

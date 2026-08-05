@@ -125,7 +125,7 @@ impl TerminationReason {
 
 /// A single agent conversation thread.
 ///
-/// Created by [`crate::control::AgentControl`] and consumed by [`AgentThread::run`].
+/// Created by [`crate::control::AgentControl`] and consumed by `AgentThread::run`.
 pub struct AgentThread {
     /// Unique thread identifier.
     pub id: String,

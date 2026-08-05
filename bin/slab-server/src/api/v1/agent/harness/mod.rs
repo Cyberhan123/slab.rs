@@ -4,7 +4,7 @@
 //! wire-type mapping helpers. Behavior is split across submodules:
 //! - [`session`] — per-connection transient state + the agent event fan-out.
 //! - [`body`] — typed request handlers (one per method).
-//! - [`host`] — the [`RequestHandler`] that gates `initialize` and dispatches
+//! - [`host`] — the `RequestHandler` that gates `initialize` and dispatches
 //!   everything else through a [`slab_jsonrpc::router::Router`].
 //!
 //! The wire contract lives in `slab_proto::harness`.

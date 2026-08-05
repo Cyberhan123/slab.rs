@@ -21,7 +21,7 @@
 //! ## Flush vs fsync (durability)
 //!
 //! The payload file is flushed (buffer drained to the OS page cache) before the
-//! ref is returned, and `trace.jsonl` appends are flushed in [`Self::append`].
+//! ref is returned, and `trace.jsonl` appends are flushed in [`TraceWriter::append`].
 //! This is sufficient for the payload-before-event *exists-invariant* and for
 //! diagnostic replay within a running machine. It is NOT an `fsync`: a
 //! power-loss crash may lose the tail of recently-written data. True

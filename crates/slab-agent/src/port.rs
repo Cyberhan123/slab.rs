@@ -159,7 +159,7 @@ pub struct ToolRiskAssessment {
 // ── Approval ──────────────────────────────────────────────────────────────────
 
 /// Decision returned by an [`ApprovalPort`] implementation. An approval carries
-/// the user-chosen [`ApprovalScope`] so the kernel can persist the rule.
+/// the user-chosen [`slab_exec_policy::ApprovalScope`] so the kernel can persist the rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalDecision {
     Approved(slab_exec_policy::ApprovalScope),

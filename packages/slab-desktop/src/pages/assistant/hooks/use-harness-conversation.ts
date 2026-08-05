@@ -118,10 +118,20 @@ export interface HarnessConversation {
   compactionMarkers: CompactionMarker[]
   /** True while a manual `/compact` round-trip is in flight. */
   isCompacting: boolean
+  /** True while a `/fork` round-trip is in flight. */
+  isForking: boolean
   /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
   resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
   /** Manually compact the current (or given) thread via `thread/compact/start`. */
   compactThread: (threadId?: string) => Promise<void>
+  /** Fork the current (or given) thread via `thread/fork`, then switch to the child. */
+  forkThread: (threadId?: string) => Promise<void>
+  /** True while a `thread/rollback` round-trip is in flight. */
+  isRollingBack: boolean
+  /** userMessage itemId → its numeric turn index (drives the rollback affordance). */
+  userMessageTurnIndex: ReadonlyMap<string, number>
+  /** Retract `turnIndex` and every later turn via `thread/rollback` (turn 0 is a no-op). */
+  rollbackFromTurn: (turnIndex: number) => Promise<void>
 }
 
 /** Highest numeric turn id in a thread (-1 when there are no turns). */
@@ -132,6 +142,24 @@ function computeLastTurnIndex(thread: Thread): number {
     if (!Number.isNaN(index) && index > max) max = index
   }
   return max
+}
+
+/**
+ * Map each `userMessage` item id to the numeric turn index of the turn that owns
+ * it. Drives the per-user-bubble rollback affordance: rolling back to that
+ * message retracts it and every later turn (`thread/rollback` with
+ * `toTurnId = turnIndex - 1` keeps turns `0..turnIndex-1`).
+ */
+function buildUserMessageTurnIndex(thread: Thread): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const turn of thread.turns) {
+    const idx = Number(turn.id)
+    if (Number.isNaN(idx)) continue
+    for (const item of turn.items) {
+      if (item.type === "userMessage") map.set(item.id, idx)
+    }
+  }
+  return map
 }
 
 export function useHarnessConversation(
@@ -156,6 +184,11 @@ export function useHarnessConversation(
   const [historyCreatedAt, setHistoryCreatedAt] = useState<number | null>(null)
   const [compactionMarkers, setCompactionMarkers] = useState<CompactionMarker[]>([])
   const [isCompacting, setIsCompacting] = useState(false)
+  const [isForking, setIsForking] = useState(false)
+  const [isRollingBack, setIsRollingBack] = useState(false)
+  const [userMessageTurnIndex, setUserMessageTurnIndex] = useState<Map<string, number>>(
+    () => new Map(),
+  )
 
   const transport = useMemo(() => new HarnessChatTransport({ client, model }), [client, model])
 
@@ -379,6 +412,7 @@ export function useHarnessConversation(
         const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
         client.lastTurnIndex = computeLastTurnIndex(thread)
         setRestoredMessages(messages)
+        setUserMessageTurnIndex(buildUserMessageTurnIndex(thread))
         // historyCreatedAt is unchanged (same thread). Flip the marker to done;
         // it survives the restoreVersion remount because it lives in this hook.
         setCompactionMarkers((prev) =>
@@ -391,6 +425,61 @@ export function useHarnessConversation(
         setError(compactError instanceof Error ? compactError.message : "compact failed")
       } finally {
         setIsCompacting(false)
+      }
+    },
+    [client],
+  )
+
+  const forkThread = useCallback(
+    async (threadId?: string) => {
+      const tid = threadId ?? client.currentThreadId
+      if (!tid) return
+      setError(null)
+      setIsForking(true)
+      try {
+        // Fork returns a child thread under the same slab session; rebind the
+        // live socket to the child and re-render its (copied) history. The
+        // parent thread is retained on disk but is not reachable from the UI
+        // until a future thread-picker.
+        const { thread: child } = await client.threadFork({ threadId: tid })
+        const { thread } = await client.threadResume({ threadId: child.id })
+        const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
+        client.currentThreadId = thread.id
+        client.lastTurnIndex = computeLastTurnIndex(thread)
+        setRestoredMessages(messages)
+        setUserMessageTurnIndex(buildUserMessageTurnIndex(thread))
+        setRestoredThreadId(thread.id)
+        setHistoryCreatedAt(thread.createdAt)
+        setRestoreVersion((value) => value + 1)
+      } catch (forkError) {
+        setError(forkError instanceof Error ? forkError.message : "fork failed")
+      } finally {
+        setIsForking(false)
+      }
+    },
+    [client],
+  )
+
+  const rollbackFromTurn = useCallback(
+    async (turnIndex: number) => {
+      const tid = client.currentThreadId
+      // turnIndex is the first turn to remove (the user message being retracted
+      // and everything after it). Turn 0 cannot be retracted this way.
+      if (!tid || turnIndex <= 0) return
+      setError(null)
+      setIsRollingBack(true)
+      try {
+        await client.threadRollback({ threadId: tid, toTurnId: String(turnIndex - 1) })
+        const { thread } = await client.threadResume({ threadId: tid })
+        const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
+        client.lastTurnIndex = computeLastTurnIndex(thread)
+        setRestoredMessages(messages)
+        setUserMessageTurnIndex(buildUserMessageTurnIndex(thread))
+        setRestoreVersion((value) => value + 1)
+      } catch (rollbackError) {
+        setError(rollbackError instanceof Error ? rollbackError.message : "rollback failed")
+      } finally {
+        setIsRollingBack(false)
       }
     },
     [client],
@@ -418,12 +507,14 @@ export function useHarnessConversation(
     setTurnUsage(null)
     setHistoryCreatedAt(null)
     setCompactionMarkers([])
+    setUserMessageTurnIndex(new Map())
     if (!sessionId) {
       client.currentThreadId = null
       client.lastTurnIndex = -1
       setRestoredMessages([])
       setRestoredThreadId(null)
       setActiveConversation(undefined)
+      setUserMessageTurnIndex(new Map())
       setError(null)
       setIsHistoryLoading(false)
       setRestoreVersion((value) => value + 1)
@@ -444,6 +535,7 @@ export function useHarnessConversation(
           client.lastTurnIndex = computeLastTurnIndex(thread)
           if (cancelled) return
           setRestoredMessages(messages)
+          setUserMessageTurnIndex(buildUserMessageTurnIndex(thread))
           setRestoredThreadId(thread.id)
           setHistoryCreatedAt(thread.createdAt)
           setActiveConversation(sessionId)
@@ -459,6 +551,7 @@ export function useHarnessConversation(
           setRestoredMessages([])
           setRestoredThreadId(null)
           setActiveConversation(sessionId)
+          setUserMessageTurnIndex(new Map())
         }
       } catch (restoreError) {
         if (cancelled) return
@@ -498,7 +591,12 @@ export function useHarnessConversation(
     historyCreatedAt,
     compactionMarkers,
     isCompacting,
+    isForking,
     resolveApproval,
     compactThread,
+    forkThread,
+    isRollingBack,
+    userMessageTurnIndex,
+    rollbackFromTurn,
   }
 }

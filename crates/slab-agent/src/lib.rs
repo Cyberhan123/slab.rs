@@ -1,9 +1,10 @@
 //! `slab-agent` — Agent orchestration layer for slab.rs.
 //!
 //! This crate is a **pure library** that implements the agent control plane.
-//! It has no dependency on `sqlx`, `axum`, `tonic`, or `slab-core`.  All
-//! external capabilities (LLM calls, persistence, notifications) are injected
-//! through the port traits defined in [`port`].
+//! It has no dependency on `sqlx`, `axum`, `tonic`, `slab-proto`,
+//! `slab-agent-rollout`, or `slab-app-core`.  All external capabilities (LLM
+//! calls, persistence, notifications) are injected through the port traits
+//! defined in [`port`].
 //!
 //! # Architecture
 //!

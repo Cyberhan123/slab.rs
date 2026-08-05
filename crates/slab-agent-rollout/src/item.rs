@@ -120,7 +120,7 @@ pub struct CompactedPayload {
     pub status: String,
     /// The turn at/after which this compaction took effect. A truncation that
     /// drops this turn must also drop the compaction marker (otherwise
-    /// [`crate::store::read_messages`] would reset to a summary of messages that
+    /// `crate::store::read_messages` would reset to a summary of messages that
     /// were rolled back). Defaults to `0` for older rollout files so they
     /// deserialize cleanly.
     #[serde(default)]
@@ -145,7 +145,7 @@ pub enum TurnContextPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         completed_at: Option<String>,
         /// Original turn-start timestamp carried through from
-        /// [`TurnStateRecord::started_at`] (F4). `None` on rollout files written
+        /// `TurnStateRecord::started_at` (F4). `None` on rollout files written
         /// before this field existed; replay falls back to the line timestamp.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         started_at: Option<String>,
@@ -160,13 +160,13 @@ pub enum TurnContextPayload {
     MessageAppend {
         turn_index: u32,
         message: ConversationMessage,
-        /// Original [`ThreadMessageRecord`] id carried through verbatim (F3).
+        /// Original `ThreadMessageRecord` id carried through verbatim (F3).
         /// `None` on rollout files written before this field existed; replay
         /// synthesizes `"{thread_id}-r{seq}"` for backward-compat.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<String>,
         /// Original message creation timestamp carried through from
-        /// [`ThreadMessageRecord::created_at`] (F3). `None` on old files; replay
+        /// `ThreadMessageRecord::created_at` (F3). `None` on old files; replay
         /// falls back to the line timestamp.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         created_at: Option<String>,

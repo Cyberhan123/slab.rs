@@ -14,7 +14,7 @@
 //!   by `"<thread_id>:<call_id>"`. The HTTP approve handler must supply both
 //!   the thread ID (from the URL path) and the call_id to prevent cross-thread
 //!   approval. Requests that receive no decision within
-//!   [`APPROVAL_TIMEOUT_SECS`] are automatically rejected.
+//!   `APPROVAL_TIMEOUT_SECS` are automatically rejected.
 
 use std::sync::{Arc, Mutex};
 

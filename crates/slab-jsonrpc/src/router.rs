@@ -2,7 +2,7 @@
 //!
 //! [`Router<C>`] stores type-erased handlers keyed by method string and
 //! dispatches inbound requests to them. Each handler is a typed function
-//! `Fn(C, P) -> Future<Output = Result<R, E>>`; [`HandlerWrapper`] decodes
+//! `Fn(C, P) -> Future<Output = Result<R, E>>`; `HandlerWrapper` decodes
 //! `Value → P`, calls the function, encodes `R → Value`, and converts `E`
 //! into the `String` error that [`crate::ws::serve_websocket`] turns into a
 //! `-32000` JSON-RPC error response.
@@ -42,7 +42,7 @@ use serde_json::Value;
 /// `ctx` is taken by value (see module docs). Custom adapters with post-await
 /// side effects (e.g. harness `establish_op`) may `impl ErasedHandler` directly
 /// and register via [`Router::on_erased`]; ordinary typed functions go through
-/// [`Router::on`] and are wrapped in [`HandlerWrapper`].
+/// [`Router::on`] and are wrapped in `HandlerWrapper`.
 #[async_trait::async_trait]
 pub trait ErasedHandler<C: Send + Sync + 'static>: Send + Sync + 'static {
     async fn handle(&self, ctx: C, params: Value) -> Result<Value, String>;

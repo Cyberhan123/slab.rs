@@ -56,8 +56,14 @@ jobs:
       - name: cargo check
         run: bun ./scripts/cargo/validate.ts check
 
+      - name: cargo fmt
+        run: bun ./scripts/cargo/validate.ts fmt
+
       - name: cargo clippy
         run: bun ./scripts/cargo/validate.ts clippy
+
+      - name: cargo doc
+        run: bun ./scripts/cargo/validate.ts doc
 
       - name: cargo test
         run: bun ./scripts/cargo/validate.ts test

@@ -43,7 +43,7 @@ type StreamFrameStream = Pin<Box<dyn Stream<Item = StreamFrame> + Send>>;
 /// Response-side agent service: owns the OpenAI Responses wire surface
 /// consumed by the `/responses` HTTP / SSE / WebSocket transport.
 ///
-/// Holds a cheap clone of the shared [`AgentCore`] (for the thread store) and
+/// Holds a cheap clone of the shared `AgentCore` (for the thread store) and
 /// the [`ModelState`] (for `llm-service` routing via `ChatService`).
 #[derive(Clone)]
 pub struct ResponseService {
