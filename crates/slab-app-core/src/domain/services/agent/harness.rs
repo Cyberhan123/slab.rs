@@ -157,7 +157,7 @@ impl HarnessService {
             .map_err(AppCoreError::from)?;
 
         let rollout = self.0.rollout();
-        // Slice E.2 (D2): cross-turn durability barrier on the PARENT before the
+        // Cross-turn durability barrier on the PARENT before the
         // wholesale read — the parent's observer may still be draining
         // persistence-grade events (fork does NOT refuse a running parent, so
         // this await is mandatory, not defensive). Ensures every emitted
@@ -186,7 +186,7 @@ impl HarnessService {
         // H2: the wholesale rewrite reuses the parent's exact on-disk
         // interleaved order (the production write order read_turn_items /
         // read_messages already attribute correctly), swapping the parent
-        // SessionMeta for the child's. Slice E dropped the legacy branch: a
+        // SessionMeta for the child's. The legacy branch was dropped: a
         // parent with no rollout data (no non-SessionMeta lines) yields a child
         // that carries only the child SessionMeta header — the correct empty
         // child (there is no legacy SQL to rebuild from anymore).
@@ -219,8 +219,8 @@ impl HarnessService {
     /// Rollback a thread to the state *through* `to_turn_index` (inclusive):
     /// drops every rollout line belonging to a turn `> to_turn_index`.
     ///
-    /// Slice 6 collapses the old three-way `store.delete_*_from` (which each
-    /// routed to a separate `truncate_from_turn`) into a single atomic rollout
+    /// The old three-way `store.delete_*_from` (which each
+    /// routed to a separate `truncate_from_turn`) is collapsed into a single atomic rollout
     /// truncation. `keep_line` preserves the `SessionMeta` header unconditionally
     /// and gates every other line by its turn affiliation, so one call drops the
     /// messages, turn states, and turn items of the rolled-back turns together.
@@ -239,9 +239,9 @@ impl HarnessService {
         // H4: rollback writes the rollout file directly, but reads flow through
         // the rollout-only adapter. A missing rollout file means there is no
         // persisted history to roll back — truncate would be a SILENT no-op on
-        // a missing file yet report success. The only reachable case post-Slice-E
+        // a missing file yet report success. The only reachable case now
         // is a brand-new thread before its first append materializes the rollout
-        // file (Slice E removed the legacy backfill, so there is no migration to
+        // file (the legacy backfill is gone, so there is no migration to
         // wait for); refuse cleanly instead of silently succeeding.
         if !self.0.rollout().file_exists(thread_id).await {
             return Err(AppCoreError::Internal(format!(
@@ -252,7 +252,7 @@ impl HarnessService {
         let from = to_turn_index
             .checked_add(1)
             .ok_or_else(|| AppCoreError::Internal("turn index overflow".to_owned()))?;
-        // Slice E.2 (D2): cross-turn barrier before truncating — a just-finished
+        // Cross-turn barrier before truncating — a just-finished
         // thread's observer may still be draining the final turn boundary. Wait
         // for quiescence so the truncation acts on the complete file (rollback
         // refuses running threads, so this is defensive).
@@ -299,9 +299,9 @@ impl HarnessService {
         // H4: compact writes the rollout file directly, but reads flow through
         // the rollout-only adapter. With no rollout file there is no persisted
         // history to compact — the compact would be a no-op yet report success.
-        // The only reachable case post-Slice-E is a brand-new thread before its
-        // first append materializes the rollout file (Slice E removed the legacy
-        // backfill); refuse cleanly instead.
+        // The only reachable case now is a brand-new thread before its
+        // first append materializes the rollout file (the legacy backfill is
+        // gone); refuse cleanly instead.
         if !self.0.rollout().file_exists(thread_id).await {
             return Err(AppCoreError::Internal(format!(
                 "thread {thread_id} has no rollout file yet (brand-new thread before first \
@@ -315,7 +315,7 @@ impl HarnessService {
         })?;
         let model_id = model_override.unwrap_or_else(|| config.model.clone());
 
-        // Slice E.2 (D2): cross-turn durability barrier BEFORE the conversation
+        // Cross-turn durability barrier BEFORE the conversation
         // read. compact refuses a RUNNING thread, but a thread that JUST finished
         // leaves the active set immediately while its observer may still be
         // draining the final turn's MessageAppended / TurnStateChanged. Reading

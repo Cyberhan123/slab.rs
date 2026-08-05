@@ -380,8 +380,8 @@ impl AgentControl {
         // per-record copy (messages → turn states → turn items through the store
         // adapter) was dead: it batched every TurnContext before every TurnItem,
         // breaking replay attribution, and was unconditionally overwritten by
-        // the wholesale rewrite. Slice E removed the now-unused store methods it
-        // relied on (`list_turn_states` / `list_turn_items` / `insert_turn_item`).
+        // the wholesale rewrite. The now-unused store methods it depended on
+        // were removed (`list_turn_states` / `list_turn_items` / `insert_turn_item`).
 
         Ok(child_id)
     }
@@ -421,8 +421,8 @@ impl AgentControl {
     /// Resume a persisted thread with a pre-built message history and run the
     /// next turn.
     ///
-    /// Slice E.2: the conversation read + sort + max-turn + user-content append
-    /// was HOISTED into the app-core caller (`AgentCore::send_input`); slab-agent
+    /// The conversation read + sort + max-turn + user-content append was hoisted
+    /// into the app-core caller (`AgentCore::send_input`); slab-agent
     /// no longer reads conversation data (it leaves via the `EventMsg` protocol
     /// only). This entry point receives the FULL message vec (history + the new
     /// user message already appended), the `starting_turn_index`, and `emit_from`

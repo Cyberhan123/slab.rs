@@ -51,7 +51,7 @@ pub(crate) async fn migrated_test_store() -> AnyStore {
     // `busy_timeout` so a contending writer waits instead of erroring, and WAL
     // documents the production journal mode. Without these the test store
     // diverges from production and the CAS serialization invariant is exercised
-    // against a pragmatically different DB. (Slice D2b H1.)
+    // against a pragmatically different DB. (H1.)
     let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
         .expect("sqlite test url")
         .foreign_keys(true)
@@ -77,7 +77,7 @@ pub(crate) struct RecordingRuntimeGateway {
     unloads: Mutex<Vec<RuntimeBackendId>>,
     /// Every text-generation request observed via `chat` / `chat_stream`, in
     /// arrival order. Lets offline tests assert what the caller dispatched
-    /// (e.g. the agent kv-cache `session_key` — Slice D1 invariant).
+    /// (e.g. the agent kv-cache `session_key` invariant).
     chat_requests: Mutex<Vec<RuntimeTextGenerationRequest>>,
     /// Optional canned response returned by `chat` (default: `BackendNotReady`).
     /// Lets offline tests exercise runtime → agent usage propagation with no model.
@@ -605,7 +605,7 @@ fn normalized_source_key_hub_provider(hub_provider: Option<&str>) -> Option<Stri
 
 #[cfg(test)]
 mod recording_gateway_tests {
-    //! Offline seam (Slice F2): the `RecordingRuntimeGateway` can now synthesize
+    //! Offline seam: the `RecordingRuntimeGateway` can now synthesize
     //! text-generation responses and record the dispatched requests, so tests can
     //! verify usage propagation and the agent kv-cache `session_key` without a
     //! real model or runtime process.

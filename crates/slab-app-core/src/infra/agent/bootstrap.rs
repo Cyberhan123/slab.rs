@@ -24,12 +24,12 @@ pub(crate) struct AgentBootstrap {
 
 pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> AgentBootstrap {
     let settings = ctx.pmid.config();
-    // Slice 11a/11b: compute the trace directory ONCE from `agent.debug`. The
+    // Compute the trace directory ONCE from `agent.debug`. The
     // trace sink + (future) trace bundle depend on `agent.debug` ALONE (no
     // longer on `telemetry.enabled`); OTel provider assembly is a separate
     // switch still gated by `telemetry.enabled` in the binary init. This dir is
     // also threaded into the rollout store so a root thread's SessionMeta carries
-    // it as `trace_path` (Slice 11b rollout ↔ trace coordination).
+    // it as `trace_path` (rollout ↔ trace coordination).
     //
     // The decision goes through the pure `agent_trace_enabled` gate so the
     // independence contract (agent.debug alone, telemetry.enabled ignored) is
@@ -40,12 +40,12 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         } else {
             None
         };
-    // Rollout JSONL true source (Slice 4). One shared file store for the whole
+    // Rollout JSONL true source. One shared file store for the whole
     // process; one recorder per thread, files under <app_home>/sessions in the
     // date-partitioned layout `YYYY/MM/DD/rollout-<ts>-<thread_id>.jsonl`.
     let rollout =
         Arc::new(slab_agent_rollout::RolloutFileStore::new(slab_utils::app_home::sessions_dir()));
-    // Slice D (D1): one-shot startup migration of pre-migration FLAT rollout
+    // One-shot startup migration of pre-migration FLAT rollout
     // files (`<thread_id>.rollout.jsonl` at the sessions root) into the new
     // date-partitioned layout. Runs synchronously BEFORE any recorder is spawned
     // (the adapter below spawns recorders lazily on first write), so there is no
@@ -58,8 +58,8 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     }
     // The ONLY AgentStorePort wired into the runtime: rollout-backed, with
     // metadata delegated to the SQL store. The same SQL store also backs the
-    // rollout-session index (D2a list ghost-gate + new-thread mark). Slice E
-    // dropped the legacy conversation + audit tables and the startup backfill:
+    // rollout-session index (list ghost-gate + new-thread mark). The legacy
+    // conversation + audit tables and the startup backfill were dropped:
     // rollout is the sole conversation/turn-state/item source, so there is no
     // backfill to schedule.
     let rollout_store = Arc::new(super::rollout_store::RolloutBackedAgentStore::new(
@@ -190,11 +190,11 @@ fn build_agent_control(
     let tool_router = Arc::new(tool_router);
     let approval_port: Arc<dyn slab_agent::ApprovalPort> = event_hub;
     let settings = ctx.pmid.config();
-    // Slice 11a/0 decouple: the trace sink gate is `agent.debug` ONLY (computed
+    // Trace sink decouple: the trace sink gate is `agent.debug` ONLY (computed
     // upstream in `build_agent_bootstrap`, which is why `trace_dir` is already
     // an Option here). Two INDEPENDENT diagnostic switches:
     //   - `agent.debug`       → this trace sink + trace bundle (`slab-agent-tracing`,
-    //                           decoupled from `slab-otel` in Slice 8). When on,
+    //                           decoupled from `slab-otel`). When on,
     //                           a `BundleAgentTraceSink` records every slab-agent
     //                           event into a per-root-thread bundle AND keeps the
     //                           legacy per-session JSONL + `slab_otel::session`
@@ -328,7 +328,7 @@ fn build_agent_control(
     control
 }
 
-/// Slice 11a decouple contract: the agent trace directory (and therefore the
+/// Decouple contract: the agent trace directory (and therefore the
 /// trace sink + trace bundle) is gated by `agent.debug` ALONE. `telemetry_enabled`
 /// is accepted as an explicit parameter purely so the independence is
 /// unit-testable. Returning `agent_debug` and intentionally ignoring

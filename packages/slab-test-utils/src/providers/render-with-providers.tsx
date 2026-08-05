@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, type RenderResult } from '@testing-library/react';
+import { render } from 'vitest-browser-react';
 import { type ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -10,9 +10,9 @@ export interface RenderWithProvidersOptions {
   router?: boolean | string[];
 }
 
-export interface RenderWithProvidersResult extends RenderResult {
+export type RenderWithProvidersResult = Awaited<ReturnType<typeof render>> & {
   queryClient: QueryClient;
-}
+};
 
 /**
  * Render a React element wrapped in the providers slab-desktop components
@@ -20,13 +20,16 @@ export interface RenderWithProvidersResult extends RenderResult {
  * mutation retries, matching `tests/browser/test-utils.tsx`) and an optional
  * `MemoryRouter`.
  *
+ * `render` from `vitest-browser-react` is asynchronous and returns a locator
+ * surface, so this helper is async too — callers must `await` it.
+ *
  * i18n is intentionally NOT wrapped — unit tests mock `@slab/i18n` at the
  * module level, so `useTranslation` is already a stub and needs no provider.
  */
-export function renderWithProviders(
+export async function renderWithProviders(
   ui: ReactElement,
   opts: RenderWithProvidersOptions = {},
-): RenderWithProvidersResult {
+): Promise<RenderWithProvidersResult> {
   const queryClient =
     opts.queryClient ??
     new QueryClient({
@@ -37,5 +40,5 @@ export function renderWithProviders(
     const initialEntries = Array.isArray(opts.router) ? opts.router : undefined;
     tree = <MemoryRouter initialEntries={initialEntries}>{tree}</MemoryRouter>;
   }
-  return { ...render(tree), queryClient };
+  return { ...(await render(tree)), queryClient };
 }

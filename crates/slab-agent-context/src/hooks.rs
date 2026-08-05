@@ -4,7 +4,7 @@
 //! On `OnAgentStart` it resolves the model's instruction template, scans
 //! skills + `AGENTS.md`, snapshots the environment + permission state, and
 //! injects a single ordered batch:
-//! `[system, environment, permissions, …reasoning-effort(sliced later),
+//! `[system, environment, permissions, …reasoning-effort(added later),
 //! developer(skills), memory?, …agents_md]`. `system` is emitted first so the
 //! existing thread-level insertion logic (which places injected messages after
 //! the leading `system` block) lands the rest in the right positions. Skill-body

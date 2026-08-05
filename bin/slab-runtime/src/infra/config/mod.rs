@@ -15,7 +15,7 @@ pub struct RuntimeConfig {
     pub whisper_lib_dir: Option<PathBuf>,
     pub parakeet_lib_dir: Option<PathBuf>,
     pub diffusion_lib_dir: Option<PathBuf>,
-    /// Root directory for the on-disk ggml.llama kv-cache (Slice D2). `None`
+    /// Root directory for the on-disk ggml.llama kv-cache. `None`
     /// disables disk persistence (in-process snapshot cache still works).
     pub kv_cache_dir: Option<PathBuf>,
     pub enable_candle_llama: bool,

@@ -992,7 +992,7 @@ mod tests {
         assert!(s.read_session_meta("t").await.is_some());
     }
 
-    // Slice 6 (2a): the manual-compaction sequence HarnessService::compact_thread
+    // The manual-compaction sequence HarnessService::compact_thread
     // now performs — truncate_from_turn(0) (keeps only SessionMeta) followed by a
     // single Compacted line carrying the compacted set with status="manual" —
     // must make read_messages return EXACTLY the compacted set, leave the file
@@ -1091,7 +1091,7 @@ mod tests {
         );
     }
 
-    // Slice 6 (2c) — fork wholesale-copy mechanism. HarnessService::fork_thread
+    // Fork wholesale-copy mechanism. HarnessService::fork_thread
     // rebuilds the child rollout from the parent's lines in their original
     // interleaved order (preserving the child's SessionMeta), because
     // control.fork_thread's per-row adapter copy batches all TurnContext lines
@@ -1964,7 +1964,7 @@ mod tests {
         assert!(matches!(after[0].item, RolloutItem::TurnItem(_)));
     }
 
-    // ── Slice D (D1): date-partitioned path layout + reverse lookup + migration ─
+    // ── date-partitioned path layout + reverse lookup + migration ─
     //
     // These tests exercise the REAL file system (create_session writes a real
     // date-partitioned file → read reads it back; a synthesized legacy flat file
@@ -2484,7 +2484,7 @@ mod tests {
         );
     }
 
-    // ── Slice D2a: list_all_session_metas (DB-unavailable fallback surface) ──
+    // ── list_all_session_metas (DB-unavailable fallback surface) ──
 
     // list_all_session_metas walks BOTH the date tree AND the legacy flat files,
     // dedupes by thread id (newest path wins), and skips files whose first line

@@ -1,7 +1,7 @@
 //! OpenAI-Responses wire event vocabulary for the `/responses` surface.
 //!
-//! Slice C3 relocated these types out of `slab-agent` (the engine crate) into the
-//! response layer (the `/responses` host): `slab-agent` now owns only its harness
+//! These types live in the response layer (the `/responses` host), relocated
+//! out of `slab-agent` (the engine crate): `slab-agent` now owns only its harness
 //! protocol (`EventMsg`/`TurnItem`) and holds zero OpenAI-Responses wire types.
 //! `AgentEventKind` is the event model the pure projections
 //! ([`super::projection::build_response`]/[`super::stream::envelope_to_events`]) consume;
@@ -9,7 +9,7 @@
 //!
 //! `ToolRiskAssessment` is imported back from `slab-agent` — it stays there because it is
 //! the `ApprovalPort::request_approval` signature. The serde shape of every type here is
-//! byte-identical to the pre-C3 definitions (the 44 openai_compat fixtures are the canary).
+//! byte-identical to its original definitions (the 44 openai_compat fixtures are the canary).
 
 use serde::{Deserialize, Serialize};
 

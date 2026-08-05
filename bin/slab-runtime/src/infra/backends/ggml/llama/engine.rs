@@ -356,7 +356,7 @@ pub struct GGMLLlamaEngine {
     inference_engine: RwLock<Option<LlamaRuntime>>,
     loaded_model: RwLock<Option<Arc<LlamaModel>>>,
     session_bindings: Mutex<HashMap<String, SessionBinding>>,
-    /// Optional on-disk kv-cache store (Slice D2). When `None`, the engine only
+    /// Optional on-disk kv-cache store. When `None`, the engine only
     /// keeps the in-process snapshot cache.
     kv_cache: Mutex<Option<Arc<KvCacheStore>>>,
     /// Fingerprint of the currently loaded model (computed at load); used as the
@@ -445,7 +445,7 @@ impl GGMLLlamaEngine {
         })
     }
 
-    /// Install an on-disk kv-cache store, enabling Slice D2 persistence. When
+    /// Install an on-disk kv-cache store, enabling on-disk persistence. When
     /// unset, the engine falls back to the in-process snapshot cache only.
     /// Best-effort: a store is installed at most once; subsequent calls are ignored.
     pub(crate) fn install_kv_cache(&self, store: KvCacheStore) {
@@ -543,7 +543,7 @@ impl GGMLLlamaEngine {
         let context_length = (loaded_context_length > 0).then_some(loaded_context_length);
 
         // Compute the model fingerprint before `model` is moved into the slot —
-        // it keys the on-disk kv-cache (Slice D2).
+        // it keys the on-disk kv-cache.
         let model_fp = ModelFingerprint::compute(path, model.n_params(), model.model_size());
         if let Ok(mut guard) = self.model_fp.lock() {
             *guard = Some(model_fp);
@@ -762,7 +762,7 @@ impl GGMLLlamaEngine {
         };
 
         // Best-effort: try to restore a disk snapshot BEFORE taking the bindings
-        // lock so disk I/O doesn't block other sessions under the lock (Slice D2).
+        // lock so disk I/O doesn't block other sessions under the lock.
         let disk_session = self.load_disk_session(&key);
 
         let plan;
@@ -889,7 +889,7 @@ impl GGMLLlamaEngine {
         cached_prompt.push_str(full_prompt);
         cached_prompt.push_str(generated);
 
-        // Best-effort disk mirror (Slice D2) before the snapshot is moved.
+        // Best-effort disk mirror before the snapshot is moved.
         self.persist_disk_session(&key, &snapshot, cached_prompt.clone(), gbnf.as_deref());
 
         self.lock_session_bindings()?

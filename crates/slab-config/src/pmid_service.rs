@@ -2837,7 +2837,7 @@ mod tests {
 
     #[test]
     fn property_descriptions_decouple_agent_debug_from_telemetry() {
-        // Slice C contract: agent.debug and telemetry.enabled are INDEPENDENT
+        // Contract: agent.debug and telemetry.enabled are INDEPENDENT
         // diagnostic switches, and each property description must state that
         // independence AND cross-reference the other switch so the decoupling is
         // visible at every surface. A revert to the old non-cross-referencing
@@ -2865,7 +2865,7 @@ mod tests {
 
     #[test]
     fn telemetry_and_agent_section_descriptions_reference_the_other_switch() {
-        // Slice C: the telemetry/agent section `description_md` must mirror the
+        // The telemetry/agent section `description_md` must mirror the
         // en-US i18n wording, which cross-references the other switch (restores
         // the "description_md == en-US i18n value" invariant the other 8 sections
         // already satisfy). A revert to the old standalone wording fails here.

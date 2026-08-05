@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react"
+import { renderHook } from "vitest-browser-react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const { toastMock } = vi.hoisted(() => ({
@@ -42,9 +42,9 @@ describe("useAssistantConversationList", () => {
     vi.clearAllMocks()
   })
 
-  it("pins the current conversation to the front of the sorted list", () => {
+  it("pins the current conversation to the front of the sorted list", async () => {
     const opts = baseOptions({ curConversation: "session-2" })
-    const { result } = renderHook(() => useAssistantConversationList(opts))
+    const { result } = await renderHook(() => useAssistantConversationList(opts))
 
     expect(result.current.sortedConversations.map((conversation) => conversation.key)).toEqual([
       "session-2",
@@ -52,11 +52,11 @@ describe("useAssistantConversationList", () => {
     ])
   })
 
-  it("falls back to the current session label when the conversation has none", () => {
+  it("falls back to the current session label when the conversation has none", async () => {
     const opts = baseOptions({
       conversationList: [item({ key: "session-1", label: "  " })],
     })
-    const { result } = renderHook(() => useAssistantConversationList(opts))
+    const { result } = await renderHook(() => useAssistantConversationList(opts))
 
     expect(result.current.currentConversationLabel).toBe(
       "pages.assistant.sessionSummary.currentSession",
@@ -67,11 +67,9 @@ describe("useAssistantConversationList", () => {
     const opts = baseOptions({
       conversationList: [item({ key: "session-1", label: "pages.assistant.runtime.newChat" })],
     })
-    const { result } = renderHook(() => useAssistantConversationList(opts))
+    const { result } = await renderHook(() => useAssistantConversationList(opts))
 
-    await act(async () => {
-      await result.current.setConversationLabelIfNeeded("session-1", "hello world")
-    })
+    await result.current.setConversationLabelIfNeeded("session-1", "hello world")
 
     expect(opts.updateSessionLabel).toHaveBeenCalledWith("session-1", "hello world")
   })
@@ -80,22 +78,18 @@ describe("useAssistantConversationList", () => {
     const opts = baseOptions({
       conversationList: [item({ key: "session-1", label: "Project review" })],
     })
-    const { result } = renderHook(() => useAssistantConversationList(opts))
+    const { result } = await renderHook(() => useAssistantConversationList(opts))
 
-    await act(async () => {
-      await result.current.setConversationLabelIfNeeded("session-1", "hello world")
-    })
+    await result.current.setConversationLabelIfNeeded("session-1", "hello world")
 
     expect(opts.updateSessionLabel).not.toHaveBeenCalled()
   })
 
-  it("blocks deletion while the session is busy and toasts", () => {
+  it("blocks deletion while the session is busy and toasts", async () => {
     const opts = baseOptions({ isSessionBusy: true })
-    const { result } = renderHook(() => useAssistantConversationList(opts))
+    const { result } = await renderHook(() => useAssistantConversationList(opts))
 
-    act(() => {
-      void result.current.handleDeleteConversation("session-2")
-    })
+    void result.current.handleDeleteConversation("session-2")
 
     expect(opts.deleteSession).not.toHaveBeenCalled()
     expect(toastMock.info).toHaveBeenCalledWith("pages.assistant.toast.waitBeforeDeletingSessions")
@@ -103,40 +97,38 @@ describe("useAssistantConversationList", () => {
 
   it("deletes the conversation when the session is idle", async () => {
     const opts = baseOptions()
-    const { result } = renderHook(() => useAssistantConversationList(opts))
+    const { result } = await renderHook(() => useAssistantConversationList(opts))
 
-    await act(async () => {
-      await result.current.handleDeleteConversation("session-2")
-    })
+    await result.current.handleDeleteConversation("session-2")
 
     expect(opts.deleteSession).toHaveBeenCalledWith("session-2")
   })
 
-  it("closes the sheet without switching when reselecting the current conversation", () => {
+  it("closes the sheet without switching when reselecting the current conversation", async () => {
     const opts = baseOptions({ curConversation: "session-1" })
-    const { result } = renderHook(() => useAssistantConversationList(opts))
+    const { result } = await renderHook(() => useAssistantConversationList(opts))
 
-    act(() => result.current.handleSelectConversation("session-1"))
+    result.current.handleSelectConversation("session-1")
 
     expect(opts.setCurConversation).not.toHaveBeenCalled()
     expect(opts.setIsSessionSheetOpen).toHaveBeenCalledWith(false)
   })
 
-  it("blocks switching while the session is bootstrapping and toasts", () => {
+  it("blocks switching while the session is bootstrapping and toasts", async () => {
     const opts = baseOptions({ isSessionBootstrapping: true })
-    const { result } = renderHook(() => useAssistantConversationList(opts))
+    const { result } = await renderHook(() => useAssistantConversationList(opts))
 
-    act(() => result.current.handleSelectConversation("session-2"))
+    result.current.handleSelectConversation("session-2")
 
     expect(opts.setCurConversation).not.toHaveBeenCalled()
     expect(toastMock.info).toHaveBeenCalledWith("pages.assistant.toast.sessionSyncing")
   })
 
-  it("switches the current conversation and closes the sheet when idle", () => {
+  it("switches the current conversation and closes the sheet when idle", async () => {
     const opts = baseOptions({ curConversation: "session-1" })
-    const { result } = renderHook(() => useAssistantConversationList(opts))
+    const { result } = await renderHook(() => useAssistantConversationList(opts))
 
-    act(() => result.current.handleSelectConversation("session-2"))
+    result.current.handleSelectConversation("session-2")
 
     expect(opts.setCurConversation).toHaveBeenCalledWith("session-2")
     expect(opts.setIsSessionSheetOpen).toHaveBeenCalledWith(false)

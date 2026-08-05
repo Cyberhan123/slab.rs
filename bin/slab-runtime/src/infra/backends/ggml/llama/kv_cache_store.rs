@@ -1,4 +1,4 @@
-//! On-disk persistence for the ggml.llama kv-cache (Slice D2).
+//! On-disk persistence for the ggml.llama kv-cache.
 //!
 //! Each agent thread gets a per-(model, session) snapshot directory under the
 //! configured kv-cache root. The snapshot is the per-sequence state byte blob

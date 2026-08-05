@@ -40,7 +40,7 @@ pub struct Cli {
     pub lib_dir: Option<PathBuf>,
     #[arg(long = "log-file")]
     pub log_file: Option<PathBuf>,
-    /// Root directory for the on-disk ggml.llama kv-cache (Slice D2). Defaults to
+    /// Root directory for the on-disk ggml.llama kv-cache. Defaults to
     /// `<runtime-home>/kv-cache` (two levels above the lib dir). Pass a path to
     /// override; there is no explicit disable flag (point it at a read-only path
     /// and persistence degrades best-effort to in-process caching).

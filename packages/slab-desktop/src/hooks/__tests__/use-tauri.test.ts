@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react';
+import { renderHook } from 'vitest-browser-react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import useIsTauri, { isTauri } from '../use-tauri';
@@ -19,17 +19,17 @@ describe('tauri environment hooks', () => {
     clearTauriInternals();
   });
 
-  it('detects a web runtime when Tauri internals are absent', () => {
+  it('detects a web runtime when Tauri internals are absent', async () => {
     clearTauriInternals();
 
     expect(isTauri()).toBe(false);
-    expect(renderHook(() => useIsTauri()).result.current).toBe(false);
+    expect((await renderHook(() => useIsTauri())).result.current).toBe(false);
   });
 
-  it('detects a Tauri runtime when internals are present', () => {
+  it('detects a Tauri runtime when internals are present', async () => {
     setTauriInternals();
 
     expect(isTauri()).toBe(true);
-    expect(renderHook(() => useIsTauri()).result.current).toBe(true);
+    expect((await renderHook(() => useIsTauri())).result.current).toBe(true);
   });
 });

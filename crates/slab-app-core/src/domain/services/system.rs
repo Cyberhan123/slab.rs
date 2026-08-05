@@ -118,11 +118,11 @@ impl SystemService {
     /// (where it stores the termination reason) and left `None` for completed
     /// threads (where it stores the final answer, not a reason).
     ///
-    /// Slice E: the `agent_tool_calls` audit table was dropped, so the
+    /// The `agent_tool_calls` audit table was dropped, so the
     /// failed-tool-call list is no longer populated here (the response field is
     /// retained for API stability and returned empty). Tool failures are now
     /// captured by the rollout `TurnItem` stream; a rollout-native diagnostics
-    /// reader is deferred to a later slice.
+    /// reader is not yet implemented.
     pub async fn agent_diagnostics(&self) -> Result<AgentDiagnosticsResponse, AppCoreError> {
         let model_state = self.model_state.as_ref().ok_or_else(|| {
             AppCoreError::Internal("agent diagnostics require app state".to_owned())
@@ -151,8 +151,8 @@ impl SystemService {
             .map(Into::into)
             .collect();
 
-        // Slice E: agent_tool_calls was dropped; failed-tool-call diagnostics
-        // are deferred until a rollout-native reader exists.
+        // agent_tool_calls was dropped; failed-tool-call diagnostics
+        // are not populated until a rollout-native reader exists.
         let failed_tool_calls = Vec::new();
 
         Ok(AgentDiagnosticsResponse { threads, failed_tool_calls })

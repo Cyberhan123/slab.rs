@@ -80,7 +80,7 @@ pub struct GgmlBackendConfig {
     pub whisper_lib_dir: Option<PathBuf>,
     pub parakeet_lib_dir: Option<PathBuf>,
     pub diffusion_lib_dir: Option<PathBuf>,
-    /// Root directory for the on-disk ggml.llama kv-cache (Slice D2). When
+    /// Root directory for the on-disk ggml.llama kv-cache. When
     /// `None`, persistence is disabled and only the in-process cache is used.
     pub kv_cache_dir: Option<PathBuf>,
 }

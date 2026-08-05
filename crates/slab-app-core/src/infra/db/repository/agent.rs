@@ -196,11 +196,11 @@ impl AgentStorePort for SqlxStore {
         Ok(())
     }
 
-    // Slice E.2: the conversation surface (`insert_thread_message` /
+    // The conversation surface (`insert_thread_message` /
     // `list_thread_messages` / `upsert_turn_state`) was REMOVED from
     // `AgentStorePort` — the trait is now pure metadata. The legacy
     // `agent_thread_messages` / `agent_turn_states` / `agent_turn_items` tables
-    // were DROPPED in Slice E; rollout is the sole conversation/turn source.
+    // were DROPPED; rollout is the sole conversation/turn source.
     // slab-agent emits conversation data via `EventMsg` (`MessageAppended` /
     // `TurnStateChanged`); the app-core observer lands it in rollout. The
     // `single_shot` Responses-API path writes out-of-band through the

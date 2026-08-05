@@ -36,7 +36,7 @@ const CHANNEL_CAPACITY: usize = 256;
 /// `Compacted`) ahead of the `should_persist` fallback. UI-only deltas
 /// (text/reasoning deltas, approvals) are NOT structural.
 ///
-/// Slice E.2 NOTE: this NO LONGER gates routing. `on_event_msg` routes EVERY
+/// NOTE: this NO LONGER gates routing. `on_event_msg` routes EVERY
 /// event to the dedicated unbounded persistence channel; the observer's
 /// `EventPersistenceMode::should_persist` fallback decides which non-structural
 /// variants (Error/Warning under Limited, deltas/approvals under Extended)
@@ -71,7 +71,7 @@ pub struct AgentEventHub {
     channels: Arc<DashMap<String, EventChannel>>,
     /// Pending approval requests: "<thread_id>:<call_id>" → oneshot sender.
     approvals: Arc<DashMap<String, oneshot::Sender<ApprovalDecision>>>,
-    /// Slice E.2 (D2): per-thread DEDICATED UNBOUNDED persistence channel.
+    /// Per-thread DEDICATED UNBOUNDED persistence channel.
     /// Replaces the bounded broadcast for the rollout persistence observer so
     /// a flood of persistence-grade events CANNOT `Lagged`-drop conversation
     /// data (the #1 false-green hole). The sender is registered when the
@@ -209,7 +209,7 @@ impl AgentEventHub {
         self.channel(thread_id).send_msg(msg);
     }
 
-    /// Slice E.2 (D2): route a persistence-grade event into the DEDICATED
+    /// Route a persistence-grade event into the DEDICATED
     /// UNBOUNDED persistence channel. Called from `on_event_msg` IN ADDITION to
     /// the UI broadcast.
     ///
@@ -241,7 +241,7 @@ impl AgentEventHub {
         }
     }
 
-    /// Slice E.2 (D2): subscribe the rollout persistence observer to the
+    /// Subscribe the rollout persistence observer to the
     /// DEDICATED UNBOUNDED persistence channel for `thread_id`.
     ///
     /// Returns (replay snapshot, mpsc receiver). The replay snapshot captures
@@ -273,7 +273,7 @@ impl AgentEventHub {
         (snapshot, rx)
     }
 
-    /// Slice E.2 (D2): the cross-turn barrier. Enqueue a FIFO sentinel AFTER
+    /// The cross-turn barrier. Enqueue a FIFO sentinel AFTER
     /// every persistence event already emitted for `thread_id` and return a
     /// receiver that resolves once the observer has reached + flushed it — which
     /// (FIFO ordering of the unbounded mpsc) means EVERY prior event is durable.
@@ -314,17 +314,17 @@ impl AgentNotifyPort for AgentEventHub {
     async fn on_event_msg(&self, thread_id: &str, msg: &EventMsg) {
         // Always broadcast to the UI (unchanged).
         self.broadcast_msg(thread_id, msg.clone());
-        // Slice E.2 (D2): route EVERY event to the dedicated unbounded
+        // Route EVERY event to the dedicated unbounded
         // persistence channel so the observer never Lag-drops conversation data.
         // The observer's `EventPersistenceMode::should_persist` fallback arm
         // decides which non-structural variants (Error/Warning under Limited,
         // deltas/approvals under Extended) become `RolloutItem::EventMsg` lines
-        // — exactly the pre-slice semantics (the old observer subscribed to the
+        // — exactly the previous semantics (the old observer subscribed to the
         // full broadcast and filtered by should_persist). Routing only the
         // 9 structural `is_persistence_grade` variants would make that fallback
         // unreachable for Error/Warning, silently dropping them from the rollout
         // timeline under the default Limited mode. The mpsc is unbounded ⇒ the
-        // UI-delta flood that motivated D2 still cannot Lag-drop the structural
+        // UI-delta flood that motivated the dedicated channel still cannot Lag-drop the structural
         // conversation events (the no-Lag guarantee is pinned by Test C).
         self.route_persistence(thread_id, msg.clone());
     }

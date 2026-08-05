@@ -1,6 +1,6 @@
-import { renderHook } from '@testing-library/react';
 import type { ChangeEvent } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderHook } from 'vitest-browser-react';
 
 const openMock = vi.hoisted(() => vi.fn<() => Promise<string | null>>());
 
@@ -49,7 +49,7 @@ describe('useFile', () => {
 
   it('returns the first selected File in browser mode', async () => {
     const file = new File(['audio'], 'sample.wav', { type: 'audio/wav' });
-    const { result } = renderHook(() => useFile());
+    const { result } = await renderHook(() => useFile());
 
     await expect(result.current.handleFile(fileInputEvent(file))).resolves.toEqual({
       file,
@@ -59,7 +59,7 @@ describe('useFile', () => {
   });
 
   it('returns null when browser mode receives no selected file', async () => {
-    const { result } = renderHook(() => useFile());
+    const { result } = await renderHook(() => useFile());
 
     await expect(result.current.handleFile(fileInputEvent())).resolves.toBeNull();
   });
@@ -67,7 +67,7 @@ describe('useFile', () => {
   it('opens the Tauri file dialog and derives the selected file name from the path', async () => {
     setTauriInternals();
     openMock.mockResolvedValueOnce('C:\\recordings\\voice.mp3');
-    const { result } = renderHook(() => useFile());
+    const { result } = await renderHook(() => useFile());
 
     await expect(result.current.handleFile()).resolves.toEqual({
       file: 'C:\\recordings\\voice.mp3',
@@ -85,7 +85,7 @@ describe('useFile', () => {
   it('returns null when the Tauri file dialog is cancelled', async () => {
     setTauriInternals();
     openMock.mockResolvedValueOnce(null);
-    const { result } = renderHook(() => useFile());
+    const { result } = await renderHook(() => useFile());
 
     await expect(result.current.handleFile()).resolves.toBeNull();
   });

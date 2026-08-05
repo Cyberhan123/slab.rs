@@ -1,5 +1,5 @@
-import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderHook } from 'vitest-browser-react';
 
 vi.mock('@mantine/hooks', () => ({
   useInterval: vi.fn<() => { start: () => void; stop: () => void }>(() => ({
@@ -17,7 +17,10 @@ vi.mock('@slab/api', () => ({
   default: { useQuery: useQueryMock, useMutation: useMutationMock },
 }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn<(message: string) => void>() } }));
-vi.mock('@slab/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('@slab/i18n', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+  translateServerField: (_i18n: unknown, _field: string, fallback: string) => fallback,
+}));
 vi.mock('@/lib/error-description', () => ({ getErrorDescription: () => 'error' }));
 
 import type { Task } from '../../const';
@@ -51,8 +54,8 @@ describe('useTaskList', () => {
     useMutationMock.mockReturnValue(mutationResult());
   });
 
-  it('subscribes to the tasks endpoint and lifecycle mutations with toasts suppressed', () => {
-    renderHook(() => useTaskList());
+  it('subscribes to the tasks endpoint and lifecycle mutations with toasts suppressed', async () => {
+    await renderHook(() => useTaskList());
 
     expect(useQueryMock).toHaveBeenCalledWith('get', '/v1/tasks');
     expect(useMutationMock).toHaveBeenCalledWith('get', '/v1/tasks/{id}', {
@@ -79,9 +82,9 @@ describe('useTaskList', () => {
       refetch: vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
     });
 
-    const { result } = renderHook(() => useTaskList());
+    const { result } = await renderHook(() => useTaskList());
 
-    await waitFor(() => expect(result.current.metrics.total).toBe(5));
+    await vi.waitFor(() => expect(result.current.metrics.total).toBe(5));
     expect(result.current.metrics).toEqual({
       total: 5,
       running: 2,
@@ -94,8 +97,8 @@ describe('useTaskList', () => {
     expect(result.current.paginatedTasks).toHaveLength(4);
   });
 
-  it('exposes the lifecycle mutations on its return surface', () => {
-    const { result } = renderHook(() => useTaskList());
+  it('exposes the lifecycle mutations on its return surface', async () => {
+    const { result } = await renderHook(() => useTaskList());
 
     expect(result.current.cancelTaskMutation).toBeDefined();
     expect(result.current.restartTaskMutation).toBeDefined();

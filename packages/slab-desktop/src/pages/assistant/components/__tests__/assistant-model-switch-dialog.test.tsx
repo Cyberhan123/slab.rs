@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
+import { userEvent } from "vitest/browser"
 import { describe, expect, it, vi } from "vitest"
+import { render } from "vitest-browser-react"
 
 // `@slab/test-utils` factory import MUST precede the mocked module imports
 // below (vitest hoists `vi.mock`; the factory runs when `@slab/i18n` is first
@@ -65,50 +65,45 @@ function baseProps(overrides: Record<string, unknown> = {}) {
 }
 
 describe("AssistantModelSwitchDialog", () => {
-  it("renders nothing when there is no pending model", () => {
-    render(<AssistantModelSwitchDialog {...baseProps({ pendingModelId: null })} />)
+  it("renders nothing when there is no pending model", async () => {
+    const screen = await render(<AssistantModelSwitchDialog {...baseProps({ pendingModelId: null })} />)
 
-    expect(screen.queryByTestId("dialog-footer")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("dialog-footer")).not.toBeInTheDocument()
   })
 
   it("fires onCreateSession when the create button is clicked", async () => {
-    const user = userEvent.setup()
     const onCreateSession = vi.fn<() => void>()
-    render(<AssistantModelSwitchDialog {...baseProps({ onCreateSession })} />)
+    const screen = await render(<AssistantModelSwitchDialog {...baseProps({ onCreateSession })} />)
 
-    await user.click(screen.getByRole("button", { name: "pages.assistant.dialog.createTitle" }))
+    await userEvent.click(screen.getByRole("button", { name: "pages.assistant.dialog.createTitle" }))
 
     expect(onCreateSession).toHaveBeenCalledOnce()
   })
 
   it("fires onKeepSession when the keep button is clicked", async () => {
-    const user = userEvent.setup()
     const onKeepSession = vi.fn<() => void>()
-    render(<AssistantModelSwitchDialog {...baseProps({ onKeepSession })} />)
+    const screen = await render(<AssistantModelSwitchDialog {...baseProps({ onKeepSession })} />)
 
-    await user.click(screen.getByRole("button", { name: "pages.assistant.dialog.keepTitle" }))
+    await userEvent.click(screen.getByRole("button", { name: "pages.assistant.dialog.keepTitle" }))
 
     expect(onKeepSession).toHaveBeenCalledOnce()
   })
 
   it("closes (onOpenChange false) when the cancel button is clicked", async () => {
-    const user = userEvent.setup()
     const onOpenChange = vi.fn<(open: boolean) => void>()
-    render(<AssistantModelSwitchDialog {...baseProps({ onOpenChange })} />)
+    const screen = await render(<AssistantModelSwitchDialog {...baseProps({ onOpenChange })} />)
 
-    await user.click(screen.getByRole("button", { name: "pages.assistant.dialog.cancel" }))
+    await userEvent.click(screen.getByRole("button", { name: "pages.assistant.dialog.cancel" }))
 
     expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false)
   })
 
-  it("disables every action while a session is being created", () => {
-    render(<AssistantModelSwitchDialog {...baseProps({ isCreatingSession: true })} />)
+  it("disables every action while a session is being created", async () => {
+    const screen = await render(<AssistantModelSwitchDialog {...baseProps({ isCreatingSession: true })} />)
 
     const footer = screen.getByTestId("dialog-footer")
-    const buttons = footer.querySelectorAll("button")
-    expect(buttons).toHaveLength(3)
-    buttons.forEach((button) => {
-      expect(button).toBeDisabled()
-    })
+    const buttons = footer.getByRole("button")
+    expect(buttons.length).toBe(3)
+    expect(buttons.elements().every((b) => (b as HTMLButtonElement).disabled)).toBe(true)
   })
 })

@@ -1,7 +1,7 @@
 //! Trace bundle directory layout (L3 semantic replay).
 //!
 //! A trace bundle groups all raw evidence for one ROOT thread under a single
-//! directory so a future reducer (Slice 10) can reconstruct the conversation
+//! directory so a future reducer can reconstruct the conversation
 //! the model actually saw. Layout:
 //!
 //! ```text
@@ -9,7 +9,7 @@
 //!     manifest.json     # written ONCE at creation (5 fields)
 //!     trace.jsonl       # append-only event stream (see writer::TraceWriter)
 //!     payloads/*.json   # large bodies referenced by events (request/response/...)
-//!     state.json        # OPTIONAL reducer cache (Slice 10), not written in Slice 9
+//!     state.json        # OPTIONAL reducer cache, not written here
 //! ```
 //!
 //! ## Multi-writer / multi-turn / cross-process safety
@@ -32,7 +32,7 @@
 //! [`crate::BundleAgentTraceSink`] serializes same-bundle appends under a
 //! per-bundle lock (see its module docs), so concurrent root + subagent
 //! records produce clean, parseable lines. That lock does NOT cross processes:
-//! if a future slice lets `slab-runtime` write into the same bundle from a
+//! if a future change ever lets `slab-runtime` write into the same bundle from a
 //! second process, `trace.jsonl` cross-process append ordering would need care
 //! (file locking or per-process files) — a raw `TraceWriter` opened directly
 //! (without the sink) is only atomic to the extent a single OS append of one
@@ -53,7 +53,7 @@ pub const AGENT_TRACE_DIR_NAME: &str = "agent_trace";
 pub const MANIFEST_FILE: &str = "manifest.json";
 pub const TRACE_FILE: &str = "trace.jsonl";
 pub const PAYLOADS_DIR: &str = "payloads";
-/// Reserved for the Slice 10 reducer cache. Not written in Slice 9.
+/// Reserved for the reducer cache. Not written here.
 pub const STATE_FILE: &str = "state.json";
 
 /// Bundle manifest format version. Bumped only on breaking layout changes.
@@ -105,8 +105,7 @@ pub struct BundleManifest {
     pub root_thread_id: String,
     pub created_at: String,
     /// Optional pointer to the Part-1 rollout JSONL file for this thread. The
-    /// rollout file links back the other way via `SessionMeta.trace_path`
-    /// (wired in Slice 11).
+    /// rollout file links back the other way via `SessionMeta.trace_path`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rollout_path: Option<String>,
     pub format_version: u32,
@@ -224,7 +223,7 @@ impl TraceBundle {
         self.dir.join(PAYLOADS_DIR)
     }
 
-    /// Reserved `state.json` path (Slice 10 reducer cache). Not written here.
+    /// Reserved `state.json` path (reducer cache). Not written here.
     pub fn state_path(&self) -> PathBuf {
         self.dir.join(STATE_FILE)
     }

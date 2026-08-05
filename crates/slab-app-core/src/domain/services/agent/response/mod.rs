@@ -9,9 +9,9 @@
 //! single-shot orchestration (resolve model → route → call → persist →
 //! synthesize) in [`single_shot`].
 //!
-//! Slice C3 relocated the OpenAI-Responses wire vocabulary
+//! The OpenAI-Responses wire vocabulary
 //! ([`event::AgentEventKind`]/[`event::TurnEvent`]/[`event::AgentEventEnvelope`]/[`event::AgentResponseRef`])
-//! out of `slab-agent` into [`event`] — the engine crate now owns only its
+//! lives in [`event`], moved out of `slab-agent` — the engine crate now owns only its
 //! harness protocol (`EventMsg`/`TurnItem`) and holds zero `/responses` wire
 //! types. `/responses` synthesizes the envelopes locally; it never drives the
 //! slab-agent turn loop and never touches `AgentEventHub`.

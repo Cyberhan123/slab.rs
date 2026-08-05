@@ -1,5 +1,5 @@
-import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderHook } from 'vitest-browser-react';
 
 const { useIsTauriMock, mutateAsyncMock, useMutationMock } = vi.hoisted(() => ({
   useIsTauriMock: vi.fn<() => boolean>(),
@@ -31,17 +31,17 @@ describe('useTranscribe', () => {
     installMutation();
   });
 
-  it('subscribes to the transcription endpoint with the global error toast suppressed', () => {
-    renderHook(() => useTranscribe());
+  it('subscribes to the transcription endpoint with the global error toast suppressed', async () => {
+    await renderHook(() => useTranscribe());
 
     expect(useMutationMock).toHaveBeenCalledWith('post', '/v1/audio/transcriptions', {
       meta: { skipGlobalErrorToast: true },
     });
   });
 
-  it('exposes the react-query mutation status', () => {
+  it('exposes the react-query mutation status', async () => {
     installMutation({ isPending: true, isError: true, error: new Error('boom') });
-    const { result } = renderHook(() => useTranscribe());
+    const { result } = await renderHook(() => useTranscribe());
 
     expect(result.current.isPending).toBe(true);
     expect(result.current.isError).toBe(true);
@@ -49,7 +49,7 @@ describe('useTranscribe', () => {
   });
 
   it('builds the request body and submits it via mutateAsync', async () => {
-    const { result } = renderHook(() => useTranscribe());
+    const { result, act } = await renderHook(() => useTranscribe());
 
     let response: unknown = null;
     await act(async () => {
@@ -64,7 +64,7 @@ describe('useTranscribe', () => {
 
   it('rejects submissions outside the desktop host', async () => {
     useIsTauriMock.mockReturnValue(false);
-    const { result } = renderHook(() => useTranscribe());
+    const { result, act } = await renderHook(() => useTranscribe());
 
     let thrown: unknown = null;
     await act(async () => {
@@ -81,7 +81,7 @@ describe('useTranscribe', () => {
   });
 
   it('rejects submissions with a non-string or blank path', async () => {
-    const { result } = renderHook(() => useTranscribe());
+    const { result, act } = await renderHook(() => useTranscribe());
 
     let thrown: unknown = null;
     await act(async () => {

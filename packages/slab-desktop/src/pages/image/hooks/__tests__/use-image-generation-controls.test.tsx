@@ -1,5 +1,5 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderHook } from 'vitest-browser-react';
 
 vi.mock('@/store/ui-state-storage', () => ({
   createUiStateStorage: () => ({
@@ -10,6 +10,7 @@ vi.mock('@/store/ui-state-storage', () => ({
 }));
 vi.mock('@/lib/model-config', () => ({
   useModelConfigDocumentQuery: vi.fn<() => unknown>(() => ({ data: undefined, error: null })),
+  getModelConfigFieldValue: () => undefined,
 }));
 
 import { useImageUiStore } from '@/store/useImageUiStore';
@@ -21,8 +22,8 @@ describe('useImageGenerationControls', () => {
     useImageUiStore.setState({ hasHydrated: true, modelControls: {} });
   });
 
-  it('uses default controls and the square preset when no model is selected', () => {
-    const { result } = renderHook(() => useImageGenerationControls(''));
+  it('uses default controls and the square preset when no model is selected', async () => {
+    const { result } = await renderHook(() => useImageGenerationControls(''));
 
     expect(result.current.mode).toBe('txt2img');
     expect(result.current.activeDimensionPreset).toBe('1:1');
@@ -41,20 +42,26 @@ describe('useImageGenerationControls', () => {
       },
     });
 
-    const { result } = renderHook(() => useImageGenerationControls('m1'));
+    const { result } = await renderHook(() => useImageGenerationControls('m1'));
 
-    await waitFor(() => expect(result.current.mode).toBe('img2img'));
+    await vi.waitFor(() => expect(result.current.mode).toBe('img2img'));
     expect(result.current.activeDimensionPreset).toBe('4:3');
   });
 
-  it('updates controls through the setter surface and resolves the active preset', () => {
-    const { result } = renderHook(() => useImageGenerationControls(''));
+  it('updates controls through the setter surface and resolves the active preset', async () => {
+    const { result, act } = await renderHook(() => useImageGenerationControls(''));
 
-    act(() => result.current.setMode('img2img'));
+    await act(() => {
+      result.current.setMode('img2img');
+    });
     expect(result.current.mode).toBe('img2img');
 
-    act(() => result.current.setWidthStr('1024'));
-    act(() => result.current.setHeightStr('576'));
+    await act(() => {
+      result.current.setWidthStr('1024');
+    });
+    await act(() => {
+      result.current.setHeightStr('576');
+    });
     expect(result.current.activeDimensionPreset).toBe('16:9');
   });
 
@@ -64,13 +71,15 @@ describe('useImageGenerationControls', () => {
       modelControls: { m1: { ...createDefaultImageGenerationControls(), steps: 20 } },
     });
 
-    const { result } = renderHook(() => useImageGenerationControls('m1'));
+    const { result, act } = await renderHook(() => useImageGenerationControls('m1'));
 
-    await waitFor(() => expect(result.current.steps).toBe(20));
+    await vi.waitFor(() => expect(result.current.steps).toBe(20));
 
-    act(() => result.current.setSteps(30));
+    await act(() => {
+      result.current.setSteps(30);
+    });
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(useImageUiStore.getState().modelControls.m1?.steps).toBe(30);
     });
   });

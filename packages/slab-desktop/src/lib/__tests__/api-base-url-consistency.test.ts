@@ -1,10 +1,13 @@
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_API_BASE_URL, normalizeApiBaseUrl } from '@slab/api/config';
+
+// Static JSON imports resolve through Vite in Browser Mode (no `node:fs` /
+// `node:path`, which are externalized and unavailable in the browser).
+import workspacePkg from '../../../../../package.json';
+import desktopPkg from '../../../package.json';
+import apiPkg from '../../../../../packages/api/package.json';
+import tauriConf from '../../../../../bin/slab-app/src-tauri/tauri.conf.json';
 
 describe('desktop API base URL consistency', () => {
   it('keeps frontend defaults normalized to the desktop API origin', () => {
@@ -14,25 +17,10 @@ describe('desktop API base URL consistency', () => {
   });
 
   it('keeps static mirrors aligned across package and Tauri config', () => {
-    const testDir = dirname(fileURLToPath(import.meta.url));
-    const workspacePackageJsonPath = resolve(testDir, '../../../../../package.json');
-    const desktopPackageJsonPath = resolve(testDir, '../../../package.json');
-    const apiPackageJsonPath = resolve(testDir, '../../../../../packages/api/package.json');
-    const tauriConfigPath = resolve(
-      testDir,
-      '../../../../../bin/slab-app/src-tauri/tauri.conf.json'
-    );
-
-    const workspacePackageJson = JSON.parse(readFileSync(workspacePackageJsonPath, 'utf8')) as {
-      scripts?: Record<string, string>;
-    };
-    const desktopPackageJson = JSON.parse(readFileSync(desktopPackageJsonPath, 'utf8')) as {
-      scripts?: Record<string, string>;
-    };
-    const apiPackageJson = JSON.parse(readFileSync(apiPackageJsonPath, 'utf8')) as {
-      scripts?: Record<string, string>;
-    };
-    const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, 'utf8')) as {
+    const workspacePackageJson = workspacePkg as { scripts?: Record<string, string> };
+    const desktopPackageJson = desktopPkg as { scripts?: Record<string, string> };
+    const apiPackageJson = apiPkg as { scripts?: Record<string, string> };
+    const tauriConfig = tauriConf as {
       app?: {
         security?: {
           csp?: {

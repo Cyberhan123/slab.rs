@@ -1,5 +1,5 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderHook } from 'vitest-browser-react';
 
 vi.mock('../../store/ui-state-storage', () => ({
   createUiStateStorage: () => ({
@@ -108,14 +108,14 @@ describe('useAiModel', () => {
   it('persists a fallback selection after hydration', async () => {
     installApiMocks([model({ id: 'model-a' }), model({ id: 'model-b' })]);
 
-    renderHook(() =>
+    await renderHook(() =>
       useAiModel({
         capability: 'chat_generation',
         storageKey: 'assistant:model',
       }),
     );
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(useHeaderUiStore.getState().selections['assistant:model']).toBe('model-a');
     });
   });
@@ -142,7 +142,7 @@ describe('useAiModel', () => {
       }),
     ]);
 
-    renderHook(() =>
+    await renderHook(() =>
       useAiModel({
         capability: 'image_generation',
         storageKey: 'image:model',
@@ -150,19 +150,18 @@ describe('useAiModel', () => {
       }),
     );
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(useHeaderUiStore.getState().selections['image:model']).toBe('model-b');
     });
   });
 
-  it('keeps non-persisted selection in local hook state', () => {
+  it('keeps non-persisted selection in local hook state', async () => {
     installApiMocks([model({ id: 'model-a' })]);
 
-    const { result } = renderHook(() => useAiModel());
+    const { result } = await renderHook(() => useAiModel());
 
-    act(() => {
-      result.current.setSelectedId('model-a');
-    });
+    result.current.setSelectedId('model-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(result.current.selectedId).toBe('model-a');
     expect(useHeaderUiStore.getState().selections).toEqual({});

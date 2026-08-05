@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
+import { render } from "vitest-browser-react"
 
 import { setupSlabI18nMock } from "@slab/test-utils/mocks"
 
@@ -78,9 +78,18 @@ vi.mock("../message/message-tool-part", () => ({
   default: ({ part }: { part?: { type?: string } }) => (
     <div data-testid="tool-part">{part?.type}</div>
   ),
+  // Real consumers (e.g. message-tool-file-change-part) import these named
+  // exports; browser native ESM throws if a mock omits a consumed named export,
+  // so expose stubs alongside the default.
+  Tool: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  ToolHeader: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  ToolContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
 }))
 vi.mock("../message/message-tool-command-part", () => ({
   default: () => <div data-testid="tool-command-part" />,
+}))
+vi.mock("../message/message-tool-file-change-part", () => ({
+  default: () => <div data-testid="tool-file-change-part" />,
 }))
 
 function message(overrides: Partial<TMessage> = {}): TMessage {
@@ -93,35 +102,35 @@ function message(overrides: Partial<TMessage> = {}): TMessage {
 }
 
 describe("MessageItem", () => {
-  it("renders the text part for an assistant message and shows a copy button", () => {
-    render(<MessageItem message={message()} />)
+  it("renders the text part for an assistant message and shows a copy button", async () => {
+    const screen = await render(<MessageItem message={message()} />)
 
-    expect(screen.getByTestId("agent-avatar")).toBeInTheDocument()
-    expect(screen.getByTestId("text-part")).toHaveTextContent("hello")
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument()
+    await expect.element(screen.getByTestId("agent-avatar")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("text-part")).toHaveTextContent("hello")
+    await expect.element(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument()
   })
 
-  it("renders the user avatar for a user message", () => {
-    render(<MessageItem message={message({ role: "user", id: "m2" })} />)
+  it("renders the user avatar for a user message", async () => {
+    const screen = await render(<MessageItem message={message({ role: "user", id: "m2" })} />)
 
-    expect(screen.getByTestId("user-avatar")).toBeInTheDocument()
-    expect(screen.queryByTestId("agent-avatar")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("user-avatar")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("agent-avatar")).not.toBeInTheDocument()
   })
 
-  it("routes a tool part to the tool component and hides the copy button when there is no text", () => {
-    render(
+  it("routes a tool part to the tool component and hides the copy button when there is no text", async () => {
+    const screen = await render(
       <MessageItem
         message={message({ parts: [{ type: "tool-call", state: "input-available" }] })}
       />,
     )
 
-    expect(screen.getByTestId("tool-part")).toHaveTextContent("tool-call")
-    expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("tool-part")).toHaveTextContent("tool-call")
+    await expect.element(screen.getByRole("button", { name: "Copy" })).not.toBeInTheDocument()
   })
 
-  it("shows a rollback button on a retracable user message and emits the message id", () => {
+  it("shows a rollback button on a retracable user message and emits the message id", async () => {
     const rollbackToMessage = vi.fn()
-    render(
+    const screen = await render(
       <MessageInteractionContext.Provider
         value={{
           approvalStatusByItemId: new Map(),
@@ -138,12 +147,12 @@ describe("MessageItem", () => {
     )
 
     const btn = screen.getByTestId("assistant-message-rollback")
-    fireEvent.click(btn)
+    await btn.click()
     expect(rollbackToMessage).toHaveBeenCalledWith("mu1")
   })
 
-  it("hides the rollback button on the first user message (turn 0)", () => {
-    render(
+  it("hides the rollback button on the first user message (turn 0)", async () => {
+    const screen = await render(
       <MessageInteractionContext.Provider
         value={{
           approvalStatusByItemId: new Map(),
@@ -159,11 +168,11 @@ describe("MessageItem", () => {
       </MessageInteractionContext.Provider>,
     )
 
-    expect(screen.queryByTestId("assistant-message-rollback")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-message-rollback")).not.toBeInTheDocument()
   })
 
-  it("hides the rollback button on assistant messages", () => {
-    render(
+  it("hides the rollback button on assistant messages", async () => {
+    const screen = await render(
       <MessageInteractionContext.Provider
         value={{
           approvalStatusByItemId: new Map(),
@@ -177,6 +186,6 @@ describe("MessageItem", () => {
       </MessageInteractionContext.Provider>,
     )
 
-    expect(screen.queryByTestId("assistant-message-rollback")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-message-rollback")).not.toBeInTheDocument()
   })
 })

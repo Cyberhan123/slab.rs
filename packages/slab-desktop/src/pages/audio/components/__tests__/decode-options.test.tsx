@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { userEvent } from 'vitest/browser';
 import type { ChangeEvent, ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { render } from 'vitest-browser-react';
 
 import { setupSlabI18nMock } from '@slab/test-utils/mocks';
 
@@ -31,9 +31,10 @@ vi.mock('@slab/components/input', () => ({
     type?: string;
     placeholder?: string;
   }) => (
+    // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- labeled via the component's sibling <Label htmlFor>
     <input
       id={id}
-      aria-label="decode-field"
+      title="decode-field"
       value={value}
       onChange={onChange}
       disabled={disabled}
@@ -55,10 +56,11 @@ vi.mock('@slab/components/switch', () => ({
     onCheckedChange?: (checked: boolean) => void;
     disabled?: boolean;
   }) => (
+    // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- labeled via the component's sibling <Label htmlFor>
     <input
       type="checkbox"
       id={id}
-      aria-label="decode-switch"
+      title="decode-switch"
       checked={checked}
       onChange={(event) => onCheckedChange?.(event.target.checked)}
       disabled={disabled}
@@ -109,51 +111,48 @@ function baseProps(overrides: Record<string, unknown> = {}): DecodeOptionsProps 
 }
 
 describe('DecodeOptions', () => {
-  it('hides the numeric fields when collapsed', () => {
-    render(<DecodeOptions {...baseProps({ showDecodeOptions: false })} />);
+  it('hides the numeric fields when collapsed', async () => {
+    const screen = await render(<DecodeOptions {...baseProps({ showDecodeOptions: false })} />);
 
-    expect(screen.queryAllByRole('spinbutton')).toHaveLength(0);
+    expect(screen.getByRole('spinbutton').elements()).toHaveLength(0);
   });
 
-  it('exposes the numeric fields when expanded', () => {
-    render(<DecodeOptions {...baseProps()} />);
+  it('exposes the numeric fields when expanded', async () => {
+    const screen = await render(<DecodeOptions {...baseProps()} />);
 
-    expect(screen.getAllByRole('spinbutton').length).toBeGreaterThan(0);
+    expect(screen.getByRole('spinbutton').length).toBeGreaterThan(0);
   });
 
   it('toggles expansion via the header switch', async () => {
-    const user = userEvent.setup();
     const setShowDecodeOptions = vi.fn<(value: boolean) => void>();
-    render(<DecodeOptions {...baseProps({ showDecodeOptions: false, setShowDecodeOptions })} />);
+    const screen = await render(<DecodeOptions {...baseProps({ showDecodeOptions: false, setShowDecodeOptions })} />);
 
-    await user.click(screen.getByLabelText('pages.audio.decode.title'));
+    await userEvent.click(screen.getByLabelText('pages.audio.decode.title'));
 
     expect(setShowDecodeOptions).toHaveBeenCalledExactlyOnceWith(true);
   });
 
   it('forwards a numeric field edit to its setter', async () => {
-    const user = userEvent.setup();
     const setDecodeOffsetMs = vi.fn<(value: string) => void>();
-    render(<DecodeOptions {...baseProps({ setDecodeOffsetMs })} />);
+    const screen = await render(<DecodeOptions {...baseProps({ setDecodeOffsetMs })} />);
 
-    await user.type(screen.getByLabelText('pages.audio.decode.fields.offset'), '5');
+    await userEvent.type(screen.getByLabelText('pages.audio.decode.fields.offset'), '5');
 
     expect(setDecodeOffsetMs).toHaveBeenCalledWith('5');
   });
 
   it('forwards a toggle field edit to its setter', async () => {
-    const user = userEvent.setup();
     const setDecodeNoContext = vi.fn<(value: boolean) => void>();
-    render(<DecodeOptions {...baseProps({ setDecodeNoContext })} />);
+    const screen = await render(<DecodeOptions {...baseProps({ setDecodeNoContext })} />);
 
-    await user.click(screen.getByLabelText('pages.audio.decode.fields.noContext'));
+    await userEvent.click(screen.getByLabelText('pages.audio.decode.fields.noContext'));
 
     expect(setDecodeNoContext).toHaveBeenCalledExactlyOnceWith(true);
   });
 
-  it('disables the numeric inputs while busy', () => {
-    render(<DecodeOptions {...baseProps({ isBusy: true })} />);
+  it('disables the numeric inputs while busy', async () => {
+    const screen = await render(<DecodeOptions {...baseProps({ isBusy: true })} />);
 
-    expect(screen.getByLabelText('pages.audio.decode.fields.offset')).toBeDisabled();
+    await expect.element(screen.getByLabelText('pages.audio.decode.fields.offset')).toBeDisabled();
   });
 });

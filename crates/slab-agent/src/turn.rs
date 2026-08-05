@@ -575,7 +575,7 @@ async fn persist_assistant_tool_request(
     messages.push(assistant_message);
 }
 
-/// Slice E.2: emit a conversation message append as a persistence-grade
+/// Emit a conversation message append as a persistence-grade
 /// `MessageAppended` event. The app-core rollout observer lands it in the
 /// rollout true source (`TurnContext::MessageAppend`), replacing the old
 /// slab-agent store-trait `insert_thread_message` route. Carries the original
@@ -598,7 +598,7 @@ pub(crate) async fn emit_message_appended(
     notify.on_event_msg(thread_id, &event).await;
 }
 
-/// Slice E.2: emit a turn-state snapshot as a persistence-grade `TurnStateChanged`
+/// Emit a turn-state snapshot as a persistence-grade `TurnStateChanged`
 /// event. The app-core rollout observer lands it in the rollout true source
 /// (`TurnContext::TurnState`), replacing the old slab-agent store-trait
 /// `upsert_turn_state` route. Carries the typed input-messages vec directly (so
@@ -699,7 +699,7 @@ fn parsed_tool_calls_trace_payload(tool_calls: &[ParsedToolCall]) -> serde_json:
 //
 // The harness text/reasoning emits. slab-agent speaks `EventMsg` (its harness
 // protocol) exclusively — the legacy `AgentEventKind`/`/responses` wire left
-// this crate in slice C3. These mirror, byte-for-byte, what `HarnessProjection`
+// this crate. These mirror, byte-for-byte, what `HarnessProjection`
 // used to derive so the harness wire is unchanged.
 
 fn harness_turn_id(turn_index: u32) -> String {

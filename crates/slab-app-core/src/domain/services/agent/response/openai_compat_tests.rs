@@ -154,7 +154,7 @@ fn strip_message_annotations(v: Value) -> Value {
     walk(v)
 }
 
-/// Phase 1.1 — non-streaming `Response` with two `message` output items that
+/// Non-streaming `Response` with two `message` output items that
 /// carry the `phase` discriminator (`commentary` / `final_answer`).
 #[test]
 fn non_streaming_message_with_phase_round_trips() {
@@ -201,7 +201,7 @@ fn envelope(event: AgentEventKind) -> AgentEventEnvelope {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 1.2 — reasoning (encrypted_content + summary)
+// reasoning (encrypted_content + summary)
 // ---------------------------------------------------------------------------
 
 const REASONING_JSON: &str = include_str!(
@@ -627,7 +627,7 @@ fn envelopes_from_chunks(raw: &str) -> Vec<AgentEventEnvelope> {
     envelopes
 }
 
-/// Phase 2 — streaming text round-trip against `openai-phase.1.chunks.txt`.
+/// Streaming text round-trip against `openai-phase.1.chunks.txt`.
 ///
 /// Slab's `ResponseOutputTextDelta` carries no `phase` discriminator, so the
 /// `phase` shown on the fixture's `response.output_item.added` wrapper is
@@ -657,7 +657,7 @@ fn streaming_text_round_trips() {
 const FINAL_ANSWER_TEXT: &str = "Here are some **latest AI updates for today (Wednesday, February 25, 2026)** based on recent postings:\n\n### Top headline\n- **Anthropic announced it is acquiring Vercept** to improve Claude\u{2019}s computer-use/agent capabilities (posted **Feb 25, 2026**).  \n  Source: Anthropic Newsroom: https://www.anthropic.com/news\n\n### Other very recent AI items (this week)\n- **Anthropic updated its Responsible Scaling Policy to v3.0** (**Feb 24, 2026**).  \n- **Anthropic posted work on detecting/preventing model distillation attacks** (**Feb 23, 2026**).  \n- **Anthropic announced cybersecurity capability access for defenders** (**Feb 20, 2026**).  \n- **Claude Sonnet 4.6 introduced** (**Feb 17, 2026**).  \n  Source for all above: https://www.anthropic.com/news\n\n### Bigger recent context\n- **Anthropic disclosed a major Series G funding round** (**Feb 12, 2026**) with a very large valuation, signaling continued heavy investment in frontier AI.  \n  Source: https://www.anthropic.com/news\n\n---\n\nIf you want, I can also give you a **broader \u{201C}today in AI\u{201D} roundup** across OpenAI, Google DeepMind, Microsoft, Meta, xAI, NVIDIA, and major regulators (US/EU/UK) with only same-day / last-48-hours items.";
 
 // ---------------------------------------------------------------------------
-// Phase 2.3 — streaming reasoning with summary text deltas
+// Streaming reasoning with summary text deltas
 // (openai-reasoning-encrypted-content.1.chunks.txt)
 //
 // The slab `ResponseReasoningTextDelta`/`.done` events are mapped onto the
@@ -698,7 +698,7 @@ fn normalize_reasoning_added_encrypted(events: Vec<Value>) -> Vec<Value> {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Phase 3 — custom_tool_call (openai-custom-tool.1.{json,chunks.txt})
+// custom_tool_call (openai-custom-tool.1.{json,chunks.txt})
 // ---------------------------------------------------------------------------
 
 const CUSTOM_TOOL_JSON: &str = include_str!(
@@ -1416,7 +1416,7 @@ fn function_call_fixture_skeleton() -> slab_proto::openai::Response {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4 — compaction (openai-compaction.1.{json,chunks.txt})
+// compaction (openai-compaction.1.{json,chunks.txt})
 //
 // Output is [message, compaction]. The compaction item carries an opaque
 // `encrypted_content` blob. slab-agent's new `ResponseCompactionDone` variant
@@ -1515,7 +1515,7 @@ fn compaction_non_streaming_round_trips() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4 — tool_search (openai-tool-search.1 / openai-client-tool-search.1)
+// tool_search (openai-tool-search.1 / openai-client-tool-search.1)
 // ---------------------------------------------------------------------------
 
 const TOOL_SEARCH_JSON: &str = include_str!(
@@ -2168,7 +2168,7 @@ fn image_generation_non_streaming_round_trips() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4 — mcp approval family (openai-mcp-tool-approval.{1,2,3,4})
+// mcp approval family (openai-mcp-tool-approval.{1,2,3,4})
 //
 // All four fixtures share the same echoed request config (single `mcp` tool
 // with `require_approval: "always"`, model `gpt-5-mini-2025-08-07`, reasoning
@@ -3117,7 +3117,7 @@ fn shell_container_multiturn_non_streaming_round_trips() {
 }
 
 // ===========================================================================
-// Phase 5 — streaming long tail (mcp / shell / code-interpreter / web-search /
+// Streaming long tail (mcp / shell / code-interpreter / web-search /
 // file-search / multi-response reasoning)
 //
 // Each `.chunks.txt` is driven through `envelope_to_events` via a general
@@ -3740,7 +3740,7 @@ fn file_search_2_streaming_round_trips() {
     assert_streaming_round_trips(FILE_SEARCH_2_CHUNKS);
 }
 
-/// Phase 2.3 — multi-response reasoning fixture. The `.chunks.txt` carries 4
+/// Multi-response reasoning fixture. The `.chunks.txt` carries 4
 /// independent response cycles (reasoning+function_call ×1, function_call ×2,
 /// final message ×1). Each cycle is driven through a FRESH `StreamCtx` (reset
 /// per cycle), and the concatenated redacted event vec is compared to the

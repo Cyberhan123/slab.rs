@@ -735,7 +735,7 @@ impl AgentStorePort for RecordingStore {
 #[derive(Default)]
 struct RecordingPersistingStore {
     snapshots: Mutex<HashMap<String, ThreadSnapshot>>,
-    // Slice E.2: the slab-agent `insert_thread_message` trait method is gone;
+    // The slab-agent `insert_thread_message` trait method is gone;
     // retained for direct-push seeding in tests. Unread — tests verify emission
     // via `RecordingNotify`.
     #[allow(dead_code)]
@@ -836,7 +836,7 @@ impl AgentNotifyPort for NoopNotify {
     async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
 }
 
-/// Slice E.2: a notify port that records every `EventMsg` slab-agent emits, so
+/// A notify port that records every `EventMsg` slab-agent emits, so
 /// tests can verify emission (slab-agent no longer writes conversation data to
 /// the store — it emits `MessageAppended` / `TurnStateChanged` events).
 /// Implements `ApprovalPort` (rejecting, matching `NoopNotify`) so it can stand
@@ -886,7 +886,7 @@ impl RecordingNotify {
     }
 }
 
-/// Slice E.2: poll for an emitted `MessageAppended` whose rendered text contains
+/// Poll for an emitted `MessageAppended` whose rendered text contains
 /// `text` (replaces `wait_for_persisted_message`, which polled the store).
 async fn wait_for_emitted_message(notify: &RecordingNotify, thread_id: &str, text: &str) {
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -1152,7 +1152,7 @@ async fn wait_for_persisted_status(
     .expect("persisted status did not reach expected value");
 }
 
-/// Slice E.2 test helper: resume a thread with a new user message, mirroring the
+/// Test helper: resume a thread with a new user message, mirroring the
 /// hoisted `AgentCore::send_input` flow (read history from the mock + sort +
 /// max-turn + append user + `resume_thread`). slab-agent no longer reads
 /// conversation data itself (the trait method is gone), so tests that previously
@@ -1720,7 +1720,7 @@ async fn tool_start_observations_are_appended_to_tool_output() {
         .expect("spawn");
     wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
 
-    // Slice E.2: slab-agent emits `MessageAppended` (no store writes).
+    // slab-agent emits `MessageAppended` (no store writes).
     let tool_output = notify
         .emitted_messages(&thread_id)
         .iter()
@@ -1767,7 +1767,7 @@ async fn turn_state_records_running_llm_tool_and_completed_statuses() {
         .expect("spawn");
     wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
 
-    // Slice E.2: slab-agent emits `TurnStateChanged` events (no longer writes
+    // slab-agent emits `TurnStateChanged` events (no longer writes
     // turn-state records to the store). Assert the emitted events carry the
     // expected status progression; the app-core observer lands them in rollout.
     let statuses = notify
@@ -2165,7 +2165,7 @@ async fn concurrent_tool_calls_preserve_persisted_message_order() {
         .expect("spawn");
 
     wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
-    // Slice E.2: slab-agent emits `MessageAppended` (no store writes); read the
+    // slab-agent emits `MessageAppended` (no store writes); read the
     // emitted tool messages and assert FIFO order is preserved.
     let tool_outputs = notify
         .emitted_messages(&thread_id)
@@ -2608,7 +2608,7 @@ async fn send_input_replays_persisted_thread_messages() {
     let thread_id = control.spawn("session-replay".into(), config, messages).await.expect("spawn");
     wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
 
-    // Slice E.2: slab-agent no longer reads conversation data itself (the trait
+    // slab-agent no longer reads conversation data itself (the trait
     // method is gone). `resume_with_input` mirrors the hoisted
     // `AgentCore::send_input` read+sort+max over the mock's seeded messages.
     // Seed the spawn-time user message as a turn-0 record (what the OLD adapter
@@ -2633,7 +2633,7 @@ async fn send_input_replays_persisted_thread_messages() {
     resume_with_input(&store, &control, &thread_id, "second prompt".into())
         .await
         .expect("send input");
-    // Slice E.2: slab-agent emits `MessageAppended` events (no store writes).
+    // slab-agent emits `MessageAppended` events (no store writes).
     wait_for_emitted_message(&notify, &thread_id, "second prompt").await;
 
     let emitted = notify.emitted_messages(&thread_id);
@@ -2860,7 +2860,7 @@ async fn task_complete_finalizes_run_on_success() {
     let calls = *llm_handle.call_count.lock().unwrap();
     assert_eq!(calls, 1, "task.complete should finalize without a second LLM turn");
 
-    // Slice E.2: slab-agent emits `MessageAppended` (no store writes).
+    // slab-agent emits `MessageAppended` (no store writes).
     let final_text = notify
         .emitted_messages(&thread_id)
         .iter()
@@ -3155,7 +3155,7 @@ async fn fork_thread_clones_history_at_depth_plus_one() {
         .await
         .expect("seed parent");
     for (id, turn_index) in [("pmsg-0", 0u32), ("pmsg-1", 1)] {
-        // Slice E.2: `insert_thread_message` left the slab-agent store trait;
+        // `insert_thread_message` left the slab-agent store trait;
         // seed the mock's in-memory messages vec directly.
         store.messages.lock().unwrap().push(ThreadMessageRecord {
             id: id.into(),
@@ -3171,10 +3171,10 @@ async fn fork_thread_clones_history_at_depth_plus_one() {
             created_at: now.clone(),
         });
     }
-    // Slice E.2: `upsert_turn_state` left the slab-agent store trait (slab-agent
+    // `upsert_turn_state` left the slab-agent store trait (slab-agent
     // emits `TurnStateChanged` events now). Seed the mock's in-memory turn-state
     // vec directly so the parent has a realistic history; fork does not copy
-    // per-record turn states (Slice E), so this is not asserted on below.
+    // per-record turn states, so this is not asserted on below.
     store.turn_states.lock().unwrap().push(TurnStateRecord {
         thread_id: "parent-1".into(),
         turn_index: 1,
@@ -3201,13 +3201,13 @@ async fn fork_thread_clones_history_at_depth_plus_one() {
         serde_json::from_str(&child.config_json).expect("child config parses");
     assert_eq!(child_config.model, "child-model", "model override applied");
 
-    // Slice E: `AgentControl::fork_thread` no longer clones the parent's
+    // `AgentControl::fork_thread` no longer clones the parent's
     // per-record history — the production fork path (HarnessService::fork_thread)
     // snapshots the parent rollout file wholesale into the child. At this layer
     // the child is just new metadata, so the parent's history stays untouched
     // under the parent id (no per-record copy into the child).
     //
-    // Slice E.2: `list_thread_messages` left the slab-agent store trait (slab-agent
+    // `list_thread_messages` left the slab-agent store trait (slab-agent
     // is pure now); assert directly against the mock's in-memory messages.
     let parent_message_count =
         store.messages.lock().unwrap().iter().filter(|m| m.thread_id == "parent-1").count();

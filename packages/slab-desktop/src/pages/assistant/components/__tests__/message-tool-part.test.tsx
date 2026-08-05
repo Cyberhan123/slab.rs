@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { render } from "vitest-browser-react"
 
 import type { MessagePartRenderProps } from "../message/message-parts"
 import type { TMessage, TMessagePart } from "../message/message-item"
@@ -128,33 +128,36 @@ describe("MessageToolPart", () => {
     interactionState.approvalStatusByItemId = new Map()
   })
 
-  it("renders nothing for non-tool kinds", () => {
-    const { container } = render(<MessageToolPart {...baseProps({ kind: "text" })} />)
-    expect(container).toBeEmptyDOMElement()
+  it("renders nothing for non-tool kinds", async () => {
+    const screen = await render(<MessageToolPart {...baseProps({ kind: "text" })} />)
+    // vitest-browser-react's screen does not expose the mount container, so the
+    // original `container.toBeEmptyDOMElement()` is approximated by asserting the
+    // component's primary rendered output (the Collapsible wrapper) is absent.
+    expect(screen.getByTestId("collapsible").query()).toBeNull()
   })
 
-  it("shows the awaiting-approval badge and opens by default while pending", () => {
+  it("shows the awaiting-approval badge and opens by default while pending", async () => {
     interactionState.approvalStatusByItemId = new Map([["tc1", "pending"]])
-    render(<MessageToolPart {...baseProps()} />)
+    const screen = await render(<MessageToolPart {...baseProps()} />)
 
-    expect(screen.getByText("Awaiting Approval")).toBeInTheDocument()
-    expect(screen.getByTestId("collapsible")).toHaveAttribute("data-default-open", "true")
+    await expect.element(screen.getByText("Awaiting Approval")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("collapsible")).toHaveAttribute("data-default-open", "true")
   })
 
-  it("shows the completed badge and stays closed once output is available", () => {
-    render(<MessageToolPart {...baseProps({ part: part({ state: "output-available", output: "ok" }) })} />)
+  it("shows the completed badge and stays closed once output is available", async () => {
+    const screen = await render(<MessageToolPart {...baseProps({ part: part({ state: "output-available", output: "ok" }) })} />)
 
-    expect(screen.getByText("Completed")).toBeInTheDocument()
-    expect(screen.getByTestId("collapsible")).toHaveAttribute("data-default-open", "false")
+    await expect.element(screen.getByText("Completed")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("collapsible")).toHaveAttribute("data-default-open", "false")
   })
 
-  it("derives the tool name from the part type when no name is supplied", () => {
-    render(
+  it("derives the tool name from the part type when no name is supplied", async () => {
+    const screen = await render(
       <MessageToolPart
         {...baseProps({ name: undefined, part: part({ type: "tool-search-web", state: "input-available" }) })}
       />,
     )
 
-    expect(screen.getByText("search-web")).toBeInTheDocument()
+    await expect.element(screen.getByText("search-web")).toBeInTheDocument()
   })
 })

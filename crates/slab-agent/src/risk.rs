@@ -16,7 +16,7 @@ pub enum ToolApprovalDecision {
 /// model); the host/app-core supplies this policy.
 ///
 /// Full sandbox execution (`Sandbox` tier for dangerous/external-network tools)
-/// is a separate slice; until then such tools map to [`ToolApprovalDecision::Ask`].
+/// is not yet wired up; until then such tools map to [`ToolApprovalDecision::Ask`].
 #[derive(Debug, Clone, Copy)]
 pub struct ToolApprovalPolicy {
     /// Risk at or above this tier requires approval (unless the tool supplies

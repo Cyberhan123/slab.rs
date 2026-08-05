@@ -18,6 +18,9 @@ vi.mock('@slab/api', () => ({
 vi.mock('sonner', () => ({
   toast: toastMock,
 }));
+vi.mock('@slab/i18n', () => ({
+  default: { t: (key: string) => key },
+}));
 
 import { createUiStateStorage, useUiStatePersistenceStatus } from '../ui-state-storage';
 
@@ -133,7 +136,7 @@ describe('createUiStateStorage', () => {
     });
     await expect(storage.getItem('workspace')).resolves.toBeNull();
 
-    expect(toastMock.error).toHaveBeenCalledWith('Unable to load UI preferences', {
+    expect(toastMock.error).toHaveBeenCalledWith('pages.settings.persistence.loadFailed', {
       description: '500 Server Error',
       id: 'ui-state:load:failed',
     });
@@ -161,11 +164,11 @@ describe('createUiStateStorage', () => {
     apiClientMock.DELETE.mockRejectedValueOnce(new Error('delete failed'));
     await expect(storage.removeItem('workspace')).resolves.toBeUndefined();
     expect(console.warn).toHaveBeenCalled();
-    expect(toastMock.error).toHaveBeenCalledWith('Unable to save UI preferences', {
+    expect(toastMock.error).toHaveBeenCalledWith('pages.settings.persistence.saveFailed', {
       description: 'write failed',
       id: 'ui-state:save:failed',
     });
-    expect(toastMock.error).toHaveBeenCalledWith('Unable to remove UI preferences', {
+    expect(toastMock.error).toHaveBeenCalledWith('pages.settings.persistence.removeFailed', {
       description: 'delete failed',
       id: 'ui-state:remove:failed',
     });

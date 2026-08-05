@@ -263,7 +263,7 @@ async fn agent_responses_get(
             "thread_id is required for SSE fallback".into(),
         )));
     };
-    // Slice C2: `/responses` is single-shot per request — there is no in-flight
+    // `/responses` is single-shot per request — there is no in-flight
     // hub stream to resume. GET SSE reconstructs the finalized response from
     // the thread store and replays it as a terminal `response.completed`.
     Ok(agent_events_sse_resume(service, thread_id).await)

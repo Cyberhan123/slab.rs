@@ -1,6 +1,6 @@
-import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
 import type { ReactNode } from "react"
+import { describe, expect, it, vi } from "vitest"
+import { render } from "vitest-browser-react"
 
 import { MessageInteractionContext } from "../../message-interaction-context"
 import type { ToolPartLike } from "../message-tool-part"
@@ -45,7 +45,7 @@ vi.mock("@slab/components/badge", () => ({
   Badge: ({ children }: { children: ReactNode }) => <span data-testid="badge">{children}</span>,
 }))
 
-function renderPart(
+async function renderPart(
   part: Partial<ToolPartLike>,
   ctx: { approval?: string; liveOutput?: string },
   toolCallId = "call-1",
@@ -75,26 +75,24 @@ function renderPart(
 }
 
 describe("MessageToolCommandPart", () => {
-  afterEach(() => cleanup())
-
-  it("renders streamed live output while the command is active (pending approval)", () => {
-    renderPart(
+  it("renders streamed live output while the command is active (pending approval)", async () => {
+    const screen = await renderPart(
       { type: "tool-input-available", input: { command: "echo hi", cwd: "/repo" } },
       { approval: "pending", liveOutput: "streaming-bytes" },
     )
     const terminal = screen.getByTestId("terminal")
-    expect(terminal.getAttribute("data-streaming")).toBe("true")
+    expect(terminal.element().getAttribute("data-streaming")).toBe("true")
     // Command input lives in the header; cwd is exposed via the title attribute.
-    expect(screen.getByTestId("terminal-header").textContent).toContain("$ echo hi")
-    expect(screen.getByTestId("terminal-title").getAttribute("title")).toBe("/repo")
+    expect(screen.getByTestId("terminal-header").element().textContent).toContain("$ echo hi")
+    expect(screen.getByTestId("terminal-title").element().getAttribute("title")).toBe("/repo")
     // Output (live while active) lives in the content surface, not the header.
-    expect(screen.getByTestId("terminal-content").textContent).toContain("streaming-bytes")
+    expect(screen.getByTestId("terminal-content").element().textContent).toContain("streaming-bytes")
     // Badge reflects the approval-requested state.
-    expect(screen.getByTestId("badge").textContent).toContain("Awaiting Approval")
+    expect(screen.getByTestId("badge").element().textContent).toContain("Awaiting Approval")
   })
 
-  it("renders finalized output once the command completes", () => {
-    renderPart(
+  it("renders finalized output once the command completes", async () => {
+    const screen = await renderPart(
       {
         type: "tool-output-available",
         input: { command: "echo hi", cwd: "/repo" },
@@ -104,14 +102,14 @@ describe("MessageToolCommandPart", () => {
       { approval: "approved" },
     )
     const terminal = screen.getByTestId("terminal")
-    expect(terminal.getAttribute("data-streaming")).toBe("false")
-    expect(screen.getByTestId("terminal-header").textContent).toContain("$ echo hi")
-    expect(screen.getByTestId("terminal-content").textContent).toContain("final-result")
-    expect(screen.getByTestId("badge").textContent).toContain("Completed")
+    expect(terminal.element().getAttribute("data-streaming")).toBe("false")
+    expect(screen.getByTestId("terminal-header").element().textContent).toContain("$ echo hi")
+    expect(screen.getByTestId("terminal-content").element().textContent).toContain("final-result")
+    expect(screen.getByTestId("badge").element().textContent).toContain("Completed")
   })
 
-  it("renders the error text and Error badge when the command failed", () => {
-    renderPart(
+  it("renders the error text and Error badge when the command failed", async () => {
+    const screen = await renderPart(
       {
         type: "tool-output-error",
         input: { command: "bad-cmd", cwd: "/repo" },
@@ -120,26 +118,26 @@ describe("MessageToolCommandPart", () => {
       },
       {},
     )
-    expect(screen.getByTestId("terminal-content").textContent).toContain("boom: command not found")
-    expect(screen.getByTestId("badge").textContent).toContain("Error")
+    expect(screen.getByTestId("terminal-content").element().textContent).toContain("boom: command not found")
+    expect(screen.getByTestId("badge").element().textContent).toContain("Error")
   })
 
-  it("renders the Denied badge when the approval was denied", () => {
-    renderPart(
+  it("renders the Denied badge when the approval was denied", async () => {
+    const screen = await renderPart(
       { type: "tool-input-available", input: { command: "echo hi", cwd: "/repo" } },
       { approval: "denied" },
     )
-    expect(screen.getByTestId("badge").textContent).toContain("Denied")
+    expect(screen.getByTestId("badge").element().textContent).toContain("Denied")
   })
 
-  it("does not crash when toolCallId is empty and renders no approval lookup", () => {
+  it("does not crash when toolCallId is empty and renders no approval lookup", async () => {
     // Empty toolCallId is falsy → the component skips the approval/output map lookups.
-    renderPart(
+    const screen = await renderPart(
       { type: "tool-input-available", input: { command: "echo hi", cwd: "/repo" } },
       {},
       "",
     )
     // Still renders the command framing in the header without throwing.
-    expect(screen.getByTestId("terminal-header").textContent).toContain("$ echo hi")
+    expect(screen.getByTestId("terminal-header").element().textContent).toContain("$ echo hi")
   })
 })

@@ -16,7 +16,7 @@ pub(crate) struct AgentRuntimeReloader {
     state: ModelState,
     runtime: AgentRuntime,
     tool_router: Arc<ToolRouter>,
-    /// Shared rollout true source (Slice F) so a reloaded memory pipeline reads
+    /// Shared rollout true source so a reloaded memory pipeline reads
     /// the SAME rollout files the live agent runtime writes. Retained for
     /// `rollout_path` stamping; the conversation itself is read via
     /// `rollout_store` (the production read path).

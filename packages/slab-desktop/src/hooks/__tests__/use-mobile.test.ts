@@ -1,5 +1,5 @@
-import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderHook } from 'vitest-browser-react';
 
 const useMediaQueryMock = vi.hoisted(() =>
   vi.fn<
@@ -23,8 +23,8 @@ describe('useIsMobile', () => {
     useMediaQueryMock.mockReturnValue(false);
   });
 
-  it('uses the mobile breakpoint with an effect-time media query initial value', () => {
-    const { result } = renderHook(() => useIsMobile());
+  it('uses the mobile breakpoint with an effect-time media query initial value', async () => {
+    const { result } = await renderHook(() => useIsMobile());
 
     expect(result.current).toBe(false);
     expect(useMediaQueryMock).toHaveBeenCalledWith('(max-width: 767px)', false, {
@@ -32,10 +32,10 @@ describe('useIsMobile', () => {
     });
   });
 
-  it('returns the current media query match value', () => {
+  it('returns the current media query match value', async () => {
     useMediaQueryMock.mockReturnValue(true);
 
-    const { result } = renderHook(() => useIsMobile());
+    const { result } = await renderHook(() => useIsMobile());
 
     expect(result.current).toBe(true);
   });

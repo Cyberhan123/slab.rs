@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
 import { memo } from 'react';
 import { Settings } from 'lucide-react';
 import { describe, expect, it, vi } from 'vitest';
+import { render } from 'vitest-browser-react';
 
 import type { HeaderHistoryConfig, HeaderSearchConfig, HeaderSelectConfig } from '@/layouts/header';
 import Header from '@/layouts/header';
@@ -83,7 +83,7 @@ const HeaderRenderProbe = memo(function HeaderRenderProbe({
 });
 
 describe('useHeader', () => {
-  it('reads route-owned header metadata from the provider default meta', () => {
+  it('reads route-owned header metadata from the provider default meta', async () => {
     const defaultMeta = {
       icon: Settings,
       subtitle: 'Route subtitle',
@@ -91,45 +91,45 @@ describe('useHeader', () => {
       contextLabel: 'Route context',
     };
 
-    render(
+    const screen = await render(
       <HeaderProvider defaultMeta={defaultMeta}>
         <HeaderProbe />
       </HeaderProvider>,
     );
 
-    expect(screen.getByTestId('header-title')).toHaveTextContent('Route title');
-    expect(screen.getByTestId('header-subtitle')).toHaveTextContent('Route subtitle');
-    expect(screen.getByTestId('header-context')).toHaveTextContent('Route context');
+    await expect.element(screen.getByTestId('header-title')).toHaveTextContent('Route title');
+    await expect.element(screen.getByTestId('header-subtitle')).toHaveTextContent('Route subtitle');
+    await expect.element(screen.getByTestId('header-context')).toHaveTextContent('Route context');
   });
 
-  it('registers header metadata, select, and search, then clears them when inactive', () => {
-    const { rerender } = render(
+  it('registers header metadata, select, and search, then clears them when inactive', async () => {
+    const screen = await render(
       <HeaderProvider>
         <HeaderRegistration active />
         <HeaderProbe />
       </HeaderProvider>,
     );
 
-    expect(screen.getByTestId('header-title')).toHaveTextContent('Registered title');
-    expect(screen.getByTestId('header-history')).toHaveTextContent('History');
-    expect(screen.getByTestId('header-select')).toHaveTextContent('model-a');
-    expect(screen.getByTestId('header-search')).toHaveTextContent('draft query');
+    await expect.element(screen.getByTestId('header-title')).toHaveTextContent('Registered title');
+    await expect.element(screen.getByTestId('header-history')).toHaveTextContent('History');
+    await expect.element(screen.getByTestId('header-select')).toHaveTextContent('model-a');
+    await expect.element(screen.getByTestId('header-search')).toHaveTextContent('draft query');
 
-    rerender(
+    await screen.rerender(
       <HeaderProvider>
         <HeaderRegistration active={false} />
         <HeaderProbe />
       </HeaderProvider>,
     );
 
-    expect(screen.getByTestId('header-title')).toHaveTextContent('Slab');
-    expect(screen.getByTestId('header-history')).toHaveTextContent('none');
-    expect(screen.getByTestId('header-select')).toHaveTextContent('none');
-    expect(screen.getByTestId('header-search')).toHaveTextContent('none');
+    await expect.element(screen.getByTestId('header-title')).toHaveTextContent('Slab');
+    await expect.element(screen.getByTestId('header-history')).toHaveTextContent('none');
+    await expect.element(screen.getByTestId('header-select')).toHaveTextContent('none');
+    await expect.element(screen.getByTestId('header-search')).toHaveTextContent('none');
   });
 
-  it('uses the latest registration while preserving earlier entries', () => {
-    const { unmount } = render(
+  it('uses the latest registration while preserving earlier entries', async () => {
+    const screen = await render(
       <HeaderProvider>
         <SelectRegistration value="model-a" />
         <SelectRegistration value="model-b" />
@@ -137,14 +137,14 @@ describe('useHeader', () => {
       </HeaderProvider>,
     );
 
-    expect(screen.getByTestId('header-select')).toHaveTextContent('model-b');
-    unmount();
+    await expect.element(screen.getByTestId('header-select')).toHaveTextContent('model-b');
+    await screen.unmount();
   });
 
-  it('renders registered history as an actionable header button', () => {
+  it('renders registered history as an actionable header button', async () => {
     onHistoryClick.mockClear();
 
-    render(
+    const screen = await render(
       <HeaderProvider>
         <HeaderRegistration active />
         <Header />
@@ -152,14 +152,14 @@ describe('useHeader', () => {
     );
 
     const historyButton = screen.getByTestId('header-history-control');
-    expect(historyButton).toHaveAttribute('aria-label', 'Open history');
+    await expect.element(historyButton).toHaveAttribute('aria-label', 'Open history');
 
-    fireEvent.click(historyButton);
+    await historyButton.click();
 
     expect(onHistoryClick).toHaveBeenCalledTimes(1);
   });
 
-  it('disables registered history actions while preserving the control', () => {
+  it('disables registered history actions while preserving the control', async () => {
     onHistoryClick.mockClear();
 
     function DisabledHistoryRegistration() {
@@ -173,7 +173,7 @@ describe('useHeader', () => {
       return null;
     }
 
-    render(
+    const screen = await render(
       <HeaderProvider>
         <DisabledHistoryRegistration />
         <Header />
@@ -181,34 +181,36 @@ describe('useHeader', () => {
     );
 
     const historyButton = screen.getByTestId('header-history-control');
-    expect(historyButton).toBeDisabled();
+    await expect.element(historyButton).toBeDisabled();
 
-    fireEvent.click(historyButton);
+    // Raw DOM click on a disabled button: spec-mandated no-op (dispatches no
+    // click event), and avoids the Locator click's actionability auto-wait.
+    historyButton.element().click();
 
     expect(onHistoryClick).not.toHaveBeenCalled();
   });
 
-  it('removes the history button after registration cleanup', () => {
-    const { rerender } = render(
+  it('removes the history button after registration cleanup', async () => {
+    const screen = await render(
       <HeaderProvider>
         <HeaderRegistration active />
         <Header />
       </HeaderProvider>,
     );
 
-    expect(screen.getByTestId('header-history-control')).toBeInTheDocument();
+    await expect.element(screen.getByTestId('header-history-control')).toBeInTheDocument();
 
-    rerender(
+    await screen.rerender(
       <HeaderProvider>
         <HeaderRegistration active={false} />
         <Header />
       </HeaderProvider>,
     );
 
-    expect(screen.queryByTestId('header-history-control')).not.toBeInTheDocument();
+    await expect.element(screen.getByTestId('header-history-control')).not.toBeInTheDocument();
   });
 
-  it('does not republish equivalent history registrations', () => {
+  it('does not republish equivalent history registrations', async () => {
     const onRender = vi.fn<(history: HeaderHistoryConfig | null) => void>();
 
     function StableHistoryRegistration({ value }: { value: string }) {
@@ -219,24 +221,24 @@ describe('useHeader', () => {
       return <span data-testid="stable-value">{value}</span>;
     }
 
-    const { rerender } = render(
+    const screen = await render(
       <HeaderProvider>
         <StableHistoryRegistration value="first" />
         <HeaderRenderProbe onRender={onRender} />
       </HeaderProvider>,
     );
 
-    expect(screen.getByTestId('header-render-probe')).toHaveTextContent('History');
+    await expect.element(screen.getByTestId('header-render-probe')).toHaveTextContent('History');
     expect(onRender).toHaveBeenCalledTimes(2);
 
-    rerender(
+    await screen.rerender(
       <HeaderProvider>
         <StableHistoryRegistration value="second" />
         <HeaderRenderProbe onRender={onRender} />
       </HeaderProvider>,
     );
 
-    expect(screen.getByTestId('stable-value')).toHaveTextContent('second');
+    await expect.element(screen.getByTestId('stable-value')).toHaveTextContent('second');
     expect(onRender).toHaveBeenCalledTimes(2);
   });
 });

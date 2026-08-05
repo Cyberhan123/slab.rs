@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react"
+import { renderHook } from "vitest-browser-react"
 import { describe, expect, it, vi } from "vitest"
 
 vi.mock("@slab/i18n", () => ({
@@ -46,8 +46,8 @@ const base = {
 }
 
 describe("useAssistantModelStatusLabel", () => {
-  it("wires the resolved language and selected model into the label helper", () => {
-    const { result } = renderHook(() => useAssistantModelStatusLabel(base))
+  it("wires the resolved language and selected model into the label helper", async () => {
+    const { result } = await renderHook(() => useAssistantModelStatusLabel(base))
 
     expect(labelSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -59,8 +59,8 @@ describe("useAssistantModelStatusLabel", () => {
     expect(result.current.statusLabel).toBe("events:true:ctx:none:lang:en-US")
   })
 
-  it("maps loaded model status context length to the runtime context window", () => {
-    renderHook(() =>
+  it("maps loaded model status context length to the runtime context window", async () => {
+    await renderHook(() =>
       useAssistantModelStatusLabel({
         ...base,
         loadedModelStatus: { context_length: 8192 } as ModelRuntimeStatus,
@@ -72,8 +72,8 @@ describe("useAssistantModelStatusLabel", () => {
     )
   })
 
-  it("treats a restored thread as connected even while history is still loading", () => {
-    renderHook(() =>
+  it("treats a restored thread as connected even while history is still loading", async () => {
+    await renderHook(() =>
       useAssistantModelStatusLabel({
         ...base,
         restoredThreadId: "thread-1",
@@ -84,8 +84,8 @@ describe("useAssistantModelStatusLabel", () => {
     expect(labelSpy).toHaveBeenCalledWith(expect.objectContaining({ eventsConnected: true }))
   })
 
-  it("reports disconnected while history loads without a restored thread", () => {
-    renderHook(() => useAssistantModelStatusLabel({ ...base, isHistoryLoading: true }))
+  it("reports disconnected while history loads without a restored thread", async () => {
+    await renderHook(() => useAssistantModelStatusLabel({ ...base, isHistoryLoading: true }))
 
     expect(labelSpy).toHaveBeenCalledWith(expect.objectContaining({ eventsConnected: false }))
   })

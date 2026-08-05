@@ -134,7 +134,7 @@ pub struct TurnItemRecord {
 
 /// Risk level assigned to a tool call by the risk analyzer.
 ///
-/// Relocated from `event.rs` in slice C3 — `event.rs` was deleted when the
+/// Relocated from `event.rs` — `event.rs` was deleted when the
 /// OpenAI-Responses wire vocabulary (`AgentEventKind`) left the crate. Risk
 /// assessment stays in slab-agent because it is part of the `ApprovalPort`
 /// surface and the `risk` analyzer, not the response wire.

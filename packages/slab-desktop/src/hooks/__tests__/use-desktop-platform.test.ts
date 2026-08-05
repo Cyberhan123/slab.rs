@@ -1,5 +1,5 @@
-import { renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { renderHook } from 'vitest-browser-react';
 
 import useDesktopPlatform, { getDesktopPlatform, type DesktopPlatform } from '../use-desktop-platform';
 
@@ -33,13 +33,13 @@ describe('desktop platform hooks', () => {
     expect(getDesktopPlatform()).toBe(expected);
   });
 
-  it('exposes the detected platform through the React hook', () => {
+  it('exposes the detected platform through the React hook', async () => {
     mockNavigatorPlatform({
       platform: 'Win32',
       userAgent: 'Mozilla/5.0',
     });
 
-    const { result } = renderHook(() => useDesktopPlatform());
+    const { result } = await renderHook(() => useDesktopPlatform());
 
     expect(result.current).toBe('windows' satisfies DesktopPlatform);
   });

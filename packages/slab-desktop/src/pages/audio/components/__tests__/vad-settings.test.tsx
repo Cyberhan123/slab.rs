@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { userEvent } from 'vitest/browser';
 import type { ChangeEvent, ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { render } from 'vitest-browser-react';
 
 import { setupSlabI18nMock } from '@slab/test-utils/mocks';
 
@@ -29,7 +29,8 @@ vi.mock('@slab/components/input', () => ({
     disabled?: boolean;
     type?: string;
   }) => (
-    <input id={id} aria-label="vad-field" value={value} onChange={onChange} disabled={disabled} type={type} />
+    // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- labeled via the component's sibling <Label htmlFor>
+    <input id={id} title="vad-field" value={value} onChange={onChange} disabled={disabled} type={type} />
   ),
 }));
 
@@ -45,10 +46,11 @@ vi.mock('@slab/components/switch', () => ({
     onCheckedChange?: (checked: boolean) => void;
     disabled?: boolean;
   }) => (
+    // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- labeled via the component's sibling <Label htmlFor>
     <input
       type="checkbox"
       id={id}
-      aria-label="vad-switch"
+      title="vad-switch"
       checked={checked}
       onChange={(event) => onCheckedChange?.(event.target.checked)}
       disabled={disabled}
@@ -123,36 +125,33 @@ function baseProps(overrides: Record<string, unknown> = {}): VadSettingsProps {
 }
 
 describe('VadSettings', () => {
-  it('hides the numeric fields while VAD is disabled', () => {
-    render(<VadSettings {...baseProps({ enableVad: false })} />);
+  it('hides the numeric fields while VAD is disabled', async () => {
+    const screen = await render(<VadSettings {...baseProps({ enableVad: false })} />);
 
-    expect(screen.queryByLabelText('pages.audio.vad.fields.threshold')).not.toBeInTheDocument();
+    await expect.element(screen.getByLabelText('pages.audio.vad.fields.threshold')).not.toBeInTheDocument();
   });
 
   it('toggles VAD via the header switch', async () => {
-    const user = userEvent.setup();
     const setEnableVad = vi.fn<(value: boolean) => void>();
-    render(<VadSettings {...baseProps({ enableVad: false, setEnableVad })} />);
+    const screen = await render(<VadSettings {...baseProps({ enableVad: false, setEnableVad })} />);
 
-    await user.click(screen.getByLabelText('pages.audio.vad.title'));
+    await userEvent.click(screen.getByLabelText('pages.audio.vad.title'));
 
     expect(setEnableVad).toHaveBeenCalledExactlyOnceWith(true);
   });
 
   it('forwards a numeric field edit to its setter', async () => {
-    const user = userEvent.setup();
     const setVadThreshold = vi.fn<(value: string) => void>();
-    render(<VadSettings {...baseProps({ setVadThreshold })} />);
+    const screen = await render(<VadSettings {...baseProps({ setVadThreshold })} />);
 
-    await user.type(screen.getByLabelText('pages.audio.vad.fields.threshold'), '5');
+    await userEvent.type(screen.getByLabelText('pages.audio.vad.fields.threshold'), '5');
 
     expect(setVadThreshold).toHaveBeenCalledWith('5');
   });
 
   it('renders dedicated VAD models and reports selection', async () => {
-    const user = userEvent.setup();
     const setSelectedVadModelId = vi.fn<(value: string) => void>();
-    render(
+    const screen = await render(
       <VadSettings
         {...baseProps({
           hasBundledVad: false,
@@ -162,7 +161,7 @@ describe('VadSettings', () => {
       />,
     );
 
-    await user.selectOptions(screen.getByTestId('vad-model-select'), 'm1');
+    await screen.getByTestId('vad-model-select').selectOptions('m1');
 
     expect(setSelectedVadModelId).toHaveBeenCalledExactlyOnceWith('m1');
   });

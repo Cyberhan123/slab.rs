@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react"
+import { renderHook } from "vitest-browser-react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const { toastMock } = vi.hoisted(() => ({
@@ -49,54 +49,66 @@ describe("useAssistantModelSwitch", () => {
     vi.clearAllMocks()
   })
 
-  it("ignores picker changes that match the current selection", () => {
+  it("ignores picker changes that match the current selection", async () => {
     const opts = baseOptions()
-    const { result } = renderHook(() => useAssistantModelSwitch(opts))
+    const { result, act } = await renderHook(() => useAssistantModelSwitch(opts))
 
-    act(() => result.current.handleModelPickerChange("model-a"))
+    await act(() => {
+      result.current.handleModelPickerChange("model-a")
+    })
 
     expect(opts.setSelectedModelId).not.toHaveBeenCalled()
     expect(result.current.pendingModelSwitchId).toBeNull()
   })
 
-  it("blocks switching while the session is busy and toasts", () => {
+  it("blocks switching while the session is busy and toasts", async () => {
     const opts = baseOptions({ isSessionBusy: true })
-    const { result } = renderHook(() => useAssistantModelSwitch(opts))
+    const { result, act } = await renderHook(() => useAssistantModelSwitch(opts))
 
-    act(() => result.current.handleModelPickerChange("model-b"))
+    await act(() => {
+      result.current.handleModelPickerChange("model-b")
+    })
 
     expect(opts.setSelectedModelId).not.toHaveBeenCalled()
     expect(result.current.pendingModelSwitchId).toBeNull()
     expect(toastMock.info).toHaveBeenCalledWith("pages.assistant.toast.waitBeforeSwitchingModels")
   })
 
-  it("switches immediately when there is no active conversation", () => {
+  it("switches immediately when there is no active conversation", async () => {
     const opts = baseOptions({ curConversation: undefined, messageCount: 0 })
-    const { result } = renderHook(() => useAssistantModelSwitch(opts))
+    const { result, act } = await renderHook(() => useAssistantModelSwitch(opts))
 
-    act(() => result.current.handleModelPickerChange("model-b"))
+    await act(() => {
+      result.current.handleModelPickerChange("model-b")
+    })
 
     expect(opts.setSelectedModelId).toHaveBeenCalledWith("model-b")
     expect(result.current.pendingModelSwitchId).toBeNull()
   })
 
-  it("opens a pending switch confirmation when the session has messages", () => {
+  it("opens a pending switch confirmation when the session has messages", async () => {
     const opts = baseOptions()
-    const { result } = renderHook(() => useAssistantModelSwitch(opts))
+    const { result, act } = await renderHook(() => useAssistantModelSwitch(opts))
 
-    act(() => result.current.handleModelPickerChange("model-b"))
+    await act(() => {
+      result.current.handleModelPickerChange("model-b")
+    })
 
     expect(opts.setSelectedModelId).not.toHaveBeenCalled()
     expect(result.current.pendingModelSwitchId).toBe("model-b")
     expect(result.current.pendingModelSwitch?.id).toBe("model-b")
   })
 
-  it("keeps the current session and applies the pending model", () => {
+  it("keeps the current session and applies the pending model", async () => {
     const opts = baseOptions()
-    const { result } = renderHook(() => useAssistantModelSwitch(opts))
+    const { result, act } = await renderHook(() => useAssistantModelSwitch(opts))
 
-    act(() => result.current.handleModelPickerChange("model-b"))
-    act(() => result.current.handleKeepSessionOnModelSwitch())
+    await act(() => {
+      result.current.handleModelPickerChange("model-b")
+    })
+    await act(() => {
+      result.current.handleKeepSessionOnModelSwitch()
+    })
 
     expect(opts.setSelectedModelId).toHaveBeenCalledWith("model-b")
     expect(result.current.pendingModelSwitchId).toBeNull()
@@ -104,9 +116,11 @@ describe("useAssistantModelSwitch", () => {
 
   it("creates a new session and applies the pending model on confirm", async () => {
     const opts = baseOptions()
-    const { result } = renderHook(() => useAssistantModelSwitch(opts))
+    const { result, act } = await renderHook(() => useAssistantModelSwitch(opts))
 
-    act(() => result.current.handleModelPickerChange("model-b"))
+    await act(() => {
+      result.current.handleModelPickerChange("model-b")
+    })
     await act(async () => {
       await result.current.handleCreateSessionOnModelSwitch()
     })
@@ -122,9 +136,11 @@ describe("useAssistantModelSwitch", () => {
         .fn<(options?: { select?: boolean; quiet?: boolean }) => Promise<{ id: string } | null>>()
         .mockResolvedValue(null),
     })
-    const { result } = renderHook(() => useAssistantModelSwitch(opts))
+    const { result, act } = await renderHook(() => useAssistantModelSwitch(opts))
 
-    act(() => result.current.handleModelPickerChange("model-b"))
+    await act(() => {
+      result.current.handleModelPickerChange("model-b")
+    })
     await act(async () => {
       await result.current.handleCreateSessionOnModelSwitch()
     })
@@ -133,12 +149,16 @@ describe("useAssistantModelSwitch", () => {
     expect(result.current.pendingModelSwitchId).toBe("model-b")
   })
 
-  it("does not close the pending switch while a session is being created", () => {
+  it("does not close the pending switch while a session is being created", async () => {
     const opts = baseOptions({ isCreatingSession: true })
-    const { result } = renderHook(() => useAssistantModelSwitch(opts))
+    const { result, act } = await renderHook(() => useAssistantModelSwitch(opts))
 
-    act(() => result.current.handleModelPickerChange("model-b"))
-    act(() => result.current.closePendingModelSwitch())
+    await act(() => {
+      result.current.handleModelPickerChange("model-b")
+    })
+    await act(() => {
+      result.current.closePendingModelSwitch()
+    })
 
     expect(result.current.pendingModelSwitchId).toBe("model-b")
   })

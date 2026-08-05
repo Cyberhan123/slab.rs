@@ -1,5 +1,5 @@
-import { render } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { render } from "vitest-browser-react"
 import { Streamdown } from "streamdown"
 
 import { Markdown } from "../message/markdown"
@@ -22,22 +22,22 @@ describe("Markdown", () => {
     MockStreamdown.mockClear()
   })
 
-  it("delegates rendering to Streamdown and forwards children", () => {
-    render(<Markdown>{"# hello"}</Markdown>)
+  it("delegates rendering to Streamdown and forwards children", async () => {
+    await render(<Markdown>{"# hello"}</Markdown>)
 
     expect(MockStreamdown).toHaveBeenCalledTimes(1)
     expect(lastProps().children).toBe("# hello")
   })
 
-  it("defaults controls to false and tags the slot", () => {
-    render(<Markdown>{"x"}</Markdown>)
+  it("defaults controls to false and tags the slot", async () => {
+    await render(<Markdown>{"x"}</Markdown>)
 
     expect(lastProps().controls).toBe(false)
     expect(lastProps()["data-slot"]).toBe("markdown")
   })
 
-  it("applies the base markdown className and merges a custom one", () => {
-    render(<Markdown className="prose-sm">{"x"}</Markdown>)
+  it("applies the base markdown className and merges a custom one", async () => {
+    await render(<Markdown className="prose-sm">{"x"}</Markdown>)
 
     const className = lastProps().className as string
     expect(className).toContain("cn-markdown")
@@ -46,22 +46,22 @@ describe("Markdown", () => {
     expect(className).toContain("prose-sm")
   })
 
-  it("provides the default plugin set (code, cjk, mermaid, math)", () => {
-    render(<Markdown>{"x"}</Markdown>)
+  it("provides the default plugin set (code, cjk, mermaid, math)", async () => {
+    await render(<Markdown>{"x"}</Markdown>)
 
     const pluginKeys = Object.keys(lastProps().plugins as object)
     expect(pluginKeys).toHaveLength(4)
     expect(pluginKeys).toEqual(expect.arrayContaining(["code", "cjk", "math", "mermaid"]))
   })
 
-  it("forces streaming mode while another chunk is pending", () => {
-    render(<Markdown hasNextChunk>{"x"}</Markdown>)
+  it("forces streaming mode while another chunk is pending", async () => {
+    await render(<Markdown hasNextChunk>{"x"}</Markdown>)
 
     expect(lastProps().mode).toBe("streaming")
   })
 
-  it("forwards an explicit mode when not streaming", () => {
-    render(<Markdown mode="static">{"x"}</Markdown>)
+  it("forwards an explicit mode when not streaming", async () => {
+    await render(<Markdown mode="static">{"x"}</Markdown>)
 
     expect(lastProps().mode).toBe("static")
   })

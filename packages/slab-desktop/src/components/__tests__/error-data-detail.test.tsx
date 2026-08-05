@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render } from 'vitest-browser-react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ErrorDataDetail } from '../error-data-detail';
@@ -12,38 +12,38 @@ vi.mock('@slab/api', () => ({
 }));
 
 describe('ErrorDataDetail', () => {
-  it('renders nothing when there is no data or error', () => {
-    const { container } = render(<ErrorDataDetail />);
+  it('renders nothing when there is no data or error', async () => {
+    const { container } = await render(<ErrorDataDetail />);
 
-    expect(container).toBeEmptyDOMElement();
+    expect(container.childNodes.length).toBe(0);
   });
 
-  it('describes a runtime_failure', () => {
-    render(<ErrorDataDetail data={{ code: 'runtime_failure', runtime_code: 'boom' } as never} />);
+  it('describes a runtime_failure', async () => {
+    const screen = await render(<ErrorDataDetail data={{ code: 'runtime_failure', runtime_code: 'boom' } as never} />);
 
-    expect(screen.getByText('runtime_failure')).toBeInTheDocument();
-    expect(screen.getByText('boom')).toBeInTheDocument();
+    await expect.element(screen.getByText('runtime_failure')).toBeInTheDocument();
+    await expect.element(screen.getByText('boom')).toBeInTheDocument();
   });
 
-  it('describes an unsupported_chat_parameter', () => {
-    render(<ErrorDataDetail data={{ code: 'unsupported_chat_parameter', param: 'temperature' } as never} />);
+  it('describes an unsupported_chat_parameter', async () => {
+    const screen = await render(<ErrorDataDetail data={{ code: 'unsupported_chat_parameter', param: 'temperature' } as never} />);
 
-    expect(screen.getByText('Unsupported parameter: temperature')).toBeInTheDocument();
+    await expect.element(screen.getByText('Unsupported parameter: temperature')).toBeInTheDocument();
   });
 
-  it('describes a model_download_unavailable with a suggestion', () => {
-    render(
+  it('describes a model_download_unavailable with a suggestion', async () => {
+    const screen = await render(
       <ErrorDataDetail
         data={{ code: 'model_download_unavailable', reason: 'no space', suggestion: 'free up disk' } as never}
       />,
     );
 
-    expect(screen.getByText('no space. free up disk')).toBeInTheDocument();
+    await expect.element(screen.getByText('no space. free up disk')).toBeInTheDocument();
   });
 
-  it('derives the detail from an error via getErrorData', () => {
-    render(<ErrorDataDetail error={new Error('upstream')} />);
+  it('derives the detail from an error via getErrorData', async () => {
+    const screen = await render(<ErrorDataDetail error={new Error('upstream')} />);
 
-    expect(screen.getByText('recovered from error')).toBeInTheDocument();
+    await expect.element(screen.getByText('recovered from error')).toBeInTheDocument();
   });
 });

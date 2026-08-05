@@ -1,4 +1,4 @@
-//! Live bundle-aware trace sink (Slice 0 hot-path wiring).
+//! Live bundle-aware trace sink (hot-path wiring).
 //!
 //! [`BundleAgentTraceSink`] is the production sink assembled by `slab-app-core`
 //! bootstrap when `agent.debug` is on. It is a thin adapter over the existing
@@ -11,7 +11,7 @@
 //!
 //! Two reasons:
 //!
-//! 1. **Telemetry wire must stay byte-identical.** The Slice 8 decouple made
+//! 1. **Telemetry wire must stay byte-identical.** The decouple made
 //!    [`crate::FileAgentTraceSink`] emit the `slab_otel::session` event directly
 //!    via `tracing::info!`. Delegating to that same sink preserves the wire
 //!    format exactly (a review checkpoint).
@@ -20,7 +20,7 @@
 //!    shared [`crate::FileAgentTraceSink`] keyed by `trace_dir`. Keeping the
 //!    legacy file alive means the cross-process path is untouched (plan risk #6).
 //!
-//! The bundle is therefore ADDITIVE in this slice: main-process `slab-agent`
+//! The bundle is therefore ADDITIVE here: main-process `slab-agent`
 //! events land in BOTH the legacy JSONL and the bundle; `slab-runtime` and the
 //! `slab-app-core` adapter `record_json_from_context` events keep landing in the
 //! legacy JSONL only.
@@ -277,7 +277,7 @@ fn write_optional_payload(
 ///   emits a real `structured_output_requested` event every turn when
 ///   structured output is configured — a substring match would misclassify it
 ///   as `InferenceStarted` and pollute the bundle's inference dimension with a
-///   phantom request (Slice 10 reducer would see a ghost inference turn). The
+///   phantom request (the reducer would see a ghost inference turn). The
 ///   same hazard applies to free-form names like `runtime_request`,
 ///   `mcp_approval_request`, and `invalid_request_error` (all real names in the
 ///   app stack). Exact matching is safe: the inference request/response event

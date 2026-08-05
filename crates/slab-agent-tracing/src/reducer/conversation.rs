@@ -58,7 +58,7 @@
 //! ## state.json cache
 //!
 //! After a successful reduction the reconstructed conversation is cached to the
-//! bundle's `state.json` (the path reserved in Slice 9). A re-run reads the
+//! bundle's `state.json` (the reserved path). A re-run reads the
 //! cache first and reuses it only when it covers EXACTLY every current
 //! `trace.jsonl` event — a truncated (shrunk) trace forces a re-derive, symmetric
 //! with the appended (grown) case. See [`reduce_conversation_cached`].

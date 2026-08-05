@@ -1,5 +1,5 @@
-import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderHook } from 'vitest-browser-react';
 
 const apiMock = vi.hoisted(() => ({
   useQuery: vi.fn<(...args: unknown[]) => unknown>(),
@@ -18,7 +18,7 @@ vi.mock('sonner', () => ({
 
 import { useMediaTaskPolling } from '../use-media-task-polling';
 
-function renderPolling(taskId: string | null = 'task-1') {
+async function renderPolling(taskId: string | null = 'task-1') {
   return renderHook(() =>
     useMediaTaskPolling({
       enabled: true,
@@ -59,8 +59,8 @@ describe('useMediaTaskPolling', () => {
     apiMock.useQuery.mockImplementation(() => queryState);
   });
 
-  it('disables polling when no task id is available', () => {
-    renderPolling(null);
+  it('disables polling when no task id is available', async () => {
+    await renderPolling(null);
 
     expect(latestQueryOptions()).toMatchObject({
       enabled: false,
@@ -70,7 +70,7 @@ describe('useMediaTaskPolling', () => {
   });
 
   it('backs off polling failures and dedupes the toast id', async () => {
-    const { rerender } = renderPolling();
+    const hook = await renderPolling();
 
     expect(latestQueryOptions()).toMatchObject({
       enabled: true,
@@ -84,9 +84,9 @@ describe('useMediaTaskPolling', () => {
       error: new Error('temporary outage'),
       errorUpdatedAt: 1,
     };
-    rerender();
+    await hook.rerender();
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(toastMock.error).toHaveBeenCalledWith('Polling failed: temporary outage', {
         id: 'media-poll-error',
       });
@@ -97,8 +97,8 @@ describe('useMediaTaskPolling', () => {
       ...queryState,
       errorUpdatedAt: 2,
     };
-    rerender();
+    await hook.rerender();
 
-    await waitFor(() => expect(latestQueryOptions().refetchInterval).toBe(8_000));
+    await vi.waitFor(() => expect(latestQueryOptions().refetchInterval).toBe(8_000));
   });
 });

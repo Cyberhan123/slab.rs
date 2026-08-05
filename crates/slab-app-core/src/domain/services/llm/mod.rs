@@ -7,8 +7,8 @@
 //! - cloud catalog resolution and genai invocation ([`cloud`]);
 //! - shared token estimation [`build_estimated_usage`] / [`finish_reason_from_token_budget`].
 //!
-//! The local backend will be migrated from `domain::services::chat::local` into [`local`]
-//! in a later slice.
+//! The local backend is intended to migrate from `domain::services::chat::local` into [`local`]
+//! (not yet migrated).
 
 pub(crate) mod cloud;
 pub(crate) mod local;

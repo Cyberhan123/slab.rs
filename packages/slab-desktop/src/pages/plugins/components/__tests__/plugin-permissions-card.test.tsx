@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import { userEvent } from "vitest/browser"
+import { render } from "vitest-browser-react"
 import type { ReactNode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -48,35 +48,37 @@ beforeEach(() => {
 })
 
 describe("PluginPermissionsCard", () => {
-  it("shows the empty state when there are no grants", () => {
-    render(<PluginPermissionsCard />)
+  it("shows the empty state when there are no grants", async () => {
+    const screen = await render(<PluginPermissionsCard />)
 
-    expect(screen.getByText("pages.plugins.permissions.management.empty")).toBeInTheDocument()
-    expect(screen.queryByTestId("plugin-permissions-revoke-all")).not.toBeInTheDocument()
+    await expect.element(
+      screen.getByText("pages.plugins.permissions.management.empty"),
+    ).toBeInTheDocument()
+    await expect.element(
+      screen.getByTestId("plugin-permissions-revoke-all"),
+    ).not.toBeInTheDocument()
   })
 
   it("revokes every granted plugin via the revoke-all button", async () => {
-    const user = userEvent.setup()
     usePluginAuthorizationStore.setState({
       grants: { "plugin-a": ["perm1", "perm2"], "plugin-b": [] },
     })
 
-    render(<PluginPermissionsCard />)
+    const screen = await render(<PluginPermissionsCard />)
 
-    await user.click(screen.getByTestId("plugin-permissions-revoke-all"))
+    await userEvent.click(screen.getByTestId("plugin-permissions-revoke-all"))
 
     expect(revoke.fn).toHaveBeenCalledExactlyOnceWith("plugin-a")
   })
 
   it("revokes a single permission", async () => {
-    const user = userEvent.setup()
     usePluginAuthorizationStore.setState({
       grants: { "plugin-a": ["perm1"] },
     })
 
-    render(<PluginPermissionsCard />)
+    const screen = await render(<PluginPermissionsCard />)
 
-    await user.click(screen.getByTestId("plugin-permissions-revoke-plugin-a-perm1"))
+    await userEvent.click(screen.getByTestId("plugin-permissions-revoke-plugin-a-perm1"))
 
     expect(revoke.fn).toHaveBeenCalledExactlyOnceWith("plugin-a", "perm1")
   })

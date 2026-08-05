@@ -5,10 +5,10 @@
 //!    `payload` strings) used by the ~50 existing `record_json` call sites.
 //!    These keep working unchanged.
 //! 2. The typed [`RawTraceEvent`] / [`RawTraceEventPayload`] taxonomy below,
-//!    used by the Slice 9 trace-bundle writer. The bare-string events are
+//!    used by the trace-bundle writer. The bare-string events are
 //!    carried via the [`RawTraceEventPayload::Other`] catch-all variant so the
-//!    50 call sites are NOT migrated in this slice — future slices progressively
-//!    type the high-frequency events.
+//!    50 call sites are NOT migrated here; later work progressively
+//!    types the high-frequency events.
 
 use std::path::PathBuf;
 
@@ -75,7 +75,7 @@ pub enum RawTraceEventPayload {
     /// compaction — context was compacted.
     ContextCompacted,
     /// Catch-all for legacy bare-string events (`record_json` source/event). No
-    /// call site is migrated in Slice 9; the writer wraps such events here.
+    /// call site is migrated; the writer wraps such events here.
     Other {
         source: String,
         event: String,

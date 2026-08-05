@@ -96,7 +96,7 @@ pub struct ContextCompactedParams {
     pub output_tokens: Option<u32>,
 }
 
-// ---- Slice E.2: persistence-grade conversation events ----
+// ---- persistence-grade conversation events ----
 //
 // These two variants carry conversation data (a message append / a turn-state
 // snapshot) out of slab-agent via the `EventMsg` protocol so the app-core

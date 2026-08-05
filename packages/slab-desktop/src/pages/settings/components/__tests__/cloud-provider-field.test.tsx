@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { render } from "vitest-browser-react";
 
 import { CloudProviderField } from "../cloud-provider-field";
 
@@ -32,36 +32,38 @@ beforeEach(() => {
 });
 
 describe("CloudProviderField", () => {
-  it("renders the empty state when no providers are configured", () => {
-    render(<CloudProviderField value={[]} onChange={vi.fn()} />);
+  it("renders the empty state when no providers are configured", async () => {
+    const screen = await render(<CloudProviderField value={[]} onChange={vi.fn()} />);
 
-    expect(screen.getByText("pages.settings.providerRegistry.empty")).toBeDefined();
-    expect(screen.getByText("pages.settings.providerRegistry.addProvider")).toBeDefined();
+    await expect.element(screen.getByText("pages.settings.providerRegistry.empty")).toBeInTheDocument();
+    await expect.element(screen.getByText("pages.settings.providerRegistry.addProvider")).toBeInTheDocument();
   });
 
-  it("lists configured providers with their display name and api base", () => {
-    render(
+  it("lists configured providers with their display name and api base", async () => {
+    const screen = await render(
       <CloudProviderField value={[OPENAI_ENTRY, ANTHROPIC_ENTRY]} onChange={vi.fn()} />,
     );
 
     // Display name appears in both the title and the family badge.
-    expect(screen.getAllByText("OpenAI").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Anthropic").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("https://api.openai.com/v1")).toBeDefined();
-    expect(screen.getByText("https://api.anthropic.com/v1")).toBeDefined();
+    expect(screen.getByText("OpenAI").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Anthropic").length).toBeGreaterThanOrEqual(1);
+    await expect.element(screen.getByText("https://api.openai.com/v1")).toBeInTheDocument();
+    await expect.element(screen.getByText("https://api.anthropic.com/v1")).toBeInTheDocument();
     // configured count uses the plural form (count !== 1)
-    expect(
+    await expect.element(
       screen.getByText("pages.settings.providerRegistry.configuredProviders:2"),
-    ).toBeDefined();
+    ).toBeInTheDocument();
   });
 
-  it("deletes a provider and emits the remaining registry via onChange", () => {
+  it("deletes a provider and emits the remaining registry via onChange", async () => {
     const onChange = vi.fn();
-    render(<CloudProviderField value={[OPENAI_ENTRY, ANTHROPIC_ENTRY]} onChange={onChange} />);
+    const screen = await render(
+      <CloudProviderField value={[OPENAI_ENTRY, ANTHROPIC_ENTRY]} onChange={onChange} />,
+    );
 
     // First remove button belongs to OpenAI (rendered first).
-    const removeButtons = screen.getAllByLabelText("Remove provider");
-    fireEvent.click(removeButtons[0]!);
+    const removeButtons = screen.getByLabelText("Remove provider").all();
+    await removeButtons[0]!.click();
 
     expect(onChange).toHaveBeenCalledTimes(1);
     const emitted = onChange.mock.calls[0]![0] as Array<{ id: string; family: string }>;
@@ -70,22 +72,22 @@ describe("CloudProviderField", () => {
     expect(emitted[0]!.family).toBe("anthropic");
   });
 
-  it("preserves the auth shape (api_key / api_key_env) when emitting entries", () => {
+  it("preserves the auth shape (api_key / api_key_env) when emitting entries", async () => {
     const onChange = vi.fn();
-    render(<CloudProviderField value={[ANTHROPIC_ENTRY]} onChange={onChange} />);
+    const screen = await render(<CloudProviderField value={[ANTHROPIC_ENTRY]} onChange={onChange} />);
 
-    fireEvent.click(screen.getAllByLabelText("Remove provider")[0]!);
+    const removeButtons = screen.getByLabelText("Remove provider").all();
+    await removeButtons[0]!.click();
 
     expect(onChange).toHaveBeenCalledTimes(1);
     // Removing the last entry emits an empty array (activation will clean up its models).
     expect(onChange.mock.calls[0]![0]).toEqual([]);
   });
 
-  it("renders a custom provider without crashing when family is unknown", () => {
+  it("renders a custom provider without crashing when family is unknown", async () => {
     const customEntry = { ...OPENAI_ENTRY, family: "openai_compatible", display_name: "My Local" };
-    render(<CloudProviderField value={[customEntry]} onChange={vi.fn()} />);
+    const screen = await render(<CloudProviderField value={[customEntry]} onChange={vi.fn()} />);
 
-    expect(screen.getByText("My Local")).toBeDefined();
-    cleanup();
+    await expect.element(screen.getByText("My Local")).toBeInTheDocument();
   });
 });

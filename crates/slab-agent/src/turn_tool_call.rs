@@ -69,7 +69,7 @@ struct ToolCallRunResult {
 // slab-agent emits the harness protocol directly (the `EventMsg`/`TurnItem`
 // surface in `crate::protocol`). This is what makes tool calls visible to the
 // harness WS fan-out and turn-item persistence (bug 1). The legacy
-// `AgentEventKind`/`/responses` emits left this crate in slice C3.
+// `AgentEventKind`/`/responses` emits left this crate.
 
 /// Workspace root for `CommandExecution.cwd`, or `None` when no workspace is bound.
 fn workspace_root_of(context: &TurnExecutionContext<'_>) -> Option<String> {

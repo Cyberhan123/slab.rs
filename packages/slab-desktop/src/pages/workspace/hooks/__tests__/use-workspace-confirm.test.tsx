@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import { userEvent } from "vitest/browser"
+import { render } from "vitest-browser-react"
 import { describe, expect, it, vi } from "vitest"
 
 import { useWorkspaceConfirmDialog } from "../use-workspace-confirm"
@@ -18,7 +18,7 @@ vi.mock("@slab/i18n", () => ({
 
 type ConfirmOptions = Parameters<ReturnType<typeof useWorkspaceConfirmDialog>["confirm"]>[0]
 
-function setupConfirm() {
+async function setupConfirm() {
   let confirmRef: ((options: ConfirmOptions) => Promise<boolean>) | null = null
   function Harness() {
     const { confirm, dialog } = useWorkspaceConfirmDialog()
@@ -26,8 +26,9 @@ function setupConfirm() {
     return <>{dialog}</>
   }
 
-  render(<Harness />)
+  const screen = await render(<Harness />)
   return {
+    screen,
     confirm: (options: ConfirmOptions) => {
       if (!confirmRef) throw new Error("harness not mounted")
       return confirmRef(options)
@@ -37,39 +38,41 @@ function setupConfirm() {
 
 describe("useWorkspaceConfirmDialog", () => {
   it("opens a themed modal with the requested message and resolves true on accept", async () => {
-    const { confirm } = setupConfirm()
+    const { screen, confirm } = await setupConfirm()
     const pending = confirm({
       messageKey: "pages.workspace.confirm.discardUnsaved",
       confirmKey: "pages.workspace.confirm.discard",
       tone: "danger",
     })
 
-    expect(await screen.findByTestId("workspace-confirm-dialog")).toBeInTheDocument()
-    expect(screen.getByText("pages.workspace.confirm.discardUnsaved")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("workspace-confirm-dialog")).toBeInTheDocument()
+    await expect.element(
+      screen.getByText("pages.workspace.confirm.discardUnsaved"),
+    ).toBeInTheDocument()
 
     await userEvent.click(screen.getByTestId("workspace-confirm-accept"))
 
     expect(await pending).toBe(true)
-    expect(screen.queryByTestId("workspace-confirm-dialog")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("workspace-confirm-dialog")).not.toBeInTheDocument()
   })
 
   it("resolves false on cancel so callers keep the unsaved content", async () => {
-    const { confirm } = setupConfirm()
+    const { screen, confirm } = await setupConfirm()
     const pending = confirm({
       messageKey: "pages.workspace.confirm.closeUnsaved",
       confirmKey: "pages.workspace.confirm.closeAnyway",
       tone: "danger",
     })
 
-    await screen.findByTestId("workspace-confirm-dialog")
+    await expect.element(screen.getByTestId("workspace-confirm-dialog")).toBeInTheDocument()
     await userEvent.click(screen.getByTestId("workspace-confirm-cancel"))
 
     expect(await pending).toBe(false)
-    expect(screen.queryByTestId("workspace-confirm-dialog")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("workspace-confirm-dialog")).not.toBeInTheDocument()
   })
 
   it("resolves false when the dialog is dismissed without accepting", async () => {
-    const { confirm } = setupConfirm()
+    const { screen, confirm } = await setupConfirm()
     const pending = confirm({
       messageKey: "pages.workspace.confirm.discardGitChange",
       messageParams: { path: "src/app.ts" },
@@ -77,9 +80,11 @@ describe("useWorkspaceConfirmDialog", () => {
       tone: "danger",
     })
 
-    await screen.findByTestId("workspace-confirm-dialog")
+    await expect.element(screen.getByTestId("workspace-confirm-dialog")).toBeInTheDocument()
     // Interpolated message params are forwarded to the translator.
-    expect(screen.getByText(/pages.workspace.confirm.discardGitChange:.*src\/app.ts/)).toBeInTheDocument()
+    await expect.element(
+      screen.getByText(/pages.workspace.confirm.discardGitChange:.*src\/app.ts/),
+    ).toBeInTheDocument()
 
     // Simulate the user closing the dialog via the root onOpenChange (overlay/escape).
     await userEvent.keyboard("{Escape}")

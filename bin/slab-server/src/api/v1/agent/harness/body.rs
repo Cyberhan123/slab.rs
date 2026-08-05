@@ -2,10 +2,9 @@
 //!
 //! Each function takes the [`HarnessSession`] **by value** plus typed params
 //! and returns a typed result (or `String` error). The host (see `host.rs`)
-//! registers them into the `Router` as default typed handlers. Phase 5 will
-//! wrap the `thread_op` / `establish_op` families in transformers to absorb
-//! cross-cutting concerns (binding resolution, fan-out establishment); for now
-//! every handler does that work inline, preserving the prior behavior exactly.
+//! registers them into the `Router` as default typed handlers. Each handler
+//! currently does cross-cutting work (binding resolution, fan-out establishment)
+//! inline, preserving the prior behavior exactly.
 
 use chrono::Utc;
 use slab_agent::port::ThreadListFilter;

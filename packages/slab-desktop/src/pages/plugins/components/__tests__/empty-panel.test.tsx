@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render } from 'vitest-browser-react';
 import { Boxes } from 'lucide-react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -25,13 +25,15 @@ vi.mock('@slab/components/state-surface', () => ({
 }));
 
 describe('EmptyPanel', () => {
-  it('forwards title, description, variant and size to StateSurface', () => {
-    render(<EmptyPanel icon={Boxes} title="No plugins" description="Install one to begin" />);
+  it('forwards title, description, variant and size to StateSurface', async () => {
+    const screen = await render(
+      <EmptyPanel icon={Boxes} title="No plugins" description="Install one to begin" />,
+    );
 
     const surface = screen.getByTestId('state-surface');
-    expect(surface).toHaveAttribute('data-variant', 'empty');
-    expect(surface).toHaveAttribute('data-size', 'compact');
-    expect(screen.getByText('No plugins')).toBeInTheDocument();
-    expect(screen.getByText('Install one to begin')).toBeInTheDocument();
+    await expect.element(surface).toHaveAttribute('data-variant', 'empty');
+    await expect.element(surface).toHaveAttribute('data-size', 'compact');
+    await expect.element(screen.getByText('No plugins')).toBeInTheDocument();
+    await expect.element(screen.getByText('Install one to begin')).toBeInTheDocument();
   });
 });

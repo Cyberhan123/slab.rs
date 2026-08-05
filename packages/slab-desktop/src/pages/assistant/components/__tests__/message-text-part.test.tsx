@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
+import { render } from "vitest-browser-react"
 
 import type { MessagePartRenderProps } from "../message/message-parts"
 import type { TMessage, TMessagePart } from "../message/message-item"
@@ -35,23 +35,23 @@ function baseProps(partOverrides: Partial<TMessagePart> = {}, kind: TextPartProp
 }
 
 describe("MessageTextPart", () => {
-  it("renders the markdown content for a text part", () => {
-    render(<MessageTextPart {...baseProps()} />)
+  it("renders the markdown content for a text part", async () => {
+    const screen = await render(<MessageTextPart {...baseProps()} />)
 
     const md = screen.getByTestId("md")
-    expect(md).toHaveTextContent("hello")
-    expect(md).toHaveAttribute("data-streaming", "false")
+    await expect.element(md).toHaveTextContent("hello")
+    await expect.element(md).toHaveAttribute("data-streaming", "false")
   })
 
-  it("keeps markdown in streaming mode while the chunk is streaming", () => {
-    render(<MessageTextPart {...baseProps({ state: "streaming", text: "partial" })} />)
+  it("keeps markdown in streaming mode while the chunk is streaming", async () => {
+    const screen = await render(<MessageTextPart {...baseProps({ state: "streaming", text: "partial" })} />)
 
-    expect(screen.getByTestId("md")).toHaveAttribute("data-streaming", "true")
+    await expect.element(screen.getByTestId("md")).toHaveAttribute("data-streaming", "true")
   })
 
-  it("renders nothing for non-text kinds", () => {
-    render(<MessageTextPart {...baseProps({}, "tool")} />)
+  it("renders nothing for non-text kinds", async () => {
+    const screen = await render(<MessageTextPart {...baseProps({}, "tool")} />)
 
-    expect(screen.queryByTestId("md")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("md")).not.toBeInTheDocument()
   })
 })

@@ -3,12 +3,12 @@
 //! `export_diagnostics` snapshot. Row types deliberately carry only whitelist-
 //! safe fields (no message content, no tool arguments).
 //!
-//! Slice E: the legacy `agent_thread_messages` table (the previous source of
+//! The legacy `agent_thread_messages` table (the previous source of
 //! `turn_index`) and the `agent_tool_calls` audit table were DROPPED. Turn index
 //! now comes from `rollout_session_index.last_turn_index`; the failed-tool-call
 //! list is deferred (tool failures are captured by the rollout `TurnItem`
-//! stream, and a rollout-native diagnostics reader is out of scope for this
-//! slice — the response field stays, returned empty).
+//! stream, and a rollout-native diagnostics reader is not yet implemented —
+//! the response field stays, returned empty).
 
 use sqlx::Row;
 
@@ -26,8 +26,8 @@ pub(crate) struct AgentThreadStatRow {
 
 impl AnyStore {
     /// Recent agent threads (newest first) with the latest turn index per
-    /// thread resolved via `rollout_session_index.last_turn_index` (Slice E:
-    /// the legacy `agent_thread_messages` source was dropped; rollout is the
+    /// thread resolved via `rollout_session_index.last_turn_index` (the
+    /// legacy `agent_thread_messages` source was dropped; rollout is the
     /// only conversation source).
     pub(crate) async fn list_recent_agent_thread_stats(
         &self,
@@ -100,7 +100,7 @@ mod tests {
         .execute(&pool)
         .await
         .expect("insert thread-b");
-        // thread-a reached turn 3 — recorded in the rollout index (Slice E: the
+        // thread-a reached turn 3 — recorded in the rollout index (the
         // legacy agent_thread_messages source was dropped).
         sqlx::query(
             "INSERT INTO rollout_session_index \

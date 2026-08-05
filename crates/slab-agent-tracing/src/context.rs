@@ -20,7 +20,7 @@ pub struct AgentTraceContext {
     pub turn_index: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_dir: Option<PathBuf>,
-    /// Root thread id owning the trace bundle (Slice 9). Set when a trace
+    /// Root thread id owning the trace bundle. Set when a trace
     /// bundle is started so child/subagent threads can be correlated back to
     /// the same bundle. `None` for legacy contexts that predate trace bundles
     /// (backward compatible — older payloads still deserialize).
@@ -62,7 +62,7 @@ impl AgentTraceContext {
         self
     }
 
-    /// Attach the root thread id owning the trace bundle (Slice 9).
+    /// Attach the root thread id owning the trace bundle.
     pub fn with_root_thread_id(mut self, root_thread_id: impl Into<String>) -> Self {
         let root_thread_id = root_thread_id.into();
         self.root_thread_id = if root_thread_id.is_empty() { None } else { Some(root_thread_id) };

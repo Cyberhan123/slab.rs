@@ -8,9 +8,8 @@ Centralizes the cross-cutting test boilerplate that was duplicated across `slab-
 
 - **Mock factories** (`setupSlabI18nMock`, `setupToastMock`, `setupApiMock`) — each call returns a fresh module shape with `vi.fn()` handles. Tests wire them as `vi.mock(path, () => setupXxxMock())` and read handles back through re-import + `vi.mocked()`.
 - **monaco-vscode deep-path stubs** (`monacoUriStub`, `monacoEventStub`, `monacoFilesServiceOverrideStub` + the `MONACO_*_PATH` constants) — centralize the version-coupled `@codingame/monaco-vscode-*` internals so they are not inlined per test.
-- **`renderWithProviders`** — `@testing-library/react` `render` wrapped with a no-retry `QueryClient` (queries + mutations) and an optional `MemoryRouter`. Access via the `@slab/test-utils/providers/render-with-providers` subpath (kept out of the root barrel so non-React consumers do not pull React).
+- **`renderWithProviders`** — `vitest-browser-react` `render` (async; Browser Mode only) wrapped with a no-retry `QueryClient` (queries + mutations) and an optional `MemoryRouter`. Callers must `await` it. Access via the `@slab/test-utils/providers/render-with-providers` subpath (kept out of the root barrel so non-React consumers do not pull React).
 - **`defineFixture`** — typed default + `Partial<T>` override builder mirroring the existing `createBackend(overrides)` / `fileEntry(overrides)` idiom.
-- **`setup/jsdom`** — jsdom global setup (jest-dom matchers, `afterEach(cleanup)`, IntersectionObserver / ResizeObserver / matchMedia stubs), migrated verbatim from `packages/slab-desktop/vitest.setup.ts`.
 
 ## Local commands
 
@@ -22,5 +21,5 @@ Lint and tests are run from the repo root:
 ## Hard boundaries
 
 - **Never import this package from production (non-test) code.** It is test-only infrastructure.
-- **`@slab/test-utils/setup/jsdom` must never be added to a browser project's `setupFiles`.** Its jsdom globals (IntersectionObserver / ResizeObserver / matchMedia) would shadow the real browser APIs. Browser projects keep their own `tests/browser/vitest.setup.ts`.
+- **`renderWithProviders` is Browser Mode only** — `vitest-browser-react`'s `render` cannot run under jsdom/node environments. Browser projects keep their own `tests/browser/vitest.setup.ts` for any per-project setup; the old `setup/jsdom` global setup (jest-dom matchers, observer/matchMedia stubs) was removed because a real browser supplies those APIs natively and `vitest-browser-react` auto-cleans between tests.
 - Mock factories must be **called inside the consuming test's `vi.mock` / `vi.hoisted`**, never at this package's module top level — vitest hoists `vi.mock` calls, and only the test file's own `vi.mock` registrations are reliably ordered before the mocked module's import.

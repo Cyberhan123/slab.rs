@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { userEvent } from 'vitest/browser';
+import { render } from 'vitest-browser-react';
 import { Boxes } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -56,8 +56,8 @@ function plugin(overrides: Record<string, unknown> = {}) {
 }
 
 describe('InstalledPluginCard', () => {
-  it('offers the launch action for an enabled, idle plugin', () => {
-    render(
+  it('offers the launch action for an enabled, idle plugin', async () => {
+    const screen = await render(
       <InstalledPluginCard
         plugin={plugin()}
         icon={Boxes}
@@ -71,13 +71,13 @@ describe('InstalledPluginCard', () => {
       />,
     );
 
-    expect(screen.getByTestId('plugin-primary-action-p1')).toHaveTextContent(
+    await expect.element(screen.getByTestId('plugin-primary-action-p1')).toHaveTextContent(
       'pages.plugins.actions.launch',
     );
   });
 
-  it('offers the enable action for a disabled plugin', () => {
-    render(
+  it('offers the enable action for a disabled plugin', async () => {
+    const screen = await render(
       <InstalledPluginCard
         plugin={plugin({ enabled: false })}
         icon={Boxes}
@@ -91,13 +91,13 @@ describe('InstalledPluginCard', () => {
       />,
     );
 
-    expect(screen.getByTestId('plugin-primary-action-p1')).toHaveTextContent(
+    await expect.element(screen.getByTestId('plugin-primary-action-p1')).toHaveTextContent(
       'pages.plugins.actions.enable',
     );
   });
 
-  it('offers the stop action for a running plugin', () => {
-    render(
+  it('offers the stop action for a running plugin', async () => {
+    const screen = await render(
       <InstalledPluginCard
         plugin={plugin({ runtimeStatus: 'running' })}
         icon={Boxes}
@@ -111,18 +111,17 @@ describe('InstalledPluginCard', () => {
       />,
     );
 
-    expect(screen.getByTestId('plugin-primary-action-p1')).toHaveTextContent(
+    await expect.element(screen.getByTestId('plugin-primary-action-p1')).toHaveTextContent(
       'pages.plugins.actions.stop',
     );
   });
 
   it('fires the primary, update, toggle and delete callbacks', async () => {
-    const user = userEvent.setup();
     const onPrimaryAction = vi.fn<() => void>();
     const onUpdate = vi.fn<() => void>();
     const onToggleEnabled = vi.fn<() => void>();
     const onDelete = vi.fn<() => void>();
-    render(
+    const screen = await render(
       <InstalledPluginCard
         plugin={plugin({ updateAvailable: true })}
         icon={Boxes}
@@ -136,10 +135,10 @@ describe('InstalledPluginCard', () => {
       />,
     );
 
-    await user.click(screen.getByTestId('plugin-primary-action-p1'));
-    await user.click(screen.getByTestId('plugin-update-p1'));
-    await user.click(screen.getByTestId('plugin-toggle-enabled-p1'));
-    await user.click(screen.getByTestId('plugin-delete-p1'));
+    await userEvent.click(screen.getByTestId('plugin-primary-action-p1'));
+    await userEvent.click(screen.getByTestId('plugin-update-p1'));
+    await userEvent.click(screen.getByTestId('plugin-toggle-enabled-p1'));
+    await userEvent.click(screen.getByTestId('plugin-delete-p1'));
 
     expect(onPrimaryAction).toHaveBeenCalledOnce();
     expect(onUpdate).toHaveBeenCalledOnce();
@@ -147,8 +146,8 @@ describe('InstalledPluginCard', () => {
     expect(onDelete).toHaveBeenCalledOnce();
   });
 
-  it('shows an action error block when present', () => {
-    render(
+  it('shows an action error block when present', async () => {
+    const screen = await render(
       <InstalledPluginCard
         plugin={plugin()}
         icon={Boxes}
@@ -162,6 +161,6 @@ describe('InstalledPluginCard', () => {
       />,
     );
 
-    expect(screen.getByText('failed to start')).toBeInTheDocument();
+    await expect.element(screen.getByText('failed to start')).toBeInTheDocument();
   });
 });

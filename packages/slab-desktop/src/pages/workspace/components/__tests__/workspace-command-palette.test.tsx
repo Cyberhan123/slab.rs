@@ -1,5 +1,4 @@
-import { screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import { userEvent } from "vitest/browser"
 import type { ComponentProps, ReactNode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -113,14 +112,16 @@ describe("WorkspaceCommandPalette", () => {
     searchFilesMock.searchFiles.mockReset()
   })
 
-  it("renders nothing when closed", () => {
-    renderWithProviders(<WorkspaceCommandPalette {...baseProps({ open: false })} />)
+  it("renders nothing when closed", async () => {
+    const screen = await renderWithProviders(
+      <WorkspaceCommandPalette {...baseProps({ open: false })} />,
+    )
 
-    expect(screen.queryByTestId("command-dialog")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("command-dialog")).not.toBeInTheDocument()
   })
 
-  it("renders recent workspaces when open and the query is empty", () => {
-    renderWithProviders(
+  it("renders recent workspaces when open and the query is empty", async () => {
+    const screen = await renderWithProviders(
       <WorkspaceCommandPalette
         {...baseProps({
           recentWorkspaces: [{ rootPath: "/repos/alpha", name: "Alpha" }] as never,
@@ -128,43 +129,49 @@ describe("WorkspaceCommandPalette", () => {
       />,
     )
 
-    expect(screen.getByTestId("command-dialog")).toBeInTheDocument()
-    expect(screen.getByText("Alpha")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("command-dialog")).toBeInTheDocument()
+    // vitest-browser-react's getByText uses substring/case-insensitive matching
+    // by default, which would also match the rootPath span ("/repos/alpha").
+    // exact:true scopes to the name span only.
+    await expect.element(screen.getByText("Alpha", { exact: true })).toBeInTheDocument()
   })
 
   it("searches files as the user types and opens a file result", async () => {
-    const user = userEvent.setup()
     const onOpenFile = vi.fn<(relativePath: string) => Promise<unknown>>().mockResolvedValue(undefined)
     searchFilesMock.searchFiles.mockResolvedValue({
       entries: [{ kind: "file", relativePath: "src/a.ts", name: "a.ts" }],
       truncated: false,
     })
-    renderWithProviders(<WorkspaceCommandPalette {...baseProps({ onOpenFile })} />)
+    const screen = await renderWithProviders(
+      <WorkspaceCommandPalette {...baseProps({ onOpenFile })} />,
+    )
 
-    await user.type(screen.getByTestId("command-input"), "a")
+    await userEvent.type(screen.getByTestId("command-input"), "a")
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(searchFilesMock.searchFiles).toHaveBeenCalledWith("a")
     })
 
-    await user.click(screen.getByText("a.ts"))
+    // Each entry renders both a name span ("a.ts") and a path span ("src/a.ts");
+    // exact matching selects only the name span.
+    await userEvent.click(screen.getByText("a.ts", { exact: true }))
 
     expect(onOpenFile).toHaveBeenCalledExactlyOnceWith("src/a.ts")
   })
 
   it("reveals a directory result in the tree instead of opening it", async () => {
-    const user = userEvent.setup()
     const onRevealDirectoryInTree = vi.fn<(relativePath: string) => Promise<unknown>>().mockResolvedValue(undefined)
     searchFilesMock.searchFiles.mockResolvedValue({
       entries: [{ kind: "directory", relativePath: "packages/foo", name: "foo" }],
       truncated: false,
     })
-    renderWithProviders(
+    const screen = await renderWithProviders(
       <WorkspaceCommandPalette {...baseProps({ onRevealDirectoryInTree })} />,
     )
 
-    await user.type(screen.getByTestId("command-input"), "foo")
-    await user.click(await screen.findByText("foo"))
+    await userEvent.type(screen.getByTestId("command-input"), "foo")
+    // exact:true matches the name span ("foo"), not the path span ("packages/foo").
+    await userEvent.click(screen.getByText("foo", { exact: true }))
 
     expect(onRevealDirectoryInTree).toHaveBeenCalledExactlyOnceWith("packages/foo")
   })

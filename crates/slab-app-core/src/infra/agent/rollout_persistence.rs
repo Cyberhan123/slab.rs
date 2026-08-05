@@ -2,11 +2,11 @@
 //!
 //! The per-thread background task that bridges the harness-protocol (`EventMsg`)
 //! stream into the rollout JSONL true source (it superseded the old
-//! SQL-writeback `turn_item_persistence` observer, which was removed in Slice 7
+//! SQL-writeback `turn_item_persistence` observer, which was removed
 //! once the rollout adapter became the only `AgentStorePort` impl). One observer
 //! task per thread (the agent `AgentCore` guards with a `DashSet`).
 //!
-//! Slice E.2 (D2): the observer consumes a DEDICATED UNBOUNDED persistence
+//! The observer consumes a DEDICATED UNBOUNDED persistence
 //! channel (`AgentEventHub::persistence_subscribe`), NOT the UI broadcast. The
 //! bounded broadcast could `Lagged`-drop persistence-grade events under flood —
 //! a silent conversation-data-loss false-green. The unbounded mpsc guarantees
@@ -110,7 +110,7 @@ pub fn spawn_rollout_persistence(
 /// looks unreadable). The flush is best-effort: a transient failure is warned
 /// and never kills the persistence task.
 ///
-/// Slice E.2 NOTE: the cross-turn durability barrier is the FIFO `Barrier`
+/// NOTE: the cross-turn durability barrier is the FIFO `Barrier`
 /// sentinel handled in the `recv()` loop above (flush + oneshot reply), NOT a
 /// durable-turn watch stamped here. This function appends lines and flushes at
 /// boundaries; it does not return a boundary signal.
@@ -145,7 +145,7 @@ async fn process_event_msg(
             }
         }
         EventMsg::MessageAppended(params) => {
-            // Slice E.2 (D1): conversation message write path. Maps 1:1 to the
+            // Conversation message write path. Maps 1:1 to the
             // rollout TurnContext::MessageAppend line, preserving F3 (id /
             // created_at). Replaces the old slab-agent store-trait
             // `insert_thread_message` route.
@@ -166,7 +166,7 @@ async fn process_event_msg(
             }
         }
         EventMsg::TurnStateChanged(params) => {
-            // Slice E.2 (D1): turn-state write path. Maps 1:1 to the rollout
+            // Turn-state write path. Maps 1:1 to the rollout
             // TurnContext::TurnState line, preserving F4 (started_at). The input
             // messages travel as a typed vec (NOT a json blob) so the F6
             // raw-blob recovery path is dead here — `input_messages_raw` is
@@ -203,7 +203,7 @@ async fn process_event_msg(
             // preserves the upstream value (`"compacted"` or `"skipped"` — the
             // skipped path must survive so `read_messages` can treat it as a
             // no-op; defaulting to `"compacted"` when absent). Manual
-            // compaction writes its own Compacted line in Slice 6.
+            // compaction writes its own Compacted line directly.
             let payload = CompactedPayload {
                 thread_id: thread_id.to_owned(),
                 compacted_messages: Vec::new(),
@@ -433,7 +433,7 @@ mod tests {
         assert!(evs.iter().any(|e| matches!(e, EventMsg::TurnCompleted(_))));
     }
 
-    // Slice E.2 regression guard: under the DEFAULT `EventPersistenceMode::Limited`,
+    // Regression guard: under the DEFAULT `EventPersistenceMode::Limited`,
     // `Error` (and `Warning`) events are persisted as `RolloutItem::EventMsg`
     // lines via the observer's `should_persist` fallback arm. `Error` is NOT in
     // the structural `is_persistence_grade` set, so this only works because
@@ -653,11 +653,11 @@ mod tests {
         assert_eq!(items[1].turn_index, 1, "M5: turn-1 item attributed to turn 1");
     }
 
-    // P6 — TurnState-anchored attribution (Slice E.2).
+    // P6 — TurnState-anchored attribution.
     //
     // `read_turn_items` advances `current_turn` on ANY `TurnContext` line
-    // (MessageAppend OR TurnState) with a new turn_index. Slice E.2 makes
-    // `TurnStateChanged` the turn-state write path (replacing the slab-agent
+    // (MessageAppend OR TurnState) with a new turn_index. `TurnStateChanged` is
+    // the turn-state write path (replacing the slab-agent
     // store `upsert_turn_state`), so a `TurnStateChanged` alone must anchor
     // attribution for the items that follow — even with NO `MessageAppend` for
     // that turn. This test drives exactly that: emit `TurnStateChanged(2)`,
@@ -744,7 +744,7 @@ mod tests {
     // Test A (P7) — attribution under the FULLY event-driven write path,
     // INCLUDING turn 0 of a fresh thread (the SpawnRequest path).
     //
-    // Slice E.2 routes BOTH the message append AND the item completion through
+    // BOTH the message append AND the item completion are routed through
     // the same dedicated unbounded persistence mpsc (FIFO ⇒ file order). This
     // test drives a 2-turn conversation entirely via `on_event_msg` (no direct
     // rollout writes) — turn 0 of a FRESH thread (the M5 anchor: the user

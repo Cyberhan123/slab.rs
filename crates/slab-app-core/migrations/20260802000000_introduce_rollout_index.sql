@@ -1,10 +1,10 @@
--- Slice 5: rollout event-source L2 index + backfill state.
+-- Rollout event-source L2 index + backfill state.
 --
 -- Introduces the index tables that back the rollout read gate
 -- (`rollout_session_index.backfill_status`) and the legacy-to-rollout backfill
 -- (`rollout_backfill_state`). The legacy three conversation tables
 -- (`agent_thread_messages` / `agent_turn_states` / `agent_turn_items`) are kept
--- as a read-only backfill source (dropped in a later slice); the zombie
+-- as a read-only backfill source (dropped later); the zombie
 -- `agent_thread_responses` table — which has had no live writer since the
 -- 2026-07-08 removal of response persistence — is dropped now.
 

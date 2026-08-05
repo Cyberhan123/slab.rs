@@ -1997,7 +1997,7 @@ mod tests {
 
     #[test]
     fn diagnostic_switch_leaves_carry_independence_descriptions() {
-        // Slice C: the two independent diagnostic switches (`telemetry.enabled`
+        // The two independent diagnostic switches (`telemetry.enabled`
         // and `agent.debug`) must both expose a schema `description` so the
         // settings UI and docs render the independence contract symmetrically.
         // A dropped doc comment + regenerated schema fails here.

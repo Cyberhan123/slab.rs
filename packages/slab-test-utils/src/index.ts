@@ -7,10 +7,6 @@
  * transitively load it. Import it via the dedicated subpath:
  *
  *   import { renderWithProviders } from '@slab/test-utils/providers/render-with-providers';
- *
- * The jsdom global setup (`./setup/jsdom`) is also intentionally not
- * re-exported — it has load-time side effects and belongs only in a project's
- * `setupFiles`, imported via the `@slab/test-utils/setup/jsdom` subpath.
  */
 export * from './mocks';
 export * from './fixtures';

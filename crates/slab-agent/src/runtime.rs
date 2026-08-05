@@ -46,8 +46,8 @@ impl AgentRuntime {
     }
 
     /// Resume a persisted thread with a pre-built message history and run the
-    /// next turn. Slice E.2: the conversation read + user-content append was
-    /// hoisted into the app-core caller; slab-agent receives the full message
+    /// next turn. The conversation read + user-content append was hoisted into
+    /// the app-core caller; slab-agent receives the full message
     /// vec + the `emit_from` anchor (index of the first new message to emit).
     pub async fn resume_thread(
         &self,

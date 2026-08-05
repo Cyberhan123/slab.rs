@@ -309,7 +309,7 @@ mod tests {
     #[derive(Default)]
     struct MemoryStore {
         threads: Mutex<HashMap<String, ThreadSnapshot>>,
-        // Slice E.2: the slab-agent `insert_thread_message` trait method is gone;
+        // The slab-agent `insert_thread_message` trait method is gone;
         // retained for direct-push seeding in tests. Unread — tests verify
         // emission via `RecordingNotify`.
         #[allow(dead_code)]
@@ -379,7 +379,7 @@ mod tests {
         async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
     }
 
-    /// Slice E.2: a notify port that records emitted `EventMsg`s so tests can
+    /// A notify port that records emitted `EventMsg`s so tests can
     /// verify emission (slab-agent no longer writes conversation data to the
     /// store — it emits `MessageAppended` / `TurnStateChanged` events).
     #[derive(Default)]
@@ -532,7 +532,7 @@ mod tests {
         assert_eq!(artifact["completion_text"], "child result");
 
         let child_id = value["child_thread_id"].as_str().expect("child id");
-        // Slice E.2: slab-agent emits `MessageAppended` (no store writes); read
+        // slab-agent emits `MessageAppended` (no store writes); read
         // the emitted child-prompt message from the recording notify.
         let child_prompt = notify
             .emitted_messages(child_id)

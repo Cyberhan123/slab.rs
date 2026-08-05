@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 // i18next load-time side effects that `index.ts` would.
 import { enUSServerMessages, zhCNServerMessages } from '../locales/server';
 
-// Slice C contract: the agent trace bundle (`agent.debug`) and the OpenTelemetry
+// Contract: the agent trace bundle (`agent.debug`) and the OpenTelemetry
 // provider/export (`telemetry.enabled`) are INDEPENDENT diagnostic switches.
 // Every user-facing description of one switch must cross-reference the other so
 // the decoupling is visible in both locales. `locale-parity.test.ts` only checks

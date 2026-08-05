@@ -1,7 +1,7 @@
-import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ReactNode } from "react"
 import type { UIMessage } from "ai"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { render } from "vitest-browser-react"
 
 import { AssistantChatPane } from "../assistant-chat-pane"
 import type { HarnessChatTransport } from "../../lib/harness"
@@ -115,37 +115,36 @@ describe("AssistantChatPane", () => {
     chatState.messages = []
     chatState.status = "ready"
   })
-  afterEach(() => cleanup())
 
-  it("shows the greeting empty state when there are no messages and not loading", () => {
-    render(<AssistantChatPane {...baseProps()} />)
-    expect(screen.getByTestId("assistant-empty-state").textContent).toContain("Hello-test")
-    expect(screen.queryByTestId("message-list")).toBeNull()
+  it("shows the greeting empty state when there are no messages and not loading", async () => {
+    const screen = await render(<AssistantChatPane {...baseProps()} />)
+    expect(screen.getByTestId("assistant-empty-state").element().textContent).toContain("Hello-test")
+    expect(screen.getByTestId("message-list").query()).toBeNull()
   })
 
-  it("shows the loading state while history is loading with no messages", () => {
-    render(<AssistantChatPane {...baseProps({ isHistoryLoading: true })} />)
-    expect(screen.getByTestId("assistant-loading-state")).toBeTruthy()
-    expect(screen.queryByTestId("message-list")).toBeNull()
+  it("shows the loading state while history is loading with no messages", async () => {
+    const screen = await render(<AssistantChatPane {...baseProps({ isHistoryLoading: true })} />)
+    await expect.element(screen.getByTestId("assistant-loading-state")).toBeInTheDocument()
+    expect(screen.getByTestId("message-list").query()).toBeNull()
   })
 
-  it("renders the message list once populated", () => {
+  it("renders the message list once populated", async () => {
     chatState.messages = [
       { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
       { id: "m2", role: "assistant", parts: [{ type: "text", text: "hey" }] },
     ]
-    render(<AssistantChatPane {...baseProps()} />)
-    expect(screen.getByTestId("message-list").textContent).toContain("2 messages")
+    const screen = await render(<AssistantChatPane {...baseProps()} />)
+    expect(screen.getByTestId("message-list").element().textContent).toContain("2 messages")
   })
 
-  it("reports the busy state and message count via the effect callbacks", () => {
+  it("reports the busy state and message count via the effect callbacks", async () => {
     chatState.status = "streaming"
     chatState.messages = [
       { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
     ]
     const onBusyChange = vi.fn()
     const onMessageCountChange = vi.fn()
-    render(
+    const screen = await render(
       <AssistantChatPane
         {...baseProps({ onBusyChange, onMessageCountChange })}
       />,
@@ -153,24 +152,24 @@ describe("AssistantChatPane", () => {
     expect(onBusyChange).toHaveBeenCalledWith(true)
     expect(onMessageCountChange).toHaveBeenCalledWith(1)
     // Sender reflects the busy flag too.
-    expect(screen.getByTestId("sender").getAttribute("data-loading")).toBe("true")
+    expect(screen.getByTestId("sender").element().getAttribute("data-loading")).toBe("true")
   })
 
-  it("forwards approvals + resolveApproval to the Sender", () => {
+  it("forwards approvals + resolveApproval to the Sender", async () => {
     const approvals = [{ itemId: "call-1", status: "pending" }]
     const resolveApproval = vi.fn()
-    render(<AssistantChatPane {...baseProps({ approvals, resolveApproval })} />)
+    const screen = await render(<AssistantChatPane {...baseProps({ approvals, resolveApproval })} />)
     const sender = screen.getByTestId("sender")
-    expect(sender.getAttribute("data-approvals")).toBe("1")
+    expect(sender.element().getAttribute("data-approvals")).toBe("1")
   })
 
-  it("does not render the token-usage indicator before a turn completes", () => {
-    render(<AssistantChatPane {...baseProps({ turnUsage: null, contextWindow: 8192 })} />)
-    expect(screen.queryByTestId("assistant-token-usage")).toBeNull()
+  it("does not render the token-usage indicator before a turn completes", async () => {
+    const screen = await render(<AssistantChatPane {...baseProps({ turnUsage: null, contextWindow: 8192 })} />)
+    expect(screen.getByTestId("assistant-token-usage").query()).toBeNull()
   })
 
-  it("renders the token-usage percentage label once a turn reports usage", () => {
-    render(
+  it("renders the token-usage percentage label once a turn reports usage", async () => {
+    const screen = await render(
       <AssistantChatPane
         {...baseProps({
           turnUsage: {
@@ -184,10 +183,10 @@ describe("AssistantChatPane", () => {
       />,
     )
     const indicator = screen.getByTestId("assistant-token-usage")
-    expect(indicator).toBeTruthy()
+    await expect.element(indicator).toBeInTheDocument()
     // Percentage label rendered (i18n mock returns the key verbatim; 2048/8192 = 25%).
-    expect(indicator.textContent).toContain("pages.assistant.usage.used")
+    expect(indicator.element().textContent).toContain("pages.assistant.usage.used")
     // The consumption bar has been removed.
-    expect(screen.queryByTestId("assistant-token-usage-bar")).toBeNull()
+    expect(screen.getByTestId("assistant-token-usage-bar").query()).toBeNull()
   })
 })

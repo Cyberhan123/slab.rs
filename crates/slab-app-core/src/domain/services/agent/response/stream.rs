@@ -1,6 +1,6 @@
 //! Streaming wire projection for the OpenAI Responses transport.
 //!
-//! Relocated from `bin/slab-server/.../openai_compat.rs` (slice 1e): pure
+//! Relocated from `bin/slab-server/.../openai_compat.rs`: pure
 //! conversion from slab-owned agent domain events into canonical
 //! `ResponsesServerEvent`s. HTTP / SSE / WebSocket framing stays in the server
 //! crate; this module only owns the streaming state machine + event synthesis.

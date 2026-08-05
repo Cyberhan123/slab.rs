@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 // factory's helper binding must already be initialized — keep these first.
 import { setupSlabI18nMock, setupToastMock } from "@slab/test-utils/mocks"
 import { renderWithProviders } from "@slab/test-utils/providers/render-with-providers"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { render } from "vitest-browser-react"
 import { toast } from "sonner"
 
 import { useWorkspaceUiStore } from "@/store/useWorkspaceUiStore"
@@ -39,9 +39,9 @@ beforeEach(() => {
 })
 
 describe("ProjectSwitcherView", () => {
-  it("lists recent workspaces and fires onSwitch with the root path", () => {
+  it("lists recent workspaces and fires onSwitch with the root path", async () => {
     const onSwitch = vi.fn<(rootPath: string) => void>()
-    render(
+    const screen = await render(
       <ProjectSwitcherView
         activeName="Slab"
         labels={labels}
@@ -53,15 +53,14 @@ describe("ProjectSwitcherView", () => {
       />
     )
 
-    fireEvent.click(screen.getByLabelText("Switch workspace"))
-    fireEvent.click(screen.getByTestId("project-switcher-item-repo-b"))
+    await screen.getByLabelText("Switch workspace").click()
+    await screen.getByTestId("project-switcher-item-repo-b").click()
 
     expect(onSwitch).toHaveBeenCalledExactlyOnceWith("repo-b")
-    cleanup()
   })
 
-  it("toggles the listbox aria state and shows the active name", () => {
-    render(
+  it("toggles the listbox aria state and shows the active name", async () => {
+    const screen = await render(
       <ProjectSwitcherView
         activeName="Active"
         labels={labels}
@@ -71,13 +70,12 @@ describe("ProjectSwitcherView", () => {
     )
 
     const toggle = screen.getByLabelText("Switch workspace")
-    expect(toggle.getAttribute("aria-expanded")).toBe("false")
-    expect(screen.getByText("Active")).toBeDefined()
-    fireEvent.click(toggle)
-    expect(toggle.getAttribute("aria-expanded")).toBe("true")
+    expect(toggle.element().getAttribute("aria-expanded")).toBe("false")
+    await expect.element(screen.getByText("Active")).toBeInTheDocument()
+    await toggle.click()
+    expect(toggle.element().getAttribute("aria-expanded")).toBe("true")
     // No recent workspaces ⇒ the listbox is not rendered.
-    expect(screen.queryByTestId("project-switcher-list")).toBeNull()
-    cleanup()
+    expect(screen.getByTestId("project-switcher-list").query()).toBeNull()
   })
 })
 
@@ -98,19 +96,17 @@ describe("ProjectSwitcher", () => {
       ],
     })
 
-    const { queryClient } = renderWithProviders(<ProjectSwitcher activeName="Alpha" />)
+    const screen = await renderWithProviders(<ProjectSwitcher activeName="Alpha" />)
 
-    fireEvent.click(screen.getByLabelText("pages.workspace.projectSwitcher.toggle"))
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("project-switcher-item-repo-b"))
-    })
+    await screen.getByLabelText("pages.workspace.projectSwitcher.toggle").click()
+    await screen.getByTestId("project-switcher-item-repo-b").click()
 
     await vi.waitFor(() => {
       expect(mockWorkspaceOpen).toHaveBeenCalledExactlyOnceWith("repo-b")
     })
     await vi.waitFor(() => {
       expect(toast.success).toHaveBeenCalledOnce()
-      expect(queryClient.getQueryData(["workspace-state"])).toEqual({
+      expect(screen.queryClient.getQueryData(["workspace-state"])).toEqual({
         current: {
           name: "Beta",
           rootPath: "repo-b",
@@ -125,6 +121,5 @@ describe("ProjectSwitcher", () => {
         description: "pages.workspace.projectSwitcher.suspended:2",
       }
     )
-    cleanup()
   })
 })

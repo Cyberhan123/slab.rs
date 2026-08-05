@@ -1,6 +1,6 @@
 //! Persistence helpers for turn tool calls.
 //!
-//! Slice E removed the `agent_tool_calls` audit table + its trait methods: tool
+//! The `agent_tool_calls` audit table + its trait methods were removed: tool
 //! calls are now captured by the rollout `TurnItem::CommandExecution` /
 //! `McpToolCall` stream instead of a side-channel audit row. What remains here
 //! is the tool-result message construction + the rollout/trace recording of the
@@ -33,7 +33,7 @@ pub(crate) async fn record_failed_tool_call(
 /// Build the tool-result message for a failed tool call. The `call_id` /
 /// `created_at` / `context` parameters are retained in the signature so callers
 /// do not need to branch, but are no longer used to persist a side-channel
-/// audit row (that path was removed in Slice E alongside `agent_tool_calls`).
+/// audit row (that path was removed alongside `agent_tool_calls`).
 #[allow(unused_variables)]
 pub(crate) async fn record_failed_tool_call_without_persisting_message(
     context: &TurnExecutionContext<'_>,

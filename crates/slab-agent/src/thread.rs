@@ -37,7 +37,7 @@ use crate::{
 //
 // The harness turn lifecycle emits. slab-agent speaks `EventMsg` (its harness
 // protocol) exclusively — the legacy `AgentEventKind`/`/responses` wire left
-// this crate in slice C3. These mirror what `HarnessProjection` used to derive.
+// this crate. These mirror what `HarnessProjection` used to derive.
 
 fn harness_turn(id: String, status: &str) -> Turn {
     Turn { id, items: Vec::new(), status: status.to_owned(), error: None }
@@ -222,7 +222,7 @@ impl AgentThread {
         // the parent→child tree can be reconstructed from the trace JSONL.
         if let Some(parent) = self.parent_id.clone() {
             trace_context = trace_context.with_parent_span_id(parent.clone());
-            // Slice 0 trace-bundle grouping: a child thread correlates back to
+            // Trace-bundle grouping: a child thread correlates back to
             // its ROOT thread's bundle (not its immediate parent). The root is
             // resolved by walking the persisted parent chain up to the ancestor
             // with no parent. depth-1 children resolve in one hop; depth-N

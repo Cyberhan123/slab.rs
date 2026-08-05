@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render } from "vitest-browser-react"
 import { describe, expect, it, vi } from "vitest"
 
 import { setupSlabI18nMock } from "@slab/test-utils/mocks"
@@ -35,8 +35,8 @@ const preview = (overrides: Record<string, unknown> = {}) =>
   }) as never
 
 describe("PermissionReviewList", () => {
-  it("shows the none message when the manifest requests no permissions", () => {
-    render(
+  it("shows the none message when the manifest requests no permissions", async () => {
+    const screen = await render(
       <PermissionReviewList
         preview={
           {
@@ -58,22 +58,24 @@ describe("PermissionReviewList", () => {
       />,
     )
 
-    expect(screen.getByText("pages.plugins.permissions.none")).toBeInTheDocument()
+    await expect.element(screen.getByText("pages.plugins.permissions.none")).toBeInTheDocument()
   })
 
-  it("lists slab API permissions and warns about unknown ones", () => {
-    render(<PermissionReviewList preview={preview()} />)
+  it("lists slab API permissions and warns about unknown ones", async () => {
+    const screen = await render(<PermissionReviewList preview={preview()} />)
 
-    expect(screen.getByTestId("plugin-permission-known.perm")).toBeInTheDocument()
-    expect(screen.getByTestId("plugin-permission-unknown.perm")).toBeInTheDocument()
-    expect(screen.getByText("pages.plugins.permissions.unknownWarning")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("plugin-permission-known.perm")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("plugin-permission-unknown.perm")).toBeInTheDocument()
+    await expect.element(
+      screen.getByText("pages.plugins.permissions.unknownWarning"),
+    ).toBeInTheDocument()
   })
 
-  it("renders file and network permission chips", () => {
-    render(<PermissionReviewList preview={preview()} />)
+  it("renders file and network permission chips", async () => {
+    const screen = await render(<PermissionReviewList preview={preview()} />)
 
-    expect(screen.getByText("read: /read")).toBeInTheDocument()
-    expect(screen.getByText("write: /write")).toBeInTheDocument()
-    expect(screen.getByText("host: example.com")).toBeInTheDocument()
+    await expect.element(screen.getByText("read: /read")).toBeInTheDocument()
+    await expect.element(screen.getByText("write: /write")).toBeInTheDocument()
+    await expect.element(screen.getByText("host: example.com")).toBeInTheDocument()
   })
 })

@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import { userEvent } from "vitest/browser"
+import { render } from "vitest-browser-react"
 import type { ComponentProps, ReactNode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -82,70 +82,66 @@ describe("WorkspaceGitPanel", () => {
     confirmMock.confirm.mockResolvedValue(true)
   })
 
-  it("shows a spinner while git status is loading", () => {
-    render(<WorkspaceGitPanel {...baseProps({ gitStatus: undefined })} />)
+  it("shows a spinner while git status is loading", async () => {
+    const screen = await render(<WorkspaceGitPanel {...baseProps({ gitStatus: undefined })} />)
 
-    expect(screen.queryByLabelText("pages.workspace.git.commitPlaceholder")).not.toBeInTheDocument()
+    await expect.element(
+      screen.getByLabelText("pages.workspace.git.commitPlaceholder"),
+    ).not.toBeInTheDocument()
   })
 
-  it("shows the not-a-repository empty state", () => {
-    render(
+  it("shows the not-a-repository empty state", async () => {
+    const screen = await render(
       <WorkspaceGitPanel
         {...baseProps({ gitStatus: gitStatus({ available: true, isRepository: false, message: "no repo" }) })}
       />,
     )
 
-    expect(screen.getByText("no repo")).toBeInTheDocument()
+    await expect.element(screen.getByText("no repo")).toBeInTheDocument()
   })
 
   it("submits a trimmed commit message and clears the input", async () => {
-    const user = userEvent.setup()
     const onCommit = vi.fn<(message: string) => Promise<void>>().mockResolvedValue(undefined)
-    render(<WorkspaceGitPanel {...baseProps({ onCommit })} />)
+    const screen = await render(<WorkspaceGitPanel {...baseProps({ onCommit })} />)
 
-    await user.type(screen.getByLabelText("pages.workspace.git.commitPlaceholder"), "  fix: bug  ")
-    await user.click(screen.getByRole("button", { name: "pages.workspace.git.commit" }))
+    await userEvent.type(screen.getByLabelText("pages.workspace.git.commitPlaceholder"), "  fix: bug  ")
+    await userEvent.click(screen.getByRole("button", { name: "pages.workspace.git.commit" }))
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(onCommit).toHaveBeenCalledExactlyOnceWith("fix: bug")
     })
-    await waitFor(() => {
-      expect(screen.getByLabelText("pages.workspace.git.commitPlaceholder")).toHaveValue("")
-    })
+    await expect.element(screen.getByLabelText("pages.workspace.git.commitPlaceholder")).toHaveValue("")
   })
 
   it("stages an unstaged entry", async () => {
-    const user = userEvent.setup()
     const onStage = vi.fn<(path: string) => Promise<void>>().mockResolvedValue(undefined)
-    render(<WorkspaceGitPanel {...baseProps({ onStage })} />)
+    const screen = await render(<WorkspaceGitPanel {...baseProps({ onStage })} />)
 
-    await user.click(screen.getByTitle("pages.workspace.git.stage"))
+    await userEvent.click(screen.getByTitle("pages.workspace.git.stage"))
 
     expect(onStage).toHaveBeenCalledExactlyOnceWith("unstaged.ts")
   })
 
   it("unstages a staged entry", async () => {
-    const user = userEvent.setup()
     const onUnstage = vi.fn<(path: string) => Promise<void>>().mockResolvedValue(undefined)
-    render(<WorkspaceGitPanel {...baseProps({ onUnstage })} />)
+    const screen = await render(<WorkspaceGitPanel {...baseProps({ onUnstage })} />)
 
-    await user.click(screen.getByTitle("pages.workspace.git.unstage"))
+    await userEvent.click(screen.getByTitle("pages.workspace.git.unstage"))
 
     expect(onUnstage).toHaveBeenCalledExactlyOnceWith("staged.ts")
   })
 
   it("discards an entry only after the confirm dialog accepts", async () => {
-    const user = userEvent.setup()
     const onDiscard = vi.fn<(path: string) => Promise<void>>().mockResolvedValue(undefined)
-    render(<WorkspaceGitPanel {...baseProps({ onDiscard })} />)
+    const screen = await render(<WorkspaceGitPanel {...baseProps({ onDiscard })} />)
 
     // Two entries each expose a discard button; the unstaged one is second in DOM order.
-    await user.click(screen.getAllByTitle("pages.workspace.git.discard")[1])
+    await userEvent.click(screen.getByTitle("pages.workspace.git.discard").all()[1])
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(confirmMock.confirm).toHaveBeenCalledOnce()
     })
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(onDiscard).toHaveBeenCalledExactlyOnceWith("unstaged.ts")
     })
   })

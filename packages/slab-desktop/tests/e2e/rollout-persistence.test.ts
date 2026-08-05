@@ -141,7 +141,7 @@ describe("rollout persistence e2e", () => {
   }, 900_000)
 
   // ③b rollback — verifies `rollback_thread`'s `await_durable` + truncate. The
-  // rollback affordance lives under each retracable user bubble (Phase R UI).
+  // rollback affordance lives under each retracable user bubble.
   // NOTE: selectors for the confirm dialog are written from the exploration; if
   // the dialog's role/label differs they may need a one-line tweak after a run.
   it("truncates the rollout when a user message is rolled back", async () => {

@@ -67,7 +67,7 @@ pub enum EventMsg {
     ContextCompacting(ContextCompactingParams),
     ContextCompacted(ContextCompactedParams),
 
-    // Slice E.2: persistence-grade conversation events (NOT UI notifications;
+    // Persistence-grade conversation events (NOT UI notifications;
     // the projection maps them to `None`). They carry conversation data out of
     // slab-agent so the app-core observer can land it in the rollout true
     // source — the sole conversation write path once the slab-agent

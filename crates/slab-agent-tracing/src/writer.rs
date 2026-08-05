@@ -109,7 +109,7 @@ impl TraceWriter {
     /// Turn index currently stamped onto appended events. Callers that need to
     /// advance it open a fresh writer per turn (cheap — reopens the same
     /// `trace.jsonl` in append mode, and payload ids stay unique because they
-    /// are uuid-based). A mutable setter is deferred to the reducer slice.
+    /// are uuid-based). A mutable setter is not yet provided.
     pub fn turn_index(&self) -> Option<u32> {
         self.turn_index
     }

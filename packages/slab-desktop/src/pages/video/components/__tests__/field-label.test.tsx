@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { render } from 'vitest-browser-react';
 
 import { FieldLabel } from '../field-label';
 
@@ -17,11 +17,11 @@ vi.mock('@slab/components/label', () => ({
 }));
 
 describe('FieldLabel', () => {
-  it('renders its children with the merged className', () => {
-    render(<FieldLabel className="extra-cls">Height</FieldLabel>);
+  it('renders its children with the merged className', async () => {
+    const screen = await render(<FieldLabel className="extra-cls">Height</FieldLabel>);
 
     const label = screen.getByText('Height');
-    const className = label.getAttribute('data-class') ?? '';
+    const className = label.element().getAttribute('data-class') ?? '';
     expect(className).toContain('uppercase');
     expect(className).toContain('extra-cls');
   });

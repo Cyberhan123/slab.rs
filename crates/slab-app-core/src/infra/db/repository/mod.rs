@@ -144,14 +144,14 @@ mod tests {
             "idx_agent_memory_phase1_status",
             "idx_agent_memory_phase2_runs_status",
             "idx_agent_memory_usage_events_thread",
-            // Slice 5: rollout-session L2 index.
+            // rollout-session L2 index.
             "idx_rollout_session",
         ] {
             assert_index_exists(&pool, index).await;
         }
 
-        // Slice 5: rollout-session index table FK (Slice E dropped
-        // rollout_backfill_state + the legacy conversation tables).
+        // rollout-session index table FK (rollout_backfill_state
+        // + the legacy conversation tables were dropped).
         assert_foreign_key(&pool, "rollout_session_index", "thread_id", "agent_threads", "CASCADE")
             .await;
         // The default backfill_status is 'completed' (new threads are
@@ -195,7 +195,7 @@ mod tests {
         .execute(&pool)
         .await;
         assert!(invalid_backfill_status.is_err(), "CHECK rejects unknown backfill_status");
-        // Slice E: the legacy conversation tables + agent_tool_calls audit table
+        // The legacy conversation tables + agent_tool_calls audit table
         // + rollout_backfill_state were dropped (rollout is the only source).
         for table in [
             "agent_thread_messages",

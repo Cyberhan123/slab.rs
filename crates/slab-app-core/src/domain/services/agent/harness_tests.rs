@@ -36,8 +36,8 @@ use crate::infra::db::repository::rollout_index::RolloutIndex;
 
 /// Minimal in-memory mock that implements `AgentStorePort` + `RolloutIndex` +
 /// `RolloutConversationStore`. Stores thread metadata, messages, items, and
-/// states. Slice E dropped the legacy/backfill surface (`thread_has_legacy_data`
-/// and the backfill/lease methods): rollout is the only source, so the mock no
+/// states. The legacy/backfill surface (`thread_has_legacy_data`
+/// and the backfill/lease methods) was dropped: rollout is the only source, so the mock no
 /// longer tracks a per-thread legacy flag.
 struct HarnessMockStore {
     threads: Mutex<HashMap<String, ThreadSnapshot>>,
@@ -153,7 +153,7 @@ impl AgentStorePort for HarnessMockStore {
     }
 }
 
-// Slice E.2: list_turn_states / list_turn_items + the conversation read/write
+// list_turn_states / list_turn_items + the conversation read/write
 // live on the app-core-internal `RolloutConversationStore` trait.
 #[async_trait]
 impl RolloutConversationStore for HarnessMockStore {
@@ -429,7 +429,7 @@ async fn seed_rollout_native_parent(
 ) {
     store.upsert_thread(&snapshot(parent_id, session)).await.expect("upsert parent");
     for turn in 0..turns {
-        // Slice E.2: `insert_thread_message` left the slab-agent store trait;
+        // `insert_thread_message` left the slab-agent store trait;
         // seed the message directly as a rollout TurnContext::MessageAppend line
         // (the same line the observer's `MessageAppended` arm produces).
         rollout
@@ -448,7 +448,7 @@ async fn seed_rollout_native_parent(
             id: format!("a{parent_id}-{turn}"),
             text: format!("r{turn}"),
         };
-        // Slice E: TurnItems are written via the rollout directly (the adapter's
+        // TurnItems are written via the rollout directly (the adapter's
         // `insert_turn_item` was removed; production writes via the rollout
         // persistence observer).
         rollout.append(parent_id, RolloutItem::TurnItem(item)).await.expect("append turn item");
@@ -660,7 +660,7 @@ async fn harness_list_turn_states_and_items_delegate_to_reader() {
     seed_rollout_native_parent(&th.store, &th.rollout, parent_id, "sess-rd", 1).await;
     // seed_rollout_native_parent writes a MessageAppend + a TurnItem per turn but
     // no TurnState — write one directly to the rollout as a TurnContext::TurnState
-    // line (Slice E.2: the slab-agent `upsert_turn_state` store method is gone;
+    // line (the slab-agent `upsert_turn_state` store method is gone;
     // production writes this via the observer's `TurnStateChanged` arm, which
     // produces the same rollout line) so list_turn_states has a row to find via
     // the reader delegation.

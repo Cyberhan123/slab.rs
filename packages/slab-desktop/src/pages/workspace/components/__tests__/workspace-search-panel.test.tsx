@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import { userEvent } from "vitest/browser"
+import { render } from "vitest-browser-react"
 import { describe, expect, it, vi } from "vitest"
 
 import { setupSlabI18nMock } from "@slab/test-utils/mocks"
@@ -27,20 +27,18 @@ function baseProps(overrides: Record<string, unknown> = {}) {
 
 describe("WorkspaceSearchPanel", () => {
   it("reports query changes as the user types", async () => {
-    const user = userEvent.setup()
     const onQueryChange = vi.fn<(query: string) => void>()
-    render(<WorkspaceSearchPanel {...baseProps({ onQueryChange })} />)
+    const screen = await render(<WorkspaceSearchPanel {...baseProps({ onQueryChange })} />)
 
     // The input is controlled by the parent; each keystroke emits the new value.
-    await user.type(screen.getByLabelText("pages.workspace.search.placeholder"), "x")
+    await userEvent.type(screen.getByLabelText("pages.workspace.search.placeholder"), "x")
 
     expect(onQueryChange).toHaveBeenCalledExactlyOnceWith("x")
   })
 
   it("renders file results and opens a file on click", async () => {
-    const user = userEvent.setup()
     const onOpenFile = vi.fn<(relativePath: string) => Promise<unknown>>()
-    render(
+    const screen = await render(
       <WorkspaceSearchPanel
         {...baseProps({
           query: "a",
@@ -50,15 +48,14 @@ describe("WorkspaceSearchPanel", () => {
       />,
     )
 
-    await user.click(screen.getByRole("button", { name: /a\.ts/ }))
+    await userEvent.click(screen.getByRole("button", { name: /a\.ts/ }))
 
     expect(onOpenFile).toHaveBeenCalledExactlyOnceWith("src/a.ts")
   })
 
   it("highlights the matched substring and opens the match on click", async () => {
-    const user = userEvent.setup()
     const onOpenMatch = vi.fn<(relativePath: string, match: unknown) => Promise<void>>()
-    render(
+    const screen = await render(
       <WorkspaceSearchPanel
         {...baseProps({
           query: "world",
@@ -74,29 +71,30 @@ describe("WorkspaceSearchPanel", () => {
       />,
     )
 
-    expect(screen.getByText("world").tagName).toBe("MARK")
+    expect(screen.getByText("world").element().tagName).toBe("MARK")
 
-    // Clicking the highlight bubbles to the line-match button.
-    await user.click(screen.getByText("world"))
+    // Clicking the highlight bubbled to the line-match button.
+    await userEvent.click(screen.getByText("world"))
 
     expect(onOpenMatch).toHaveBeenCalledOnce()
     expect(onOpenMatch.mock.calls[0]?.[0]).toBe("src/b.ts")
   })
 
   it("clears the query via the clear button", async () => {
-    const user = userEvent.setup()
     const onQueryChange = vi.fn<(query: string) => void>()
-    render(<WorkspaceSearchPanel {...baseProps({ query: "leftover", onQueryChange })} />)
+    const screen = await render(<WorkspaceSearchPanel {...baseProps({ query: "leftover", onQueryChange })} />)
 
-    await user.click(screen.getByRole("button", { name: "pages.workspace.search.clear" }))
+    await userEvent.click(screen.getByRole("button", { name: "pages.workspace.search.clear" }))
 
     expect(onQueryChange).toHaveBeenCalledExactlyOnceWith("")
   })
 
-  it("does not render result sections without a query", () => {
-    render(<WorkspaceSearchPanel {...baseProps()} />)
+  it("does not render result sections without a query", async () => {
+    const screen = await render(<WorkspaceSearchPanel {...baseProps()} />)
 
-    expect(screen.queryByText("pages.workspace.commandPalette.files")).not.toBeInTheDocument()
-    expect(screen.queryByText("pages.workspace.textSearch.results")).not.toBeInTheDocument()
+    await expect.element(
+      screen.getByText("pages.workspace.commandPalette.files"),
+    ).not.toBeInTheDocument()
+    await expect.element(screen.getByText("pages.workspace.textSearch.results")).not.toBeInTheDocument()
   })
 })

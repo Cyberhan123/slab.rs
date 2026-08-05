@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { userEvent } from 'vitest/browser';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { render } from 'vitest-browser-react';
 
 import { setupSlabI18nMock } from '@slab/test-utils/mocks';
 
@@ -104,36 +104,38 @@ function baseProps(overrides: Record<string, unknown> = {}) {
 }
 
 describe('HubCatalogTable', () => {
-  it('renders the empty state when there are no models', () => {
-    render(<HubCatalogTable {...baseProps()} />);
+  it('renders the empty state when there are no models', async () => {
+    const screen = await render(<HubCatalogTable {...baseProps()} />);
 
-    expect(screen.getByText('pages.hub.catalog.emptyPageTitle')).toBeInTheDocument();
+    await expect.element(screen.getByText('pages.hub.catalog.emptyPageTitle')).toBeInTheDocument();
   });
 
-  it('renders a card per model', () => {
-    render(<HubCatalogTable {...baseProps({ models: [model()] })} />);
+  it('renders a card per model', async () => {
+    const screen = await render(<HubCatalogTable {...baseProps({ models: [model()] })} />);
 
-    expect(screen.getByTestId('hub-model-card-m1')).toBeInTheDocument();
-    expect(screen.getByText('Test Model')).toBeInTheDocument();
+    await expect.element(screen.getByTestId('hub-model-card-m1')).toBeInTheDocument();
+    await expect.element(screen.getByText('Test Model')).toBeInTheDocument();
   });
 
   it('routes the use action with the resolved route', async () => {
-    const user = userEvent.setup();
     const onUseClick = vi.fn<(model: unknown, route: string) => void>();
-    render(<HubCatalogTable {...baseProps({ models: [model()], onUseClick })} />);
+    const screen = await render(
+      <HubCatalogTable {...baseProps({ models: [model()], onUseClick })} />,
+    );
 
-    await user.click(screen.getByTestId('hub-model-use-m1'));
+    await userEvent.click(screen.getByTestId('hub-model-use-m1'));
 
     expect(onUseClick).toHaveBeenCalledOnce();
     expect(onUseClick.mock.calls[0]?.[1]).toBe('assistant');
   });
 
   it('fires the download action', async () => {
-    const user = userEvent.setup();
     const onDownloadClick = vi.fn<(model: unknown) => void>();
-    render(<HubCatalogTable {...baseProps({ models: [model()], onDownloadClick })} />);
+    const screen = await render(
+      <HubCatalogTable {...baseProps({ models: [model()], onDownloadClick })} />,
+    );
 
-    await user.click(screen.getByTestId('hub-model-download-m1'));
+    await userEvent.click(screen.getByTestId('hub-model-download-m1'));
 
     expect(onDownloadClick).toHaveBeenCalledOnce();
   });

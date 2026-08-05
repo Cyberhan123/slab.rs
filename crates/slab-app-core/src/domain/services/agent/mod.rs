@@ -40,11 +40,11 @@ use crate::infra::agent::event_hub::{AgentEventHub, AgentEventMsgSubscription};
 use crate::infra::agent::rollout_persistence;
 
 /// app-core-internal read+write handle over the rollout-native conversation +
-/// turn-state / turn-item streams. Slice E moved the turn-state / turn-item
-/// reads OFF the slab-agent `AgentStorePort` trait (slab-agent never calls them
+/// turn-state / turn-item streams. The turn-state / turn-item
+/// reads were moved OFF the slab-agent `AgentStorePort` trait (slab-agent never calls them
 /// in production) and onto this trait so `HarnessService::list_turn_states` /
 /// `list_turn_items` (the `thread/resume` path) keep a typed, mockable handle
-/// without polluting the slab-agent surface. Slice E.2 makes this the SOLE
+/// without polluting the slab-agent surface. This is the SOLE
 /// conversation read/write path for app-core-internal callers that do NOT flow
 /// through the slab-agent event stream (notably `single_shot`, which has no
 /// turn loop and emits no `EventMsg` — its out-of-band writes go directly
@@ -98,18 +98,18 @@ pub(crate) struct AgentCore {
     /// chat/responses paths. Same `Arc` instance as the one wired into
     /// `AgentControl` so all paths compact identically.
     compact: Arc<dyn CompactPort>,
-    /// Append-only rollout event-source true source (Slice 4). Shared with the
+    /// Append-only rollout event-source true source. Shared with the
     /// harness so `compact_thread` / `fork_thread` / `rollback_thread` can
-    /// access the rollout directly (Slice 6).
+    /// access the rollout directly.
     rollout: Arc<slab_agent_rollout::RolloutFileStore>,
-    /// Slice E: app-core-internal reader for turn states + turn items (the
+    /// app-core-internal reader for turn states + turn items (the
     /// `thread/resume` path). These reads left the slab-agent `AgentStorePort`
     /// trait; `HarnessService` reaches them through this handle. Backed by the
     /// same `RolloutBackedAgentStore` Arc wired as the runtime store.
-    /// Slice E.2: renamed to `RolloutConversationStore` (read+write); the
+    /// Renamed to `RolloutConversationStore` (read+write); the
     /// accessor stays `reader()` to avoid touching callers.
     reader: Arc<dyn RolloutConversationStore>,
-    /// The trace directory configured from `agent.debug` (Slice 11b), threaded
+    /// The trace directory configured from `agent.debug`, threaded
     /// in so the harness can apply the SAME root-vs-child `trace_path` rule as
     /// `RolloutBackedAgentStore::upsert_thread` when it reconstructs a
     /// `SessionMeta` (J4: fork / compact fallback). `None` when agent debugging
@@ -179,7 +179,7 @@ impl AgentCore {
         &self.rollout
     }
 
-    /// The configured trace directory (Slice 11b), so the harness can apply the
+    /// The configured trace directory, so the harness can apply the
     /// canonical root-vs-child `trace_path` rule when reconstructing a
     /// `SessionMeta` (J4). `None` when agent debugging is off.
     pub(crate) fn trace_dir(&self) -> Option<&Path> {
@@ -220,7 +220,7 @@ impl AgentCore {
 
     /// Append user input to an existing agent thread and run the next turn.
     ///
-    /// Slice E.2: the conversation read + sort + max-turn + user-content append
+    /// The conversation read + sort + max-turn + user-content append
     /// is HOISTED here (out of slab-agent). slab-agent's `resume_thread` receives
     /// the pre-built message vec + the `emit_from` anchor (index of the first
     /// new message — the M5 within-turn attribution anchor that slab-agent emits
@@ -265,7 +265,7 @@ impl AgentCore {
         let thread = self.list_session_threads(session_id).await?.into_iter().next();
         let messages = match thread.as_ref() {
             Some(thread) => {
-                // Slice E.2 (D2): cross-turn barrier — a thread that was active
+                // Cross-turn barrier — a thread that was active
                 // shortly before restore may still have its observer draining.
                 // Wait for quiescence so the replayed messages reflect the
                 // latest emitted conversation data.
@@ -294,7 +294,7 @@ impl AgentCore {
 
     /// List persisted messages for a thread in replay order.
     ///
-    /// Slice E.2: reads now flow through the `RolloutConversationStore` reader
+    /// Reads now flow through the `RolloutConversationStore` reader
     /// (rollout is the sole conversation source), not the slab-agent store trait.
     pub(crate) async fn list_thread_messages(
         &self,
@@ -367,7 +367,7 @@ impl AgentCore {
         self.events.subscribe_event_msgs(thread_id)
     }
 
-    /// Slice E.2 (D2): cross-turn durability barrier. Enqueue a FIFO sentinel on
+    /// Cross-turn durability barrier. Enqueue a FIFO sentinel on
     /// the persistence channel and await the observer's reply — which (FIFO
     /// ordering) means EVERY persistence event emitted for `thread_id` so far
     /// has been appended + flushed to the rollout. Call this BEFORE any

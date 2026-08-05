@@ -1,5 +1,5 @@
-import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderHook } from 'vitest-browser-react';
 
 const { useAiModelMock } = vi.hoisted(() => ({
   useAiModelMock: vi.fn<(options?: { capability?: string }) => unknown>(),
@@ -88,26 +88,26 @@ describe('useAudioModelCatalog', () => {
     vi.clearAllMocks();
   });
 
-  it('merges transcription and vad local models into a single catalog', () => {
+  it('merges transcription and vad local models into a single catalog', async () => {
     installCatalogs(
       catalogResult({ localModels: [aiModel({ id: 'whisper-1' })] }),
       catalogResult({ localModels: [aiModel({ id: 'vad-1' })] }),
     );
 
-    const { result } = renderHook(() => useAudioModelCatalog());
+    const { result } = await renderHook(() => useAudioModelCatalog());
 
     expect(result.current.audioModels.map((model) => model.id)).toEqual(['whisper-1', 'vad-1']);
     expect(result.current.whisperTranscribeModels.map((model) => model.id)).toEqual(['whisper-1']);
     expect(result.current.whisperVadModels.map((model) => model.id)).toEqual(['vad-1']);
   });
 
-  it('aggregates loading and error state across both catalogs', () => {
+  it('aggregates loading and error state across both catalogs', async () => {
     installCatalogs(
       catalogResult({ loading: true, error: new Error('transcription down') }),
       catalogResult({ loading: false, error: null }),
     );
 
-    const { result } = renderHook(() => useAudioModelCatalog());
+    const { result } = await renderHook(() => useAudioModelCatalog());
 
     expect(result.current.catalogModelsLoading).toBe(true);
     expect(result.current.catalogModelsError).toBeInstanceOf(Error);
@@ -125,7 +125,7 @@ describe('useAudioModelCatalog', () => {
       catalogResult({ localModels: [aiModel({ id: 'vad-1' })], ensureDownloaded: vadEnsure }),
     );
 
-    const { result } = renderHook(() => useAudioModelCatalog());
+    const { result, act } = await renderHook(() => useAudioModelCatalog());
 
     await act(async () => {
       await result.current.ensureDownloadedAudioModel('vad-1');
@@ -138,7 +138,7 @@ describe('useAudioModelCatalog', () => {
     expect(transcriptionEnsure).toHaveBeenCalledWith('whisper-1');
   });
 
-  it('forwards the transcription selection and lifecycle surface', () => {
+  it('forwards the transcription selection and lifecycle surface', async () => {
     const transcriptionSetSelectedId = vi.fn<(value: string) => void>();
     installCatalogs(
       catalogResult({
@@ -149,7 +149,7 @@ describe('useAudioModelCatalog', () => {
       catalogResult(),
     );
 
-    const { result } = renderHook(() => useAudioModelCatalog());
+    const { result } = await renderHook(() => useAudioModelCatalog());
 
     expect(result.current.selectedModelId).toBe('whisper-1');
     expect(result.current.setSelectedModelId).toBe(transcriptionSetSelectedId);

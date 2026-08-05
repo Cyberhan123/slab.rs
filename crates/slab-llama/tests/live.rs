@@ -1,11 +1,10 @@
 //! Live integration tests for `slab-llama` against the vendored llama.cpp runtime.
 //!
 //! These tests exercise the FFI wrapper surface that is otherwise only covered by
-//! pure-Rust unit tests: GGUF `chat_template` read-back (Slice C), the
-//! `apply_chat_template` / `chat_builtin_templates` FFI (Slice A3), `model_quantize`
-//! (Slice E), the kv seq ops + per-sequence state round-trip that D2 persists
-//! (Slice A2 / D2), `perf_data` after prefill (Slice A1 / B), and incremental
-//! prefill via snapshot restore (Slice D1 / D2).
+//! pure-Rust unit tests: GGUF `chat_template` read-back, the
+//! `apply_chat_template` / `chat_builtin_templates` FFI, `model_quantize`,
+//! the kv seq ops + per-sequence state round-trip, `perf_data` after prefill,
+//! and incremental prefill via snapshot restore.
 //!
 //! Gated behind the `live` cargo feature **and** `#[ignore]` — they need network
 //! (to fetch the fixture model into the global HF cache) and the vendored native
@@ -146,7 +145,7 @@ fn prefill(
 fn live_chat_template_from_gguf() {
     let (_llama, model) = load_fixture();
 
-    // Slice C: the GGUF `tokenizer.chat_template` must be readable.
+    // The GGUF `tokenizer.chat_template` must be readable.
     let template = model.chat_template().expect("read GGUF chat_template");
     assert!(
         template.as_ref().is_some_and(|text| !text.trim().is_empty()),
@@ -164,7 +163,7 @@ fn live_chat_template_from_gguf() {
 fn live_apply_chat_template_and_builtins() {
     let (_llama, model) = load_fixture();
 
-    // Slice A3: the builtin-template FFI symbol is wired and returns a list.
+    // The builtin-template FFI symbol is wired and returns a list.
     let builtins = model.chat_builtin_templates().expect("list builtin templates");
     assert!(!builtins.is_empty(), "llama.cpp should expose at least one builtin template");
 
@@ -190,7 +189,7 @@ fn live_quantize_roundtrip() {
     let output_dir = tempfile::tempdir().expect("create quantize output tempdir");
     let output = output_dir.path().join("fixture-q8_0.gguf");
 
-    // Slice E: full FFI `llama_model_quantize` path (Q4_K_M -> Q8_0 requantize).
+    // Full FFI `llama_model_quantize` path (Q4_K_M -> Q8_0 requantize).
     let params = LlamaQuantizeParams {
         ftype: LlamaFtype::MostlyQ8_0,
         nthread: 4,
@@ -223,11 +222,11 @@ fn live_kv_state_and_perf_after_prefill() {
     let token_count = prefill(&model, &mut ctx, "The quick brown fox jumps over the lazy dog.");
     assert!(token_count > 0);
 
-    // Slice A1 / B: perf counters reflect the prefill.
+    // Perf counters reflect the prefill.
     let perf = ctx.perf_data();
     assert!(perf.n_p_eval > 0, "perf n_p_eval should reflect prefilled tokens");
 
-    // Slice A2 + D2 primitive: kv seq position + per-sequence state round-trip.
+    // kv seq position + per-sequence state round-trip.
     let pos_max = ctx.kv_cache_seq_pos_max(0);
     assert!(pos_max > 0, "kv_cache_seq_pos_max should reflect the prefill");
 
@@ -290,7 +289,7 @@ fn live_incremental_prefill_skips_reprefill() {
         ctx2.decode(&mut batch).expect("decode delta batch");
     }
 
-    // Slice D1 / D2: incremental prefill should process only the delta, not the
+    // Incremental prefill should process only the delta, not the
     // full prompt — turn-2 n_p_eval must be well below |full_tokens|.
     let perf2 = ctx2.perf_data();
     assert!(

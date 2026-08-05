@@ -34,7 +34,7 @@ const MEMORY_PHASE2_SESSION_PREFIX: &str = "memory-phase2-";
 #[derive(Clone)]
 pub struct AgentMemoryPipeline {
     store: Arc<AnyStore>,
-    /// The rollout JSONL true source (Slice F). Retained so `build_phase1_input`
+    /// The rollout JSONL true source. Retained so `build_phase1_input`
     /// can stamp the real on-disk `rollout_path` for the prompt. The CONVERSATION
     /// itself is read through `rollout_store` below — the SAME production read
     /// path the agent runtime uses — so the memory model can never diverge from
@@ -42,7 +42,7 @@ pub struct AgentMemoryPipeline {
     rollout: Arc<RolloutFileStore>,
     /// The rollout-backed store that owns the production read path
     /// (`list_thread_messages` / `read_thread_messages`): rollout flush +
-    /// `replay_messages`. Slice E made the rollout JSONL the sole source, so
+    /// `replay_messages`. The rollout JSONL is the sole source, so
     /// routing the phase1 read through here keeps the memory model on the SAME
     /// replay the runtime observes — the two cannot diverge.
     rollout_store: Arc<RolloutBackedAgentStore>,
@@ -705,7 +705,7 @@ async fn record_memory_usage_in_pool(
 /// to). The memory model and the runtime therefore share ONE code path and can
 /// never diverge on what the conversation was.
 ///
-/// Slice E: rollout is the ONLY source, so this always replays the rollout file
+/// Rollout is the ONLY source, so this always replays the rollout file
 /// and stamps the real on-disk `rollout_path`. A missing rollout file (a
 /// brand-new thread before its first append) replays to an empty conversation.
 /// `rollout_cwd` is always the app-wide workspace root when one is bound.
@@ -1037,7 +1037,7 @@ mod tests {
         })
     }
 
-    // Slice F: the phase1 input is read from the rollout JSONL true source when
+    // The phase1 input is read from the rollout JSONL true source when
     // the rollout gate (`backfill_status == "completed"`) admits it. The replay
     // MUST preserve role / rendered_text / created_at fidelity (created_at from
     // the F3-carried timestamp, NOT the line write-time), stamp

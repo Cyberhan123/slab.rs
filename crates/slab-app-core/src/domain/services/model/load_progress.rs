@@ -13,7 +13,7 @@
 //!   the download pipeline.
 //! - **Load phase** — coarse only (`"loading"`). The runtime `LoadModel` gRPC is
 //!   unary and the engine FFI exposes no progress callback, so true load % is
-//!   out of scope for this slice.
+//!   not available.
 
 use std::time::Duration;
 

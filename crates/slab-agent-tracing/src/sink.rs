@@ -1,7 +1,7 @@
 //! Trace sinks: the legacy free-form [`AgentTraceEvent`] + the
 //! [`AgentTraceSink`] trait with no-op and file-backed implementations.
 //!
-//! Slice 8 decoupled this crate from `slab-otel`: the file sink now emits the
+//! This crate is decoupled from `slab-otel`: the file sink now emits the
 //! session-telemetry event directly via `tracing::info!` with the SAME target
 //! (`slab_otel::session`) and field names/order as
 //! `slab_otel::SessionTelemetry::emit_event`, so downstream OTel/subscriber
@@ -173,7 +173,7 @@ impl AgentTraceSink for FileAgentTraceSink {
             tracing::warn!(error = %error, "agent trace file append failed");
         }
 
-        // Slice 8 decouple: emit the session-telemetry event directly. This is
+        // Decouple: emit the session-telemetry event directly. This is
         // WIRE-IDENTICAL to `slab_otel::SessionTelemetry::emit_event` (see
         // crates/slab-otel/src/session.rs:54-71): same target, same field names
         // and order, same `%`/`?` recording conventions. Downstream OTel /

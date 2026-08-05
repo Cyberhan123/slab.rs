@@ -1,9 +1,9 @@
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { userEvent } from "vitest/browser"
+import { render } from "vitest-browser-react"
+import { describe, expect, it, vi } from "vitest"
 
-import { usePluginAuthorizationStore } from "@/store/usePluginAuthorizationStore";
-import { usePluginAuthorization } from "../use-plugin-authorization";
+import { usePluginAuthorizationStore } from "@/store/usePluginAuthorizationStore"
+import { usePluginAuthorization } from "../use-plugin-authorization"
 
 vi.mock("@/store/ui-state-storage", () => ({
   createUiStateStorage: () => ({
@@ -11,7 +11,7 @@ vi.mock("@/store/ui-state-storage", () => ({
     removeItem: vi.fn<() => Promise<void>>(async () => {}),
     setItem: vi.fn<() => Promise<void>>(async () => {}),
   }),
-}));
+}))
 
 vi.mock("@slab/i18n", () => ({
   useTranslation: () => ({
@@ -21,19 +21,20 @@ vi.mock("@slab/i18n", () => ({
       params ? `${key}:${JSON.stringify(params)}` : key,
     i18n: { resolvedLanguage: "en", language: "en" },
   }),
-}));
+}))
 
 type Authorize = ReturnType<typeof usePluginAuthorization>["authorize"];
 
-function setup() {
+async function setup() {
   let authorizeRef: Authorize | null = null;
   function Harness() {
     const { authorize, prompt } = usePluginAuthorization("plugin-a", "Plugin A");
     authorizeRef = authorize;
     return <>{prompt}</>;
   }
-  render(<Harness />);
+  const screen = await render(<Harness />);
   return {
+    screen,
     authorize: (...args: Parameters<Authorize>) => {
       if (!authorizeRef) throw new Error("harness not mounted");
       return authorizeRef(...args);
@@ -44,7 +45,7 @@ function setup() {
 describe("usePluginAuthorization", () => {
   it("serializes concurrent prompts so each request resolves instead of orphaning", async () => {
     usePluginAuthorizationStore.setState({ grants: {} });
-    const { authorize } = setup();
+    const { screen, authorize } = await setup();
 
     // Two distinct unauthorized permissions requested back-to-back (a plugin
     // commonly fires both on load).
@@ -55,14 +56,14 @@ describe("usePluginAuthorization", () => {
     const second = authorize("models:read", { method: "GET", path: "/v1/models" });
 
     // The first prompt is shown; the second is queued behind it.
-    await screen.findByTestId("plugin-authorization-dialog");
-    expect(screen.getByText(/chat\/completions/)).toBeInTheDocument();
+    await expect.element(screen.getByTestId("plugin-authorization-dialog")).toBeInTheDocument();
+    await expect.element(screen.getByText(/chat\/completions/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("plugin-authorization-allow"));
     expect(await first).toBe(true);
 
     // The queue advances and the second request now has its own prompt.
-    expect(screen.getByText(/\/v1\/models/)).toBeInTheDocument();
+    await expect.element(screen.getByText(/\/v1\/models/)).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("plugin-authorization-allow"));
     expect(await second).toBe(true);
 
@@ -73,20 +74,20 @@ describe("usePluginAuthorization", () => {
 
   it("deny short-circuits without granting and closes the prompt", async () => {
     usePluginAuthorizationStore.setState({ grants: {} });
-    const { authorize } = setup();
+    const { screen, authorize } = await setup();
 
     const pending = authorize("chat:complete", {
       method: "POST",
       path: "/v1/chat/completions",
     });
 
-    await screen.findByTestId("plugin-authorization-dialog");
+    await expect.element(screen.getByTestId("plugin-authorization-dialog")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("plugin-authorization-deny"));
 
     expect(await pending).toBe(false);
     expect(usePluginAuthorizationStore.getState().isAuthorized("plugin-a", "chat:complete")).toBe(
       false,
     );
-    expect(screen.queryByTestId("plugin-authorization-dialog")).not.toBeInTheDocument();
+    await expect.element(screen.getByTestId("plugin-authorization-dialog")).not.toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
+import { render } from "vitest-browser-react"
 
 import { setupSlabI18nMock } from "@slab/test-utils/mocks"
 
@@ -58,26 +58,26 @@ const messages = [
 ]
 
 describe("MessageList", () => {
-  it("renders one row per message", () => {
-    render(<MessageList messages={messages} isBusy={false} />)
+  it("renders one row per message", async () => {
+    const screen = await render(<MessageList messages={messages} isBusy={false} />)
 
-    expect(screen.getByTestId("message-item-m1")).toBeInTheDocument()
-    expect(screen.getByTestId("message-item-m2")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("message-item-m1")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("message-item-m2")).toBeInTheDocument()
   })
 
-  it("renders the history-restored marker at the bottom of the restored history", () => {
-    render(<MessageList messages={messages} isBusy={false} showHistoryMarker />)
+  it("renders the history-restored marker at the bottom of the restored history", async () => {
+    const screen = await render(<MessageList messages={messages} isBusy={false} showHistoryMarker />)
 
     // `historyCount` defaults to all messages, so the marker lands at the end.
-    expect(screen.getByTestId("assistant-history-marker")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-history-marker")).toBeInTheDocument()
   })
 
-  it("places the history marker between restored and live messages by historyCount", () => {
+  it("places the history marker between restored and live messages by historyCount", async () => {
     // historyCount=1 → marker after the first (restored) message, before the second (live).
-    const { container } = render(
+    await render(
       <MessageList messages={messages} isBusy={false} showHistoryMarker historyCount={1} />,
     )
-    const order = Array.from(container.querySelectorAll("[data-testid]")).map((el) =>
+    const order = Array.from(document.body.querySelectorAll("[data-testid]")).map((el) =>
       el.getAttribute("data-testid"),
     )
     expect(order.indexOf("assistant-history-marker")).toBeGreaterThan(
@@ -88,39 +88,42 @@ describe("MessageList", () => {
     )
   })
 
-  it("shows a shimmer while a compaction is in progress and plain text when done", () => {
-    const compacting = {
+  it("shows a shimmer while a compaction is in progress and plain text when done", async () => {
+    const marker = {
       id: "auto:t1:1",
       mode: "auto" as const,
-      phase: "compacting" as const,
       threadId: "t1",
     }
-    const { rerender } = render(
-      <MessageList messages={messages} isBusy={false} compactionMarkers={[compacting]} />,
-    )
-    expect(screen.getByTestId("assistant-compact-marker-auto:t1:1")).toBeInTheDocument()
-    expect(screen.getByTestId("shimmer")).toBeInTheDocument()
-
-    rerender(
+    const screen = await render(
       <MessageList
         messages={messages}
         isBusy={false}
-        compactionMarkers={[{ ...compacting, phase: "compacted" as const }]}
+        compactionMarkers={[{ ...marker, phase: "compacting" as const }]}
       />,
     )
-    expect(screen.queryByTestId("shimmer")).toBeNull()
-    expect(screen.getByTestId("assistant-compact-marker-auto:t1:1")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-compact-marker-auto:t1:1")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("shimmer")).toBeInTheDocument()
+
+    await screen.rerender(
+      <MessageList
+        messages={messages}
+        isBusy={false}
+        compactionMarkers={[{ ...marker, phase: "compacted" as const }]}
+      />,
+    )
+    await expect.element(screen.getByTestId("shimmer")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-compact-marker-auto:t1:1")).toBeInTheDocument()
   })
 
-  it("omits the marker when showHistoryMarker is false", () => {
-    render(<MessageList messages={messages} isBusy={false} />)
+  it("omits the marker when showHistoryMarker is false", async () => {
+    const screen = await render(<MessageList messages={messages} isBusy={false} />)
 
-    expect(screen.queryByTestId("assistant-history-marker")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-history-marker")).not.toBeInTheDocument()
   })
 
-  it("never shows the marker for an empty session even when requested", () => {
-    render(<MessageList messages={[]} isBusy={false} showHistoryMarker />)
+  it("never shows the marker for an empty session even when requested", async () => {
+    const screen = await render(<MessageList messages={[]} isBusy={false} showHistoryMarker />)
 
-    expect(screen.queryByTestId("assistant-history-marker")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-history-marker")).not.toBeInTheDocument()
   })
 })

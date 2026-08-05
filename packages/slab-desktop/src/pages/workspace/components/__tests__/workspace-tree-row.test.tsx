@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import { userEvent } from "vitest/browser"
+import { render } from "vitest-browser-react"
 import type { ComponentProps } from "react"
 import { describe, expect, it, vi } from "vitest"
 
@@ -17,7 +17,7 @@ function buildNode(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function renderRow(node: ReturnType<typeof buildNode>, extra: Record<string, unknown> = {}) {
+async function renderRow(node: ReturnType<typeof buildNode>, extra: Record<string, unknown> = {}) {
   return render(
     <WorkspaceTreeRow
       {...({
@@ -35,12 +35,11 @@ function renderRow(node: ReturnType<typeof buildNode>, extra: Record<string, unk
 
 describe("WorkspaceTreeRow", () => {
   it("opens then toggles an unloaded directory", async () => {
-    const user = userEvent.setup()
     const onOpenDirectory = vi.fn<(relativePath: string) => Promise<unknown>>()
     const node = buildNode({ data: { kind: "directory", relativePath: "src", name: "src", loaded: false } })
-    renderRow(node, { onOpenDirectory })
+    const screen = await renderRow(node, { onOpenDirectory })
 
-    await user.click(screen.getByTestId("workspace-tree-row-src"))
+    await userEvent.click(screen.getByTestId("workspace-tree-row-src"))
 
     expect(onOpenDirectory).toHaveBeenCalledExactlyOnceWith("src")
     expect(node.toggle).toHaveBeenCalledOnce()
@@ -48,34 +47,32 @@ describe("WorkspaceTreeRow", () => {
   })
 
   it("only toggles an already-loaded directory", async () => {
-    const user = userEvent.setup()
     const onOpenDirectory = vi.fn<(relativePath: string) => Promise<unknown>>()
     const node = buildNode({ data: { kind: "directory", relativePath: "src", name: "src", loaded: true } })
-    renderRow(node, { onOpenDirectory })
+    const screen = await renderRow(node, { onOpenDirectory })
 
-    await user.click(screen.getByTestId("workspace-tree-row-src"))
+    await userEvent.click(screen.getByTestId("workspace-tree-row-src"))
 
     expect(onOpenDirectory).not.toHaveBeenCalled()
     expect(node.toggle).toHaveBeenCalledOnce()
   })
 
   it("opens a file when clicked", async () => {
-    const user = userEvent.setup()
     const onOpenFile = vi.fn<(relativePath: string) => Promise<unknown>>()
     const node = buildNode({
       data: { kind: "file", relativePath: "src/a.ts", name: "a.ts", loaded: true },
     })
-    renderRow(node, { onOpenFile })
+    const screen = await renderRow(node, { onOpenFile })
 
-    await user.click(screen.getByTestId("workspace-tree-row-src-a-ts"))
+    await userEvent.click(screen.getByTestId("workspace-tree-row-src-a-ts"))
 
     expect(onOpenFile).toHaveBeenCalledExactlyOnceWith("src/a.ts")
   })
 
-  it("derives a root test-id for an empty relative path", () => {
+  it("derives a root test-id for an empty relative path", async () => {
     const node = buildNode({ data: { kind: "directory", relativePath: "", name: "root", loaded: true } })
-    renderRow(node)
+    const screen = await renderRow(node)
 
-    expect(screen.getByTestId("workspace-tree-row-root")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("workspace-tree-row-root")).toBeInTheDocument()
   })
 })

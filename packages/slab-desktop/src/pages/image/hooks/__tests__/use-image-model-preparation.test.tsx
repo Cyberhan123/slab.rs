@@ -1,5 +1,5 @@
-import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderHook } from 'vitest-browser-react';
 
 const { useAiModelMock, toastMock } = vi.hoisted(() => ({
   useAiModelMock: vi.fn<() => unknown>(),
@@ -78,14 +78,14 @@ describe('useImageModelPreparation', () => {
     vi.clearAllMocks();
   });
 
-  it('maps local diffusion models to picker options', () => {
+  it('maps local diffusion models to picker options', async () => {
     useAiModelMock.mockReturnValue(
       catalogResult({
         localModels: [aiModel({ id: 'sdxl', display_name: 'SDXL', local_path: '/models/sdxl.gguf' })],
       }),
     );
 
-    const { result } = renderHook(() => useImageModelPreparation());
+    const { result } = await renderHook(() => useImageModelPreparation());
 
     expect(result.current.modelOptions).toEqual([
       { id: 'sdxl', label: 'SDXL', downloaded: true, pending: false, local_path: '/models/sdxl.gguf' },
@@ -94,7 +94,7 @@ describe('useImageModelPreparation', () => {
 
   it('throws when preparing a model without a selection', async () => {
     useAiModelMock.mockReturnValue(catalogResult({ selectedId: '' }));
-    const { result } = renderHook(() => useImageModelPreparation());
+    const { result, act } = await renderHook(() => useImageModelPreparation());
 
     let thrown: unknown = null;
     await act(async () => {
@@ -112,7 +112,7 @@ describe('useImageModelPreparation', () => {
     useAiModelMock.mockReturnValue(
       catalogResult({ localModels: [aiModel({ id: 'sdxl' })], selectedId: 'missing' }),
     );
-    const { result } = renderHook(() => useImageModelPreparation());
+    const { result, act } = await renderHook(() => useImageModelPreparation());
 
     let thrown: unknown = null;
     await act(async () => {
@@ -140,7 +140,7 @@ describe('useImageModelPreparation', () => {
         }),
       }),
     );
-    const { result } = renderHook(() => useImageModelPreparation());
+    const { result, act } = await renderHook(() => useImageModelPreparation());
 
     let modelPath = '';
     await act(async () => {
@@ -165,7 +165,7 @@ describe('useImageModelPreparation', () => {
         }),
       }),
     );
-    const { result } = renderHook(() => useImageModelPreparation());
+    const { result, act } = await renderHook(() => useImageModelPreparation());
 
     let thrown: unknown = null;
     await act(async () => {

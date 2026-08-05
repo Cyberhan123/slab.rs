@@ -1,4 +1,4 @@
--- Slice D2b: backfill lease columns (concurrency-safe CAS + crash recovery).
+-- Backfill lease columns (concurrency-safe CAS + crash recovery).
 --
 -- The startup backfill (`backfill_all_threads`) is a single-worker-per-process
 -- task, but a process crash mid-backfill used to leave a thread stuck in

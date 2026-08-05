@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { render } from "vitest-browser-react"
 import type { ReactNode } from "react"
 
 import { ApprovalCard } from "../approval-banner"
@@ -46,19 +46,16 @@ function commandApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequ
 }
 
 describe("ApprovalCard", () => {
-  beforeEach(() => cleanup())
-  afterEach(() => cleanup())
-
-  it("renders the command in a terminal-style block with cwd framing", () => {
-    render(<ApprovalCard approval={commandApproval()} onResolve={vi.fn()} />)
+  it("renders the command in a terminal-style block with cwd framing", async () => {
+    await render(<ApprovalCard approval={commandApproval()} onResolve={vi.fn()} />)
     const text = document.body.textContent ?? ""
     expect(text).toContain("$ cd /repo")
     expect(text).toContain("echo hi")
     expect(text).toContain("pages.assistant.approval.command")
   })
 
-  it("renders file-change entries with a type badge and optional diff", () => {
-    render(
+  it("renders file-change entries with a type badge and optional diff", async () => {
+    await render(
       <ApprovalCard
         approval={
           {
@@ -82,52 +79,55 @@ describe("ApprovalCard", () => {
     expect(text).toContain("pages.assistant.approval.fileChange")
   })
 
-  it("shows only the server-advertised scopes", () => {
-    render(
+  it("shows only the server-advertised scopes", async () => {
+    const screen = await render(
       <ApprovalCard
         approval={commandApproval({ allowedScopes: ["run_once", "deny"] })}
         onResolve={vi.fn()}
       />,
     )
-    const buttons = screen.getAllByRole("button")
+    const buttons = screen.getByRole("button").elements()
     const labels = buttons.map((b) => b.textContent)
     expect(labels).toEqual(
-      expect.arrayContaining(["pages.assistant.approval.runOnce", "pages.assistant.actions.reject"]),
+      expect.arrayContaining([
+        "pages.assistant.approval.runOnce",
+        "pages.assistant.actions.reject",
+      ]),
     )
     expect(labels).not.toContain("pages.assistant.approval.always")
     expect(buttons).toHaveLength(2)
   })
 
-  it("falls back to simple approve/reject when no scopes are advertised", () => {
-    render(<ApprovalCard approval={commandApproval()} onResolve={vi.fn()} />)
-    const buttons = screen.getAllByRole("button")
+  it("falls back to simple approve/reject when no scopes are advertised", async () => {
+    const screen = await render(<ApprovalCard approval={commandApproval()} onResolve={vi.fn()} />)
+    const buttons = screen.getByRole("button").elements()
     expect(buttons).toHaveLength(2)
     const labels = buttons.map((b) => b.textContent)
     expect(labels).toContain("pages.assistant.actions.approve")
     expect(labels).toContain("pages.assistant.actions.reject")
   })
 
-  it("resolves with (itemId, approved, scope) when a scope button is clicked", () => {
+  it("resolves with (itemId, approved, scope) when a scope button is clicked", async () => {
     const onResolve = vi.fn()
-    render(
+    const screen = await render(
       <ApprovalCard
         approval={commandApproval({ allowedScopes: ["run_once", "deny"] })}
         onResolve={onResolve}
       />,
     )
-    fireEvent.click(screen.getByText("pages.assistant.approval.runOnce"))
+    await screen.getByText("pages.assistant.approval.runOnce").click()
     expect(onResolve).toHaveBeenCalledWith("call-1", true, "run_once")
   })
 
-  it("resolves with approved=false for the deny scope", () => {
+  it("resolves with approved=false for the deny scope", async () => {
     const onResolve = vi.fn()
-    render(
+    const screen = await render(
       <ApprovalCard
         approval={commandApproval({ allowedScopes: ["run_once", "deny"] })}
         onResolve={onResolve}
       />,
     )
-    fireEvent.click(screen.getByText("pages.assistant.actions.reject"))
+    await screen.getByText("pages.assistant.actions.reject").click()
     expect(onResolve).toHaveBeenCalledWith("call-1", false, "deny")
   })
 
@@ -138,19 +138,21 @@ describe("ApprovalCard", () => {
         resolvePromise = () => r()
       }),
     )
-    render(
+    const screen = await render(
       <ApprovalCard
         approval={commandApproval({ allowedScopes: ["run_once", "deny"] })}
         onResolve={onResolve}
       />,
     )
-    fireEvent.click(screen.getByText("pages.assistant.approval.runOnce"))
-    await waitFor(() => expect(screen.getByTestId("spinner")).toBeTruthy())
-    expect(screen.getAllByRole("button").every((b) => (b as HTMLButtonElement).disabled)).toBe(true)
+    await screen.getByText("pages.assistant.approval.runOnce").click()
+    await expect.element(screen.getByTestId("spinner")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button").elements().every((b) => (b as HTMLButtonElement).disabled),
+    ).toBe(true)
 
     resolvePromise?.()
-    await waitFor(() =>
-      expect(screen.getAllByRole("button").every((b) => !(b as HTMLButtonElement).disabled)).toBe(true),
-    )
+    for (const button of screen.getByRole("button").all()) {
+      await expect.element(button).toBeEnabled()
+    }
   })
 })

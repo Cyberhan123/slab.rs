@@ -6,18 +6,18 @@
 //!    [`AgentTraceSink`] + [`record_json`] / [`record_json_from_context`]. The
 //!    ~50 call sites across `slab-agent`, `slab-app-core`, and `slab-runtime`
 //!    plus the `AgentTraceContext` propagation chain depend only on these
-//!    public items and are NOT changed by the Slice 8/9 refactor.
-//! 2. **Typed trace bundle** (Slice 9): the [`bundle`] and [`writer`] modules
+//!    public items and are NOT changed by this refactor.
+//! 2. **Typed trace bundle**: the [`bundle`] and [`writer`] modules
 //!    lay out an L3 bundle directory (`manifest.json` / `trace.jsonl` /
 //!    `payloads/*.json`) with a payload-before-event invariant, plus a typed
 //!    [`RawTraceEvent`] taxonomy in [`event`].
-//! 3. **Conversation reducer** (Slice 10): the [`reducer`] module folds a
+//! 3. **Conversation reducer**: the [`reducer`] module folds a
 //!    bundle's many inferences into the linear conversation the model was shown
 //!    (AppendOnly / FullSnapshot / post-compaction). This is an OFFLINE L3
 //!    diagnostic — it is never wired into the agent hot path. The L1 rollout
 //!    records *what happened*; the reducer reconstructs *what the model saw*.
 //!
-//! Slice 8 decoupled this crate from `slab-otel`: the file sink now emits its
+//! This crate is decoupled from `slab-otel`: the file sink now emits its
 //! session-telemetry event directly via `tracing::info!` with the SAME target
 //! (`slab_otel::session`) and fields as `slab_otel::SessionTelemetry::emit_event`,
 //! so downstream filters see a byte-identical wire format. `slab-otel` remains
@@ -48,7 +48,7 @@ pub use bundle::{
 pub use bundle_sink::BundleAgentTraceSink;
 
 /// Compile-time snapshot of this crate's `Cargo.toml`. Used by the
-/// `crate_has_no_slab_otel_dependency` test to assert the Slice 8 decouple is
+/// `crate_has_no_slab_otel_dependency` test to assert the decouple is
 /// not accidentally reverted.
 #[cfg(test)]
 const CARGO_TOML: &str = include_str!("../Cargo.toml");
@@ -59,7 +59,7 @@ mod decouple_tests {
 
     #[test]
     fn crate_has_no_slab_otel_dependency() {
-        // Slice 8 decouple: slab-otel must NOT appear as a dependency line.
+        // Decouple: slab-otel must NOT appear as a dependency line.
         // (Comments mentioning it are fine; the dependency line is not.)
         for line in CARGO_TOML.lines() {
             let trimmed = line.trim();

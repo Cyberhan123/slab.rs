@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react"
+import { renderHook } from "vitest-browser-react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const { useAiModelMock, toastMock } = vi.hoisted(() => ({
@@ -100,7 +100,7 @@ describe("useAssistantModel", () => {
     vi.clearAllMocks()
   })
 
-  it("maps catalog models to picker options and tracks the selected option", () => {
+  it("maps catalog models to picker options and tracks the selected option", async () => {
     mockCatalog(
       aiModelResult({
         models: [
@@ -111,7 +111,7 @@ describe("useAssistantModel", () => {
       }),
     )
 
-    const { result } = renderHook(() => useAssistantModel())
+    const { result } = await renderHook(() => useAssistantModel())
 
     const cloud = result.current.modelOptions.find((option) => option.id === "cloud-1")
     const local = result.current.modelOptions.find((option) => option.id === "local-1")
@@ -122,16 +122,14 @@ describe("useAssistantModel", () => {
 
   it("throws when preparing a model without a selection", async () => {
     mockCatalog(aiModelResult({ selectedId: "" }))
-    const { result } = renderHook(() => useAssistantModel())
+    const { result } = await renderHook(() => useAssistantModel())
 
     let thrown: unknown = null
-    await act(async () => {
-      try {
-        await result.current.ensureAssistantModelReady()
-      } catch (error) {
-        thrown = error
-      }
-    })
+    try {
+      await result.current.ensureAssistantModelReady()
+    } catch (error) {
+      thrown = error
+    }
 
     expect(thrown).toBeInstanceOf(Error)
     expect((thrown as Error).message).toBe("pages.assistant.error.selectModelFirst")
@@ -143,11 +141,9 @@ describe("useAssistantModel", () => {
       selectedId: "cloud-1",
     })
     mockCatalog(result0)
-    const { result } = renderHook(() => useAssistantModel())
+    const { result } = await renderHook(() => useAssistantModel())
 
-    await act(async () => {
-      await result.current.ensureAssistantModelReady()
-    })
+    await result.current.ensureAssistantModelReady()
 
     expect(result0.ensureDownloaded).not.toHaveBeenCalled()
     expect(result.current.loadedModelStatus).toBeNull()
@@ -166,7 +162,7 @@ describe("useAssistantModel", () => {
         .mockResolvedValue(loadResult({ context_length: 8192 } as ModelRuntimeStatus)),
     })
     mockCatalog(result0)
-    const { result } = renderHook(() => useAssistantModel())
+    const { result, act } = await renderHook(() => useAssistantModel())
 
     await act(async () => {
       await result.current.ensureAssistantModelReady()
@@ -191,11 +187,9 @@ describe("useAssistantModel", () => {
         .mockResolvedValueOnce(loadResult(null)),
     })
     mockCatalog(result0)
-    const { result } = renderHook(() => useAssistantModel())
+    const { result } = await renderHook(() => useAssistantModel())
 
-    await act(async () => {
-      await result.current.ensureAssistantModelReady()
-    })
+    await result.current.ensureAssistantModelReady()
 
     expect(toastMock.message).toHaveBeenCalledWith("pages.assistant.toast.modelLoadRetry")
     expect(result0.ensureDownloaded).toHaveBeenNthCalledWith(2, "local-1", { forceDownload: true })
@@ -215,16 +209,14 @@ describe("useAssistantModel", () => {
         .mockRejectedValueOnce(new Error("load failed")),
     })
     mockCatalog(result0)
-    const { result } = renderHook(() => useAssistantModel())
+    const { result } = await renderHook(() => useAssistantModel())
 
     let thrown: unknown = null
-    await act(async () => {
-      try {
-        await result.current.ensureAssistantModelReady()
-      } catch (error) {
-        thrown = error
-      }
-    })
+    try {
+      await result.current.ensureAssistantModelReady()
+    } catch (error) {
+      thrown = error
+    }
 
     expect(thrown).toBeInstanceOf(Error)
     expect((thrown as Error).message).toBe("load failed")

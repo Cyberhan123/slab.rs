@@ -1,21 +1,21 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { renderHook } from "vitest-browser-react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest"
 
 const { parsePluginPackManifestMock } = vi.hoisted(() => ({
   parsePluginPackManifestMock: vi.fn<(file: File) => Promise<null>>(),
-}));
+}))
 
 vi.mock("@slab/i18n", () => ({
   useTranslation: () => ({
     t: (key: string) => key,
   }),
-}));
+}))
 
 vi.mock("@/hooks/use-header", () => ({
   useHeader: vi.fn<() => unknown>(),
-}));
+}))
 
 vi.mock("@slab/api", () => ({
   default: {
@@ -33,15 +33,15 @@ vi.mock("@slab/api", () => ({
   getLocalizedErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
   postFormData: vi.fn<(path: string, file: File) => Promise<unknown>>(),
-}));
+}))
 
 vi.mock("../../lib/plugin-manifest-preview", () => ({
   parsePluginPackManifest: parsePluginPackManifestMock,
-}));
+}))
 
 vi.mock("../../lib/plugin-runtime-client", () => ({
   connectPluginEvents: vi.fn<() => () => void>(() => () => {}),
-}));
+}))
 
 import { usePluginsPage } from "../use-plugins-page";
 
@@ -57,17 +57,17 @@ function wrapper({ children }: { children: ReactNode }) {
 describe("usePluginsPage", () => {
   it("treats a null import preview as a reviewable parse failure", async () => {
     parsePluginPackManifestMock.mockResolvedValueOnce(null);
-    const { result } = renderHook(() => usePluginsPage(), { wrapper });
+    const { result, act } = await renderHook(() => usePluginsPage(), { wrapper });
 
     await act(async () => {
       result.current.handleImportFileChange(new File(["not a zip"], "broken.plugin.slab"));
     });
 
-    await waitFor(() => expect(result.current.importPreviewFailed).toBe(true));
+    await vi.waitFor(() => expect(result.current.importPreviewFailed).toBe(true));
     expect(result.current.importPreview).toBeNull();
     expect(result.current.canImport).toBe(false);
 
-    act(() => {
+    await act(() => {
       result.current.setHasReviewedPermissions(true);
     });
 

@@ -1,7 +1,6 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
+import { render } from 'vitest-browser-react';
+import { MemoryRouter } from 'react-router-dom';
 
 import type { Task, TaskResult } from '../../const';
 import { TaskDetailDialog } from '../task-detail-dialog';
@@ -33,7 +32,7 @@ function buildTask(taskType: string, status: Task['status']): Task {
   } as unknown as Task;
 }
 
-function renderDialog(task: Task, taskResult: TaskResult | null = null) {
+async function renderDialog(task: Task, taskResult: TaskResult | null = null) {
   return render(
     <MemoryRouter>
       <TaskDetailDialog
@@ -50,29 +49,25 @@ function renderDialog(task: Task, taskResult: TaskResult | null = null) {
   );
 }
 
-async function openDialog() {
-  await userEvent.click(screen.getByTestId('task-details-open-task-1'));
-}
-
 describe('TaskDetailDialog restart gating', () => {
   it('shows the Restart button for a failed model_download task', async () => {
-    renderDialog(buildTask('model_download', 'failed'));
-    await openDialog();
+    const screen = await renderDialog(buildTask('model_download', 'failed'));
+    await screen.getByTestId('task-details-open-task-1').click();
 
-    expect(screen.getByTestId('task-restart-task-1')).toBeInTheDocument();
+    await expect.element(screen.getByTestId('task-restart-task-1')).toBeInTheDocument();
   });
 
   it('hides the Restart button for a failed image_generation task', async () => {
-    renderDialog(buildTask('image_generation', 'failed'));
-    await openDialog();
+    const screen = await renderDialog(buildTask('image_generation', 'failed'));
+    await screen.getByTestId('task-details-open-task-1').click();
 
-    expect(screen.queryByTestId('task-restart-task-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('task-restart-task-1').query()).toBeNull();
   });
 
   it('hides the Restart button for a failed audio_transcription task', async () => {
-    renderDialog(buildTask('audio_transcription', 'failed'));
-    await openDialog();
+    const screen = await renderDialog(buildTask('audio_transcription', 'failed'));
+    await screen.getByTestId('task-details-open-task-1').click();
 
-    expect(screen.queryByTestId('task-restart-task-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('task-restart-task-1').query()).toBeNull();
   });
 });

@@ -1,10 +1,10 @@
 //! Rollout-backed [`AgentStorePort`] adapter — the true source for agent
 //! conversation and turn state.
 //!
-//! Slice 4 wired this adapter as the **only** `AgentStorePort` impl in the
-//! agent runtime. Slice E made the rollout JSONL the SOLE source: the legacy
+//! This adapter is the **only** `AgentStorePort` impl in the
+//! agent runtime. The rollout JSONL is the SOLE source: the legacy
 //! conversation + audit tables were dropped, the SQL read fallback + the startup
-//! backfill were removed. Slice E.2 finished the job: the three conversation
+//! backfill were removed. The three conversation
 //! methods (`insert_thread_message` / `list_thread_messages` /
 //! `upsert_turn_state`) were REMOVED from `AgentStorePort` (now pure metadata),
 //! and ALL conversation data flows out of slab-agent via its `EventMsg` protocol
@@ -13,7 +13,7 @@
 //! trait (read + out-of-band write for the `single_shot` Responses path) is
 //! implemented below.
 //!
-//! # Routing (Slice E.2 — rollout is the only source)
+//! # Routing (rollout is the only source)
 //! - **Thread metadata** (`upsert_thread` / `get_thread` / `list_session_threads` /
 //!   `update_thread_status` / `archive_thread`) → always `SqlxStore`
 //!   (`agent_threads` stays the metadata truth source). `upsert_thread` also
@@ -22,8 +22,8 @@
 //!   `list_session_threads[_filtered]` are the EXCEPTION: they read the DB
 //!   metadata list but then drop TRUE GHOSTS — threads the index claims are
 //!   `backfill_status = "completed"` whose rollout file has gone missing — and,
-//!   when the DB is unavailable, fall back to a best-effort filesystem scan
-//!   (Slice D2a). See [`RolloutBackedAgentStore::list_session_threads_filtered`].
+//!   when the DB is unavailable, fall back to a best-effort filesystem scan.
+//!   See [`RolloutBackedAgentStore::list_session_threads_filtered`].
 //! - **Conversation writes** (slab-agent turn loop) → `EventMsg`
 //!   (`MessageAppended` / `TurnStateChanged`) → rollout persistence observer →
 //!   rollout (`TurnContext`). `single_shot` writes out-of-band via
@@ -57,8 +57,8 @@ use crate::infra::db::repository::rollout_index::RolloutIndex;
 /// source, delegating only thread metadata to the SQL store.
 pub struct RolloutBackedAgentStore {
     /// SQL delegate for thread metadata (`agent_threads` is the metadata truth
-    /// source). Slice E dropped the legacy conversation/audit tables + the SQL
-    /// read fallback, so this delegate no longer serves conversation data.
+    /// source). The legacy conversation/audit tables + the SQL
+    /// read fallback were dropped, so this delegate no longer serves conversation data.
     sqlx: Arc<dyn AgentStorePort>,
     /// app-core-internal handle over the `rollout_session_index` table — backs
     /// the D2a list ghost-gate + the new-thread `backfill_status = "completed"`
@@ -66,7 +66,7 @@ pub struct RolloutBackedAgentStore {
     index: Arc<dyn RolloutIndex>,
     /// The append-only rollout true source.
     rollout: Arc<RolloutFileStore>,
-    /// Slice 11b rollout ↔ trace coordination: the directory where the agent
+    /// Rollout ↔ trace coordination directory: the directory where the agent
     /// trace artifacts (legacy per-session JSONL today; the W4 trace bundle
     /// once wired into bootstrap) live, stamped onto the ROOT thread's
     /// [`SessionMeta::trace_path`] so a diagnostic can jump from the rollout
@@ -80,7 +80,7 @@ impl RolloutBackedAgentStore {
     /// Wrap a SQL `AgentStorePort` delegate with a rollout true source, a
     /// [`RolloutIndex`] handle (both satisfied by `SqlxStore` in production),
     /// and an optional trace directory for [`SessionMeta::trace_path`]
-    /// coordination (Slice 11b). Pass `None` when agent debugging is off.
+    /// coordination. Pass `None` when agent debugging is off.
     pub fn new(
         sqlx: Arc<dyn AgentStorePort>,
         index: Arc<dyn RolloutIndex>,
@@ -94,7 +94,7 @@ impl RolloutBackedAgentStore {
     /// BOTH the agent runtime (`list_thread_messages` below) AND the agent-memory
     /// phase1 pipeline (`memory::build_phase1_input`).
     ///
-    /// Slice E: rollout is the ONLY source, so this flushes the recorder and
+    /// Rollout is the ONLY source, so this flushes the recorder and
     /// replays the rollout file. A missing rollout file (a brand-new thread
     /// before its first append) replays to an empty history — the de-facto
     /// behavior. The memory pipeline stamps `rollout_path` from
@@ -109,7 +109,7 @@ impl RolloutBackedAgentStore {
         Ok(replay_messages(thread_id, &lines))
     }
 
-    // ── Slice D2a: list dual-source scheduling (ghost exclusion + DB fallback) ──
+    // ── List dual-source scheduling (ghost exclusion + DB fallback) ──
 
     /// Drop TRUE GHOSTS from a DB-sourced thread list, logging each removal as a
     /// best-effort read-repair signal. See [`ThreadReadability::classify`] for
@@ -228,7 +228,7 @@ impl RolloutBackedAgentStore {
 /// realistic cluster of ghosts without 2x-ing an already-large query.
 const THREAD_LIST_OVERFETCH_PAD: usize = 64;
 
-/// Readability verdict for the list-path ghost gate (Slice D2a).
+/// Readability verdict for the list-path ghost gate.
 enum ThreadReadability {
     /// Keep the thread: rollout file present, OR a newborn native thread
     /// (`completed` + `line_count == 0`, empty but healthy), OR an index row
@@ -361,7 +361,7 @@ pub(crate) fn build_session_meta(
 ) -> SessionMeta {
     let config_json =
         serde_json::from_str(&snapshot.config_json).unwrap_or_else(|_| serde_json::json!({}));
-    // Slice 11b/0: stamp trace_path ONLY on a root thread (no parent). It points
+    // Stamp trace_path ONLY on a root thread (no parent). It points
     // at the per-root-thread bundle dir (NOT the legacy shared log dir) so it
     // matches the live sink's output. Child threads correlate back via
     // root_thread_id, so they carry None and inherit the pointer.
@@ -399,11 +399,11 @@ impl AgentStorePort for RolloutBackedAgentStore {
         if !self.rollout.file_exists(&snapshot.id).await {
             self.rollout.create_session(build_session_meta(snapshot, self.trace_dir.as_deref()));
         }
-        // Slice E: every thread is rollout-native now (the legacy conversation
+        // Every thread is rollout-native now (the legacy conversation
         // tables + the startup backfill are gone), so unconditionally stamp the
         // index row `backfill_status = "completed"` + `line_count = 0` (the
         // recorder's first append materializes the file + bumps line_count
-        // later). Pre-Slice-E this probed `thread_has_legacy_data` to avoid
+        // later). Previously this probed `thread_has_legacy_data` to avoid
         // orphaning a legacy prefix; that probe + the legacy tables are gone.
         //
         // The rollout file materializes (lazily) at the date-partitioned
@@ -551,7 +551,7 @@ impl AgentStorePort for RolloutBackedAgentStore {
     }
 }
 
-// ── Slice E.2: turn-state / turn-item reads AND the conversation read/write
+// ── Turn-state / turn-item reads AND the conversation read/write
 //    live on the app-core-internal `RolloutConversationStore` trait (slab-agent
 //    does not call them; only `HarnessService::thread/resume` + `single_shot`
 //    do). Rollout replay is the only source. The conversation-write arms are
@@ -797,7 +797,7 @@ mod tests {
     /// map drives the D2a list ghost-gate (the list-path readability classifier
     /// runs against this mock + the real `RolloutFileStore`).
     struct MockStore {
-        // Slice E.2: the conversation trait methods that read these moved off
+        // The conversation trait methods that read these moved off
         // `AgentStorePort` (the 3 conversation methods are gone from the trait).
         // Retained for direct-push seeding in tests; UNREAD since the reader
         // path now replays the rollout file. Allow dead_code.
@@ -913,7 +913,7 @@ mod tests {
         }
     }
 
-    // Slice E: list_turn_states / list_turn_items moved off `AgentStorePort`
+    // list_turn_states / list_turn_items moved off `AgentStorePort`
     // onto the app-core-internal `RolloutConversationStore` trait. The adapter
     // (`RolloutBackedAgentStore`) implements it above; `MockStore` is never cast
     // as `Arc<dyn RolloutConversationStore>` (production wires the adapter, not
@@ -991,8 +991,8 @@ mod tests {
         )
         .await
         .expect("insert message");
-        // Seed a TurnItem directly through the rollout (Slice E removed the
-        // adapter's `insert_turn_item`; production writes TurnItems via the
+        // Seed a TurnItem directly through the rollout (the
+        // adapter's `insert_turn_item` was removed; production writes TurnItems via the
         // rollout persistence observer, not the store trait).
         rollout
             .append(
@@ -1048,8 +1048,8 @@ mod tests {
         )
         .await
         .expect("insert message");
-        // Seed a TurnItem directly through the rollout (Slice E removed the
-        // adapter's `insert_turn_item`).
+        // Seed a TurnItem directly through the rollout (the
+        // adapter's `insert_turn_item` was removed).
         rollout
             .append(
                 "t-noflush",
@@ -1239,7 +1239,7 @@ mod tests {
             "F6: malformed blob preserved verbatim, not emptied"
         );
     }
-    // Slice 11b/0: a ROOT thread (no parent) upserted while a trace dir is
+    // A ROOT thread (no parent) upserted while a trace dir is
     // configured gets trace_path = Some(<per-root-thread bundle dir>) on its
     // SessionMeta; a CHILD thread (with a parent) gets None and is expected to
     // correlate back to its root thread's bundle via root_thread_id. The bundle
@@ -1280,7 +1280,7 @@ mod tests {
         );
     }
 
-    // Slice 11b: when no trace dir is configured (agent.debug off), even a root
+    // When no trace dir is configured (agent.debug off), even a root
     // thread gets trace_path = None — the coordination is opt-in.
     #[tokio::test]
     async fn no_trace_dir_means_no_trace_path_even_for_root() {
@@ -1296,7 +1296,7 @@ mod tests {
         );
     }
 
-    // Slice 0 consistency: the `trace_path` that `build_session_meta` stamps on
+    // Consistency check: the `trace_path` that `build_session_meta` stamps on
     // a root thread's SessionMeta MUST be the exact directory the live
     // `BundleAgentTraceSink` writes its bundle into. Both use the shared
     // `bundle_dir_for_root_thread` formula; this test pins them together so a
@@ -1359,7 +1359,7 @@ mod tests {
         assert!(child_meta.trace_path.is_none(), "child carries no trace_path");
     }
 
-    // ── Slice D2a: list dual-source scheduling (ghost exclusion + DB fallback) ──
+    // ── List dual-source scheduling (ghost exclusion + DB fallback) ──
     //
     // These tests exercise the REAL SqlxStore (sqlite::memory:, impls both
     // AgentStorePort + RolloutIndex) + a REAL RolloutFileStore over a tempdir,

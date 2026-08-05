@@ -1,5 +1,5 @@
-import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { renderHook } from "vitest-browser-react"
 
 import type { Thread } from "../../lib/harness"
 import { FakeWebSocket } from "../../lib/__tests__/fake-websocket"
@@ -60,384 +60,368 @@ describe("useHarnessConversation", () => {
   })
 
   it("restores a resumed thread into messages and binds the thread id", async () => {
-    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
 
-    await act(async () => {
-      await driveOpenAndInit()
-    })
-    await act(async () => {
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
-      await flush()
-    })
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(result.current.isHistoryLoading).toBe(false)
     })
     expect(result.current.restoredThreadId).toBe("hthread-1")
     expect(result.current.activeConversation).toBe("s1")
     expect(result.current.restoredMessages).toHaveLength(2)
     expect(result.current.error).toBeNull()
-    unmount()
+    await unmount()
   })
 
   it("treats a 'no thread to resume' rejection as a fresh session", async () => {
-    const { result, unmount } = renderHook(() => useHarnessConversation("s2", "m1"))
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s2", "m1"))
 
-    await act(async () => {
-      await driveOpenAndInit()
-    })
-    await act(async () => {
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcError(req.id, "no thread to resume for session"))
-      await flush()
-    })
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcError(req.id, "no thread to resume for session"))
+    await flush()
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(result.current.isHistoryLoading).toBe(false)
     })
     expect(result.current.restoredThreadId).toBeNull()
     expect(result.current.restoredMessages).toHaveLength(0)
     expect(result.current.error).toBeNull()
-    unmount()
+    await unmount()
   })
 
   it("surfaces an unexpected resume error", async () => {
-    const { result, unmount } = renderHook(() => useHarnessConversation("s3", "m1"))
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s3", "m1"))
 
-    await act(async () => {
-      await driveOpenAndInit()
-    })
-    await act(async () => {
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcError(req.id, "internal boom"))
-      await flush()
-    })
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcError(req.id, "internal boom"))
+    await flush()
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(result.current.error).toContain("internal boom")
     })
     expect(result.current.isHistoryLoading).toBe(false)
-    unmount()
+    await unmount()
   })
 
   it("tracks a command-execution approval request and ignores other threads", async () => {
-    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
-    await act(async () => {
-      await driveOpenAndInit()
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
-      await flush()
-    })
-    await waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
 
     // Approval for the bound thread → tracked.
-    await act(async () => {
-      FakeWebSocket.last!.simMessage(
-        notification("item/commandExecution/requestApproval", {
-          threadId: "hthread-1",
-          turnId: "1",
-          itemId: "call-1",
-          command: "echo hi",
-          cwd: "/tmp",
-          reason: "shell",
-          category: "shell",
-          allowedScopes: ["run_once", "always_in_workspace"],
-        }),
-      )
-      await flush()
-    })
-    expect(result.current.approvals).toHaveLength(1)
+    FakeWebSocket.last!.simMessage(
+      notification("item/commandExecution/requestApproval", {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "call-1",
+        command: "echo hi",
+        cwd: "/tmp",
+        reason: "shell",
+        category: "shell",
+        allowedScopes: ["run_once", "always_in_workspace"],
+      }),
+    )
+    await flush()
+    await vi.waitFor(() => expect(result.current.approvals).toHaveLength(1))
     expect(result.current.approvals[0]).toMatchObject({ itemId: "call-1", command: "echo hi", status: "pending" })
     expect(result.current.approvalStatusByItemId.get("call-1")).toBe("pending")
 
     // Approval for a different thread → ignored.
-    await act(async () => {
-      FakeWebSocket.last!.simMessage(
-        notification("item/commandExecution/requestApproval", {
-          threadId: "other-thread",
-          turnId: "1",
-          itemId: "call-2",
-          command: "rm -rf /",
-          cwd: "/",
-        }),
-      )
-      await flush()
-    })
+    FakeWebSocket.last!.simMessage(
+      notification("item/commandExecution/requestApproval", {
+        threadId: "other-thread",
+        turnId: "1",
+        itemId: "call-2",
+        command: "rm -rf /",
+        cwd: "/",
+      }),
+    )
+    await flush()
     expect(result.current.approvals).toHaveLength(1)
-    unmount()
+    await unmount()
   })
 
   it("resolves an approval optimistically and keeps it approved when delivered", async () => {
-    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
-    await act(async () => {
-      await driveOpenAndInit()
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
-      await flush()
-    })
-    await act(async () => {
-      FakeWebSocket.last!.simMessage(
-        notification("item/commandExecution/requestApproval", {
-          threadId: "hthread-1",
-          turnId: "1",
-          itemId: "call-1",
-          command: "echo hi",
-          cwd: "/tmp",
-        }),
-      )
-      await flush()
-    })
+    const { result, act, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+    FakeWebSocket.last!.simMessage(
+      notification("item/commandExecution/requestApproval", {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "call-1",
+        command: "echo hi",
+        cwd: "/tmp",
+      }),
+    )
+    await flush()
+    await vi.waitFor(() => expect(result.current.approvals).toHaveLength(1))
 
+    let p!: Promise<void>
     await act(async () => {
-      const p = result.current.resolveApproval("call-1", true, "run_once")
+      p = result.current.resolveApproval("call-1", true, "run_once")
       await flush()
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      expect(req.method).toBe("approval/resolve")
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { delivered: true, status: "approved" }))
-      await flush()
-      await expect(p).resolves.toBeUndefined()
     })
+    const resolveReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    expect(resolveReq.method).toBe("approval/resolve")
+    await act(async () => {
+      FakeWebSocket.last!.simMessage(rpcResponse(resolveReq.id, { delivered: true, status: "approved" }))
+      await flush()
+    })
+    await expect(p).resolves.toBeUndefined()
     // Approved ⇒ no longer in the pending list, but status map records it.
-    expect(result.current.approvals).toHaveLength(0)
+    await vi.waitFor(() => expect(result.current.approvals).toHaveLength(0))
     expect(result.current.approvalStatusByItemId.get("call-1")).toBe("approved")
-    unmount()
+    await unmount()
   })
 
   it("reverts to pending and rejects when delivery failed (delivered=false)", async () => {
-    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
-    await act(async () => {
-      await driveOpenAndInit()
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
-      await flush()
-    })
-    await act(async () => {
-      FakeWebSocket.last!.simMessage(
-        notification("item/commandExecution/requestApproval", {
-          threadId: "hthread-1",
-          turnId: "1",
-          itemId: "call-1",
-          command: "echo hi",
-          cwd: "/tmp",
-        }),
-      )
-      await flush()
-    })
+    const { result, act, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+    FakeWebSocket.last!.simMessage(
+      notification("item/commandExecution/requestApproval", {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "call-1",
+        command: "echo hi",
+        cwd: "/tmp",
+      }),
+    )
+    await flush()
+    await vi.waitFor(() => expect(result.current.approvals).toHaveLength(1))
 
     // Capture the rejection as a resolution immediately (attached before the
     // response arrives) so it is never momentarily unhandled, and so the
     // assertion stays lint-clean (no un-awaited `.rejects`).
     let captured: unknown
+    let p!: Promise<void>
     await act(async () => {
-      const p = result.current.resolveApproval("call-1", true, "run_once")
-      const capturedPromise = p.then(
-        () => new Error("expected resolveApproval to reject, but it resolved"),
-        (err: unknown) => err,
-      )
+      p = result.current.resolveApproval("call-1", true, "run_once")
       await flush()
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { delivered: false }))
-      captured = await capturedPromise
     })
+    const capturedPromise = p.then(
+      () => new Error("expected resolveApproval to reject, but it resolved"),
+      (err: unknown) => err,
+    )
+    const resolveReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    await act(async () => {
+      FakeWebSocket.last!.simMessage(rpcResponse(resolveReq.id, { delivered: false }))
+      await flush()
+    })
+    captured = await capturedPromise
     expect(String(captured)).toContain("approval not delivered")
-    expect(result.current.approvalStatusByItemId.get("call-1")).toBe("pending")
+    await vi.waitFor(() =>
+      expect(result.current.approvalStatusByItemId.get("call-1")).toBe("pending"),
+    )
     expect(result.current.approvals).toHaveLength(1)
-    unmount()
+    await unmount()
   })
 
   it("accumulates live command output under the 256 KiB per-item cap", async () => {
-    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
-    await act(async () => {
-      await driveOpenAndInit()
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
-      await flush()
-    })
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
 
-    await act(async () => {
-      FakeWebSocket.last!.simMessage(
-        notification("item/commandExecution/outputDelta", {
-          threadId: "hthread-1",
-          turnId: "1",
-          itemId: "call-1",
-          delta: "part-1\n",
-        }),
-      )
-      await flush()
-      FakeWebSocket.last!.simMessage(
-        notification("item/commandExecution/outputDelta", {
-          threadId: "hthread-1",
-          turnId: "1",
-          itemId: "call-1",
-          delta: "part-2\n",
-        }),
-      )
-      await flush()
-    })
-    expect(result.current.liveOutputByItemId.get("call-1")).toBe("part-1\npart-2\n")
+    FakeWebSocket.last!.simMessage(
+      notification("item/commandExecution/outputDelta", {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "call-1",
+        delta: "part-1\n",
+      }),
+    )
+    await flush()
+    FakeWebSocket.last!.simMessage(
+      notification("item/commandExecution/outputDelta", {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "call-1",
+        delta: "part-2\n",
+      }),
+    )
+    await flush()
+    await vi.waitFor(() =>
+      expect(result.current.liveOutputByItemId.get("call-1")).toBe("part-1\npart-2\n"),
+    )
 
     // A delta that would exceed the 256 KiB cap is dropped (existing output kept).
     const over = "x".repeat(256 * 1024 + 8)
-    await act(async () => {
-      FakeWebSocket.last!.simMessage(
-        notification("item/commandExecution/outputDelta", {
-          threadId: "hthread-1",
-          turnId: "1",
-          itemId: "call-1",
-          delta: over,
-        }),
-      )
-      await flush()
-    })
+    FakeWebSocket.last!.simMessage(
+      notification("item/commandExecution/outputDelta", {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "call-1",
+        delta: over,
+      }),
+    )
+    await flush()
     expect(result.current.liveOutputByItemId.get("call-1")).toBe("part-1\npart-2\n")
 
     // Output for a different thread is ignored.
-    await act(async () => {
-      FakeWebSocket.last!.simMessage(
-        notification("item/commandExecution/outputDelta", {
-          threadId: "other",
-          turnId: "1",
-          itemId: "call-1",
-          delta: "ignored",
-        }),
-      )
-      await flush()
-    })
+    FakeWebSocket.last!.simMessage(
+      notification("item/commandExecution/outputDelta", {
+        threadId: "other",
+        turnId: "1",
+        itemId: "call-1",
+        delta: "ignored",
+      }),
+    )
+    await flush()
     expect(result.current.liveOutputByItemId.get("call-1")).toBe("part-1\npart-2\n")
-    unmount()
+    await unmount()
   })
 
   it("resets approval + live-output state when the session changes", async () => {
-    const { result, rerender, unmount } = renderHook(({ sid }) => useHarnessConversation(sid, "m1"), {
-      initialProps: { sid: "s1" as string | undefined },
-    })
-    await act(async () => {
-      await driveOpenAndInit()
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
-      await flush()
-    })
-    await act(async () => {
-      FakeWebSocket.last!.simMessage(
-        notification("item/commandExecution/requestApproval", {
-          threadId: "hthread-1",
-          turnId: "1",
-          itemId: "call-1",
-          command: "echo hi",
-          cwd: "/tmp",
-        }),
-      )
-      await flush()
-    })
-    expect(result.current.approvals).toHaveLength(1)
+    const { result, rerender, unmount } = await renderHook(
+      ({ sid }) => useHarnessConversation(sid, "m1"),
+      {
+        initialProps: { sid: "s1" as string | undefined },
+      },
+    )
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+    FakeWebSocket.last!.simMessage(
+      notification("item/commandExecution/requestApproval", {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "call-1",
+        command: "echo hi",
+        cwd: "/tmp",
+      }),
+    )
+    await flush()
+    await vi.waitFor(() => expect(result.current.approvals).toHaveLength(1))
 
     const beforeVersion = result.current.restoreVersion
     // Switch to a fresh session: state must reset and restoreVersion bump.
-    rerender({ sid: undefined })
-    await waitFor(() => expect(result.current.restoreVersion).not.toBe(beforeVersion))
+    await rerender({ sid: undefined })
+    await vi.waitFor(() => expect(result.current.restoreVersion).not.toBe(beforeVersion))
     expect(result.current.approvals).toHaveLength(0)
     expect(result.current.liveOutputByItemId.size).toBe(0)
-    unmount()
+    await unmount()
   })
 
   it("forks the current thread and rebinds the socket to the child", async () => {
-    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
-    await act(async () => {
-      await driveOpenAndInit()
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
-      await flush()
-    })
-    await waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+    const { result, act, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
 
     const CHILD: Thread = { ...THREAD, id: "hthread-child", createdAt: 123 }
 
+    let p!: Promise<void>
     await act(async () => {
-      const p = result.current.forkThread()
+      p = result.current.forkThread()
       await flush()
-      // thread/fork → returns the child thread (the hook only consumes child.id).
-      const forkReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      expect(forkReq.method).toBe("thread/fork")
+    })
+    // thread/fork → returns the child thread (the hook only consumes child.id).
+    const forkReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    expect(forkReq.method).toBe("thread/fork")
+    await act(async () => {
       FakeWebSocket.last!.simMessage(rpcResponse(forkReq.id, { thread: CHILD }))
       await flush()
-      // thread/resume of the child → returns the child's copied history.
-      const resumeReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      expect(resumeReq.method).toBe("thread/resume")
-      expect(resumeReq.params).toMatchObject({ threadId: "hthread-child" })
+    })
+    // thread/resume of the child → returns the child's copied history.
+    const resumeReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    expect(resumeReq.method).toBe("thread/resume")
+    expect(resumeReq.params).toMatchObject({ threadId: "hthread-child" })
+    await act(async () => {
       FakeWebSocket.last!.simMessage(rpcResponse(resumeReq.id, { thread: CHILD }))
+      await flush()
       await p
     })
 
-    expect(result.current.restoredThreadId).toBe("hthread-child")
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-child"))
     expect(result.current.isForking).toBe(false)
     expect(result.current.error).toBeNull()
     expect(result.current.restoredMessages).toHaveLength(2)
-    unmount()
+    await unmount()
   })
 
   it("maps user messages to their turn index after restore", async () => {
-    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
-    await act(async () => {
-      await driveOpenAndInit()
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
-      await flush()
-    })
-    await waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
     // THREAD's single user message (u1) lives in turn 0.
     expect(result.current.userMessageTurnIndex.get("u1")).toBe(0)
-    unmount()
+    await unmount()
   })
 
   it("retracts a turn via thread/rollback and re-resumes the thread", async () => {
-    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
-    await act(async () => {
-      await driveOpenAndInit()
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
-      await flush()
-    })
-    await waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+    const { result, act, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
 
     const emptied: Thread = { ...THREAD, turns: [] }
+    let p!: Promise<void>
     await act(async () => {
-      const p = result.current.rollbackFromTurn(2)
+      p = result.current.rollbackFromTurn(2)
       await flush()
-      // thread/rollback keeps turns 0..turnIndex-1 (toTurnId = "1").
-      const rbReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      expect(rbReq.method).toBe("thread/rollback")
-      expect(rbReq.params).toMatchObject({ threadId: "hthread-1", toTurnId: "1" })
+    })
+    // thread/rollback keeps turns 0..turnIndex-1 (toTurnId = "1").
+    const rbReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    expect(rbReq.method).toBe("thread/rollback")
+    expect(rbReq.params).toMatchObject({ threadId: "hthread-1", toTurnId: "1" })
+    await act(async () => {
       FakeWebSocket.last!.simMessage(rpcResponse(rbReq.id, { thread: emptied }))
       await flush()
-      // then a re-resume refreshes the message list.
-      const resumeReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      expect(resumeReq.method).toBe("thread/resume")
+    })
+    // then a re-resume refreshes the message list.
+    const resumeReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    expect(resumeReq.method).toBe("thread/resume")
+    await act(async () => {
       FakeWebSocket.last!.simMessage(rpcResponse(resumeReq.id, { thread: emptied }))
+      await flush()
       await p
     })
 
-    expect(result.current.isRollingBack).toBe(false)
+    await vi.waitFor(() => expect(result.current.isRollingBack).toBe(false))
     expect(result.current.error).toBeNull()
     expect(result.current.restoredMessages).toHaveLength(0)
-    unmount()
+    await unmount()
   })
 
   it("treats rollback for turn 0 as a no-op (nothing before it to keep)", async () => {
-    const { result, unmount } = renderHook(() => useHarnessConversation("s1", "m1"))
-    await act(async () => {
-      await driveOpenAndInit()
-      const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
-      FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
-      await flush()
-    })
-    await waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
 
     const sentBefore = FakeWebSocket.last!.sent.length
-    await act(async () => {
-      await result.current.rollbackFromTurn(0)
-    })
+    await result.current.rollbackFromTurn(0)
     expect(FakeWebSocket.last!.sent.length).toBe(sentBefore)
-    unmount()
+    await unmount()
   })
 })

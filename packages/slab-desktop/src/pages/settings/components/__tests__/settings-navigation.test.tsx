@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { userEvent } from 'vitest/browser';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { render } from 'vitest-browser-react';
 
 import { SettingsNavigation } from '../settings-navigation';
 
@@ -23,31 +23,34 @@ const sections = [
 ] as never;
 
 describe('SettingsNavigation', () => {
-  it('renders a nav entry per section', () => {
-    render(
+  it('renders a nav entry per section', async () => {
+    const screen = await render(
       <SettingsNavigation activeSectionId="general" sections={sections} onSelectSection={vi.fn<(id: string) => void>()} />,
     );
 
-    expect(screen.getByRole('button', { name: /General/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Models$/ })).toBeInTheDocument();
+    await expect.element(screen.getByRole('button', { name: /General/ })).toBeInTheDocument();
+    await expect.element(screen.getByRole('button', { name: /^Models$/ })).toBeInTheDocument();
   });
 
   it('reports the selected section on click', async () => {
-    const user = userEvent.setup();
     const onSelectSection = vi.fn<(id: string) => void>();
-    render(<SettingsNavigation activeSectionId="general" sections={sections} onSelectSection={onSelectSection} />);
+    const screen = await render(
+      <SettingsNavigation activeSectionId="general" sections={sections} onSelectSection={onSelectSection} />,
+    );
 
-    await user.click(screen.getByRole('button', { name: /^Models$/ }));
+    await userEvent.click(screen.getByRole('button', { name: /^Models$/ }));
 
     expect(onSelectSection).toHaveBeenCalledExactlyOnceWith('models');
   });
 
-  it('shows the property-count badge only for the active section', () => {
-    render(<SettingsNavigation activeSectionId="models" sections={sections} onSelectSection={vi.fn<(id: string) => void>()} />);
+  it('shows the property-count badge only for the active section', async () => {
+    const screen = await render(
+      <SettingsNavigation activeSectionId="models" sections={sections} onSelectSection={vi.fn<(id: string) => void>()} />,
+    );
 
-    const activeButton = screen.getByRole('button', { name: /Models/ });
-    const inactiveButton = screen.getByRole('button', { name: /General/ });
-    expect(activeButton.querySelector('[data-testid="count-badge"]')).not.toBeNull();
-    expect(inactiveButton.querySelector('[data-testid="count-badge"]')).toBeNull();
+    const activeButton = screen.getByRole('button', { name: /Models/ }).element();
+    const inactiveButton = screen.getByRole('button', { name: /General/ }).element();
+    expect(activeButton?.querySelector('[data-testid="count-badge"]')).not.toBeNull();
+    expect(inactiveButton?.querySelector('[data-testid="count-badge"]')).toBeNull();
   });
 });

@@ -2,8 +2,8 @@
 //! slab-owned agent domain events into the canonical
 //! [`slab_proto::openai::Response`] wire/persistence type.
 //!
-//! Lives inside the [`ResponseService`](super::ResponseService) module (slice
-//! 1e) so the HTTP handler (immediate non-streaming POST return) and the
+//! Lives inside the [`ResponseService`](super::ResponseService) module so the
+//! HTTP handler (immediate non-streaming POST return) and the
 //! response-persistence observer (run completion) share one assembler.
 //!
 //! Boundary rules (unchanged from the original adapter):

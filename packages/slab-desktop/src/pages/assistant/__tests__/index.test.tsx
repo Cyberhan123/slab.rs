@@ -1,7 +1,7 @@
 import type { UIMessage } from "ai"
 import type { ReactNode } from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import { render } from "vitest-browser-react"
+import { userEvent } from "vitest/browser"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { MemoryRouter } from "react-router-dom"
@@ -111,6 +111,7 @@ vi.mock("@slab/i18n", () => ({
       {values ? ` ${Object.values(values).join(" ")}` : ""}
     </span>
   ),
+  translateServerField: (_i18n: unknown, _field: unknown, fallback: string) => fallback,
   useTranslation: () => ({
     t: mocks.translate,
   }),
@@ -288,7 +289,7 @@ function restoredMessages(): UIMessage[] {
   ]
 }
 
-function renderAssistant() {
+async function renderAssistant() {
   return render(
     <HeaderProvider>
       <MemoryRouter>
@@ -321,34 +322,35 @@ describe("Assistant page session and model lifecycle", () => {
   })
 
   it("restores the current session and renders restored messages", async () => {
-    renderAssistant()
+    const screen = await renderAssistant()
 
-    expect(await screen.findByText("previous prompt")).toBeInTheDocument()
-    expect(screen.getByText("previous answer")).toBeInTheDocument()
+    await expect.element(screen.getByText("previous prompt")).toBeInTheDocument()
+    await expect.element(screen.getByText("previous answer")).toBeInTheDocument()
   })
 
   it("opens the session sheet from the header history button and selects sessions", async () => {
-    renderAssistant()
+    const screen = await renderAssistant()
 
-    await screen.findByText("previous answer")
+    await expect.element(screen.getByText("previous answer")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("header-history-control"))
+    await screen.getByTestId("header-history-control").click()
 
-    expect(screen.getByTestId("assistant-session-sheet")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("assistant-session-select-session-b"))
+    await expect.element(screen.getByTestId("assistant-session-sheet")).toBeInTheDocument()
+    await screen.getByTestId("assistant-session-select-session-b").click()
 
     expect(mocks.setCurrentSessionId).toHaveBeenCalledWith("session-b")
   })
 
   it("prepares the model before sending in a restored session", async () => {
-    const user = userEvent.setup()
-    renderAssistant()
+    const screen = await renderAssistant()
 
-    await screen.findByText("previous answer")
-    await user.type(screen.getByLabelText("Message"), "continue restored")
-    await user.click(screen.getByRole("button", { name: "Send" }))
+    await expect.element(screen.getByText("previous answer")).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText("Message"), "continue restored")
+    await userEvent.click(screen.getByRole("button", { name: "Send" }))
 
-    await waitFor(() => expect(mocks.ensureDownloaded).not.toHaveBeenCalled())
+    await vi.waitFor(() => {
+      expect(mocks.ensureDownloaded).not.toHaveBeenCalled()
+    })
     expect(mocks.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ text: "continue restored" }),
     )
@@ -357,45 +359,47 @@ describe("Assistant page session and model lifecycle", () => {
   it("switches models immediately when the current session has no messages", async () => {
     mocks.harnessConversation.restoredMessages = []
 
-    renderAssistant()
+    const screen = await renderAssistant()
 
-    fireEvent.click(screen.getByText("Model B"))
+    await screen.getByText("Model B").click()
 
     expect(mocks.setSelectedModelId).toHaveBeenCalledWith("model-b")
-    expect(screen.queryByText("pages.assistant.dialog.title")).not.toBeInTheDocument()
+    expect(screen.getByText("pages.assistant.dialog.title").query()).toBeNull()
   })
 
   it("asks how to switch models when the current session has messages", async () => {
-    renderAssistant()
+    const screen = await renderAssistant()
 
-    await screen.findByText("previous answer")
-    fireEvent.click(screen.getByText("Model B"))
+    await expect.element(screen.getByText("previous answer")).toBeInTheDocument()
+    await screen.getByText("Model B").click()
 
-    expect(screen.getByText("pages.assistant.dialog.title")).toBeInTheDocument()
+    await expect.element(screen.getByText("pages.assistant.dialog.title")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "pages.assistant.dialog.keepTitle" }))
+    await screen.getByRole("button", { name: "pages.assistant.dialog.keepTitle" }).click()
     expect(mocks.setSelectedModelId).toHaveBeenCalledWith("model-b")
   })
 
   it("creates a new session before switching models from a populated session", async () => {
-    renderAssistant()
+    const screen = await renderAssistant()
 
-    await screen.findByText("previous answer")
-    fireEvent.click(screen.getByText("Model B"))
-    fireEvent.click(screen.getByRole("button", { name: "pages.assistant.dialog.createTitle" }))
+    await expect.element(screen.getByText("previous answer")).toBeInTheDocument()
+    await screen.getByText("Model B").click()
+    await screen.getByRole("button", { name: "pages.assistant.dialog.createTitle" }).click()
 
-    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledWith({ select: true }))
+    await vi.waitFor(() => expect(mocks.createSession).toHaveBeenCalledWith({ select: true }))
     expect(mocks.setSelectedModelId).toHaveBeenCalledWith("model-b")
   })
 
   it("blocks model switching while session restore is still busy", async () => {
     mocks.harnessConversation.isHistoryLoading = true
 
-    renderAssistant()
+    const screen = await renderAssistant()
 
-    fireEvent.click(screen.getByRole("button", { name: "model-select" }))
-
-    expect(screen.queryByText("Model B")).not.toBeInTheDocument()
+    // While history is loading the model picker is disabled, so its options
+    // (e.g. "Model B") stay hidden. Browser mode's actionability checks reject
+    // clicking a disabled control, so assert the disabled state directly.
+    await expect.element(screen.getByRole("button", { name: "model-select" })).toBeDisabled()
+    expect(screen.getByText("Model B").query()).toBeNull()
 
     mocks.harnessConversation.isHistoryLoading = false
   })

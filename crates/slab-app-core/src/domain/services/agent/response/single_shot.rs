@@ -1,6 +1,6 @@
 //! Single-shot Model orchestration for `/responses`.
 //!
-//! Slice C2 turns `/responses` into a standalone single-shot Model: one LLM call
+//! `/responses` is a standalone single-shot Model: one LLM call
 //! via `llm-service`, OpenAI Responses wire produced by feeding *synthesized*
 //! [`AgentEventKind`] envelopes into the existing pure projections
 //! ([`super::projection::build_response`] / [`super::stream::envelope_to_events`]).
@@ -13,7 +13,7 @@
 //! - the orchestration helpers (resolve model → route → call `llm-service` →
 //!   persist) invoked by `ResponseService`.
 //!
-//! See `slab-agent-3-snuggly-eich.md` (slice C2) for the design.
+//! See `slab-agent-3-snuggly-eich.md` for the design.
 
 use chrono::Utc;
 use futures::stream::{self, BoxStream, StreamExt};
@@ -475,7 +475,7 @@ async fn persist_input(
             .await?;
     }
     for msg in &input.new_user_messages {
-        // Slice E.2 (option c): single_shot has NO turn loop and emits NO
+        // single_shot has NO turn loop and emits NO
         // `EventMsg`, so it is NOT an agent thread and the rollout persistence
         // observer never runs for it. Its conversation writes flow directly
         // through the `RolloutConversationStore::append_message` trait (the
@@ -502,7 +502,7 @@ async fn persist_assistant_and_complete(
     match outcome {
         SingleShotOutcome::Completed { text, tool_calls, .. } => {
             let text = text.clone().unwrap_or_default();
-            // Slice E.2 (option c): single_shot writes out-of-band via the
+            // single_shot writes out-of-band via the
             // `RolloutConversationStore` trait (no EventMsg, no observer).
             core.reader()
                 .append_message(&ThreadMessageRecord {

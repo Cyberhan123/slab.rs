@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { userEvent } from 'vitest/browser';
+import { render } from 'vitest-browser-react';
 import type { ChangeEvent, ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -48,12 +48,19 @@ vi.mock('@slab/components/input', () => ({
     type,
     onChange,
     disabled,
+    ...rest
   }: {
     id?: string;
     type?: string;
     onChange?: (event: ChangeEvent<HTMLInputElement>) => void;
     disabled?: boolean;
-  }) => <input aria-label="import-input" id={id} type={type} onChange={onChange} disabled={disabled} />,
+  } & Record<string, unknown>) => (
+    // Forward all extra props (incl. data-testid / accept) so the real file
+    // <input type="file"> stays actionable for Playwright's setInputFiles. Do
+    // NOT set aria-label here: it would override the <Label htmlFor> accessible
+    // name and break getByLabelText queries that rely on the label association.
+    <input id={id} type={type} onChange={onChange} disabled={disabled} {...rest} />
+  ),
 }));
 
 vi.mock('@slab/components/label', () => ({
@@ -90,27 +97,25 @@ function baseProps(overrides: Record<string, unknown> = {}) {
 }
 
 describe('ImportPluginPackDialog', () => {
-  it('renders nothing when closed', () => {
-    render(<ImportPluginPackDialog {...baseProps({ open: false })} />);
+  it('renders nothing when closed', async () => {
+    const screen = await render(<ImportPluginPackDialog {...baseProps({ open: false })} />);
 
-    expect(screen.queryByTestId('plugin-import-submit-button')).not.toBeInTheDocument();
+    await expect.element(screen.getByTestId('plugin-import-submit-button')).not.toBeInTheDocument();
   });
 
   it('uploads the selected file', async () => {
-    const user = userEvent.setup();
     const setImportFile = vi.fn<(file: File | null) => void>();
-    render(<ImportPluginPackDialog {...baseProps({ setImportFile })} />);
+    const screen = await render(<ImportPluginPackDialog {...baseProps({ setImportFile })} />);
 
     const file = new File(['pack'], 'pack.plugin.slab');
-    await user.upload(screen.getByLabelText('pages.plugins.dialogs.import.packLabel'), file);
+    await userEvent.upload(screen.getByLabelText('pages.plugins.dialogs.import.packLabel'), file);
 
     expect(setImportFile).toHaveBeenCalledExactlyOnceWith(file);
   });
 
   it('toggles the reviewed-permissions checkbox', async () => {
-    const user = userEvent.setup();
     const onReviewedPermissionsChange = vi.fn<(reviewed: boolean) => void>();
-    render(
+    const screen = await render(
       <ImportPluginPackDialog
         {...baseProps({
           selectedFileName: 'pack.plugin.slab',
@@ -120,22 +125,21 @@ describe('ImportPluginPackDialog', () => {
       />,
     );
 
-    await user.click(screen.getByTestId('plugin-permissions-reviewed-checkbox'));
+    await userEvent.click(screen.getByTestId('plugin-permissions-reviewed-checkbox'));
 
     expect(onReviewedPermissionsChange).toHaveBeenCalledExactlyOnceWith(true);
   });
 
   it('submits and cancels the import', async () => {
-    const user = userEvent.setup();
     const onImport = vi.fn<() => void>();
     const onCancelImport = vi.fn<() => void>();
-    const { rerender } = render(<ImportPluginPackDialog {...baseProps({ onImport })} />);
+    const screen = await render(<ImportPluginPackDialog {...baseProps({ onImport })} />);
 
-    await user.click(screen.getByTestId('plugin-import-submit-button'));
+    await userEvent.click(screen.getByTestId('plugin-import-submit-button'));
     expect(onImport).toHaveBeenCalledOnce();
 
-    rerender(<ImportPluginPackDialog {...baseProps({ importPending: true, onCancelImport })} />);
-    await user.click(screen.getByTestId('plugin-import-cancel-button'));
+    await screen.rerender(<ImportPluginPackDialog {...baseProps({ importPending: true, onCancelImport })} />);
+    await userEvent.click(screen.getByTestId('plugin-import-cancel-button'));
     expect(onCancelImport).toHaveBeenCalledOnce();
   });
 });

@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
+import { userEvent } from "vitest/browser"
 import { describe, expect, it, vi } from "vitest"
+import { render } from "vitest-browser-react"
 
 import { setupSlabI18nMock } from "@slab/test-utils/mocks"
 
@@ -74,8 +74,8 @@ const conversations = [
 ]
 
 describe("AssistantSessionSheet", () => {
-  it("renders a row per conversation", () => {
-    render(
+  it("renders a row per conversation", async () => {
+    const screen = await render(
       <AssistantSessionSheet
         open
         onOpenChange={vi.fn<(open: boolean) => void>()}
@@ -86,13 +86,13 @@ describe("AssistantSessionSheet", () => {
       />,
     )
 
-    expect(screen.getByTestId("assistant-session-row-k1")).toBeInTheDocument()
-    expect(screen.getByTestId("assistant-session-row-k2")).toBeInTheDocument()
-    expect(screen.getByTestId("assistant-session-row-k3")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-session-row-k1")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-session-row-k2")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-session-row-k3")).toBeInTheDocument()
   })
 
-  it("marks only the current conversation with the current badge", () => {
-    render(
+  it("marks only the current conversation with the current badge", async () => {
+    const screen = await render(
       <AssistantSessionSheet
         open
         onOpenChange={vi.fn<(open: boolean) => void>()}
@@ -105,14 +105,13 @@ describe("AssistantSessionSheet", () => {
 
     const currentRow = screen.getByTestId("assistant-session-row-k2")
     const otherRow = screen.getByTestId("assistant-session-row-k1")
-    expect(currentRow.textContent).toContain("pages.assistant.sessionSheet.current")
-    expect(otherRow.textContent).not.toContain("pages.assistant.sessionSheet.current")
+    expect(currentRow.element().textContent).toContain("pages.assistant.sessionSheet.current")
+    expect(otherRow.element().textContent).not.toContain("pages.assistant.sessionSheet.current")
   })
 
   it("selects a conversation when its row is clicked", async () => {
-    const user = userEvent.setup()
     const onSelect = vi.fn<(key: string) => void>()
-    render(
+    const screen = await render(
       <AssistantSessionSheet
         open
         onOpenChange={vi.fn<(open: boolean) => void>()}
@@ -123,15 +122,14 @@ describe("AssistantSessionSheet", () => {
       />,
     )
 
-    await user.click(screen.getByTestId("assistant-session-select-k2"))
+    await userEvent.click(screen.getByTestId("assistant-session-select-k2"))
 
     expect(onSelect).toHaveBeenCalledExactlyOnceWith("k2")
   })
 
   it("deletes a conversation from the actions menu", async () => {
-    const user = userEvent.setup()
     const onDelete = vi.fn<(key: string) => void>()
-    render(
+    const screen = await render(
       <AssistantSessionSheet
         open
         onOpenChange={vi.fn<(open: boolean) => void>()}
@@ -142,13 +140,13 @@ describe("AssistantSessionSheet", () => {
       />,
     )
 
-    await user.click(screen.getByTestId("assistant-session-delete-k3"))
+    await userEvent.click(screen.getByTestId("assistant-session-delete-k3"))
 
     expect(onDelete).toHaveBeenCalledExactlyOnceWith("k3")
   })
 
-  it("disables every trigger while busy", () => {
-    render(
+  it("disables every trigger while busy", async () => {
+    const screen = await render(
       <AssistantSessionSheet
         open
         onOpenChange={vi.fn<(open: boolean) => void>()}
@@ -160,7 +158,7 @@ describe("AssistantSessionSheet", () => {
       />,
     )
 
-    expect(screen.getByTestId("assistant-session-select-k1")).toBeDisabled()
-    expect(screen.getByTestId("assistant-session-actions-k1")).toBeDisabled()
+    await expect.element(screen.getByTestId("assistant-session-select-k1")).toBeDisabled()
+    await expect.element(screen.getByTestId("assistant-session-actions-k1")).toBeDisabled()
   })
 })

@@ -1,5 +1,5 @@
-import { act, renderHook } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { renderHook } from "vitest-browser-react"
+import { beforeAll, describe, expect, it, vi } from "vitest"
 
 import type { WorkspaceFileContent } from "@/lib/workspace-bridge"
 
@@ -29,7 +29,16 @@ vi.mock("../../lib/workspace-editor", () => ({
 import { useWorkspaceEditorDirty } from "../use-workspace-editor-dirty"
 
 describe("useWorkspaceEditorDirty", () => {
-  it("is never dirty when no workspace is open (no editor, no watcher)", () => {
+  // The hook installs its watcher via a fire-and-forget
+  // `import("../lib/workspace-editor")`. In browser mode that dynamic import is
+  // served by the Vite dev server on a macrotask, so without warming it only
+  // resolves during teardown and the watcher never attaches in time. Awaiting the
+  // mocked module here caches it so the hook's import resolves on a microtask.
+  beforeAll(async () => {
+    await import("../../lib/workspace-editor")
+  })
+
+  it("is never dirty when no workspace is open (no editor, no watcher)", async () => {
     // workspaceRoot === null -> the VS Code watcher never starts and there is no
     // editor surface, so the file can never be dirty regardless of selection.
     const initial: { props: DirtyProps } = {
@@ -38,14 +47,17 @@ describe("useWorkspaceEditorDirty", () => {
         selectedFile: makeFile("original"),
       },
     }
-    const { result, rerender } = renderHook(
+    const { result, rerender } = await renderHook(
       ({ props }: { props: DirtyProps }) => useWorkspaceEditorDirty(props),
       { initialProps: initial },
     )
 
     expect(result.current).toBe(false)
 
-    rerender({
+    // rerender() already wraps its render in act() internally, so wrapping it
+    // again here would re-enter act and corrupt the act environment for later
+    // tests (their useEffect would stop flushing). Await it directly instead.
+    await rerender({
       props: {
         workspaceRoot: null,
         selectedFile: null,
@@ -61,12 +73,14 @@ describe("useWorkspaceEditorDirty", () => {
         selectedFile: makeFile("same"),
       },
     }
-    const { result } = renderHook(
+    const { result, act } = await renderHook(
       ({ props }: { props: DirtyProps }) => useWorkspaceEditorDirty(props),
       { initialProps: initial },
     )
 
-    // Allow the async watcher promise to resolve before emitting.
+    // Allow the async watcher promise to resolve before emitting. The watcher is
+    // installed via a fire-and-forget dynamic import; the beforeAll cache-warm
+    // above makes it resolve on a microtask so a single flush is enough.
     await act(async () => {
       await Promise.resolve()
     })
@@ -91,11 +105,12 @@ describe("useWorkspaceEditorDirty", () => {
         selectedFile: makeFile("same"),
       },
     }
-    const { result, rerender } = renderHook(
+    const { result, rerender, act } = await renderHook(
       ({ props }: { props: DirtyProps }) => useWorkspaceEditorDirty(props),
       { initialProps: initial },
     )
 
+    // Allow the async watcher promise to resolve before emitting (see note above).
     await act(async () => {
       await Promise.resolve()
     })
@@ -105,8 +120,8 @@ describe("useWorkspaceEditorDirty", () => {
     expect(result.current).toBe(true)
 
     // No active file -> the stale dirty signal must reset so it cannot leak into
-    // the next file's discard guard.
-    rerender({
+    // the next file's discard guard. Await rerender directly (see note above).
+    await rerender({
       props: {
         workspaceRoot: "/workspace",
         selectedFile: null,

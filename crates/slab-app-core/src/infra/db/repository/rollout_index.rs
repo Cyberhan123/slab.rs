@@ -1,13 +1,13 @@
-//! Rollout-session index queries on [`SqlxStore`] (Slice 5).
+//! Rollout-session index queries on [`SqlxStore`].
 //!
-//! These back the rollout read gate (`backfill_status`) and the D2a list
+//! These back the rollout read gate (`backfill_status`) and the list
 //! ghost-gate. They are inherent to the SQL store and exposed via the
 //! app-core-internal [`RolloutIndex`] trait so the rollout adapter
 //! (`RolloutBackedAgentStore`) can call them — and so tests can mock them. They
 //! are deliberately NOT on the slab-agent `AgentStorePort` trait: slab-agent
 //! must stay pure (no SQL, no rollout).
 //!
-//! Slice E removed the startup backfill (and dropped `rollout_backfill_state`),
+//! The startup backfill was removed (and `rollout_backfill_state` dropped),
 //! so the trait no longer carries the backfill/lease methods; only the
 //! `rollout_session_index`-backed read gate + new-thread mark remain.
 
@@ -27,7 +27,7 @@ pub trait RolloutIndex: Send + Sync {
     async fn rollout_backfill_status(&self, thread_id: &str) -> sqlx::Result<Option<String>>;
 
     /// BATCH read of `(backfill_status, line_count)` for a set of thread ids
-    /// (Slice D2a H1+M2). Returns a map keyed by `thread_id`; a thread with no
+    /// (H1+M2). Returns a map keyed by `thread_id`; a thread with no
     /// index row is simply ABSENT from the map (callers treat absence as
     /// `(None, 0)`). One `IN (...)` query replaces K per-thread
     /// `rollout_backfill_status` calls on the list path.

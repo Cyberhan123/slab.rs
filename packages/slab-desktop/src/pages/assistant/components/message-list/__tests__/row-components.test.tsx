@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
+import { render } from "vitest-browser-react"
 
 import { setupSlabI18nMock } from "@slab/test-utils/mocks"
 
@@ -37,69 +37,70 @@ const compactRow = (overrides: Partial<CompactionMarker> = {}): ScrollerRowOf<"c
 }
 
 describe("CompactMarkerRow", () => {
-  it("shimmers while compacting in manual mode", () => {
-    render(<CompactMarkerRow row={compactRow({ phase: "compacting" })} historyCreatedAt={null} />)
+  it("shimmers while compacting in manual mode", async () => {
+    const screen = await render(<CompactMarkerRow row={compactRow({ phase: "compacting" })} historyCreatedAt={null} />)
 
-    expect(screen.getByTestId("shimmer")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("shimmer")).toBeInTheDocument()
   })
 
-  it("renders plain text when compacted in manual mode (no shimmer)", () => {
-    render(<CompactMarkerRow row={compactRow({ phase: "compacted" })} historyCreatedAt={null} />)
+  it("renders plain text when compacted in manual mode (no shimmer)", async () => {
+    const screen = await render(<CompactMarkerRow row={compactRow({ phase: "compacted" })} historyCreatedAt={null} />)
 
-    expect(screen.queryByTestId("shimmer")).toBeNull()
-    expect(screen.getByTestId("assistant-compact-marker-manual:t1:1")).toBeInTheDocument()
+    expect(screen.getByTestId("shimmer").query()).toBeNull()
+    await expect.element(screen.getByTestId("assistant-compact-marker-manual:t1:1")).toBeInTheDocument()
   })
 
-  it("shimmers while compacting in auto mode", () => {
-    render(
+  it("shimmers while compacting in auto mode", async () => {
+    const screen = await render(
       <CompactMarkerRow
         row={compactRow({ id: "auto:t1:1", mode: "auto", phase: "compacting" })}
         historyCreatedAt={null}
       />,
     )
 
-    expect(screen.getByTestId("shimmer")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("shimmer")).toBeInTheDocument()
   })
 
-  it("renders plain text when compacted in auto mode", () => {
-    render(
+  it("renders plain text when compacted in auto mode", async () => {
+    const screen = await render(
       <CompactMarkerRow
         row={compactRow({ id: "auto:t1:1", mode: "auto", phase: "compacted" })}
         historyCreatedAt={null}
       />,
     )
 
-    expect(screen.queryByTestId("shimmer")).toBeNull()
-    expect(screen.getByTestId("assistant-compact-marker-auto:t1:1")).toBeInTheDocument()
+    expect(screen.getByTestId("shimmer").query()).toBeNull()
+    await expect.element(screen.getByTestId("assistant-compact-marker-auto:t1:1")).toBeInTheDocument()
   })
 
-  it("stamps the marker id on the separator", () => {
-    render(<CompactMarkerRow row={compactRow({ id: "auto:t9:3" })} historyCreatedAt={null} />)
+  it("stamps the marker id on the separator", async () => {
+    const screen = await render(<CompactMarkerRow row={compactRow({ id: "auto:t9:3" })} historyCreatedAt={null} />)
 
-    expect(screen.getByTestId("assistant-compact-marker-auto:t9:3")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-compact-marker-auto:t9:3")).toBeInTheDocument()
   })
 })
 
 describe("HistoryMarkerRow", () => {
-  it("renders the restored separator", () => {
-    render(
+  it("renders the restored separator", async () => {
+    const screen = await render(
       <HistoryMarkerRow
         row={{ kind: "historyMarker", id: HISTORY_MARKER_ID }}
         historyCreatedAt={null}
       />,
     )
 
-    expect(screen.getByTestId("assistant-history-marker")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-history-marker")).toBeInTheDocument()
   })
 
-  it("formats the provided createdAt as the label", () => {
-    const { container } = render(
+  it("formats the provided createdAt as the label", async () => {
+    await render(
       <HistoryMarkerRow
         row={{ kind: "historyMarker", id: HISTORY_MARKER_ID }}
         historyCreatedAt={new Date(2026, 0, 5).getTime()}
       />,
     )
 
-    expect(container.textContent).toContain("2026-01-05")
+    const text = document.body.textContent ?? ""
+    expect(text).toContain("2026-01-05")
   })
 })
