@@ -73,7 +73,7 @@ pub use slab_exec_policy::{
     OperationDescriptor, PermissionBaseline, PermissionMode, PermissionStateSnapshot, ToolExposure,
 };
 pub use tool::{
-    AgentThreadContext, PlanRef, ToolApprovalRequest, ToolCapability, ToolContext,
-    ToolContextBuilder, ToolHandler, ToolNamespace, ToolOutput, ToolOutputObserver,
-    ToolOutputStream, ToolRouter, ToolVisibility, WorkspaceRef,
+    AgentThreadContext, PlanRef, ToolApprovalRequest, ToolCallRender, ToolCapability, ToolContext,
+    ToolContextBuilder, ToolDiscoveryState, ToolHandler, ToolName, ToolNamespace, ToolOutput,
+    ToolOutputObserver, ToolOutputStream, ToolRouter, ToolVisibility, WorkspaceRef,
 };

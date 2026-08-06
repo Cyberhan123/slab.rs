@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, ToolVisibility,
+    protocol::TurnItem,
+};
 use slab_mcp::{McpClient, McpToolSpec};
 
 use crate::args::string_arg;
@@ -46,6 +49,30 @@ impl ToolHandler for McpCallTool {
 
     fn category(&self) -> slab_agent::OperationCategory {
         slab_agent::OperationCategory::Network
+    }
+
+    fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+        TurnItem::McpToolCall {
+            id: render.call.id.clone(),
+            // Schema keys are `server_name` / `tool_name` (NOT `server` / `tool`).
+            server: render
+                .args
+                .get("server_name")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>")
+                .to_owned(),
+            tool: render
+                .args
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>")
+                .to_owned(),
+            arguments: render.args.get("arguments").cloned().unwrap_or_else(|| render.args.clone()),
+            status: render.status.to_owned(),
+            result: render.output.and_then(|o| serde_json::from_str(o).ok()),
+            error: None,
+            duration_ms: None,
+        }
     }
 
     async fn execute(
@@ -150,6 +177,33 @@ impl ToolHandler for McpProxyTool {
         slab_agent::OperationCategory::Network
     }
 
+    fn namespace(&self) -> slab_agent::ToolNamespace {
+        // Wire form is `mcp__{server}__{tool}`; the structured namespace is `mcp`.
+        slab_agent::ToolNamespace::new("mcp")
+    }
+
+    fn visibility(&self) -> ToolVisibility {
+        // MCP proxies are Deferred: kept out of the base tool list until the
+        // model discovers them via `tool_search`, so many MCP tools don't bloat
+        // the model-facing tool table.
+        ToolVisibility::Deferred
+    }
+
+    fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+        // Use the original (unsanitized) server/tool names from the spec rather
+        // than parsing the wire name, so the harness shows readable values.
+        TurnItem::McpToolCall {
+            id: render.call.id.clone(),
+            server: self.spec.server_name.clone(),
+            tool: self.spec.tool.name.clone(),
+            arguments: render.args.clone(),
+            status: render.status.to_owned(),
+            result: render.output.and_then(|o| serde_json::from_str(o).ok()),
+            error: None,
+            duration_ms: None,
+        }
+    }
+
     async fn execute(
         &self,
         _ctx: &ToolContext,
@@ -212,6 +266,55 @@ mod tests {
 
         assert_eq!(tool.description(), "Remote MCP tool proxy.");
         assert_eq!(tool.parameters_schema(), json!({"type": "object", "properties": {}}));
+    }
+
+    #[test]
+    fn mcp_proxy_tool_is_deferred_and_namespaced() {
+        let spec = McpToolSpec {
+            server_name: "team server".into(),
+            tool: McpTool { name: "search".into(), description: None, input_schema: json!({}) },
+        };
+        let tool = McpProxyTool::new(Arc::new(McpClient::new()), spec);
+        assert_eq!(tool.visibility(), ToolVisibility::Deferred);
+        assert_eq!(tool.namespace().as_str(), "mcp");
+    }
+
+    #[test]
+    fn mcp_proxy_tool_renders_mcp_tool_call_from_spec() {
+        // Render uses the original (unsanitized) server/tool names from the spec.
+        let spec = McpToolSpec {
+            server_name: "team server".into(),
+            tool: McpTool {
+                name: "search.web/v1".into(),
+                description: None,
+                input_schema: json!({}),
+            },
+        };
+        let tool = McpProxyTool::new(Arc::new(McpClient::new()), spec);
+        let call = slab_agent::port::ParsedToolCall {
+            id: "c1".into(),
+            name: "mcp__team_server__search_web_v1".into(),
+            arguments: r#"{"q":"x"}"#.into(),
+        };
+        let args = json!({"q": "x"});
+        let render = ToolCallRender {
+            call: &call,
+            args: &args,
+            status: "running",
+            output: None,
+            workspace_root: None,
+            exit_code: None,
+            duration_ms: None,
+        };
+        match tool.render_turn_item(&render) {
+            TurnItem::McpToolCall { server, tool, arguments, status, .. } => {
+                assert_eq!(server, "team server");
+                assert_eq!(tool, "search.web/v1");
+                assert_eq!(arguments["q"], "x");
+                assert_eq!(status, "running");
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
     }
 
     #[test]

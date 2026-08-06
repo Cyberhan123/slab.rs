@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, protocol::TurnItem,
+};
 
 use crate::args::string_arg;
 
@@ -140,6 +142,17 @@ impl ToolHandler for WriteFileTool {
 
     fn category(&self) -> slab_agent::OperationCategory {
         slab_agent::OperationCategory::FileEdit
+    }
+
+    fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+        TurnItem::FileChange {
+            id: render.call.id.clone(),
+            changes: vec![serde_json::json!({
+                "path": render.args.get("path").and_then(Value::as_str).unwrap_or(""),
+                "type": "edit",
+            })],
+            status: render.status.to_owned(),
+        }
     }
 
     async fn execute(

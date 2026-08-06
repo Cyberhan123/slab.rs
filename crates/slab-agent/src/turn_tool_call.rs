@@ -21,8 +21,8 @@ use crate::{
     },
     state::ToolCallStateMachine,
     tool::{
-        PlanRef, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver,
-        ToolOutputStream,
+        PlanRef, ToolApprovalRequest, ToolCallRender, ToolContext, ToolHandler, ToolOutput,
+        ToolOutputObserver, ToolOutputStream,
     },
     turn::TurnExecutionContext,
     turn_tool_record::{
@@ -39,6 +39,13 @@ const TASK_COMPLETE_TOOL_NAME: &str = "task.complete";
 /// Metadata key the `task.complete` tool places its completion marker under.
 /// Mirrors `slab_agent_tools::TASK_COMPLETE_METADATA_KEY`.
 const TASK_COMPLETE_METADATA_KEY: &str = "task_complete";
+
+/// Tool name for on-demand Deferred-tool discovery. Mirrors
+/// `slab_agent_tools::TOOL_SEARCH_TOOL_NAME`; duplicated here because
+/// `slab-agent` cannot depend on `slab-agent-tools` (dependency direction is
+/// reversed). `tool_search` is intercepted by the dispatch layer before
+/// execution — see [`handle_tool_search`].
+const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
 
 /// Structured completion payload extracted from a successful `task.complete`
 /// tool call. Consumed by the turn loop to emit the final answer (双轨 2).
@@ -76,28 +83,17 @@ fn workspace_root_of(context: &TurnExecutionContext<'_>) -> Option<String> {
     context.thread_context.workspace.as_ref().map(|w| w.root.to_string_lossy().into_owned())
 }
 
-/// Split an `mcp__{server}__{tool}` proxy name into `(server, tool)`.
+/// Resolve a tool call to its harness [`TurnItem`].
 ///
-/// `proxy_tool_name` formats with exactly two `__` separators, so `splitn(3,
-/// "__")` is the reversible parse. Falls back to `("<unknown>", name)` when the
-/// name is malformed. Server/tool are display-only on the wire.
-fn parse_mcp_proxy_name(name: &str) -> (String, String) {
-    let mut parts = name.splitn(3, "__");
-    let _ = parts.next(); // leading "mcp"
-    match (parts.next(), parts.next()) {
-        (Some(server), Some(tool)) if !server.is_empty() => (server.to_owned(), tool.to_owned()),
-        _ => ("<unknown>".to_owned(), name.to_owned()),
-    }
-}
-
-/// Build the harness `TurnItem` for a tool call.
-///
-/// `status` is `"running"` for `ItemStarted`, `"completed"`/`"failed"` for
-/// `ItemCompleted`. `output` is the tool result text (filled only on
-/// completion). The item id is the provider-assigned `tool_call.id`. Unknown /
-/// read-only tools fall back to `CommandExecution` so every tool call is
-/// visible on the harness timeline (no new wire variant).
-fn tool_turn_item(
+/// Tools own their render via [`ToolHandler::render_turn_item`]; this looks up
+/// the handler and delegates, falling back to the generic
+/// [`default_tool_turn_item`] for tools not in the registry. `status` is
+/// `"running"` for `ItemStarted`, `"completed"`/`"failed"` for `ItemCompleted`;
+/// `output` is the tool result text (filled only on completion). The item id is
+/// the provider-assigned `tool_call.id`.
+#[allow(clippy::too_many_arguments)]
+fn render_tool_call_item(
+    handler: Option<&dyn ToolHandler>,
     tool_call: &ParsedToolCall,
     args: &serde_json::Value,
     status: &str,
@@ -106,91 +102,110 @@ fn tool_turn_item(
     exit_code: Option<i64>,
     duration_ms: Option<u64>,
 ) -> TurnItem {
-    let id = tool_call.id.clone();
-    let status = status.to_owned();
-    match tool_call.name.as_str() {
-        "shell" => TurnItem::CommandExecution {
-            id,
-            command: args
-                .get("command")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_owned(),
-            cwd: workspace_root.unwrap_or("").to_owned(),
-            process_id: None,
-            status,
-            aggregated_output: output.map(str::to_owned),
-            exit_code,
-            duration_ms,
-        },
-        "write_file" => TurnItem::FileChange {
-            id,
-            changes: vec![serde_json::json!({
-                "path": args.get("path").and_then(serde_json::Value::as_str).unwrap_or(""),
-                "type": "edit",
-            })],
-            status,
-        },
-        "apply_patch" => {
-            let patch = args.get("patch").and_then(serde_json::Value::as_str).unwrap_or("");
-            TurnItem::FileChange {
-                id,
-                changes: vec![serde_json::json!({
-                    "path": first_path_in_patch(patch),
-                    "type": "edit",
-                    "diff": patch,
-                })],
-                status,
-            }
-        }
-        "web_search" => TurnItem::WebSearch {
-            id,
-            query: args.get("query").and_then(serde_json::Value::as_str).unwrap_or("").to_owned(),
-        },
-        "mcp_call" => TurnItem::McpToolCall {
-            id,
-            server: args
-                .get("server")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("<unknown>")
-                .to_owned(),
-            tool: args
-                .get("tool")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("<unknown>")
-                .to_owned(),
-            arguments: args.get("arguments").cloned().unwrap_or_else(|| args.clone()),
-            status,
-            result: output.and_then(|o| serde_json::from_str(o).ok()),
-            error: None,
-            duration_ms: None,
-        },
-        name if name.starts_with("mcp__") => {
-            let (server, tool) = parse_mcp_proxy_name(name);
-            TurnItem::McpToolCall {
-                id,
-                server,
-                tool,
-                arguments: args.clone(),
-                status,
-                result: output.and_then(|o| serde_json::from_str(o).ok()),
-                error: None,
-                duration_ms: None,
-            }
-        }
-        // Fallback: every other tool (read_file/grep/plan/verify/task.complete/…)
-        // maps to CommandExecution so it is visible on the harness timeline.
-        _ => TurnItem::CommandExecution {
-            id,
-            command: tool_call.name.clone(),
-            cwd: String::new(),
-            process_id: None,
-            status,
-            aggregated_output: output.map(str::to_owned),
-            exit_code,
-            duration_ms,
-        },
+    let render = ToolCallRender {
+        call: tool_call,
+        args,
+        status,
+        output,
+        workspace_root,
+        exit_code,
+        duration_ms,
+    };
+    match handler {
+        Some(handler) => handler.render_turn_item(&render),
+        None => crate::tool::default_tool_turn_item(&render),
     }
+}
+
+/// Handle a `tool_search` call: match the query against Deferred tool specs,
+/// inject the hits into the per-thread discovery state, and return the matched
+/// specs (schema-compacted) to the model.
+///
+/// Bypasses hooks/risk/approval (read-only registry query). Emits the standard
+/// ItemStarted/ItemCompleted pair so the call is visible on the harness
+/// timeline, and records the result as a tool message so it reaches the LLM.
+async fn handle_tool_search(
+    context: &TurnExecutionContext<'_>,
+    tool_call: &ParsedToolCall,
+    args: &serde_json::Value,
+    _created_at: &str,
+) -> Result<ToolCallRunResult, AgentError> {
+    let query = args.get("query").and_then(serde_json::Value::as_str).unwrap_or("");
+    let namespace = args.get("namespace").and_then(serde_json::Value::as_str);
+    let q = query.to_ascii_lowercase();
+
+    let matched: Vec<_> = context
+        .tools
+        .deferred_tool_specs()
+        .into_iter()
+        .filter(|spec| {
+            if namespace.is_some_and(|ns| {
+                crate::tool::ToolName::parse_wire(&spec.name).namespace.as_str() != ns
+            }) {
+                return false;
+            }
+            if q.is_empty() {
+                return true;
+            }
+            spec.name.to_ascii_lowercase().contains(&q)
+                || spec.description.to_ascii_lowercase().contains(&q)
+        })
+        .collect();
+
+    // Inject every hit so it becomes visible/callable on subsequent turns.
+    for spec in &matched {
+        context.tool_discovery.inject(&spec.name);
+    }
+
+    let summarized: Vec<serde_json::Value> = matched
+        .iter()
+        .map(|spec| {
+            serde_json::json!({
+                "name": spec.name,
+                "description": spec.description,
+                "parameters": crate::tool_schema::process_tool_schema(&spec.parameters_schema),
+            })
+        })
+        .collect();
+    let content = serde_json::to_string(&serde_json::Value::Array(summarized))
+        .unwrap_or_else(|_| "[]".to_owned());
+
+    // Emit the standard start→complete pair. tool_search renders via its
+    // handler's render_turn_item (the generic CommandExecution fallback — no
+    // dedicated TurnItem variant for discovery).
+    let workspace_root = workspace_root_of(context);
+    let handler = context.tools.get(tool_call.name.as_str());
+    emit_item_started(
+        context,
+        render_tool_call_item(
+            handler.as_deref(),
+            tool_call,
+            args,
+            "running",
+            None,
+            workspace_root.as_deref(),
+            None,
+            None,
+        ),
+    )
+    .await;
+    emit_item_completed(
+        context,
+        render_tool_call_item(
+            handler.as_deref(),
+            tool_call,
+            args,
+            "completed",
+            Some(&content),
+            workspace_root.as_deref(),
+            None,
+            None,
+        ),
+    )
+    .await;
+
+    let message = crate::turn_tool_record::tool_message(tool_call, content);
+    Ok(ToolCallRunResult { message, status: ToolCallStatus::Completed, task_completion: None })
 }
 
 /// Emit `EventMsg::ItemStarted` for `item` on the harness channel.
@@ -265,10 +280,20 @@ pub(crate) async fn emit_tool_item_failed(
     output: &str,
 ) {
     let workspace_root = workspace_root_of(context);
-    let started =
-        tool_turn_item(tool_call, args, "running", None, workspace_root.as_deref(), None, None);
+    let handler = context.tools.get(&tool_call.name);
+    let started = render_tool_call_item(
+        handler.as_deref(),
+        tool_call,
+        args,
+        "running",
+        None,
+        workspace_root.as_deref(),
+        None,
+        None,
+    );
     emit_item_started(context, started).await;
-    let completed = tool_turn_item(
+    let completed = render_tool_call_item(
+        handler.as_deref(),
         tool_call,
         args,
         "failed",
@@ -529,6 +554,16 @@ async fn handle_tool_call(
         }),
     );
 
+    // `tool_search` is a read-only meta-op that discovers Deferred tools and
+    // injects them into the per-thread discovery state. Intercept it BEFORE
+    // hooks/risk/approval: it needs registry + discovery access that live in the
+    // dispatch layer (not on `ToolContext`), and a registry query must not be
+    // approval-gated. Uses pre-hook `parsed_args` (the hook may ModifyArgs for
+    // real tools, but tool_search bypasses hooks entirely).
+    if tool_call.name == TOOL_SEARCH_TOOL_NAME {
+        return handle_tool_search(context, tool_call, &parsed_args, created_at).await;
+    }
+
     let pre_event = HookEvent::OnToolStart {
         thread_id: context.thread_id.to_owned(),
         session_id: context.session_id.to_owned(),
@@ -644,7 +679,8 @@ async fn handle_tool_call(
     let workspace_root = workspace_root_of(context);
     emit_item_started(
         context,
-        tool_turn_item(
+        render_tool_call_item(
+            handler.as_deref(),
             tool_call,
             &effective_args,
             "running",
@@ -761,7 +797,8 @@ async fn handle_tool_call(
         if matches!(call_status, ToolCallStatus::Completed) { "completed" } else { "failed" };
     emit_item_completed(
         context,
-        tool_turn_item(
+        render_tool_call_item(
+            context.tools.get(&tool_call.name).as_deref(),
             tool_call,
             &effective_args,
             item_status,
@@ -1069,6 +1106,8 @@ fn append_hook_observations(output: &mut String, observations: Vec<String>) {
 mod tests {
     use super::*;
     use crate::port::ParsedToolCall;
+    use crate::tool::{ToolCallRender, ToolContext};
+    use async_trait::async_trait;
 
     fn call(name: &str) -> ParsedToolCall {
         ParsedToolCall {
@@ -1078,55 +1117,36 @@ mod tests {
         }
     }
 
-    #[test]
-    fn shell_maps_to_command_execution_with_workspace_cwd() {
-        let item = tool_turn_item(
-            &call("shell"),
-            &serde_json::json!({"command": "ls -la"}),
-            "running",
-            None,
-            Some("/ws"),
-            None,
-            None,
-        );
-        match item {
-            TurnItem::CommandExecution { command, cwd, status, aggregated_output, .. } => {
-                assert_eq!(command, "ls -la");
-                assert_eq!(cwd, "/ws");
-                assert_eq!(status, "running");
-                assert!(aggregated_output.is_none());
-            }
-            other => panic!("unexpected item: {other:?}"),
-        }
+    #[allow(clippy::too_many_arguments)]
+    fn render_of(
+        handler: Option<&dyn ToolHandler>,
+        name: &str,
+        args: &serde_json::Value,
+        status: &str,
+        output: Option<&str>,
+        workspace_root: Option<&str>,
+        exit_code: Option<i64>,
+        duration_ms: Option<u64>,
+    ) -> TurnItem {
+        render_tool_call_item(
+            handler,
+            &call(name),
+            args,
+            status,
+            output,
+            workspace_root,
+            exit_code,
+            duration_ms,
+        )
     }
 
+    // Unknown tool (no handler registered) → default CommandExecution, so every
+    // tool call is visible on the harness timeline.
     #[test]
-    fn shell_completed_carries_exit_code_and_duration() {
-        let item = tool_turn_item(
-            &call("shell"),
-            &serde_json::json!({"command": "date +%A"}),
-            "completed",
-            Some("{\"stdout\":\"Tuesday\\n\",\"exit_code\":0}"),
+    fn render_no_handler_falls_back_to_command_execution() {
+        let item = render_of(
             None,
-            Some(0),
-            Some(42),
-        );
-        match item {
-            TurnItem::CommandExecution { exit_code, duration_ms, status, .. } => {
-                assert_eq!(status, "completed");
-                assert_eq!(exit_code, Some(0));
-                assert_eq!(duration_ms, Some(42));
-            }
-            other => panic!("unexpected item: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn fallback_tool_maps_to_command_execution_catch_all() {
-        // Unknown / read-only tools fall back to CommandExecution so every tool
-        // call is visible on the harness timeline (bug 1: nothing was emitted).
-        let item = tool_turn_item(
-            &call("read_file"),
+            "read_file",
             &serde_json::json!({}),
             "completed",
             Some("file contents"),
@@ -1144,11 +1164,36 @@ mod tests {
         }
     }
 
+    // A stub tool that does NOT override render_turn_item.
+    struct DefaultRenderTool;
+
+    #[async_trait]
+    impl ToolHandler for DefaultRenderTool {
+        fn name(&self) -> &str {
+            "default_render"
+        }
+        fn description(&self) -> &str {
+            "stub"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        async fn execute(
+            &self,
+            _ctx: &ToolContext,
+            _arguments: &serde_json::Value,
+        ) -> Result<ToolOutput, crate::error::AgentError> {
+            Ok(ToolOutput { content: String::new(), metadata: None })
+        }
+    }
+
     #[test]
-    fn mcp_proxy_name_maps_to_mcp_tool_call() {
-        let item = tool_turn_item(
-            &call("mcp__server_label__search"),
-            &serde_json::json!({"q": "x"}),
+    fn render_turn_item_default_is_command_execution() {
+        let tool = DefaultRenderTool;
+        let item = render_of(
+            Some(&tool),
+            "default_render",
+            &serde_json::json!({}),
             "running",
             None,
             None,
@@ -1156,54 +1201,62 @@ mod tests {
             None,
         );
         match item {
-            TurnItem::McpToolCall { server, tool, arguments, .. } => {
-                assert_eq!(server, "server_label");
-                assert_eq!(tool, "search");
-                assert_eq!(arguments["q"], "x");
+            TurnItem::CommandExecution { command, cwd, status, aggregated_output, .. } => {
+                assert_eq!(command, "default_render");
+                assert_eq!(cwd, "");
+                assert_eq!(status, "running");
+                assert!(aggregated_output.is_none());
             }
             other => panic!("unexpected item: {other:?}"),
         }
     }
 
+    // A stub tool that DOES override render_turn_item — verifies the dispatcher
+    // delegates to the tool's own render instead of the default.
+    struct CustomRenderTool;
+
+    #[async_trait]
+    impl ToolHandler for CustomRenderTool {
+        fn name(&self) -> &str {
+            "custom"
+        }
+        fn description(&self) -> &str {
+            "stub"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+            TurnItem::AgentMessage {
+                id: render.call.id.clone(),
+                text: format!("custom:{}", render.call.name),
+            }
+        }
+        async fn execute(
+            &self,
+            _ctx: &ToolContext,
+            _arguments: &serde_json::Value,
+        ) -> Result<ToolOutput, crate::error::AgentError> {
+            Ok(ToolOutput { content: String::new(), metadata: None })
+        }
+    }
+
     #[test]
-    fn web_search_maps_query() {
-        let item = tool_turn_item(
-            &call("web_search"),
-            &serde_json::json!({"query": "rust async"}),
-            "running",
+    fn render_turn_item_delegates_to_handler_override() {
+        let tool = CustomRenderTool;
+        let item = render_of(
+            Some(&tool),
+            "custom",
+            &serde_json::json!({}),
+            "completed",
             None,
             None,
             None,
             None,
         );
         match item {
-            TurnItem::WebSearch { query, .. } => assert_eq!(query, "rust async"),
+            TurnItem::AgentMessage { text, .. } => assert_eq!(text, "custom:custom"),
             other => panic!("unexpected item: {other:?}"),
         }
-    }
-
-    #[test]
-    fn apply_patch_maps_first_path_into_file_change() {
-        let args = serde_json::json!({
-            "patch": "--- a/x.rs\n+++ b/x.rs\n@@ -1 +1 @@\n-a\n+b\n"
-        });
-        let item = tool_turn_item(&call("apply_patch"), &args, "completed", None, None, None, None);
-        match item {
-            TurnItem::FileChange { changes, status, .. } => {
-                assert_eq!(status, "completed");
-                assert_eq!(changes[0]["path"].as_str(), Some("x.rs"));
-            }
-            other => panic!("unexpected item: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_mcp_proxy_name_handles_namespaced_and_malformed() {
-        assert_eq!(parse_mcp_proxy_name("mcp__srv__tool"), ("srv".to_owned(), "tool".to_owned()));
-        // Fewer than two separators: cannot recover server/tool → placeholder.
-        assert_eq!(
-            parse_mcp_proxy_name("mcp__only"),
-            ("<unknown>".to_owned(), "mcp__only".to_owned())
-        );
     }
 }

@@ -8,8 +8,10 @@ use std::{path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use serde_json::Value;
+use slab_agent::protocol::TurnItem;
 use slab_agent::{
-    AgentError, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver, ToolOutputStream,
+    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver,
+    ToolOutputStream,
 };
 use slab_sandboxing::{OutputSink, OutputStream, SandboxDriver};
 pub use slab_shell_command::ShellPolicy;
@@ -93,6 +95,19 @@ impl ToolHandler for ShellTool {
         slab_agent::OperationCategory::Shell
     }
 
+    fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+        TurnItem::CommandExecution {
+            id: render.call.id.clone(),
+            command: render.args.get("command").and_then(Value::as_str).unwrap_or("").to_owned(),
+            cwd: render.workspace_root.unwrap_or("").to_owned(),
+            process_id: None,
+            status: render.status.to_owned(),
+            aggregated_output: render.output.map(str::to_owned),
+            exit_code: render.exit_code,
+            duration_ms: render.duration_ms,
+        }
+    }
+
     async fn execute(
         &self,
         ctx: &ToolContext,
@@ -152,6 +167,35 @@ mod tests {
 
     fn ctx() -> ToolContext {
         ToolContext::for_thread("thread").build()
+    }
+
+    #[test]
+    fn shell_tool_renders_command_execution() {
+        let tool = ShellTool::default();
+        let call = slab_agent::port::ParsedToolCall {
+            id: "c1".into(),
+            name: "shell".into(),
+            arguments: r#"{"command":"ls"}"#.into(),
+        };
+        let args = json!({"command": "ls -la"});
+        let render = ToolCallRender {
+            call: &call,
+            args: &args,
+            status: "running",
+            output: None,
+            workspace_root: Some("/ws"),
+            exit_code: None,
+            duration_ms: None,
+        };
+        match tool.render_turn_item(&render) {
+            TurnItem::CommandExecution { command, cwd, status, aggregated_output, .. } => {
+                assert_eq!(command, "ls -la");
+                assert_eq!(cwd, "/ws");
+                assert_eq!(status, "running");
+                assert!(aggregated_output.is_none());
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
     }
 
     #[derive(Clone)]

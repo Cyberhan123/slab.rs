@@ -1,7 +1,5 @@
 //! Single-turn execution logic (private to the crate).
 
-use std::collections::HashSet;
-
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
@@ -28,7 +26,7 @@ use crate::{
     },
     repetition_guard::ToolCallSignature,
     risk::ToolRiskAnalyzer,
-    tool::{AgentThreadContext, ToolRouter},
+    tool::{AgentThreadContext, ToolDiscoveryState, ToolRouter},
     tool_validation::{InvalidToolCall, validate_tool_calls},
     turn_tool_call::{emit_tool_item_failed, handle_tool_calls},
     turn_tool_record::record_failed_tool_call,
@@ -46,6 +44,7 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub config: &'a AgentConfig,
     pub llm: &'a dyn LlmPort,
     pub tools: &'a ToolRouter,
+    pub tool_discovery: &'a ToolDiscoveryState,
     pub notify: &'a dyn AgentNotifyPort,
     pub approval: &'a dyn ApprovalPort,
     pub exec_policy: &'a dyn ExecPolicyPort,
@@ -369,10 +368,10 @@ fn allowed_tool_specs(context: &TurnExecutionContext<'_>) -> Result<Vec<ToolSpec
     // Visibility (Direct/Deferred/Hidden) + category-exposure projection.
     // Computed fresh each turn from the live per-thread permission mode, so a
     // mid-thread mode/permission flip is reflected immediately. `injected_deferred`
-    // is populated by `tool_search` (a later chunk); empty here means Deferred
-    // tools stay hidden from the base list until the model discovers them.
+    // is the set of Deferred tools `tool_search` has injected for this thread;
+    // empty means Deferred tools stay hidden from the base list until discovered.
     let exposure = context.exec_policy.permission_state_for(context.thread_id).exposure;
-    let injected_deferred: HashSet<String> = HashSet::new();
+    let injected_deferred = context.tool_discovery.snapshot();
     let mut specs = context.tools.visible_tool_specs(exposure, &injected_deferred);
     if !context.config.allowed_tools.is_empty() {
         specs.retain(|tool| context.config.allowed_tools.contains(&tool.name));

@@ -25,7 +25,7 @@ use crate::{
     risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
     state::ThreadStateMachine,
     thread::{AgentThread, AgentThreadRuntime},
-    tool::{AgentThreadContext, ToolRouter},
+    tool::{AgentThreadContext, ToolDiscoveryState, ToolRouter},
 };
 
 // ── Internal handle stored per active thread ─────────────────────────────────
@@ -652,6 +652,7 @@ impl AgentControl {
             approval,
             exec_policy,
             tools,
+            tool_discovery: ToolDiscoveryState::new(),
             hooks,
             compact,
             risk,

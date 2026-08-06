@@ -14,7 +14,8 @@ use std::{
 
 use crate::{
     AgentControl, AgentControlLimits, AgentError, AgentHook, AgentThreadContext, HookEvent,
-    HookOutcome, PlanRef, ToolContext, ToolHandler, ToolOutput, ToolRouter, WorkspaceRef,
+    HookOutcome, PlanRef, ToolContext, ToolHandler, ToolOutput, ToolRouter, ToolVisibility,
+    WorkspaceRef,
     compact::{CompactContext, CompactPort, SlidingWindowCompactPort},
     config::{AgentConfig, AgentToolChoice},
     port::{
@@ -577,10 +578,104 @@ impl LlmPort for CapturingToolsLlm {
     }
 }
 
+// A Deferred read-only tool the model can only reach via `tool_search`.
+struct DeferredSearchableTool;
+
+#[async_trait]
+impl ToolHandler for DeferredSearchableTool {
+    fn name(&self) -> &str {
+        "deferred_read_tool"
+    }
+    fn description(&self) -> &str {
+        "A deferred read-only tool used for tool_search tests."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
+    fn visibility(&self) -> ToolVisibility {
+        ToolVisibility::Deferred
+    }
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        _arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        Ok(ToolOutput { content: "deferred ok".to_owned(), metadata: None })
+    }
+}
+
+// A `tool_search` placeholder registered so the model can see/call it; its
+// execution is intercepted by the dispatch layer, so `execute` is never reached.
+struct ToolSearchStubTool;
+
+#[async_trait]
+impl ToolHandler for ToolSearchStubTool {
+    fn name(&self) -> &str {
+        "tool_search"
+    }
+    fn description(&self) -> &str {
+        "Discover deferred tools."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})
+    }
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        _arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        Ok(ToolOutput { content: "{}".to_owned(), metadata: None })
+    }
+}
+
+// LLM that records the visible tool names per call. Call 1 emits a `tool_search`
+// tool call with the given query; call 2 returns a plain final answer.
+struct ToolSearchLlm {
+    query: String,
+    calls: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+#[async_trait]
+impl LlmPort for ToolSearchLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut calls = self.calls.lock().unwrap();
+        calls.push(tools.iter().map(|t| t.name.clone()).collect());
+        let call_index = calls.len();
+        drop(calls);
+        if call_index == 1 {
+            Ok(LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "search-1".into(),
+                    name: "tool_search".into(),
+                    arguments: format!(r#"{{"query":"{}"}}"#, self.query),
+                }],
+                finish_reason: Some("tool_calls".into()),
+                usage: None,
+            })
+        } else {
+            Ok(LlmResponse {
+                content: Some("done".into()),
+                content_already_streamed: false,
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".into()),
+                usage: None,
+            })
+        }
+    }
+}
+
 struct TwoToolCallsLlm {
     call_count: Mutex<u32>,
 }
-
 impl TwoToolCallsLlm {
     fn new() -> Self {
         Self { call_count: Mutex::new(0) }
@@ -1305,6 +1400,80 @@ async fn smoke_echo_tool_agent_completes() {
 
     // By now the thread has been removed from the registry; verify the count.
     assert_eq!(control.active_thread_count().await, 0);
+}
+
+/// Spawn an agent whose router has a Deferred tool + a `tool_search` stub, drive
+/// it with a [`ToolSearchLlm`] that calls `tool_search` with `query` on turn 1,
+/// and return the per-turn captured visible-tool-name lists.
+async fn run_tool_search_agent(query: &str) -> Vec<Vec<String>> {
+    let calls: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(ToolSearchLlm { query: query.to_owned(), calls: Arc::clone(&calls) });
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(DeferredSearchableTool));
+    router.register(Box::new(ToolSearchStubTool));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store, notify, approval, Arc::new(router), 8, 4));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("search for tools".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id = control.spawn("session-search".into(), config, messages).await.expect("spawn");
+    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            if matches!(
+                *status_rx.borrow(),
+                ThreadStatus::Completed
+                    | ThreadStatus::Errored
+                    | ThreadStatus::Shutdown
+                    | ThreadStatus::Interrupted
+            ) {
+                return;
+            }
+        }
+    })
+    .await;
+
+    calls.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn tool_search_discovers_and_injects_deferred_tool() {
+    let calls = run_tool_search_agent("deferred").await;
+    assert!(calls.len() >= 2, "expected at least 2 LLM calls, got {calls:?}");
+    // Turn 1 (before search): the Deferred tool is hidden; tool_search is visible.
+    assert!(
+        !calls[0].iter().any(|n| n == "deferred_read_tool"),
+        "deferred tool should be hidden before tool_search, got {:?}",
+        calls[0]
+    );
+    assert!(calls[0].iter().any(|n| n == "tool_search"), "tool_search should be visible");
+    // Turn 2 (after search): the Deferred tool has been injected and is visible.
+    assert!(
+        calls[1].iter().any(|n| n == "deferred_read_tool"),
+        "deferred tool should be visible after tool_search injected it, got {:?}",
+        calls[1]
+    );
+}
+
+#[tokio::test]
+async fn tool_search_no_match_returns_empty_and_does_not_inject() {
+    let calls = run_tool_search_agent("zzz_no_match").await;
+    assert!(calls.len() >= 2, "expected at least 2 LLM calls, got {calls:?}");
+    // A non-matching query injects nothing: the Deferred tool stays hidden.
+    assert!(
+        !calls[1].iter().any(|n| n == "deferred_read_tool"),
+        "deferred tool should stay hidden after a non-matching search, got {:?}",
+        calls[1]
+    );
 }
 
 #[tokio::test]

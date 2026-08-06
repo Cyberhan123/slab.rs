@@ -16,7 +16,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use slab_agent::{AgentError, PluginToolPort, ToolContext, ToolHandler, ToolOutput, ToolRouter};
+use slab_agent::{
+    AgentError, PluginToolPort, ToolContext, ToolHandler, ToolNamespace, ToolOutput, ToolRouter,
+    ToolVisibility,
+};
 use slab_types::{
     PluginCapabilityKind, PluginManifest,
     plugin_capability::{CapabilityEffectTrust, infer_effect_trust, plugin_agent_tool_name},
@@ -103,6 +106,18 @@ impl ToolHandler for PluginCapabilityProxyTool {
             return json!({ "type": "object", "properties": {} });
         }
         self.descriptor.input_schema.clone()
+    }
+
+    fn namespace(&self) -> ToolNamespace {
+        // Wire form is `plugin__<id>__<cap>`; structured namespace is `plugin`.
+        ToolNamespace::new("plugin")
+    }
+
+    fn visibility(&self) -> ToolVisibility {
+        // Plugin capabilities are Deferred: kept out of the base tool list until
+        // discovered via `tool_search`, so many plugin tools don't bloat the
+        // model-facing tool table (mirrors the MCP proxy default).
+        ToolVisibility::Deferred
     }
 
     async fn execute(

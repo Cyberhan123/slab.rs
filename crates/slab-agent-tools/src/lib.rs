@@ -22,6 +22,7 @@ pub mod plan;
 pub mod shell;
 pub mod subagent;
 pub mod task_complete;
+pub mod tool_search;
 pub mod verify;
 pub mod web_search;
 
@@ -39,6 +40,7 @@ pub use slab_shell_command::{
 };
 pub use subagent::DelegateSubagentTool;
 pub use task_complete::{TASK_COMPLETE_METADATA_KEY, TASK_COMPLETE_TOOL_NAME, TaskCompleteTool};
+pub use tool_search::{TOOL_SEARCH_TOOL_NAME, ToolSearchTool};
 pub use verify::{CommandWorkspaceVerifier, VerifyTarget, VerifyTool, WorkspaceVerifier};
 pub use web_search::WebSearchTool;
 
@@ -73,6 +75,10 @@ pub fn register_all_tools(
     router.register(Box::new(TaskCompleteTool::new()));
     router.register(Box::new(VerifyTool::new()));
     router.register(Box::new(WebSearchTool::new(web_search_config)));
+    // `tool_search` lets the model discover Deferred tools (plugins/MCP) so the
+    // base tool list stays small. Its execution is intercepted by the dispatch
+    // layer; the registration here only contributes the spec.
+    router.register(Box::new(ToolSearchTool::new()));
     if let Some(watcher) = FsWatchTool::new() {
         router.register(Box::new(watcher));
     }

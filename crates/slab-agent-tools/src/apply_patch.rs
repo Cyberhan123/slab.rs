@@ -10,7 +10,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 use slab_agent::{
-    AgentError, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver, ToolOutputStream,
+    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver,
+    ToolOutputStream, protocol::TurnItem,
 };
 use slab_apply_patch::{
     AppliedPatchDelta, AppliedPatchFileChange, PatchProgress, PatchProgressKind, PatchProgressSink,
@@ -72,6 +73,19 @@ impl ToolHandler for ApplyPatchTool {
 
     fn category(&self) -> slab_agent::OperationCategory {
         slab_agent::OperationCategory::FileEdit
+    }
+
+    fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+        let patch = render.args.get("patch").and_then(Value::as_str).unwrap_or("");
+        TurnItem::FileChange {
+            id: render.call.id.clone(),
+            changes: vec![serde_json::json!({
+                "path": first_path_in_patch(patch),
+                "type": "edit",
+                "diff": patch,
+            })],
+            status: render.status.to_owned(),
+        }
     }
 
     async fn execute(
@@ -254,6 +268,35 @@ mod tests {
 
     fn ctx() -> ToolContext {
         ToolContext::for_thread("thread").build()
+    }
+
+    #[test]
+    fn apply_patch_renders_file_change_with_first_path() {
+        let tool = ApplyPatchTool::new(PathBuf::from("."));
+        let patch = "--- a/x.rs\n+++ b/x.rs\n@@ -1 +1 @@\n-a\n+b\n";
+        let call = slab_agent::port::ParsedToolCall {
+            id: "c1".into(),
+            name: "apply_patch".into(),
+            arguments: "{}".into(),
+        };
+        let args = json!({ "patch": patch });
+        let render = ToolCallRender {
+            call: &call,
+            args: &args,
+            status: "completed",
+            output: None,
+            workspace_root: None,
+            exit_code: None,
+            duration_ms: None,
+        };
+        match tool.render_turn_item(&render) {
+            TurnItem::FileChange { changes, status, .. } => {
+                assert_eq!(status, "completed");
+                assert_eq!(changes[0]["path"].as_str(), Some("x.rs"));
+                assert_eq!(changes[0]["diff"].as_str(), Some(patch));
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
     }
 
     fn abs(root: &Path, name: &str) -> String {

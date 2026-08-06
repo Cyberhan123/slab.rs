@@ -29,7 +29,7 @@ use crate::{
     repetition_guard::{RepetitionDetected, RepetitionGuard},
     risk::ToolRiskAnalyzer,
     state::ThreadStateMachine,
-    tool::{AgentThreadContext, ToolRouter},
+    tool::{AgentThreadContext, ToolDiscoveryState, ToolRouter},
     turn::{TurnExecutionContext, TurnOutcome, emit_message_appended, execute_turn},
 };
 
@@ -148,6 +148,7 @@ pub(crate) struct AgentThreadRuntime {
     pub approval: Arc<dyn ApprovalPort>,
     pub exec_policy: Arc<dyn ExecPolicyPort>,
     pub tools: Arc<ToolRouter>,
+    pub tool_discovery: ToolDiscoveryState,
     pub hooks: AgentHookRegistry,
     pub compact: Arc<dyn CompactPort>,
     pub risk: Arc<dyn ToolRiskAnalyzer>,
@@ -207,6 +208,7 @@ impl AgentThread {
             approval,
             exec_policy,
             tools,
+            tool_discovery,
             hooks,
             compact,
             risk,
@@ -395,6 +397,7 @@ impl AgentThread {
                     config: &self.config,
                     llm: llm.as_ref(),
                     tools: tools.as_ref(),
+                    tool_discovery: &tool_discovery,
                     notify: notify.as_ref(),
                     approval: approval.as_ref(),
                     exec_policy: exec_policy.as_ref(),

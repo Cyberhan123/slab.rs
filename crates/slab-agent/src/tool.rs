@@ -9,7 +9,8 @@ use std::{
 use async_trait::async_trait;
 
 use crate::error::AgentError;
-use crate::port::ToolSpec;
+use crate::port::{ParsedToolCall, ToolSpec};
+use crate::protocol::TurnItem;
 
 // ── Context & output types ───────────────────────────────────────────────────
 
@@ -272,6 +273,65 @@ impl Default for ToolNamespace {
     }
 }
 
+/// A structured tool identity: a [`ToolNamespace`] plus a name within it.
+///
+/// The canonical wire form is `namespace__name` for namespaced tools and a bare
+/// `name` for built-in tools (e.g. `shell`, `write_file`). MCP proxy names like
+/// `mcp__server__tool` parse to namespace `mcp` / name `server__tool` and
+/// round-trip losslessly via [`ToolName::to_wire`].
+///
+/// `ToolName` is a parse/classify helper only — tool structs keep returning a
+/// cached wire-form `&str` from [`ToolHandler::name`] (the trait requires `&str`,
+/// not `String`); `ToolName` is used where structured namespace reasoning is
+/// needed (e.g. deciding whether a name is built-in vs. namespaced).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolName {
+    /// Namespace the tool belongs to.
+    pub namespace: ToolNamespace,
+    /// Name within the namespace. For namespaced tools this may itself contain
+    /// `__` (e.g. the `server__tool` part of an MCP proxy name).
+    pub name: String,
+}
+
+impl ToolName {
+    /// Create a namespaced tool name.
+    pub fn new(namespace: ToolNamespace, name: impl Into<String>) -> Self {
+        Self { namespace, name: name.into() }
+    }
+
+    /// Create a built-in tool name (namespace = `builtin`).
+    pub fn builtin(name: impl Into<String>) -> Self {
+        Self { namespace: ToolNamespace::builtin(), name: name.into() }
+    }
+
+    /// Whether this is a built-in (un-namespaced) tool.
+    pub fn is_builtin(&self) -> bool {
+        self.namespace.as_str() == ToolNamespace::BUILTIN
+    }
+
+    /// Render the canonical wire form. Built-in tools render as their bare name;
+    /// namespaced tools render as `namespace__name`.
+    pub fn to_wire(&self) -> String {
+        if self.is_builtin() {
+            self.name.clone()
+        } else {
+            format!("{}__{}", self.namespace.as_str(), self.name)
+        }
+    }
+
+    /// Parse a wire-form name. A string with no `__` (or an empty side) is
+    /// treated as a built-in bare name; otherwise the first `__` splits
+    /// namespace from the (possibly multi-segment) name.
+    pub fn parse_wire(value: &str) -> Self {
+        match value.split_once("__") {
+            Some((ns, name)) if !ns.is_empty() && !name.is_empty() => {
+                Self::new(ToolNamespace::new(ns), name)
+            }
+            _ => Self::builtin(value),
+        }
+    }
+}
+
 /// Static capability metadata for a tool — the single source of truth consumed
 /// by tool-exposure filtering, approval/risk routing, and (future) per-agent
 /// tool constraints.
@@ -314,6 +374,43 @@ impl Default for ToolCapability {
 }
 
 // ── ToolHandler trait ────────────────────────────────────────────────────────
+
+/// Inputs to [`ToolHandler::render_turn_item`]: everything a tool needs to build
+/// its harness [`TurnItem`] for a given call. Bundled into a struct so the
+/// render method signature stays small (and overriding tools pick out only the
+/// fields they care about).
+pub struct ToolCallRender<'a> {
+    /// The parsed tool call (id + name + raw arguments string).
+    pub call: &'a ParsedToolCall,
+    /// Parsed arguments object.
+    pub args: &'a serde_json::Value,
+    /// `"running"` for `ItemStarted`, `"completed"`/`"failed"` for `ItemCompleted`.
+    pub status: &'a str,
+    /// Tool result text, filled only on completion.
+    pub output: Option<&'a str>,
+    /// Workspace root for `CommandExecution.cwd`, or `None` when unbound.
+    pub workspace_root: Option<&'a str>,
+    /// Shell exit code, surfaced only for completed `shell` calls.
+    pub exit_code: Option<i64>,
+    /// Elapsed milliseconds, surfaced only on completion.
+    pub duration_ms: Option<u64>,
+}
+
+/// The default [`TurnItem`] for a tool call: a `CommandExecution` whose
+/// `command` is the tool name. Every tool call is visible on the harness
+/// timeline this way — tools with a richer render override [`ToolHandler::render_turn_item`].
+pub fn default_tool_turn_item(r: &ToolCallRender<'_>) -> TurnItem {
+    TurnItem::CommandExecution {
+        id: r.call.id.clone(),
+        command: r.call.name.clone(),
+        cwd: String::new(),
+        process_id: None,
+        status: r.status.to_owned(),
+        aggregated_output: r.output.map(str::to_owned),
+        exit_code: r.exit_code,
+        duration_ms: r.duration_ms,
+    }
+}
 
 /// An individual tool that can be invoked by an agent.
 #[async_trait]
@@ -374,6 +471,16 @@ pub trait ToolHandler: Send + Sync {
             namespace: self.namespace(),
             risk_level: None,
         }
+    }
+
+    /// Build the harness [`TurnItem`] for a call to this tool. The default
+    /// renders a generic [`TurnItem::CommandExecution`] (via
+    /// [`default_tool_turn_item`]) so every tool is visible on the timeline;
+    /// tools with a richer representation (shell command, file change, web
+    /// search, MCP call, …) override this. Render is purely a view over the
+    /// call/result — it must not perform side effects.
+    fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+        default_tool_turn_item(render)
     }
 
     /// Execute the tool with the given parsed arguments.
@@ -510,6 +617,56 @@ impl ToolRouter {
             })
             .collect()
     }
+
+    /// Specs for every registered [`ToolVisibility::Deferred`] tool, regardless
+    /// of category exposure. These are the candidates `tool_search` matches
+    /// against; whether a hit becomes callable still depends on exposure (see
+    /// [`Self::visible_tool_specs`]).
+    pub fn deferred_tool_specs(&self) -> Vec<ToolSpec> {
+        let handlers = self.handlers.read().expect("tool registry lock poisoned");
+        let caps = self.capabilities.read().expect("tool registry lock poisoned");
+        handlers
+            .values()
+            .filter_map(|handler| {
+                let name = handler.name();
+                let visibility =
+                    caps.get(name).map(|cap| cap.visibility).unwrap_or(ToolVisibility::Direct);
+                (visibility == ToolVisibility::Deferred).then(|| ToolSpec {
+                    name: handler.name().to_owned(),
+                    description: handler.description().to_owned(),
+                    parameters_schema: handler.parameters_schema(),
+                })
+            })
+            .collect()
+    }
+}
+
+/// Per-thread state tracking which `Deferred` tools `tool_search` has injected
+/// for the current thread. Lives on the thread runtime (not the process-wide
+/// [`ToolRouter`]) so discovery is isolated per thread and cleaned up when the
+/// thread ends — no manual `clear` needed.
+#[derive(Debug, Default)]
+pub struct ToolDiscoveryState {
+    injected: std::sync::Mutex<HashSet<String>>,
+}
+
+impl ToolDiscoveryState {
+    /// Create an empty discovery state.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mark a Deferred tool as injected (visible/callable for subsequent turns
+    /// of this thread, subject to category exposure).
+    pub fn inject(&self, name: &str) {
+        self.injected.lock().expect("tool discovery state lock poisoned").insert(name.to_owned());
+    }
+
+    /// Snapshot the set of injected tool names (wire form), for the per-turn
+    /// [`ToolRouter::visible_tool_specs`] projection.
+    pub fn snapshot(&self) -> HashSet<String> {
+        self.injected.lock().expect("tool discovery state lock poisoned").clone()
+    }
 }
 
 impl Default for ToolRouter {
@@ -556,6 +713,44 @@ mod tests {
         assert_eq!(ToolNamespace::default().as_str(), "builtin");
         assert_eq!(ToolNamespace::new("mcp:foo").as_str(), "mcp:foo");
         assert_eq!(ToolNamespace(ToolNamespace::BUILTIN.to_owned()).as_str(), "builtin");
+    }
+
+    #[test]
+    fn tool_name_builtin_to_wire_is_bare() {
+        let n = ToolName::builtin("shell");
+        assert!(n.is_builtin());
+        assert_eq!(n.to_wire(), "shell");
+        assert_eq!(n.namespace.as_str(), "builtin");
+        assert_eq!(n.name, "shell");
+    }
+
+    #[test]
+    fn parse_wire_treats_bare_name_as_builtin() {
+        assert!(ToolName::parse_wire("write_file").is_builtin());
+        assert!(ToolName::parse_wire("task.complete").is_builtin());
+        // No "__" at all → builtin.
+        assert_eq!(ToolName::parse_wire("grep").to_wire(), "grep");
+    }
+
+    #[test]
+    fn tool_name_namespaced_round_trip() {
+        let n = ToolName::parse_wire("mcp__server__tool");
+        assert!(!n.is_builtin());
+        assert_eq!(n.namespace.as_str(), "mcp");
+        assert_eq!(n.name, "server__tool");
+        assert_eq!(n.to_wire(), "mcp__server__tool");
+    }
+
+    #[test]
+    fn mcp_proxy_name_parses_back() {
+        let wire = "mcp__team_server__search_web_v1";
+        assert_eq!(ToolName::parse_wire(wire).to_wire(), wire);
+        // A single-segment namespaced name round-trips too.
+        let single = "plugin__my_tool";
+        let parsed = ToolName::parse_wire(single);
+        assert_eq!(parsed.namespace.as_str(), "plugin");
+        assert_eq!(parsed.name, "my_tool");
+        assert_eq!(parsed.to_wire(), single);
     }
 
     #[test]
@@ -740,6 +935,30 @@ mod tests {
         let specs =
             router.visible_tool_specs(slab_exec_policy::ToolExposure::all(), &HashSet::new());
         assert!(specs.iter().all(|s| s.name != "hidden_helper"));
+    }
+
+    #[test]
+    fn deferred_tool_specs_lists_only_deferred_tools() {
+        let router = router_with_all_visibilities();
+        // Only the Deferred tool surfaces as a search candidate; Direct/Hidden
+        // tools never appear here (Direct are already in the base list, Hidden
+        // are internal helpers).
+        let specs = router.deferred_tool_specs();
+        assert_eq!(names(&specs), ["deferred_read"]);
+    }
+
+    #[test]
+    fn discovery_state_inject_and_snapshot_round_trip() {
+        let state = ToolDiscoveryState::new();
+        assert!(state.snapshot().is_empty());
+        state.inject("mcp__srv__tool");
+        state.inject("plugin__p__cap");
+        let snap = state.snapshot();
+        assert_eq!(snap.len(), 2);
+        assert!(snap.contains("mcp__srv__tool"));
+        // Two independent states don't share injected sets (per-thread isolation).
+        let other = ToolDiscoveryState::new();
+        assert!(other.snapshot().is_empty());
     }
 
     #[test]
