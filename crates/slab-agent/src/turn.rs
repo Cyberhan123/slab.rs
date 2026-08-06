@@ -1,5 +1,7 @@
 //! Single-turn execution logic (private to the crate).
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
@@ -364,7 +366,14 @@ fn is_external_tool_name(name: &str) -> bool {
 }
 
 fn allowed_tool_specs(context: &TurnExecutionContext<'_>) -> Result<Vec<ToolSpec>, AgentError> {
-    let mut specs = context.tools.tool_specs();
+    // Visibility (Direct/Deferred/Hidden) + category-exposure projection.
+    // Computed fresh each turn from the live per-thread permission mode, so a
+    // mid-thread mode/permission flip is reflected immediately. `injected_deferred`
+    // is populated by `tool_search` (a later chunk); empty here means Deferred
+    // tools stay hidden from the base list until the model discovers them.
+    let exposure = context.exec_policy.permission_state_for(context.thread_id).exposure;
+    let injected_deferred: HashSet<String> = HashSet::new();
+    let mut specs = context.tools.visible_tool_specs(exposure, &injected_deferred);
     if !context.config.allowed_tools.is_empty() {
         specs.retain(|tool| context.config.allowed_tools.contains(&tool.name));
     }
@@ -372,22 +381,6 @@ fn allowed_tool_specs(context: &TurnExecutionContext<'_>) -> Result<Vec<ToolSpec
         // INFRA-07: offline mode narrows the toolset to local-only tools,
         // dropping anything that needs external network/provider reachability.
         specs.retain(|tool| !is_external_tool_name(&tool.name));
-    }
-    // Progressive tool exposure: hide tool categories the current permission
-    // behavior doesn't permit (e.g. shell/file-edit/network in read-only mode).
-    // Computed fresh each turn from the live per-thread permission mode, so a
-    // mid-thread mode flip is reflected immediately. `all()` short-circuits the
-    // (cheap but needless) category-map build under FullControl/RequestApproval.
-    let exposure = context.exec_policy.permission_state_for(context.thread_id).exposure;
-    if exposure != slab_exec_policy::ToolExposure::all() {
-        let categories = context.tools.categories();
-        specs.retain(|spec| {
-            let category = categories
-                .get(&spec.name)
-                .copied()
-                .unwrap_or(slab_exec_policy::OperationCategory::ReadOnly);
-            exposure.contains(category)
-        });
     }
 
     match &context.config.tool_choice {

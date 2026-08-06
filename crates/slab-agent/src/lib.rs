@@ -34,6 +34,7 @@ pub mod risk;
 pub mod runtime;
 pub mod thread;
 pub mod tool;
+pub mod tool_schema;
 
 mod concurrency_gate;
 mod llm_output;
@@ -54,7 +55,7 @@ pub use compact::{
 };
 pub use config::{AgentConfig, AgentToolChoice};
 pub use control::{AgentControl, AgentControlLimits};
-pub use error::AgentError;
+pub use error::{AgentError, ToolError};
 pub use hook::{AgentHook, AgentHookRegistry, HookEffects, HookEvent, HookOutcome, HookToolAction};
 pub use llm_output::{
     AgentStreamAssembler, AgentStreamCompletion, AgentStreamDelta, RenderedToolCallOutput,
@@ -72,6 +73,7 @@ pub use slab_exec_policy::{
     OperationDescriptor, PermissionBaseline, PermissionMode, PermissionStateSnapshot, ToolExposure,
 };
 pub use tool::{
-    AgentThreadContext, PlanRef, ToolApprovalRequest, ToolContext, ToolContextBuilder, ToolHandler,
-    ToolOutput, ToolOutputObserver, ToolOutputStream, ToolRouter, WorkspaceRef,
+    AgentThreadContext, PlanRef, ToolApprovalRequest, ToolCapability, ToolContext,
+    ToolContextBuilder, ToolHandler, ToolNamespace, ToolOutput, ToolOutputObserver,
+    ToolOutputStream, ToolRouter, ToolVisibility, WorkspaceRef,
 };
