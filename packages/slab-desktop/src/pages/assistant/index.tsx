@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
@@ -61,6 +61,7 @@ function Assistant() {
         restoreVersion,
         isHistoryLoading,
         error: harnessError,
+        actionError: harnessActionError,
         approvals,
         approvalStatusByItemId,
         liveOutputByItemId,
@@ -152,19 +153,54 @@ function Assistant() {
         onNewSession: handleNewSession,
     })
 
+    // Toast a restore failure once per distinct error. `t` is read for the label
+    // but intentionally omitted from the deps so a post-mount language change
+    // (AppLanguageSync) doesn't re-fire the toast for the same error.
+    const lastToastedRestoreErrorRef = useRef<string | null>(null)
     useEffect(() => {
         if (!harnessError) {
+            lastToastedRestoreErrorRef.current = null
             return
         }
-
+        if (lastToastedRestoreErrorRef.current === harnessError) return
+        lastToastedRestoreErrorRef.current = harnessError
         toast.error(t("pages.assistant.toast.failedToLoadSession"), {
             description: getAssistantErrorDescription(
                 new Error(harnessError),
                 t("pages.assistant.toast.unknownError"),
+                // eslint-disable-next-line react-hooks/exhaustive-deps
                 t
             ),
         })
-    }, [harnessError, t])
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [harnessError])
+
+    // Surface a failed `/compact` or `/fork` action (distinct from a restore
+    // failure) so a backend refusal doesn't look like "nothing happened".
+    const lastToastedActionRef = useRef<{ kind: string; message: string } | null>(null)
+    useEffect(() => {
+        if (!harnessActionError) {
+            lastToastedActionRef.current = null
+            return
+        }
+        const last = lastToastedActionRef.current
+        if (last?.kind === harnessActionError.kind && last.message === harnessActionError.message) {
+            return
+        }
+        lastToastedActionRef.current = {
+            kind: harnessActionError.kind,
+            message: harnessActionError.message,
+        }
+        toast.error(
+            t(
+                harnessActionError.kind === "compact"
+                    ? "pages.assistant.toast.compactFailed"
+                    : "pages.assistant.toast.forkFailed",
+            ),
+            { description: harnessActionError.message },
+        )
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [harnessActionError])
 
     const handleBeforeSubmit = useCallback(
         async (value: string) => {
@@ -175,7 +211,7 @@ function Assistant() {
 
             // NOTE: model loading is now server-driven inside `turn/start`
             // (streaming `model/load/*` notifications rendered by the in-stream
-            // ModelLoadIndicator), so there is no HTTP pre-flight here.
+            // model-load Marker), so there is no HTTP pre-flight here.
             void setConversationLabelIfNeeded(curConversation, value)
         },
         [

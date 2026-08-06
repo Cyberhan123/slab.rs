@@ -43,6 +43,7 @@ impl GgmlLlamaService {
             engine_workers: usize::try_from(num_workers)
                 .map_err(|_| invalid_model("ggml_llama.num_workers", "exceeds usize range"))?,
             context_length: request.context_length,
+            free_vram_bytes: request.free_vram_bytes,
             flash_attn,
             chat_template: request.chat_template,
             gbnf: request.gbnf,

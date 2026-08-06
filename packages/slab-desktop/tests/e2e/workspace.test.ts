@@ -473,8 +473,12 @@ async function openWorkspaceFromUi(
     timeout: 60_000,
   })
   await page.getByTestId("workspace-open-screen").waitFor({ state: "visible", timeout: 60_000 })
-  expect(await page.getByRole("button", { name: "Open folder" }).count()).toBe(1)
+  const openFolderButton = page.getByRole("button", { name: "Open folder" })
+  expect(await openFolderButton.count()).toBe(1)
 
+  // Browser fallback: the path input now lives inside a popover revealed by the
+  // single "Open folder" button (the native dialog only exists in the Tauri shell).
+  await openFolderButton.click()
   await page.getByTestId("workspace-path-input").fill(root)
   await page.getByTestId("workspace-open-path-button").click()
   await page.getByTestId("workspace-active-screen").waitFor({ state: "visible", timeout: 60_000 })

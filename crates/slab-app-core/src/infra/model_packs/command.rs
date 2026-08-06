@@ -67,7 +67,6 @@ fn build_local_model_command(
                     })
                     .flatten()
             }),
-            context_window: manifest.context_window.or(bridge.load_defaults.context_length),
             ..Default::default()
         },
         runtime_presets,

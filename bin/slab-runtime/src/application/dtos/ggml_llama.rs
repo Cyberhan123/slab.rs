@@ -13,6 +13,7 @@ pub(crate) fn decode_ggml_llama_load_request(
         model_path: decode_optional_path(request.model_path.as_ref()),
         num_workers: request.num_workers,
         context_length: request.context_length,
+        free_vram_bytes: request.free_vram_bytes,
         chat_template: request.chat_template.clone(),
         gbnf: request.gbnf.clone(),
         flash_attn: request.flash_attn,

@@ -3,7 +3,11 @@ import { renderHook } from "vitest-browser-react"
 
 import type { Thread } from "../../lib/harness"
 import { FakeWebSocket } from "../../lib/__tests__/fake-websocket"
-import { useHarnessConversation } from "../use-harness-conversation"
+import {
+  MAX_RESTORE_ATTEMPTS,
+  RESTORE_BACKOFF_MS,
+  useHarnessConversation,
+} from "../use-harness-conversation"
 
 /** Flush microtasks + the macrotask queue so the client's async open/await settle. */
 function flush(): Promise<void> {
@@ -421,6 +425,137 @@ describe("useHarnessConversation", () => {
 
     const sentBefore = FakeWebSocket.last!.sent.length
     await result.current.rollbackFromTurn(0)
+    expect(FakeWebSocket.last!.sent.length).toBe(sentBefore)
+    await unmount()
+  })
+
+  it("retries the transport open when the first dial fails, then restores", async () => {
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await flush()
+    // First dial fails transiently (e.g. slab-server not yet ready).
+    FakeWebSocket.last!.simError()
+    await flush()
+    // The hook backs off, then redials on a fresh socket.
+    await new Promise((resolve) => setTimeout(resolve, RESTORE_BACKOFF_MS + 120))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+    expect(result.current.error).toBeNull()
+    await unmount()
+  })
+
+  it("surfaces a restore error only after exhausting the open retries", async () => {
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    // Attempts 1..MAX-1 fail and back off (linear) before redialing.
+    for (let attempt = 1; attempt < MAX_RESTORE_ATTEMPTS; attempt += 1) {
+      await flush() // let the next dial create its socket
+      FakeWebSocket.last!.simError()
+      await flush() // let the rejection propagate
+      await new Promise((resolve) => setTimeout(resolve, RESTORE_BACKOFF_MS * attempt + 120))
+    }
+    // Still mid-retry, before the final attempt: no error surfaced yet.
+    expect(result.current.error).toBeNull()
+
+    // Final attempt fails → the error is now surfaced.
+    await flush()
+    FakeWebSocket.last!.simError()
+    await flush()
+    await vi.waitFor(() => expect(result.current.error).toBeTruthy())
+    expect(result.current.isHistoryLoading).toBe(false)
+    await unmount()
+  })
+
+  it("compacts the current thread and refreshes the compacted history", async () => {
+    const { result, act, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+
+    const compacted: Thread = {
+      ...THREAD,
+      turns: [{ ...THREAD.turns[0], items: [THREAD.turns[0].items[0]] }],
+    }
+    let p!: Promise<void>
+    await act(async () => {
+      p = result.current.compactThread()
+      await flush()
+    })
+    const startReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    expect(startReq.method).toBe("thread/compact/start")
+    await act(async () => {
+      FakeWebSocket.last!.simMessage(rpcResponse(startReq.id, {}))
+      await flush()
+    })
+    const resumeReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    expect(resumeReq.method).toBe("thread/resume")
+    await act(async () => {
+      FakeWebSocket.last!.simMessage(rpcResponse(resumeReq.id, { thread: compacted }))
+      await flush()
+      await p
+    })
+
+    await vi.waitFor(() => expect(result.current.isCompacting).toBe(false))
+    expect(result.current.actionError).toBeNull()
+    expect(result.current.error).toBeNull()
+    expect(result.current.restoredMessages).toHaveLength(1)
+    expect(
+      result.current.compactionMarkers.some((m) => m.mode === "manual" && m.phase === "compacted"),
+    ).toBe(true)
+    await unmount()
+  })
+
+  it("surfaces a compact rejection as an action error (separate from restore errors)", async () => {
+    const { result, act, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+
+    let p!: Promise<void>
+    await act(async () => {
+      p = result.current.compactThread()
+      await flush()
+    })
+    const startReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    expect(startReq.method).toBe("thread/compact/start")
+    await act(async () => {
+      FakeWebSocket.last!.simMessage(
+        rpcError(startReq.id, "thread is running; interrupt it before compacting"),
+      )
+      await flush()
+      await p
+    })
+
+    await vi.waitFor(() => expect(result.current.actionError?.kind).toBe("compact"))
+    expect(result.current.actionError?.message).toContain("thread is running")
+    expect(result.current.compactionMarkers.some((m) => m.mode === "manual")).toBe(false)
+    expect(result.current.isCompacting).toBe(false)
+    // Restore error stays clear — action errors are surfaced separately.
+    expect(result.current.error).toBeNull()
+    await unmount()
+  })
+
+  it("surfaces a compact with no bound thread as an action error without an RPC", async () => {
+    const { result, act, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    // Fresh session → no thread bound (currentThreadId stays null).
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcError(req.id, "no thread to resume for session"))
+    await flush()
+    await vi.waitFor(() => expect(result.current.isHistoryLoading).toBe(false))
+    expect(result.current.restoredThreadId).toBeNull()
+
+    const sentBefore = FakeWebSocket.last!.sent.length
+    await act(async () => {
+      await result.current.compactThread()
+    })
+    expect(result.current.actionError?.kind).toBe("compact")
     expect(FakeWebSocket.last!.sent.length).toBe(sentBefore)
     await unmount()
   })

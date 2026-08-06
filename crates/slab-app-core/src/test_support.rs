@@ -486,7 +486,6 @@ pub(crate) fn local_model_pack_bytes(id: &str) -> Vec<u8> {
                 "label": id,
                 "family": "llama",
                 "capabilities": ["text_generation", "chat_generation"],
-                "context_window": 32768,
                 "engines": [{"id": "ggml.llama", "format": "gguf"}],
                 "sources": [{
                     "kind": "hugging_face",

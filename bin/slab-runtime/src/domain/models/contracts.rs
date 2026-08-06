@@ -9,6 +9,10 @@ pub(crate) struct GgmlLlamaLoadConfig {
     pub engine_workers: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
+    /// Free GPU VRAM (bytes) snapshot; used to size an `auto` context
+    /// (`context_length == None`). `None` when no VRAM signal is available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free_vram_bytes: Option<u64>,
     #[serde(default)]
     pub flash_attn: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

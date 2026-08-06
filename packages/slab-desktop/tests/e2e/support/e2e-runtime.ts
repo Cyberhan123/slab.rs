@@ -645,7 +645,7 @@ function writeSettingsDocument(
           ggml: {
             backends: {
               diffusion: { enabled: false },
-              llama: { enabled: true, context_length: 2048 },
+              llama: { enabled: true, context_length: "auto" },
               whisper: { enabled: false },
             },
           },

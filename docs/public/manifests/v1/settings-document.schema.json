@@ -668,7 +668,6 @@
           "$ref": "#/$defs/LlamaRuntimeLeafConfig",
           "default": {
             "capacity": {},
-            "context_length": 2048,
             "enabled": true,
             "endpoint": {
               "http": {},
@@ -729,7 +728,6 @@
             },
             "llama": {
               "capacity": {},
-              "context_length": 2048,
               "enabled": true,
               "endpoint": {
                 "http": {},
@@ -856,13 +854,24 @@
           "default": {}
         },
         "context_length": {
-          "description": "Optional context length override.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "const": "auto",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional context length override (`auto` resolves at load to the largest\ncontext that fits in GPU VRAM)."
         },
         "enabled": {
           "default": true,
@@ -1403,7 +1412,6 @@
               },
               "llama": {
                 "capacity": {},
-                "context_length": 2048,
                 "enabled": true,
                 "endpoint": {
                   "http": {},
@@ -2034,7 +2042,6 @@
             },
             "llama": {
               "capacity": {},
-              "context_length": 2048,
               "enabled": true,
               "endpoint": {
                 "http": {},

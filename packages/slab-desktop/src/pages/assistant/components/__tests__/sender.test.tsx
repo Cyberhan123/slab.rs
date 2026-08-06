@@ -39,3 +39,32 @@ describe("Sender", () => {
     await expect.element(screen.getByRole("button", { name: "Send" })).toBeDisabled()
   })
 })
+
+describe("Sender slash-command menu", () => {
+  it("opens the command menu when the user types a leading slash", async () => {
+    const screen = await render(<Sender onSubmit={vi.fn()} />)
+
+    await userEvent.type(screen.getByLabelText("Message"), "/")
+
+    await expect.element(screen.getByText("/compact")).toBeInTheDocument()
+    await expect.element(screen.getByText("/fork")).toBeInTheDocument()
+  })
+
+  it("opens the same menu from the toolbar button, including Model/Permission", async () => {
+    const screen = await render(<Sender onSubmit={vi.fn()} />)
+
+    await userEvent.click(screen.getByRole("button", { name: "Commands" }))
+
+    await expect.element(screen.getByText("Model")).toBeInTheDocument()
+    await expect.element(screen.getByText("/compact")).toBeInTheDocument()
+  })
+
+  it("inserts a command into the input when selected", async () => {
+    const screen = await render(<Sender onSubmit={vi.fn()} />)
+
+    await userEvent.type(screen.getByLabelText("Message"), "/")
+    await userEvent.click(screen.getByText("/compact"))
+
+    await expect.element(screen.getByLabelText("Message")).toHaveValue("/compact")
+  })
+})

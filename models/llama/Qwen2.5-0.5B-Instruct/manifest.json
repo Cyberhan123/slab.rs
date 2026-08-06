@@ -5,7 +5,6 @@
   "id": "Qwen2.5-0.5B-Instruct",
   "label": "Qwen2.5-0.5B-Instruct",
   "family": "llama",
-  "context_window": 4096,
   "metadata": {
     "author": "bartowski"
   },

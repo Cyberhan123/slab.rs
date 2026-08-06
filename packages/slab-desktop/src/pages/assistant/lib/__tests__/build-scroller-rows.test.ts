@@ -6,7 +6,7 @@ import {
   formatMarkerDate,
   type ScrollerRow,
 } from '../build-scroller-rows'
-import type { CompactionMarker } from '@/pages/assistant/hooks/use-harness-conversation'
+import type { CompactionMarker, ModelLoadState } from '@/pages/assistant/hooks/use-harness-conversation'
 
 const msg = (id: string) => ({ id, role: 'assistant' })
 
@@ -71,6 +71,46 @@ describe('buildScrollerRows', () => {
 
     expect(compactRowIds(rows)).toEqual(['auto:t1:1', 'manual:t1:2'])
     expect(rows.at(-1)?.kind).toBe('compactMarker')
+  })
+
+  it('leads with a session-load marker only while restoring with no messages', () => {
+    const loading = buildScrollerRows([], [], { showHistoryMarker: false, sessionLoading: true })
+    expect(loading).toHaveLength(1)
+    expect(loading[0]).toMatchObject({ kind: 'sessionLoadMarker' })
+
+    // Once there are messages, the session-load marker is suppressed even if still loading.
+    const withMessages = buildScrollerRows([msg('m1')], [], {
+      showHistoryMarker: false,
+      sessionLoading: true,
+    })
+    expect(withMessages.some((r) => r.kind === 'sessionLoadMarker')).toBe(false)
+  })
+
+  it('places the model-load marker after compaction markers at the live edge', () => {
+    const load: ModelLoadState = { phase: 'loading', modelId: 'm' }
+    const rows = buildScrollerRows([msg('m1')], [compact('c1')], {
+      showHistoryMarker: false,
+      modelLoad: load,
+    })
+
+    expect(rows.map((r) => r.kind)).toEqual(['message', 'compactMarker', 'modelLoadMarker'])
+  })
+
+  it('orders the full status timeline: history → compaction → model-load', () => {
+    const load: ModelLoadState = { phase: 'downloading', downloadedBytes: 1, totalBytes: 2 }
+    const rows = buildScrollerRows([msg('m1'), msg('m2')], [compact('c1')], {
+      showHistoryMarker: true,
+      historyCount: 1,
+      modelLoad: load,
+    })
+
+    expect(rows.map((r) => r.kind)).toEqual([
+      'message',
+      'historyMarker',
+      'message',
+      'compactMarker',
+      'modelLoadMarker',
+    ])
   })
 })
 

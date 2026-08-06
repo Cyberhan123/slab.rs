@@ -19,7 +19,6 @@ import {
 } from "@slab/components/message-scroller"
 
 import MessageList from "@/pages/assistant/components/message-list"
-import { ModelLoadIndicator } from "@/pages/assistant/components/model-load-indicator"
 import { TokenUsageIndicator } from "@/pages/assistant/components/token-usage-indicator"
 import Sender from "@/pages/assistant/components/sender.tsx"
 import { MessageInteractionContext } from "@/pages/assistant/components/message-interaction-context"
@@ -156,19 +155,7 @@ export function AssistantChatPane({
                     <CardContent className="flex-1 overflow-hidden p-0">
                         <div className="flex h-full flex-col">
                             <div className="min-h-0 flex-1">
-                                {isHistoryLoading && messages.length === 0 ? (
-                                    <Empty className="h-full" data-testid="assistant-loading-state">
-                                        <EmptyHeader>
-                                            <EmptyMedia variant="icon">
-                                                <MessageCircleDashedIcon />
-                                            </EmptyMedia>
-                                            <EmptyTitle>{t("pages.assistant.loading.title")}</EmptyTitle>
-                                            <EmptyDescription>
-                                                {t("pages.assistant.loading.description")}
-                                            </EmptyDescription>
-                                        </EmptyHeader>
-                                    </Empty>
-                                ) : messages.length === 0 ? (
+                                {messages.length === 0 && !isHistoryLoading ? (
                                     <Empty className="h-full" data-testid="assistant-empty-state">
                                         <EmptyHeader>
                                             <EmptyMedia variant="icon">
@@ -190,6 +177,8 @@ export function AssistantChatPane({
                                                 historyCount={initialMessages.length}
                                                 historyCreatedAt={historyCreatedAt}
                                                 compactionMarkers={compactionMarkers}
+                                                modelLoad={modelLoad}
+                                                sessionLoading={isHistoryLoading}
                                             />
                                         </MessageInteractionContext.Provider>
                                         {rollbackConfirmDialog}
@@ -199,7 +188,6 @@ export function AssistantChatPane({
                         </div>
                     </CardContent>
                     <CardFooter className="flex-col gap-2">
-                        <ModelLoadIndicator modelLoad={modelLoad} />
                         <TokenUsageIndicator usage={turnUsage} contextWindow={contextWindow} />
                         <Sender
                             onSubmit={async (value, { files, effort, permissionMode }) => {

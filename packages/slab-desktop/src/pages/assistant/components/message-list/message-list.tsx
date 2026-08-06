@@ -7,7 +7,7 @@ import {
     MessageScrollerViewport,
 } from "@slab/components/message-scroller"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import type { CompactionMarker } from "@/pages/assistant/hooks/use-harness-conversation"
+import type { CompactionMarker, ModelLoadState } from "@/pages/assistant/hooks/use-harness-conversation"
 import { buildScrollerRows, type ScrollerRow } from "@/pages/assistant/lib/build-scroller-rows"
 import type { TMessage } from "@/pages/assistant/components/message/message-item"
 import { rowComponents, type ScrollerRowExtraProps } from "./row-components"
@@ -23,6 +23,10 @@ type MessageListProps = {
     historyCreatedAt?: number | null
     /** Session-scoped compaction markers rendered at the end of the stream. */
     compactionMarkers?: CompactionMarker[]
+    /** Transient model-load state; rendered as a Marker at the live edge. */
+    modelLoad?: ModelLoadState | null
+    /** True while restoring; renders a session-load Marker when there are no messages yet. */
+    sessionLoading?: boolean
 }
 
 function MessageList({
@@ -32,6 +36,8 @@ function MessageList({
     historyCount,
     historyCreatedAt,
     compactionMarkers,
+    modelLoad,
+    sessionLoading = false,
 }: MessageListProps) {
     const viewportRef = useRef<HTMLDivElement>(null)
 
@@ -40,8 +46,10 @@ function MessageList({
             buildScrollerRows(messages, compactionMarkers ?? [], {
                 showHistoryMarker,
                 historyCount,
+                modelLoad,
+                sessionLoading,
             }),
-        [messages, showHistoryMarker, historyCount, compactionMarkers],
+        [messages, showHistoryMarker, historyCount, compactionMarkers, modelLoad, sessionLoading],
     )
 
     const virtualizer = useVirtualizer({

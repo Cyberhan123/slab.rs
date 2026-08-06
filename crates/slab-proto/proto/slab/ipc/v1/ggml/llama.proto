@@ -25,6 +25,9 @@ message GgmlLlamaLoadRequest {
   // engine loads an mtmd context bound to the text model and enables image
   // inputs on chat requests.
   optional string mmproj_path = 7;
+  // Free GPU VRAM (bytes) snapshot from the server, used to size an `auto`
+  // context (context_length unset). `null` when no VRAM signal is available.
+  optional uint64 free_vram_bytes = 8;
 }
 
 message GgmlLlamaChatRequest {

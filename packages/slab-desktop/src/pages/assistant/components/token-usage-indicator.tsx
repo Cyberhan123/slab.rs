@@ -7,9 +7,8 @@ import type { TurnUsage } from "../lib/harness"
  * Token-usage indicator driven by the `turn/completed` harness notification's
  * `usage` payload. Shows a compact "used X%" label (or a total-token count when
  * the context window is unknown); hovering reveals the prompt / completion /
- * cached breakdown as plain text. Rendered as a sibling of
- * {@link ModelLoadIndicator} in the composer footer. Hidden when `usage` is
- * null (no turn has completed yet).
+ * cached breakdown as plain text. Rendered in the composer footer. Hidden when
+ * `usage` is null (no turn has completed yet).
  */
 export function TokenUsageIndicator({
     usage,

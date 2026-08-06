@@ -69,7 +69,6 @@ fn builds_local_model_command_from_pack_manifest() {
                 "id": "qwen2.5-7b-instruct",
                 "label": "Qwen2.5 7B Instruct",
                 "family": "llama",
-                "context_window": 32768,
                 "capabilities": ["text_generation"],
                 "engines": [{"id": "ggml.llama", "format": "gguf"}],
                 "sources": [{
@@ -158,7 +157,9 @@ fn builds_local_model_command_from_pack_manifest() {
     assert_eq!(command.spec.repo_id.as_deref(), Some("bartowski/Qwen2.5-7B-Instruct-GGUF"));
     assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
     assert_eq!(command.spec.local_path, None);
-    assert_eq!(command.spec.context_window, Some(32768));
+    // context_window is no longer a pack-manifest property; local packs project
+    // None (the effective value is reported post-load via ModelStatus).
+    assert_eq!(command.spec.context_window, None);
     assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.temperature), Some(0.7));
     assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.top_p), Some(0.95));
 }

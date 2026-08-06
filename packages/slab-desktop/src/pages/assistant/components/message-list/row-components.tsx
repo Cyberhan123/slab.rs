@@ -71,6 +71,46 @@ export function MessageRow({
     )
 }
 
+/** "Loading this session…" separator shown while restoring, before any messages exist. */
+export function SessionLoadMarkerRow(
+    _props: ScrollerRowComponentProps<ScrollerRowOf<"sessionLoadMarker">>,
+): ReactElement {
+    const { t } = useTranslation()
+    return (
+        <Marker variant="separator" data-testid="assistant-session-load-marker">
+            <MarkerContent>
+                <Shimmer>{`${t("pages.assistant.loading.title")} — ${t("pages.assistant.loading.description")}`}</Shimmer>
+            </MarkerContent>
+        </Marker>
+    )
+}
+
+/** "Downloading/loading model…" separator that tracks the live model-load phase. */
+export function ModelLoadMarkerRow({
+    row,
+}: ScrollerRowComponentProps<ScrollerRowOf<"modelLoadMarker">>): ReactElement {
+    const { t } = useTranslation()
+    const { modelLoad } = row
+    const label =
+        modelLoad.phase === "downloading"
+            ? t("pages.assistant.modelLoad.downloading")
+            : t("pages.assistant.modelLoad.loading")
+    const percent =
+        modelLoad.downloadedBytes != null &&
+        modelLoad.totalBytes != null &&
+        modelLoad.totalBytes > 0
+            ? Math.min(100, Math.round((modelLoad.downloadedBytes / modelLoad.totalBytes) * 100))
+            : null
+    return (
+        <Marker variant="separator" data-testid="assistant-model-load-marker">
+            <MarkerContent>
+                <Shimmer>{label}</Shimmer>
+                {percent != null ? <span className="tabular-nums">{percent}%</span> : null}
+            </MarkerContent>
+        </Marker>
+    )
+}
+
 /**
  * Row-level component registry, mirroring the MessageParts dispatch pattern.
  * Replaces the former `row.kind === ...` ternary chain in the list. Meta-rows
@@ -85,11 +125,15 @@ export function MessageRow({
  * type, so safety moves from "narrowed in the list" to "narrowed by signature".
  */
 export const rowComponents: {
+    sessionLoadMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"sessionLoadMarker">>>
     historyMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"historyMarker">>>
     compactMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"compactMarker">>>
+    modelLoadMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"modelLoadMarker">>>
     message: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"message">>>
 } = {
+    sessionLoadMarker: SessionLoadMarkerRow,
     historyMarker: HistoryMarkerRow,
     compactMarker: CompactMarkerRow,
+    modelLoadMarker: ModelLoadMarkerRow,
     message: MessageRow,
 }

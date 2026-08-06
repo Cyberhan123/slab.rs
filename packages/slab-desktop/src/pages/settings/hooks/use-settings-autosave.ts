@@ -29,6 +29,13 @@ export function useSettingsAutosave({
 }: UseSettingsAutosaveArgs) {
   const { t } = useTranslation();
   const [drafts, setDrafts] = useState<Record<string, DraftValue>>({});
+  // Latest-drafts mirror, read inside the `saveDraft` event to decide — after
+  // the PUT resolves — whether a newer edit landed during the await. Replaces a
+  // side-effect-inside-a-setState-updater pattern whose synchronous read raced
+  // with React's (sometimes deferred) updater execution and stuck the field on
+  // "new edits waiting" even though the save had succeeded.
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
   const [fieldErrors, setFieldErrors] = useState<Record<string, FieldErrorState>>({});
   const [fieldStatuses, setFieldStatuses] = useState<Record<string, FieldStatusState>>({});
   const [resettingPmid, setResettingPmid] = useState<string | null>(null);
@@ -151,7 +158,13 @@ export function useSettingsAutosave({
         body.op === 'set' ? body.value : property.schema.default_value,
       );
 
-      let draftWasConsumed = false;
+      // Race-free consume check: compare the snapshot to the LATEST draft. If a
+      // newer edit landed during the await, draftsRef no longer points at the
+      // snapshot, so keep the newer draft and stay dirty; otherwise consume it
+      // and mark saved. This no longer depends on React running the setDrafts
+      // updater eagerly at dispatch time.
+      const stillCurrent = draftsRef.current[pmid] === draftSnapshot;
+
       setDrafts((current) => {
         if (current[pmid] !== draftSnapshot) {
           return current;
@@ -159,11 +172,10 @@ export function useSettingsAutosave({
 
         const next = { ...current };
         delete next[pmid];
-        draftWasConsumed = true;
         return next;
       });
 
-      if (draftWasConsumed) {
+      if (stillCurrent) {
         clearFieldError(pmid);
         setFieldStatus(pmid, {
           tone: 'saved',

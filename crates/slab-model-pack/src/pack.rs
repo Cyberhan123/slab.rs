@@ -664,7 +664,6 @@ mod tests {
             "id": "qwen2.5-7b-instruct",
             "label": "Qwen2.5 7B Instruct",
             "family": "llama",
-            "context_window": 8192,
             "engines": [{"id": "ggml.llama", "format": "gguf"}],
             "components": [{
                 "id": "model",
@@ -865,7 +864,6 @@ mod tests {
             "label": "Qwen2.5 7B Instruct",
             "family": "llama",
             "capabilities": capabilities,
-            "context_window": 8192,
             "engines": [{"id": "ggml.llama", "format": "gguf"}],
             "metadata": {"author": "slab"},
             "components": [{

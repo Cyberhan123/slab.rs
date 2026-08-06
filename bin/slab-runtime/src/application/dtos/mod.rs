@@ -209,6 +209,7 @@ pub(crate) struct GgmlLlamaLoadRequest {
     pub model_path: Option<PathBuf>,
     pub num_workers: Option<u32>,
     pub context_length: Option<u32>,
+    pub free_vram_bytes: Option<u64>,
     pub chat_template: Option<String>,
     pub gbnf: Option<String>,
     pub flash_attn: Option<bool>,

@@ -24,6 +24,7 @@ use slab_jsonrpc::notifier::Notifier;
 use slab_proto::harness::method;
 use slab_proto::harness::notification::ErrorParams;
 use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 
 /// harness-visible thread id → real slab thread id, set once the first turn
 /// materializes the thread.
@@ -44,6 +45,10 @@ struct SessionInner {
     service: HarnessService,
     notifier: Notifier,
     bindings: StdMutex<HashMap<String, ThreadBinding>>,
+    /// Live fan-out task handles, keyed by real thread id, so a re-resume on the
+    /// same connection (e.g. after `/compact` or rollback) doesn't spawn a second
+    /// subscriber that would double-deliver every event. See `spawn_event_fanout`.
+    fanout_tasks: StdMutex<HashMap<String, JoinHandle<()>>>,
     initialized: AtomicBool,
     next_thread_id: AtomicU64,
 }
@@ -62,6 +67,7 @@ impl HarnessSession {
                 service,
                 notifier,
                 bindings: StdMutex::new(HashMap::new()),
+                fanout_tasks: StdMutex::new(HashMap::new()),
                 initialized: AtomicBool::new(false),
                 next_thread_id: AtomicU64::new(1),
             }),
@@ -138,12 +144,21 @@ impl HarnessSession {
     /// consumes `EventMsg` only — no projection layer. The legacy
     /// `AgentEventKind` stream stays separate and feeds `/responses`.
     ///
-    /// ⚠️ The caller must ensure at most one fan-out task per real thread id
-    /// (a duplicate would double-deliver every event to the client).
+    /// Idempotent per live real thread id: a re-resume on the same connection
+    /// (e.g. `/compact` and rollback both re-resume to refresh messages) is a
+    /// no-op while a fan-out task for that real thread is still running, so
+    /// events are never double-delivered. A finished task (its receiver hit
+    /// `Closed`) is replaced, allowing re-establishment after task death.
     pub(crate) fn spawn_event_fanout(&self, real_thread_id: String, harness_thread_id: String) {
+        let mut tasks = self.inner.fanout_tasks.lock().expect("fanout task map poisoned");
+        if matches!(dedupe_fanout(&tasks, &real_thread_id), FanoutDedupe::Skip) {
+            return;
+        }
+
         let service = self.inner.service.clone();
         let notifier = self.inner.notifier.clone();
-        tokio::spawn(async move {
+        let real_key = real_thread_id.clone();
+        let handle = tokio::spawn(async move {
             let subscription = service.subscribe_event_msgs(&real_thread_id);
 
             for envelope in &subscription.replay {
@@ -177,6 +192,7 @@ impl HarnessSession {
                 }
             }
         });
+        tasks.insert(real_key, handle);
     }
 }
 
@@ -238,6 +254,25 @@ fn push_event(notifier: &Notifier, thread_id: &str, msg: EventMsg) {
     }
 }
 
+/// Decision returned by [`dedupe_fanout`].
+enum FanoutDedupe {
+    /// A live fan-out task already exists for this real thread id.
+    Skip,
+    /// No live task (absent, or the previous task finished) — spawn one.
+    Spawn,
+}
+
+/// Guard the "at most one live fan-out task per real thread id" invariant. A
+/// still-running task yields [`FanoutDedupe::Skip`]; a finished task (e.g. its
+/// broadcast receiver hit `Closed`) is treated like an absent entry so a
+/// re-resume after task death can re-establish the fan-out.
+fn dedupe_fanout(tasks: &HashMap<String, JoinHandle<()>>, real_id: &str) -> FanoutDedupe {
+    match tasks.get(real_id) {
+        Some(handle) if !handle.is_finished() => FanoutDedupe::Skip,
+        _ => FanoutDedupe::Spawn,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use slab_agent::protocol::{ContextCompactedParams, ContextCompactingParams, ErrorEvent};
@@ -289,5 +324,31 @@ mod tests {
             EventMsg::ContextCompacted(p) => assert_eq!(p.thread_id, "hthread-1"),
             other => panic!("unexpected variant: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn dedupe_fanout_spawns_when_absent_and_skips_when_live() {
+        use tokio::sync::mpsc;
+
+        let tasks: HashMap<String, JoinHandle<()>> = HashMap::new();
+        // Absent real id → Spawn (also exercises the finished/`_` arm).
+        assert!(matches!(dedupe_fanout(&tasks, "real-1"), FanoutDedupe::Spawn));
+
+        // A task parked on a channel stays live for the whole test.
+        let (block_tx, mut block_rx) = mpsc::channel::<()>(1);
+        let mut tasks = tasks;
+        tasks.insert(
+            "real-live".to_owned(),
+            tokio::spawn(async move {
+                let _ = block_rx.recv().await;
+            }),
+        );
+
+        // Live real id → Skip; any other id still → Spawn.
+        assert!(matches!(dedupe_fanout(&tasks, "real-live"), FanoutDedupe::Skip));
+        assert!(matches!(dedupe_fanout(&tasks, "real-other"), FanoutDedupe::Spawn));
+
+        // Unblock so the parked task can finish before the runtime shuts down.
+        let _ = block_tx.send(()).await;
     }
 }

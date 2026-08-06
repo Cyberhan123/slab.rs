@@ -100,6 +100,8 @@ export interface HarnessConversation {
   isHistoryLoading: boolean
   /** Restore error message, if any. */
   error: string | null
+  /** A failed `/compact` or `/fork` action, surfaced separately from `error`. */
+  actionError: ActionError | null
   /** Approval requests still awaiting a user decision (rendered in the banner). */
   approvals: ApprovalRequest[]
   /** itemId → approval status, for the in-stream tool-card status badge. */
@@ -162,6 +164,20 @@ function buildUserMessageTurnIndex(thread: Thread): Map<string, number> {
   return map
 }
 
+/**
+ * How many times the harness transport `open()` is retried before a restore
+ * fails. `slab-server` spawns asynchronously, so the first WebSocket dial can
+ * race the server being ready; a few backed-off retries recover without a
+ * manual refresh. Only the transport open is retried — `thread/resume` failures
+ * are surfaced immediately (they are either a real error or a "no thread" fresh
+ * session).
+ */
+export const MAX_RESTORE_ATTEMPTS = 3
+export const RESTORE_BACKOFF_MS = 400
+
+/** A failed `/compact` or `/fork` action (distinct from a restore `error`). */
+export type ActionError = { kind: "compact" | "fork"; message: string }
+
 export function useHarnessConversation(
   sessionId: string | undefined,
   model: string,
@@ -176,6 +192,7 @@ export function useHarnessConversation(
   const [restoreVersion, setRestoreVersion] = useState(0)
   const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<ActionError | null>(null)
   const [approvalMap, setApprovalMap] = useState<Map<string, ApprovalRequest>>(new Map())
   const [liveOutputMap, setLiveOutputMap] = useState<Map<string, string>>(new Map())
   const [livePatchMap, setLivePatchMap] = useState<Map<string, string[]>>(new Map())
@@ -397,8 +414,12 @@ export function useHarnessConversation(
   const compactThread = useCallback(
     async (threadId?: string) => {
       const tid = threadId ?? client.currentThreadId
-      if (!tid) return
+      if (!tid) {
+        setActionError({ kind: "compact", message: "no active thread" })
+        return
+      }
       setError(null)
+      setActionError(null)
       setIsCompacting(true)
       const markerId = `manual:${tid}:${Date.now()}`
       setCompactionMarkers((prev) => [
@@ -420,9 +441,13 @@ export function useHarnessConversation(
         )
         setRestoreVersion((value) => value + 1)
       } catch (compactError) {
-        // Drop the marker — no compaction happened.
+        // Drop the marker — no compaction happened. Surface as an action error
+        // (separate from restore errors) so the user sees why nothing changed.
         setCompactionMarkers((prev) => prev.filter((m) => m.id !== markerId))
-        setError(compactError instanceof Error ? compactError.message : "compact failed")
+        setActionError({
+          kind: "compact",
+          message: compactError instanceof Error ? compactError.message : "compact failed",
+        })
       } finally {
         setIsCompacting(false)
       }
@@ -433,8 +458,12 @@ export function useHarnessConversation(
   const forkThread = useCallback(
     async (threadId?: string) => {
       const tid = threadId ?? client.currentThreadId
-      if (!tid) return
+      if (!tid) {
+        setActionError({ kind: "fork", message: "no active thread" })
+        return
+      }
       setError(null)
+      setActionError(null)
       setIsForking(true)
       try {
         // Fork returns a child thread under the same slab session; rebind the
@@ -452,7 +481,10 @@ export function useHarnessConversation(
         setHistoryCreatedAt(thread.createdAt)
         setRestoreVersion((value) => value + 1)
       } catch (forkError) {
-        setError(forkError instanceof Error ? forkError.message : "fork failed")
+        setActionError({
+          kind: "fork",
+          message: forkError instanceof Error ? forkError.message : "fork failed",
+        })
       } finally {
         setIsForking(false)
       }
@@ -527,7 +559,23 @@ export function useHarnessConversation(
 
     const restore = async () => {
       try {
-        await client.open()
+        // slab-server spawns asynchronously, so the harness WebSocket can fail
+        // to dial on the first attempt. Retry the transport open with backoff
+        // rather than failing the whole restore (which previously needed a
+        // manual refresh to recover). Resume errors are NOT retried — they are
+        // either a real failure or a "no thread" fresh session.
+        for (let attempt = 1; attempt <= MAX_RESTORE_ATTEMPTS; attempt += 1) {
+          if (cancelled) return
+          try {
+            await client.open()
+            break
+          } catch (openError) {
+            if (cancelled) return
+            if (attempt === MAX_RESTORE_ATTEMPTS) throw openError
+            await new Promise((resolve) => setTimeout(resolve, RESTORE_BACKOFF_MS * attempt))
+          }
+        }
+
         try {
           const { thread } = await client.threadResume({})
           const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
@@ -582,6 +630,7 @@ export function useHarnessConversation(
     restoreVersion,
     isHistoryLoading,
     error,
+    actionError,
     approvals,
     approvalStatusByItemId,
     liveOutputByItemId: liveOutputMap,

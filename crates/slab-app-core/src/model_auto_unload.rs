@@ -536,6 +536,12 @@ impl ModelAutoUnloadManager {
         })
     }
 
+    /// Free bytes on the primary GPU (total − used), or `None` when no GPU /
+    /// telemetry is available. Used to size an `auto` model context at load.
+    pub async fn primary_gpu_free_bytes(&self) -> Option<u64> {
+        self.primary_gpu_memory_gauge().await.map(MemoryGauge::free_bytes)
+    }
+
     async fn select_pressure_eviction_candidate(
         &self,
         target_backend: RuntimeBackendId,
@@ -709,7 +715,9 @@ fn load_spec_num_workers(spec: &RuntimeBackendLoadSpec) -> Option<usize> {
 
 fn load_spec_context_length(spec: &RuntimeBackendLoadSpec) -> Option<u32> {
     match spec {
-        RuntimeBackendLoadSpec::GgmlLlama(config) => config.context_length,
+        RuntimeBackendLoadSpec::GgmlLlama(config) => {
+            config.context_length.and_then(|spec| spec.as_fixed_u32())
+        }
         _ => None,
     }
 }

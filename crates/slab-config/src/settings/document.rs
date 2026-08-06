@@ -8,7 +8,7 @@ use slab_otel::config::OtelSettings;
 
 use super::defaults;
 use super::launch::RuntimeTransportMode;
-use slab_types::{DESKTOP_API_BIND, I18nMessageRef, I18nPayload, ServerI18nKey};
+use slab_types::{ContextLengthSpec, DESKTOP_API_BIND, I18nMessageRef, I18nPayload, ServerI18nKey};
 
 pub const PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL: &str =
     "https://slab.reorgix.com/manifests/v1/settings-document.schema.json";
@@ -1021,9 +1021,10 @@ pub struct LlamaRuntimeLeafConfig {
     /// Whether the llama backend is enabled.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// Optional context length override.
+    /// Optional context length override (`auto` resolves at load to the largest
+    /// context that fits in GPU VRAM).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_length: Option<u32>,
+    pub context_length: Option<ContextLengthSpec>,
     /// Whether Flash Attention is enabled for llama contexts.
     #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
@@ -1041,7 +1042,10 @@ impl Default for LlamaRuntimeLeafConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            context_length: Some(2048),
+            // Unset = `auto` (resolve at load to the largest context that fits
+            // in GPU VRAM). The explicit default keeps programmatic `default()`
+            // consistent with an absent settings field.
+            context_length: None,
             flash_attn: defaults::flash_attn_enabled(),
             source: SourceConfig::default(),
             logging: LoggingOverrideConfig::default(),

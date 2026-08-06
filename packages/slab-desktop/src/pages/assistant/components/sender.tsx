@@ -96,7 +96,12 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
   const [effortLevel, setEffortLevel] = useState<EffortLevel>("high")
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("request_approval")
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // The "/" command menu opens both from the toolbar button and from typing a
+  // leading "/", as one unified popover above the input.
+  const isSlashCommand = value.trimStart().startsWith("/")
 
   const effort: ReasoningEffort = thinkingEnabled ? effortLevel : "off"
   const isGenerating = loading
@@ -143,6 +148,7 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
     await onSubmit(message, { files, effort, permissionMode }, event)
 
     setValue("")
+    setCommandMenuOpen(false)
     for (const item of attachments) URL.revokeObjectURL(item.previewUrl)
     setAttachments([])
   }
@@ -258,7 +264,11 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <DropdownMenu>
+          <DropdownMenu
+            open={commandMenuOpen || isSlashCommand}
+            onOpenChange={setCommandMenuOpen}
+            modal={false}
+          >
             <DropdownMenuTrigger asChild>
               <InputGroupButton
                 aria-label="Commands"

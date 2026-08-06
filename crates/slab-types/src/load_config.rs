@@ -3,15 +3,21 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{GbnfAssetRef, RuntimeDevicePreference, TemplateAssetRef, defaults};
+use crate::{ContextLengthSpec, GbnfAssetRef, RuntimeDevicePreference, TemplateAssetRef, defaults};
 
 /// Typed `model.load` payload for the `ggml.llama` backend.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct GgmlLlamaLoadConfig {
     pub model_path: PathBuf,
     pub num_workers: usize,
+    /// Context window: an explicit token count, or `auto` (resolve at load to
+    /// the largest context that fits in GPU VRAM). `None` is treated as `auto`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_length: Option<u32>,
+    pub context_length: Option<ContextLengthSpec>,
+    /// Free GPU VRAM (bytes) snapshot taken by the server at dispatch time, used
+    /// to size `auto` context. `None` when no VRAM signal is available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free_vram_bytes: Option<u64>,
     #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

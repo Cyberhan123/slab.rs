@@ -8,6 +8,7 @@ use super::{
     launch::LaunchConfig,
 };
 use slab_otel::config::OtelSettings;
+use slab_types::ContextLengthSpec;
 
 /// A configured cloud/remote AI provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -97,9 +98,10 @@ pub struct RuntimeConfig {
 pub struct RuntimeLlamaConfig {
     /// Number of parallel llama workers.
     pub num_workers: u32,
-    /// Context window length in tokens.
+    /// Context window: an explicit token count, or `auto` (resolve at load to
+    /// the largest context that fits in GPU VRAM). `None`/unset = `auto`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_length: Option<u32>,
+    pub context_length: Option<ContextLengthSpec>,
     #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
 }

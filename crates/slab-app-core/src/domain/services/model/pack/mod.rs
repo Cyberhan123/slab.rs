@@ -390,7 +390,6 @@ pub(super) fn build_local_model_command_from_pack_preset(
                             })
                             .flatten()
                     }),
-                    context_window: manifest.context_window.or(bridge.load_defaults.context_length),
                     ..Default::default()
                 },
                 runtime_presets,
@@ -441,7 +440,6 @@ pub(super) fn build_local_model_command_from_pack_preset(
                             })
                             .flatten()
                     }),
-                    context_window: manifest.context_window,
                     ..Default::default()
                 },
                 runtime_presets: None,

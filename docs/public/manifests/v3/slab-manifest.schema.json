@@ -319,14 +319,6 @@
       },
       "type": "array"
     },
-    "context_window": {
-      "format": "uint32",
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
     "default_preset": {
       "type": [
         "string",

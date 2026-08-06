@@ -5,7 +5,7 @@ use slab_types::load_config::{
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
 };
 use slab_types::runtime::DiffusionLoadOptions;
-use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
+use slab_types::{ContextLengthSpec, RuntimeBackendId, RuntimeBackendLoadSpec};
 use tracing::info;
 
 use crate::context::{ModelState, WorkerState};
@@ -254,16 +254,16 @@ pub(super) async fn resolve_model_workers(
 pub(super) async fn resolve_llama_context_length(
     state: &ModelState,
     backend_id: RuntimeBackendId,
-) -> Result<(u32, &'static str), AppCoreError> {
+) -> Result<(ContextLengthSpec, &'static str), AppCoreError> {
     if backend_id != RuntimeBackendId::GgmlLlama {
-        return Ok((0, "not_applicable"));
+        return Ok((ContextLengthSpec::Auto, "not_applicable"));
     }
-
-    let configured = state.pmid().config().runtime.llama.context_length;
-    let Some(context_length) = configured else {
-        return Ok((0, "default"));
-    };
-    Ok((context_length, "settings"))
+    // The settings field is `Option<ContextLengthSpec>`; unset (None) means
+    // `auto` — resolve at load to the largest context that fits in GPU VRAM.
+    match state.pmid().config().runtime.llama.context_length {
+        Some(spec) => Ok((spec, "settings")),
+        None => Ok((ContextLengthSpec::Auto, "default")),
+    }
 }
 
 fn resolve_backend_flash_attn(state: &ModelState, backend_id: RuntimeBackendId) -> bool {
@@ -377,7 +377,7 @@ async fn load_model_candidate(
     let (context_length, context_source) = if let Some(context_length) =
         candidate.pack_load_defaults.as_ref().and_then(|defaults| defaults.context_length)
     {
-        (context_length, "model_pack")
+        (ContextLengthSpec::Fixed(context_length), "model_pack")
     } else {
         resolve_llama_context_length(state, candidate.backend_id).await?
     };
@@ -397,18 +397,21 @@ async fn load_model_candidate(
         model_path = %candidate.model_path,
         workers = num_workers,
         worker_source = worker_source,
-        context_length = context_length,
+        context_length = %context_length,
         context_source = context_source,
         flash_attn = flash_attn,
         "{log_message}"
     );
 
+    // Snapshot free GPU VRAM so the runtime can size an `auto` context to fit.
+    let free_vram_bytes = state.auto_unload().primary_gpu_free_bytes().await;
     let load_spec = build_backend_load_spec(
         candidate.backend_id,
         &candidate.model_path,
         BackendLoadSpecOptions {
             num_workers,
             context_length,
+            free_vram_bytes,
             chat_template: candidate
                 .pack_load_defaults
                 .as_ref()
@@ -488,7 +491,8 @@ async fn persist_selected_engine_id(
 
 struct BackendLoadSpecOptions {
     num_workers: u32,
-    context_length: u32,
+    context_length: ContextLengthSpec,
+    free_vram_bytes: Option<u64>,
     chat_template: Option<String>,
     gbnf: Option<String>,
     flash_attn: bool,
@@ -504,6 +508,7 @@ fn build_backend_load_spec(
     let BackendLoadSpecOptions {
         num_workers,
         context_length,
+        free_vram_bytes,
         chat_template,
         gbnf,
         flash_attn,
@@ -518,7 +523,8 @@ fn build_backend_load_spec(
                     "failed to convert num_workers into usize for ggml.llama: {error}"
                 ))
             })?,
-            context_length: (context_length > 0).then_some(context_length),
+            context_length: Some(context_length),
+            free_vram_bytes,
             flash_attn,
             chat_template,
             gbnf,

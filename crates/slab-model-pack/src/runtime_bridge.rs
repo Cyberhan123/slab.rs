@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use serde_json::Value;
 use slab_types::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig, Capability,
-    DiffusionLoadOptions, DriverHints, GbnfAssetRef, GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig,
-    GgmlParakeetLoadConfig, GgmlWhisperLoadConfig, JsonOptions, ModelSource, ModelSpec,
-    OnnxLoadConfig, RuntimeBackendId, RuntimeBackendLoadSpec, RuntimeModelLoadCommand,
+    ContextLengthSpec, DiffusionLoadOptions, DriverHints, GbnfAssetRef, GgmlDiffusionLoadConfig,
+    GgmlLlamaLoadConfig, GgmlParakeetLoadConfig, GgmlWhisperLoadConfig, JsonOptions, ModelSource,
+    ModelSpec, OnnxLoadConfig, RuntimeBackendId, RuntimeBackendLoadSpec, RuntimeModelLoadCommand,
     TemplateAssetRef,
 };
 
@@ -183,7 +183,8 @@ impl ModelPackEngineLoadSpec {
                         message: error.to_string(),
                     },
                 )?,
-                context_length: self.load_defaults.context_length,
+                context_length: self.load_defaults.context_length.map(ContextLengthSpec::Fixed),
+                free_vram_bytes: None,
                 flash_attn: true,
                 chat_template: self.load_defaults.chat_template_source.clone(),
                 gbnf: self.load_defaults.gbnf_source.clone(),
@@ -411,10 +412,10 @@ fn build_load_defaults(
 
     Ok(ModelPackLoadDefaults {
         num_workers: options.get("num_workers").and_then(as_u32),
-        context_length: resolved
-            .manifest
-            .context_window
-            .or_else(|| options.get("context_length").and_then(as_u32)),
+        // `context_window` is no longer a model-pack property; the active context
+        // length is resolved from settings (default `auto`). Packs may still
+        // override via a `context_length` key in their load config payload.
+        context_length: options.get("context_length").and_then(as_u32),
         chat_template_source: resolve_text_asset_ref(
             resolved,
             &config_id,
@@ -611,7 +612,9 @@ mod v3_tests {
                 .as_deref(),
             Some("C:/models/qwen.gguf")
         );
-        assert_eq!(bridge.load_defaults.context_length, Some(8192));
+        // context_window is no longer a pack property; the bridge surfaces no
+        // context_length unless the pack's load config sets one explicitly.
+        assert_eq!(bridge.load_defaults.context_length, None);
         assert_eq!(bridge.inference_defaults.get("temperature").and_then(Value::as_f64), Some(0.7));
     }
 
@@ -674,7 +677,6 @@ mod v3_tests {
                     "label": "Qwen2.5 7B Instruct",
                     "family": "llama",
                     "capabilities": ["text_generation"],
-                    "context_window": 8192,
                     "engines": [{"id": "ggml.llama", "format": "gguf"}],
                     "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$ref": "ref://models/variants/q4.json"}],
                     "presets": [{"id": "default", "label": "Default", "$ref": "ref://models/presets/default.json"}],

@@ -122,10 +122,14 @@ describe("AssistantChatPane", () => {
     expect(screen.getByTestId("message-list").query()).toBeNull()
   })
 
-  it("shows the loading state while history is loading with no messages", async () => {
+  it("renders the message list (session-load marker) while history is loading with no messages", async () => {
     const screen = await render(<AssistantChatPane {...baseProps({ isHistoryLoading: true })} />)
-    await expect.element(screen.getByTestId("assistant-loading-state")).toBeInTheDocument()
-    expect(screen.getByTestId("message-list").query()).toBeNull()
+    // Loading no longer swaps in a full-page Empty; the MessageList renders so
+    // the session-load Marker shows in-stream. The hero Empty is reserved for
+    // the empty + idle case.
+    await expect.element(screen.getByTestId("message-list")).toBeInTheDocument()
+    expect(screen.getByTestId("assistant-loading-state").query()).toBeNull()
+    expect(screen.getByTestId("assistant-empty-state").query()).toBeNull()
   })
 
   it("renders the message list once populated", async () => {

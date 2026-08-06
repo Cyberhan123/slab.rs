@@ -262,6 +262,8 @@ export const assistant = {
     failedToUpdateSession: '更新助手会话失败。',
     failedToDeleteSession: '删除助手会话失败。',
     interruptFailed: '中断助手线程失败',
+    compactFailed: '压缩会话失败。',
+    forkFailed: '分叉会话失败。',
     eventStreamInterrupted: '助手连接已中断，请准备好后重试本次回复。',
     unknownError: '未知错误',
   },

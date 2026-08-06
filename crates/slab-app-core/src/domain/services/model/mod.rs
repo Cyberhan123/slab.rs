@@ -189,15 +189,16 @@ impl ModelService {
         object.insert("num_workers".into(), Value::from(workers));
 
         if backend_id == RuntimeBackendId::GgmlLlama {
-            if let Some(context_length) = bridge.load_defaults.context_length {
-                object.insert("context_length".into(), Value::from(context_length));
+            let context_length = if let Some(context_length) = bridge.load_defaults.context_length {
+                slab_types::ContextLengthSpec::Fixed(context_length)
             } else {
-                let (context_length, source) =
-                    runtime::resolve_llama_context_length(&self.model_state, backend_id).await?;
-                if context_length > 0 || source == "settings" {
-                    object.insert("context_length".into(), Value::from(context_length));
-                }
-            }
+                runtime::resolve_llama_context_length(&self.model_state, backend_id).await?.0
+            };
+            object.insert(
+                "context_length".into(),
+                serde_json::to_value(context_length)
+                    .map_err(|error| AppCoreError::Internal(error.to_string()))?,
+            );
             if let Some(chat_template) = bridge.load_defaults.chat_template.as_ref() {
                 object.insert(
                     "chat_template".into(),
@@ -296,9 +297,7 @@ impl ModelService {
                     Some("Effective llama context window length in tokens.".into()),
                     ModelConfigValueType::Integer,
                     json_property_or_null(resolved_load_spec, "context_length"),
-                    if resolved.manifest.context_window.is_some() {
-                        ModelConfigOrigin::PackManifest
-                    } else if bridge.load_defaults.context_length.is_some() {
+                    if bridge.load_defaults.context_length.is_some() {
                         ModelConfigOrigin::SelectedBackendConfig
                     } else {
                         ModelConfigOrigin::PmidFallback

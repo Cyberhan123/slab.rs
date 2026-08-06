@@ -268,6 +268,8 @@ export const assistant = {
     failedToUpdateSession: 'Failed to update assistant session.',
     failedToDeleteSession: 'Failed to delete assistant session.',
     interruptFailed: 'Failed to interrupt assistant thread',
+    compactFailed: 'Failed to compact the conversation.',
+    forkFailed: 'Failed to fork the conversation.',
     eventStreamInterrupted: 'Assistant connection was interrupted. Retry the response when you are ready.',
     unknownError: 'Unknown error',
   },

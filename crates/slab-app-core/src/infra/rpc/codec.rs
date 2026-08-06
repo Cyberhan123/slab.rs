@@ -61,7 +61,8 @@ pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> ModelLoadRpcR
             ModelLoadRpcRequest::GgmlLlama(pb::GgmlLlamaLoadRequest {
                 model_path: Some(path_to_string(&config.model_path)),
                 num_workers: Some(usize_to_u32(config.num_workers)),
-                context_length: config.context_length.filter(|value| *value != 0),
+                context_length: config.context_length.and_then(|spec| spec.as_fixed_u32()),
+                free_vram_bytes: config.free_vram_bytes,
                 chat_template: non_empty_string(config.chat_template.as_deref()),
                 gbnf: non_empty_string(config.gbnf.as_deref()),
                 flash_attn: Some(config.flash_attn),

@@ -272,7 +272,6 @@ fn product_only_vad_pack_projects_into_local_catalog_model() {
         label: "whisper-vad".into(),
         family: ModelFamily::Whisper,
         capabilities: vec![Capability::AudioVad],
-        context_window: None,
         pricing: None,
         metadata: BTreeMap::new(),
         engines: vec![slab_model_pack::EngineTarget {

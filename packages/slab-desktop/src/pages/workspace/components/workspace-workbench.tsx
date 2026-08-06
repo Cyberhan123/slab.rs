@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils"
 import type { WorkspacePageState } from "../hooks/use-workspace-page"
 import { SLAB_DIR_NAME } from "../lib/workspace-page-utils"
+import { OpenWorkspaceButton } from "./open-workspace-button"
 import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceCommandPalette } from "./workspace-command-palette"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
@@ -88,7 +89,6 @@ export function WorkspaceWorkbench({
   const { t } = useTranslation()
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [explorerWidth, setExplorerWidth] = useState(380)
-  const [pathInput, setPathInput] = useState("")
   const explorerResizeStartWidthRef = useRef(explorerWidth)
   const previousResizeCursorRef = useRef("")
   const previousResizeUserSelectRef = useRef("")
@@ -214,13 +214,8 @@ export function WorkspaceWorkbench({
             description={t("pages.workspace.empty.description")}
             action={
               <div className="flex w-full flex-col items-center gap-3">
-                <Button variant="cta" size="pill" onClick={handleOpenFolder}>
-                  <FolderOpen className="size-4" />
-                  {t("pages.workspace.actions.openFolder")}
-                </Button>
-                <WorkspacePathOpenForm
-                  pathInput={pathInput}
-                  setPathInput={setPathInput}
+                <OpenWorkspaceButton
+                  onOpenFolder={handleOpenFolder}
                   onOpenWorkspacePath={openWorkspacePath}
                 />
                 {commandPaletteButton}
@@ -428,54 +423,5 @@ export function WorkspaceWorkbench({
       {commandPalette}
       {confirmDiscardDialog}
     </div>
-  )
-}
-
-function WorkspacePathOpenForm({
-  onOpenWorkspacePath,
-  pathInput,
-  setPathInput,
-}: {
-  onOpenWorkspacePath: (rootPath: string) => Promise<void>
-  pathInput: string
-  setPathInput: (value: string) => void
-}) {
-  const { t } = useTranslation()
-  const trimmedPath = pathInput.trim()
-
-  return (
-    <form
-      className="flex w-full max-w-2xl flex-col gap-2 sm:flex-row"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (trimmedPath) {
-          void onOpenWorkspacePath(trimmedPath)
-        }
-      }}
-    >
-      <input
-        value={pathInput}
-        onChange={(event) => setPathInput(event.target.value)}
-        className="focus-ring h-10 min-w-0 flex-1 rounded-lg border border-border/60 bg-background px-3 text-sm transition duration-[var(--dur-180)] ease-out-expo focus:border-[var(--brand-teal)]"
-        placeholder={t("pages.workspace.actions.pathPlaceholder")}
-        aria-label={t("pages.workspace.actions.pathPlaceholder")}
-        data-testid="workspace-path-input"
-      />
-      <Button
-        type="button"
-        variant="cta"
-        size="pill"
-        disabled={!trimmedPath}
-        onClick={() => {
-          if (trimmedPath) {
-            void onOpenWorkspacePath(trimmedPath)
-          }
-        }}
-        data-testid="workspace-open-path-button"
-      >
-        <FolderOpen className="size-4" />
-        {t("pages.workspace.actions.openPath")}
-      </Button>
-    </form>
   )
 }

@@ -302,7 +302,7 @@ async fn resolve_context_length(state: &ModelState, model_id: &str) -> Option<u3
     {
         return Some(context_window);
     }
-    state.pmid().config().runtime.llama.context_length
+    state.pmid().config().runtime.llama.context_length.and_then(|spec| spec.as_fixed_u32())
 }
 
 #[cfg(test)]

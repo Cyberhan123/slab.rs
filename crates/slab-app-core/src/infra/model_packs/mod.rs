@@ -501,7 +501,6 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
         label: config.display_name.clone(),
         family,
         capabilities: config.capabilities.clone(),
-        context_window: config.spec.context_window,
         pricing: config
             .spec
             .pricing
