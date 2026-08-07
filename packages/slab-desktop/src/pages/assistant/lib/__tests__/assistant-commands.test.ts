@@ -112,8 +112,12 @@ describe('resolveCommandDispatch', () => {
     })
   })
 
-  it('falls through to send for a prompt command (/plan)', () => {
-    expect(resolveCommandDispatch('/plan foo', COMMANDS)).toEqual({ action: 'send' })
+  it('routes /plan to the togglePlan action (no message sent)', () => {
+    expect(resolveCommandDispatch('/plan', COMMANDS)).toEqual({ action: 'togglePlan' })
+  })
+
+  it('routes /plan with trailing args to togglePlan (args ignored)', () => {
+    expect(resolveCommandDispatch('/plan foo', COMMANDS)).toEqual({ action: 'togglePlan' })
   })
 
   it('falls through to send for a prompt skill command', () => {

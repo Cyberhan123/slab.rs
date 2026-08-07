@@ -190,6 +190,18 @@ export async function selectPermissionMode(
   await page.keyboard.press("Escape")
 }
 
+/** Select the interaction mode (`default` | `plan`) from the composer's Commands
+ * dropdown. Items are tagged `assistant-interaction-mode-<mode>`. Mirrors
+ * {@link selectPermissionMode} — the two selectors are orthogonal. */
+export async function selectInteractionMode(
+  page: Page,
+  mode: "default" | "plan"
+): Promise<void> {
+  await page.getByRole("button", { name: "Commands" }).click()
+  await page.getByTestId(`assistant-interaction-mode-${mode}`).click()
+  await page.keyboard.press("Escape")
+}
+
 export async function expectAssistantPageText(page: Page, text: string): Promise<void> {
   const needle = visibleNeedle(text)
   // Assistant message bubbles are tagged `assistant-message-assistant` on
@@ -252,6 +264,48 @@ export async function expectFileChangeCard(
     },
     60_000
   )
+}
+
+/** Assert the structured plan card rendered (tagged `assistant-tool-plan`,
+ * message-tool-plan-part.tsx) and, when set, that its summary text contains
+ * `expectation.summaryContains`. */
+export async function expectPlanCard(
+  page: Page,
+  expectation: { summaryContains?: string }
+): Promise<void> {
+  await eventually(
+    "plan card",
+    async () => {
+      const card = page.locator('[data-testid="assistant-tool-plan"]')
+      if (!(await card.first().isVisible())) {
+        return null
+      }
+      if (expectation.summaryContains) {
+        const text = (await card.first().textContent()) ?? ""
+        if (!text.includes(expectation.summaryContains)) {
+          return null
+        }
+      }
+      return true
+    },
+    60_000
+  )
+}
+
+/** Assert the rich plan approval card rendered (tagged `assistant-approval-plan`,
+ * approval-banner.tsx) and click the chosen scope (`approve` = run_once,
+ * `reject` = deny). */
+export async function expectPlanApprovalCard(
+  page: Page,
+  action: "approve" | "reject"
+): Promise<void> {
+  await eventually(
+    "plan approval card",
+    async () => page.locator('[data-testid="assistant-approval-plan"]').first().isVisible(),
+    240_000
+  )
+  const scope = action === "approve" ? "run_once" : "deny"
+  await page.getByTestId(`assistant-approval-${scope}`).click({ timeout: 240_000 })
 }
 
 export function latestAssistantTextAfter(

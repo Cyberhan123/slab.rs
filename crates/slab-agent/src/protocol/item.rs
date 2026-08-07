@@ -71,6 +71,15 @@ pub enum TurnItem {
         id: String,
         path: String,
     },
+    /// A structured execution plan authored in Plan interaction mode (by the
+    /// `plan` / `update_plan` / `present_plan` tools). `plan` is the serialized
+    /// `slab_agent::Plan` (snake_case fields). UI-only — its LLM-visible
+    /// counterpart flows through as the tool-result text.
+    #[serde(alias = "Plan")]
+    Plan {
+        id: String,
+        plan: Value,
+    },
 }
 
 impl TurnItem {
@@ -84,7 +93,8 @@ impl TurnItem {
             | Self::FileChange { id, .. }
             | Self::McpToolCall { id, .. }
             | Self::WebSearch { id, .. }
-            | Self::ImageView { id, .. } => id,
+            | Self::ImageView { id, .. }
+            | Self::Plan { id, .. } => id,
         }
     }
 }
@@ -161,5 +171,31 @@ mod tests {
         assert_eq!(json["type"], "commandExecution");
         assert_eq!(json["cwd"], "/tmp");
         assert_eq!(json["durationMs"], 12);
+    }
+
+    #[test]
+    fn plan_round_trips_and_exposes_id() {
+        let item = TurnItem::Plan {
+            id: "p1".to_owned(),
+            plan: serde_json::json!({
+                "plan_id": "plan-0",
+                "summary": "ship it",
+                "items": [{ "step": "do", "status": "pending" }],
+                "counts": { "pending": 1, "in_progress": 0, "completed": 0, "blocked": 0 }
+            }),
+        };
+        assert_eq!(item.id(), "p1");
+        // camelCase tag; the nested plan keeps its snake_case producer shape.
+        let json = serde_json::to_value(&item).unwrap();
+        assert_eq!(json["type"], "plan");
+        assert_eq!(json["plan"]["plan_id"], "plan-0");
+        assert_eq!(json["plan"]["counts"]["pending"], 1);
+        // Round-trips and accepts the PascalCase spelling (mirrors other variants).
+        let s = serde_json::to_string(&item).unwrap();
+        let back: TurnItem = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, item);
+        let pascal: TurnItem =
+            serde_json::from_str(r#"{"type":"Plan","id":"p1","plan":{}}"#).unwrap();
+        assert!(matches!(pascal, TurnItem::Plan { id, .. } if id == "p1"));
     }
 }

@@ -54,6 +54,33 @@ const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
 /// tool's content (the metadata marker is a producer-side signal only).
 const PRESENT_PLAN_TOOL_NAME: &str = "present_plan";
 
+/// Plan-authoring tool names. Mirror `slab_agent_tools::{PLAN,UPDATE_PLAN}_TOOL_NAME`.
+const PLAN_TOOL_NAME: &str = "plan";
+const UPDATE_PLAN_TOOL_NAME: &str = "update_plan";
+
+/// Metadata key under which `present_plan` nests the plan snapshot. Mirrors
+/// `slab_agent_tools::PRESENT_PLAN_METADATA_KEY`.
+const PRESENT_PLAN_METADATA_KEY: &str = "present_plan";
+
+/// Extract the structured plan snapshot a plan tool stashed in its `metadata`.
+///
+/// `plan` / `update_plan` carry the plan as the metadata object itself;
+/// `present_plan` nests it under [`PRESENT_PLAN_METADATA_KEY`]. Shared by the
+/// loop-side `TurnItem::Plan` synthesis (UI card) and the approval-request
+/// `plan_snapshot` (rich approval card). Returns `None` for other tools or when
+/// no snapshot is present (e.g. a failed call).
+fn plan_snapshot_for(
+    name: &str,
+    metadata: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let metadata = metadata?;
+    match name {
+        PLAN_TOOL_NAME | UPDATE_PLAN_TOOL_NAME => Some(metadata.clone()),
+        PRESENT_PLAN_TOOL_NAME => metadata.get(PRESENT_PLAN_METADATA_KEY).cloned(),
+        _ => None,
+    }
+}
+
 /// Structured completion payload extracted from a successful `task.complete`
 /// tool call. Consumed by the turn loop to emit the final answer (双轨 2).
 #[derive(Debug, Clone)]
@@ -342,6 +369,7 @@ async fn emit_approval_request(run: &ToolRunContext<'_, '_>) {
         reason: None,
         category: Some(request.descriptor.category),
         allowed_scopes: default_allowed_scopes(),
+        plan_snapshot: None,
     });
     run.context.notify.on_event_msg(run.context.thread_id, &msg).await;
 }
@@ -356,6 +384,7 @@ async fn drive_present_plan_approval(
     context: &TurnExecutionContext<'_>,
     call_id: &str,
     plan_summary: String,
+    plan_snapshot: Option<serde_json::Value>,
     risk: &ToolRiskAssessment,
 ) -> Result<(String, ToolCallStatus), AgentError> {
     use slab_exec_policy::{InteractionMode, OperationCategory, OperationDescriptor};
@@ -370,6 +399,7 @@ async fn drive_present_plan_approval(
         reason: Some("Plan ready for approval".to_owned()),
         category: Some(OperationCategory::ReadOnly),
         allowed_scopes: default_allowed_scopes(),
+        plan_snapshot,
     });
     context.notify.on_event_msg(context.thread_id, &msg).await;
     record_json(
@@ -851,9 +881,16 @@ async fn handle_tool_call(
     // `task.complete` detection pattern).
     let mut content =
         if tool_call.name == PRESENT_PLAN_TOOL_NAME && call_status == ToolCallStatus::Completed {
-            let (approved_content, resolved_status) =
-                drive_present_plan_approval(context, &call_id, tool_output.content.clone(), &risk)
-                    .await?;
+            let plan_snapshot =
+                plan_snapshot_for(PRESENT_PLAN_TOOL_NAME, tool_output.metadata.as_ref());
+            let (approved_content, resolved_status) = drive_present_plan_approval(
+                context,
+                &call_id,
+                tool_output.content.clone(),
+                plan_snapshot,
+                &risk,
+            )
+            .await?;
             call_status = resolved_status;
             approved_content
         } else {
@@ -900,9 +937,13 @@ async fn handle_tool_call(
 
     let item_status =
         if matches!(call_status, ToolCallStatus::Completed) { "completed" } else { "failed" };
-    emit_item_completed(
-        context,
-        render_tool_call_item(
+    // Plan-authoring tools stash the structured plan in `metadata`, which the
+    // generic render path can't see. Synthesize a `TurnItem::Plan` (UI card)
+    // when a snapshot is present; otherwise fall back to the tool's own render.
+    // Mirrors the loop-side `task.complete` / `present_plan` detection pattern.
+    let completed_item = match plan_snapshot_for(&tool_call.name, tool_output.metadata.as_ref()) {
+        Some(plan) => TurnItem::Plan { id: tool_call.id.clone(), plan },
+        _ => render_tool_call_item(
             context.tools.get(&tool_call.name).as_deref(),
             tool_call,
             &effective_args,
@@ -912,8 +953,8 @@ async fn handle_tool_call(
             shell_exit_code,
             Some(duration_ms),
         ),
-    )
-    .await;
+    };
+    emit_item_completed(context, completed_item).await;
 
     let message = crate::turn_tool_record::tool_message(tool_call, content);
 
@@ -1220,6 +1261,22 @@ mod tests {
             name: name.to_owned(),
             arguments: "{}".to_owned(),
         }
+    }
+
+    #[test]
+    fn plan_snapshot_extracts_per_tool_shape() {
+        let plan = serde_json::json!({ "plan_id": "plan-0", "items": [], "counts": {
+            "pending": 0, "in_progress": 0, "completed": 0, "blocked": 0
+        }});
+        // plan / update_plan carry the plan as the metadata object itself.
+        assert_eq!(plan_snapshot_for(PLAN_TOOL_NAME, Some(&plan)), Some(plan.clone()));
+        assert_eq!(plan_snapshot_for(UPDATE_PLAN_TOOL_NAME, Some(&plan)), Some(plan.clone()));
+        // present_plan nests it under the metadata key.
+        let nested = serde_json::json!({ PRESENT_PLAN_METADATA_KEY: plan });
+        assert_eq!(plan_snapshot_for(PRESENT_PLAN_TOOL_NAME, Some(&nested)), Some(plan));
+        // Other tools / absent metadata yield None.
+        assert!(plan_snapshot_for("shell", Some(&nested)).is_none());
+        assert!(plan_snapshot_for(PRESENT_PLAN_TOOL_NAME, None).is_none());
     }
 
     #[allow(clippy::too_many_arguments)]

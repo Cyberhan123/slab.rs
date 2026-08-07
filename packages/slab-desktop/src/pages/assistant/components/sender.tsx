@@ -31,6 +31,7 @@ import {
   Check,
   Dot,
   File,
+  ListChecksIcon,
   PaperclipIcon,
   PlusIcon,
   ShieldCheck,
@@ -40,8 +41,15 @@ import {
   XIcon,
 } from "lucide-react"
 
-import type { ApprovalScope, CommandInfo, PermissionMode, ReasoningEffort } from "../lib/harness"
+import type {
+  ApprovalScope,
+  CommandInfo,
+  InteractionMode,
+  PermissionMode,
+  ReasoningEffort,
+} from "../lib/harness"
 import type { ApprovalRequest } from "../hooks/use-harness-conversation"
+import { resolveCommandDispatch } from "../lib/assistant-commands"
 import { ApprovalCard } from "./approval-banner"
 
 /** Per-session permission modes offered in the composer. */
@@ -50,6 +58,12 @@ const PERMISSION_MODES: ReadonlyArray<{ value: PermissionMode; label: string }> 
   { value: "approve_for_me", label: "pages.assistant.composer.permission.approveForMe" },
   { value: "full_control", label: "pages.assistant.composer.permission.fullControl" },
   { value: "custom", label: "pages.assistant.composer.permission.custom" },
+]
+
+/** Per-session interaction modes offered in the composer (orthogonal to permission). */
+const INTERACTION_MODES: ReadonlyArray<{ value: InteractionMode; label: string }> = [
+  { value: "default", label: "pages.assistant.composer.interaction.default" },
+  { value: "plan", label: "pages.assistant.composer.interaction.plan" },
 ]
 
 type EffortLevel = "low" | "medium" | "high"
@@ -64,6 +78,7 @@ export type SenderSubmitOptions = {
   files: FileUIPart[]
   effort: ReasoningEffort
   permissionMode: PermissionMode
+  interactionMode: InteractionMode
 }
 
 type SenderProps = {
@@ -80,6 +95,10 @@ type SenderProps = {
   onResolveApproval?: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void> | void
   /** Command registry snapshot driving the `/`-menu (`command/list`). */
   commands: CommandInfo[]
+  /** Current interaction mode (lifted from the conversation hook). */
+  interactionMode: InteractionMode
+  /** Set the interaction mode (absolute); `/plan` toggles via this. */
+  onInteractionModeChange: (mode: InteractionMode) => void
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -91,7 +110,16 @@ function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
-function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApproval, commands }: SenderProps) {
+function Sender({
+  onSubmit,
+  onStop,
+  loading = false,
+  approvals,
+  onResolveApproval,
+  commands,
+  interactionMode,
+  onInteractionModeChange,
+}: SenderProps) {
   const { t } = useTranslation()
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -138,6 +166,16 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
     if (!message && attachments.length === 0) return
     if (isGenerating) return
 
+    // `/plan` toggles the client-side Plan interaction mode (no message sent).
+    // The server is the source of truth via the `turn/start` interactionMode.
+    const dispatch = resolveCommandDispatch(value, commands)
+    if (dispatch.action === "togglePlan") {
+      onInteractionModeChange(interactionMode === "plan" ? "default" : "plan")
+      setValue("")
+      setCommandMenuOpen(false)
+      return
+    }
+
     const files: FileUIPart[] = await Promise.all(
       attachments.map(async (item) => ({
         type: "file" as const,
@@ -147,7 +185,7 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
       })),
     )
 
-    await onSubmit(message, { files, effort, permissionMode }, event)
+    await onSubmit(message, { files, effort, permissionMode, interactionMode }, event)
 
     setValue("")
     setCommandMenuOpen(false)
@@ -350,6 +388,25 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
               </DropdownMenuGroup>
               <DropdownMenuGroup>
                 <DropdownMenuLabel>
+                  {t("pages.assistant.composer.interaction.title")}
+                </DropdownMenuLabel>
+                {INTERACTION_MODES.map((mode) => (
+                  <DropdownMenuItem
+                    key={mode.value}
+                    data-testid={`assistant-interaction-mode-${mode.value}`}
+                    onSelect={(event) => {
+                      event.preventDefault()
+                      onInteractionModeChange(mode.value)
+                    }}
+                  >
+                    <ListChecksIcon />
+                    {t(mode.label)}
+                    {interactionMode === mode.value ? <Check className="ml-auto size-3.5" /> : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>
                   {t("pages.assistant.composer.commandSkill")}
                 </DropdownMenuLabel>
                 {commands.map((cmd) => {
@@ -360,9 +417,15 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
                       title={cmd.description}
                       onSelect={(event) => {
                         event.preventDefault()
-                        // Control commands seed the exact trigger (ready to
-                        // submit); Prompt/Render commands prefix the input for
-                        // further typing.
+                        // `/plan` toggles Plan interaction mode directly (no
+                        // seeding, no message). Control commands seed the exact
+                        // trigger (ready to submit); Prompt/Render commands
+                        // prefix the input for further typing.
+                        if (cmd.name === "plan") {
+                          onInteractionModeChange(interactionMode === "plan" ? "default" : "plan")
+                          setCommandMenuOpen(false)
+                          return
+                        }
                         if (cmd.kind === "control") {
                           setValue(seed)
                         } else {

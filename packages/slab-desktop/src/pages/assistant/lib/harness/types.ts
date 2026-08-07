@@ -115,6 +115,40 @@ export type PermissionMode =
   | "full_control"
   | "custom"
 
+/**
+ * Orthogonal interaction mode (mirrors `slab_exec_policy::InteractionMode`).
+ * `plan` narrows the agent to read-only exploration + the plan tools and gates
+ * execution behind an approval flip back to `default`.
+ */
+export type InteractionMode = "default" | "plan"
+
+// ── Plan value type (mirrors `slab_agent::Plan`, snake_case wire fields) ────
+
+export type PlanStatus = "pending" | "in_progress" | "completed" | "blocked"
+
+export interface PlanItem {
+  step: string
+  status: PlanStatus
+  depends_on?: string[]
+  result_ref?: string
+}
+
+export interface PlanCounts {
+  pending: number
+  in_progress: number
+  completed: number
+  blocked: number
+}
+
+/** A structured plan authored in Plan mode. Fields are snake_case on the wire. */
+export interface Plan {
+  plan_id: string
+  summary?: string
+  items: PlanItem[]
+  counts: PlanCounts
+  current_step?: number
+}
+
 /** Persistence scope chosen when approving a prompt. */
 export type ApprovalScope = "run_once" | "always_in_workspace" | "always" | "deny"
 
@@ -215,6 +249,7 @@ export type TurnItem =
     }
   | { type: "webSearch"; id: string; query: string }
   | { type: "imageView"; id: string; path: string }
+  | { type: "plan"; id: string; plan: Plan }
 
 // ── UserInput (turn/start `input`) ──────────────────────────────────────────
 
@@ -271,6 +306,7 @@ export interface ThreadStartParams {
   approvalPolicy?: ApprovalPolicy
   sandbox?: SandboxMode
   permissionMode?: PermissionMode
+  interactionMode?: InteractionMode
   baseInstructions?: string
   developerInstructions?: string
   experimentalRawEvents?: boolean
@@ -303,6 +339,7 @@ export interface TurnStartParams {
   approvalPolicy?: ApprovalPolicy
   sandboxPolicy?: SandboxPolicy
   permissionMode?: PermissionMode
+  interactionMode?: InteractionMode
   model?: string
   effort?: ReasoningEffort
   outputSchema?: unknown
@@ -551,6 +588,8 @@ export interface CommandExecutionRequestApprovalParams {
   category?: OperationCategory
   /** Scopes the client may offer; empty for servers that only support approve/reject. */
   allowedScopes?: ApprovalScope[]
+  /** Full plan snapshot, present only on `present_plan` approvals (rich card). */
+  planSnapshot?: Plan
 }
 
 export interface FileChangeApprovalChange {

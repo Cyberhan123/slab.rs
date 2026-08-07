@@ -7,6 +7,7 @@ import { useTranslation } from "@slab/i18n"
 import {
   CheckIcon,
   FilePenIcon,
+  ListChecksIcon,
   ShieldAlertIcon,
   TerminalIcon,
   XIcon,
@@ -15,6 +16,7 @@ import { useState } from "react"
 
 import type { ApprovalScope } from "../lib/harness"
 import type { ApprovalRequest } from "../hooks/use-harness-conversation"
+import { PlanCardBody } from "./message/message-tool-plan-part"
 
 const changeTypeVariant: Record<string, "default" | "secondary" | "destructive"> = {
   add: "secondary",
@@ -67,17 +69,29 @@ export function ApprovalCard({
         ]
 
   const isCommand = approval.kind === "command"
+  const isPlan = approval.kind === "plan"
 
   return (
-    <div className="rounded-md border border-yellow-500/40 bg-yellow-500/5 p-3">
+    <div
+      className="rounded-md border border-yellow-500/40 bg-yellow-500/5 p-3"
+      data-testid={isPlan ? "assistant-approval-plan" : undefined}
+    >
       <div className="flex items-center gap-2 text-sm font-medium">
         <ShieldAlertIcon className="size-4 text-yellow-600" />
         <span>{t("pages.assistant.approval.title")}</span>
         <Badge variant="secondary" className="gap-1">
-          {isCommand ? <TerminalIcon className="size-3" /> : <FilePenIcon className="size-3" />}
-          {isCommand
-            ? t("pages.assistant.approval.command")
-            : t("pages.assistant.approval.fileChange")}
+          {isPlan ? (
+            <ListChecksIcon className="size-3" />
+          ) : isCommand ? (
+            <TerminalIcon className="size-3" />
+          ) : (
+            <FilePenIcon className="size-3" />
+          )}
+          {isPlan
+            ? t("pages.assistant.approval.plan")
+            : isCommand
+              ? t("pages.assistant.approval.command")
+              : t("pages.assistant.approval.fileChange")}
         </Badge>
       </div>
 
@@ -86,7 +100,9 @@ export function ApprovalCard({
       ) : null}
 
       <div className="mt-2 space-y-2">
-        {isCommand ? (
+        {isPlan && approval.planSnapshot ? (
+          <PlanCardBody plan={approval.planSnapshot} />
+        ) : isCommand ? (
           <pre className="overflow-x-auto rounded-md bg-muted/60 p-2 font-mono text-xs">
             <span className="text-muted-foreground">$ cd {approval.cwd ?? "."}</span>
             {"\n"}

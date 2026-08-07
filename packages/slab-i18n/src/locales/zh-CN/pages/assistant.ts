@@ -7,9 +7,14 @@ export const assistant = {
     title: '需要审批',
     command: '命令',
     fileChange: '文件变更',
+    plan: '计划',
     runOnce: '仅本次允许',
     alwaysInWorkspace: '当前工作区总是允许',
     always: '总是允许',
+  },
+  planMode: {
+    banner: '计划模式已开启 —— 助手正在只读探索并起草计划。',
+    exit: '退出',
   },
   header: {
     title: '助手',
@@ -167,6 +172,11 @@ export const assistant = {
       approveForMe: '替我审批（敬请期待）',
       fullControl: '完全控制',
       custom: '自定义',
+    },
+    interaction: {
+      title: '交互模式',
+      default: '默认',
+      plan: '计划',
     },
     stopGeneratingResponse: '停止生成回复',
     sendMessage: '发送消息',

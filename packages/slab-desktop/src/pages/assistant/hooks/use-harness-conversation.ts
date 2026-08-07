@@ -30,20 +30,22 @@ import {
   type ContextCompactingParams,
   type FileChangeApprovalChange,
   type FileChangeRequestApprovalParams,
+  type InteractionMode,
   type JsonRpcNotification,
   type ModelLoadDeltaParams,
   type ModelLoadPhase,
   type OperationCategory,
+  type Plan,
   type Thread,
   type TurnCompletedParams,
   type TurnUsage,
 } from "../lib/harness"
 
-/** A pending human-approval request surfaced from the harness (commands / file changes). */
+/** A pending human-approval request surfaced from the harness (commands / file changes / plans). */
 export type ApprovalRequest = {
   itemId: string
   threadId: string
-  kind: "command" | "fileChange"
+  kind: "command" | "fileChange" | "plan"
   command?: string
   cwd?: string
   changes?: FileChangeApprovalChange[]
@@ -51,6 +53,8 @@ export type ApprovalRequest = {
   category?: OperationCategory
   /** Persistence scopes the server allows the user to pick. */
   allowedScopes?: ApprovalScope[]
+  /** Full plan snapshot, present only on `present_plan` approvals (rich card). */
+  planSnapshot?: Plan
   status: "pending" | "approved" | "denied"
 }
 
@@ -125,6 +129,10 @@ export interface HarnessConversation {
   isCompacting: boolean
   /** True while a `/fork` round-trip is in flight. */
   isForking: boolean
+  /** Current interaction mode (`default` | `plan`); lifted so approval-resolve can reset it. */
+  interactionMode: InteractionMode
+  /** Set the interaction mode (absolute). `/plan` toggles via the Sender. */
+  setInteractionMode: (mode: InteractionMode) => void
   /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
   resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
   /** Manually compact the current (or given) thread via `thread/compact/start`. */
@@ -210,6 +218,12 @@ export function useHarnessConversation(
   const [userMessageTurnIndex, setUserMessageTurnIndex] = useState<Map<string, number>>(
     () => new Map(),
   )
+  // Interaction mode is lifted here (not in the Sender) so resolving a plan
+  // approval can flip it back to `default` atomically — the server flips its
+  // per-thread mode inside the approval handler, and the next `turn/start`
+  // carries this value, keeping client + server in sync. Ephemeral per session
+  // (not persisted to rollout): a restored session starts in `default`.
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>("default")
 
   const transport = useMemo(() => new HarnessChatTransport({ client, model }), [client, model])
 
@@ -342,15 +356,19 @@ export function useHarnessConversation(
         const next = new Map(prev)
         if (isCommandApproval) {
           const command = params as CommandExecutionRequestApprovalParams
+          // A `present_plan` approval carries a full plan snapshot; render it as
+          // a plan approval (rich card) instead of a plain command approval.
+          const isPlan = command.planSnapshot !== undefined
           next.set(params.itemId, {
             itemId: params.itemId,
             threadId: params.threadId,
-            kind: "command",
+            kind: isPlan ? "plan" : "command",
             command: command.command,
             cwd: command.cwd,
             reason: command.reason,
             category: command.category,
             allowedScopes: command.allowedScopes,
+            planSnapshot: command.planSnapshot,
             status: "pending",
           })
         } else {
@@ -381,6 +399,12 @@ export function useHarnessConversation(
         next.set(itemId, { ...existing, status: approved ? "approved" : "denied" })
         return next
       })
+      // Approving a plan flips the thread out of Plan mode (mutation tools
+      // unlock); mirror the server's mode flip here so the banner clears and
+      // the next turn/start carries `default`. Rejection keeps Plan mode.
+      if (approved && entry.kind === "plan") {
+        setInteractionMode("default")
+      }
       try {
         const result = await client.approvalResolve({ threadId: entry.threadId, itemId, approved, scope })
         // If the server couldn't deliver the decision (e.g. the pending entry
@@ -545,6 +569,7 @@ export function useHarnessConversation(
     setCompactionMarkers([])
     setCommands([])
     setUserMessageTurnIndex(new Map())
+    setInteractionMode("default")
     if (!sessionId) {
       client.currentThreadId = null
       client.lastTurnIndex = -1
@@ -657,6 +682,8 @@ export function useHarnessConversation(
     compactionMarkers,
     isCompacting,
     isForking,
+    interactionMode,
+    setInteractionMode,
     resolveApproval,
     compactThread,
     forkThread,

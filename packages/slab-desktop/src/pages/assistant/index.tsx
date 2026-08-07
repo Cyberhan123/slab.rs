@@ -78,6 +78,8 @@ function Assistant() {
         forkThread,
         userMessageTurnIndex,
         rollbackFromTurn,
+        interactionMode,
+        setInteractionMode,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
 
     // Context window for the usage consumption bar: prefer the runtime's
@@ -253,6 +255,8 @@ function Assistant() {
                 isForking={isForking}
                 userMessageTurnIndex={userMessageTurnIndex}
                 onRollbackFromTurn={rollbackFromTurn}
+                interactionMode={interactionMode}
+                onInteractionModeChange={setInteractionMode}
             />
 
             <AssistantSessionSheet

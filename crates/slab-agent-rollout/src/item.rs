@@ -265,6 +265,15 @@ mod tests {
                 id: "iv1".to_owned(),
                 path: "/p.png".to_owned(),
             }),
+            RolloutItem::TurnItem(TurnItem::Plan {
+                id: "pl1".to_owned(),
+                plan: serde_json::json!({
+                    "plan_id": "plan-0",
+                    "summary": "ship it",
+                    "items": [{"step": "do", "status": "pending"}],
+                    "counts": {"pending": 1, "in_progress": 0, "completed": 0, "blocked": 0}
+                }),
+            }),
             RolloutItem::Compacted(CompactedPayload {
                 thread_id: "t1".to_owned(),
                 compacted_messages: vec![],

@@ -33,8 +33,9 @@ export function parseAssistantCommand(value: string): AssistantCommandParseResul
 /**
  * Resolve a composer submission into a dispatch decision, driven by the
  * registry snapshot from `command/list`. A `control` result runs a host action
- * (never reaches the model); `send` falls through to `sendMessage` (Prompt
- * commands, `/plan`, skills, and anything not recognized as a command).
+ * (never reaches the model); `togglePlan` flips the client-side InteractionMode
+ * toggle (the `/plan` command — never reaches the model); `send` falls through
+ * to `sendMessage` (skills and anything not recognized as a command).
  *
  * Local resolution (no server round-trip) per the "客户端解析" guidance: the
  * client already holds the full command list, so `parseAssistantCommand` +
@@ -42,6 +43,7 @@ export function parseAssistantCommand(value: string): AssistantCommandParseResul
  */
 export type CommandDispatch =
     | { action: "control"; controlAction: "compact" | "fork" }
+    | { action: "togglePlan" }
     | { action: "send" }
 
 export function resolveCommandDispatch(
@@ -60,6 +62,12 @@ export function resolveCommandDispatch(
             if (cmd.controlAction === "fork") {
                 return { action: "control", controlAction: "fork" }
             }
+        }
+        // `/plan` is registered as a Prompt command but the client repurposes it
+        // to toggle Plan interaction mode (no message sent); the server stays
+        // the source of truth via the `turn/start` interactionMode field.
+        if (cmd?.name === "plan") {
+            return { action: "togglePlan" }
         }
     }
     return { action: "send" }

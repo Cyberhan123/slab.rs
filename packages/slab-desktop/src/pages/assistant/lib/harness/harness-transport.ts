@@ -30,6 +30,7 @@ import {
   isTerminalNotification,
 } from "./stream"
 import type {
+  InteractionMode,
   JsonRpcNotification,
   PermissionMode,
   ReasoningEffort,
@@ -103,6 +104,16 @@ function readPermissionMode(metadata: unknown): PermissionMode | undefined {
   return undefined
 }
 
+/** Read the per-session interaction-mode selector carried via `sendMessage({ metadata })`. */
+function readInteractionMode(metadata: unknown): InteractionMode | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined
+  const mode = (metadata as { interactionMode?: unknown }).interactionMode
+  if (mode === "default" || mode === "plan") {
+    return mode
+  }
+  return undefined
+}
+
 export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatTransport<UI_MESSAGE> {
   private readonly client: HarnessClient
   private readonly model: string
@@ -121,6 +132,7 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
     const input = buildTurnInput(options.messages)
     const effort = readEffort(options.requestMetadata)
     const permissionMode = readPermissionMode(options.requestMetadata)
+    const interactionMode = readInteractionMode(options.requestMetadata)
 
     return createUIMessageStream({
       execute: async ({ writer }) => {
@@ -187,6 +199,7 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
           }
           if (effort) turnParams.effort = effort
           if (permissionMode) turnParams.permissionMode = permissionMode
+          if (interactionMode) turnParams.interactionMode = interactionMode
           this.client
             .turnStart(turnParams)
             .catch((error) => {

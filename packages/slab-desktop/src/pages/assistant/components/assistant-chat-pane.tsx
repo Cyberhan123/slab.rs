@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react"
 import type { UIMessage } from "ai"
-import { MessageCircleDashedIcon } from "lucide-react"
+import { ListChecksIcon, MessageCircleDashedIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo } from "react"
 
 import { useTranslation } from "@slab/i18n"
@@ -31,7 +31,13 @@ import type {
     CompactionMarker,
     ModelLoadState,
 } from "../hooks/use-harness-conversation"
-import type { ApprovalScope, CommandInfo, HarnessChatTransport, TurnUsage } from "../lib/harness"
+import type {
+    ApprovalScope,
+    CommandInfo,
+    HarnessChatTransport,
+    InteractionMode,
+    TurnUsage,
+} from "../lib/harness"
 
 export type AssistantChatPaneProps = {
     disabled: boolean
@@ -71,6 +77,10 @@ export type AssistantChatPaneProps = {
     userMessageTurnIndex: ReadonlyMap<string, number>
     /** Retract a turn (and everything after it) via `thread/rollback`. */
     onRollbackFromTurn: (turnIndex: number) => Promise<void>
+    /** Current interaction mode (lifted from the conversation hook). */
+    interactionMode: InteractionMode
+    /** Set the interaction mode (absolute); drives the plan-mode banner + toggle. */
+    onInteractionModeChange: (mode: InteractionMode) => void
 }
 
 export function AssistantChatPane({
@@ -99,6 +109,8 @@ export function AssistantChatPane({
     isForking,
     userMessageTurnIndex,
     onRollbackFromTurn,
+    interactionMode,
+    onInteractionModeChange,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
     const { messages, sendMessage, status, stop } = useChat({
@@ -157,6 +169,25 @@ export function AssistantChatPane({
                 <Card className="h-full w-full gap-0 border-none shadow-none">
                     <CardContent className="flex-1 overflow-hidden p-0">
                         <div className="flex h-full flex-col">
+                            {interactionMode === "plan" ? (
+                                <div
+                                    data-testid="assistant-plan-mode-banner"
+                                    className="flex items-center gap-2 border-b border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-700 dark:text-blue-300"
+                                >
+                                    <ListChecksIcon className="size-3.5 shrink-0" />
+                                    <span className="flex-1">
+                                        {t("pages.assistant.planMode.banner")}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-blue-500/20"
+                                        onClick={() => onInteractionModeChange("default")}
+                                    >
+                                        <XIcon className="size-3" />
+                                        {t("pages.assistant.planMode.exit")}
+                                    </button>
+                                </div>
+                            ) : null}
                             <div className="min-h-0 flex-1">
                                 {messages.length === 0 && !isHistoryLoading ? (
                                     <Empty className="h-full" data-testid="assistant-empty-state">
@@ -193,11 +224,11 @@ export function AssistantChatPane({
                     <CardFooter className="flex-col gap-2">
                         <TokenUsageIndicator usage={turnUsage} contextWindow={contextWindow} />
                         <Sender
-                            onSubmit={async (value, { files, effort, permissionMode }) => {
+                            onSubmit={async (value, { files, effort, permissionMode, interactionMode: turnMode }) => {
                                 // Registry-driven dispatch: Control commands run a
-                                // host action and never reach the model; everything
-                                // else (Prompt commands, `/plan`, skills, plain text)
-                                // falls through to sendMessage.
+                                // host action and never reach the model. `/plan` is
+                                // intercepted by the Sender (toggle, never submitted);
+                                // everything else (skills, plain text) reaches sendMessage.
                                 const dispatch = resolveCommandDispatch(value, commands)
                                 if (dispatch.action === "control") {
                                     if (dispatch.controlAction === "compact") {
@@ -210,13 +241,19 @@ export function AssistantChatPane({
                                     }
                                 }
                                 await onBeforeSubmit(value)
-                                sendMessage({ text: value, files, metadata: { effort, permissionMode } })
+                                sendMessage({
+                                    text: value,
+                                    files,
+                                    metadata: { effort, permissionMode, interactionMode: turnMode },
+                                })
                             }}
                             onStop={stop}
                             loading={disabled || isBusy || isCompacting || isForking}
                             approvals={approvals}
                             onResolveApproval={resolveApproval}
                             commands={commands}
+                            interactionMode={interactionMode}
+                            onInteractionModeChange={onInteractionModeChange}
                         />
                         <p
                             className="w-full truncate text-xs text-muted-foreground"

@@ -69,6 +69,10 @@ export function toolItemFields(item: TurnItem): ToolItemFields | null {
       }
     case "webSearch":
       return { toolName: "webSearch", input: { query: item.query }, failed: false }
+    case "plan":
+      // The full Plan object is the card payload. Surfacing it as both input
+      // and output marks the static (non-streaming) card as `output-available`.
+      return { toolName: "plan", input: item.plan, output: item.plan, failed: false }
     default:
       return null
   }

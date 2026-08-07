@@ -25,6 +25,7 @@ import MessageFallbackPart from "./message-fallback-part"
 import MessageToolPart from "./message-tool-part"
 import MessageToolCommandPart from "./message-tool-command-part"
 import MessageToolFileChangePart from "./message-tool-file-change-part"
+import MessageToolPlanPart from "./message-tool-plan-part"
 
 type TMessagePart = {
     state?: string;
@@ -96,7 +97,7 @@ const messagePartComponents: MessagePartComponents<TMessagePart, TMessage> = {
     reasoning: MessageReasoningPart,
     tool: MessageToolPart,
     fallback: MessageFallbackPart,
-    tools: { commandExecution: MessageToolCommandPart, fileChange: MessageToolFileChangePart },
+    tools: { commandExecution: MessageToolCommandPart, fileChange: MessageToolFileChangePart, plan: MessageToolPlanPart },
 }
 
 

@@ -16,9 +16,9 @@ use slab_types::chat::{ConversationContentPart, ConversationMessage, Conversatio
 /// one exists.
 ///
 /// Returns `None` for UI-only artifacts (`Reasoning`, `CommandExecution`,
-/// `FileChange`, `McpToolCall`, `WebSearch`, `ImageView`) — their LLM-visible
-/// counterparts flow through `TurnContext::MessageAppend` (tool results) and are
-/// not derivable from the UI item alone.
+/// `FileChange`, `McpToolCall`, `WebSearch`, `ImageView`, `Plan`) — their
+/// LLM-visible counterparts flow through `TurnContext::MessageAppend` (tool
+/// results) and are not derivable from the UI item alone.
 pub fn turn_item_to_conversation_message(item: &TurnItem) -> Option<ConversationMessage> {
     match item {
         TurnItem::UserMessage { content, .. } => {
@@ -58,7 +58,8 @@ pub fn turn_item_to_conversation_message(item: &TurnItem) -> Option<Conversation
         | TurnItem::FileChange { .. }
         | TurnItem::McpToolCall { .. }
         | TurnItem::WebSearch { .. }
-        | TurnItem::ImageView { .. } => None,
+        | TurnItem::ImageView { .. }
+        | TurnItem::Plan { .. } => None,
     }
 }
 
@@ -225,6 +226,14 @@ mod tests {
         };
         assert!(turn_item_to_conversation_message(&reasoning).is_none());
         assert!(turn_item_to_conversation_message(&cmd).is_none());
+        // Plan is a UI-only artifact (its LLM counterpart is the tool-result text).
+        let plan = TurnItem::Plan {
+            id: "p".to_owned(),
+            plan: serde_json::json!({"plan_id": "plan-0", "items": [], "counts": {
+                "pending": 0, "in_progress": 0, "completed": 0, "blocked": 0
+            }}),
+        };
+        assert!(turn_item_to_conversation_message(&plan).is_none());
     }
 
     #[test]

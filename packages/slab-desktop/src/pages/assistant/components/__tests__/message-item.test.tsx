@@ -78,18 +78,24 @@ vi.mock("../message/message-tool-part", () => ({
   default: ({ part }: { part?: { type?: string } }) => (
     <div data-testid="tool-part">{part?.type}</div>
   ),
-  // Real consumers (e.g. message-tool-file-change-part) import these named
-  // exports; browser native ESM throws if a mock omits a consumed named export,
-  // so expose stubs alongside the default.
+  // Real consumers (e.g. message-tool-file-change-part, message-tool-plan-part)
+  // import these named exports; browser native ESM throws if a mock omits a
+  // consumed named export, so expose stubs alongside the default.
   Tool: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   ToolHeader: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   ToolContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  deriveState: () => "output-available",
+  isToolActive: () => false,
 }))
 vi.mock("../message/message-tool-command-part", () => ({
   default: () => <div data-testid="tool-command-part" />,
 }))
 vi.mock("../message/message-tool-file-change-part", () => ({
   default: () => <div data-testid="tool-file-change-part" />,
+}))
+vi.mock("../message/message-tool-plan-part", () => ({
+  default: () => <div data-testid="tool-plan-part" />,
+  PlanCardBody: () => <div data-testid="plan-card-body" />,
 }))
 
 function message(overrides: Partial<TMessage> = {}): TMessage {

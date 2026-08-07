@@ -7,9 +7,14 @@ export const assistant = {
     title: 'Approval required',
     command: 'command',
     fileChange: 'file change',
+    plan: 'plan',
     runOnce: 'Allow once',
     alwaysInWorkspace: 'Always in workspace',
     always: 'Always allow',
+  },
+  planMode: {
+    banner: 'Plan mode active — the agent is exploring read-only and drafting a plan.',
+    exit: 'Exit',
   },
   header: {
     title: 'Assistant',
@@ -167,6 +172,11 @@ export const assistant = {
       approveForMe: 'Approve for me (soon)',
       fullControl: 'Full control',
       custom: 'Custom',
+    },
+    interaction: {
+      title: 'Interaction mode',
+      default: 'Default',
+      plan: 'Plan',
     },
     commandWebSearchDescription: 'Use the available web search tool',
     stopGeneratingResponse: 'Stop generating response',

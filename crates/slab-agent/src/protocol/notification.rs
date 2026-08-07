@@ -234,6 +234,12 @@ pub struct CommandExecutionRequestApprovalParams {
     /// / deny). Empty for servers that only support approve/reject.
     #[serde(default)]
     pub allowed_scopes: Vec<slab_exec_policy::ApprovalScope>,
+    /// Full structured plan snapshot, present only on `present_plan` approvals
+    /// so the UI can render a rich plan card (summary / counts / items /
+    /// current step) instead of the one-line `command` text. Absent (and
+    /// omitted from the wire) for all other approvals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_snapshot: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

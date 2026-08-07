@@ -129,4 +129,24 @@ describe("harness turnItemToUiParts / toolItemFields (ex-lossy cases)", () => {
       }),
     )?.toMatchObject({ toolName: "fileChange", output: { status: "completed" } })
   })
+
+  it("maps a plan item to a tool-plan part carrying the full plan", () => {
+    const plan = {
+      plan_id: "plan-0",
+      summary: "ship it",
+      items: [{ step: "do", status: "pending" as const }],
+      counts: { pending: 1, in_progress: 0, completed: 0, blocked: 0 },
+    }
+    const fields = toolItemFields({ type: "plan", id: "p1", plan })
+    expect(fields).toMatchObject({ toolName: "plan", input: plan, output: plan, failed: false })
+
+    const parts = turnItemToUiParts({ type: "plan", id: "p1", plan })
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({
+      type: "tool-plan",
+      toolCallId: "p1",
+      state: "output-available",
+      output: plan,
+    })
+  })
 })
