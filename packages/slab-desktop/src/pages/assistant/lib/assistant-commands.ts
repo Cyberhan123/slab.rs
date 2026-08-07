@@ -1,3 +1,5 @@
+import type { CommandInfo } from "./harness/types"
+
 const COMMAND_PREFIX = "/"
 
 /** True when the composer input is the `/compact` control command (never reaches the model). */
@@ -26,4 +28,39 @@ export function parseAssistantCommand(value: string): AssistantCommandParseResul
     const [name, ...rest] = body.split(/\s+/)
     if (!name) return null
     return { name, args: rest.join(" ") }
+}
+
+/**
+ * Resolve a composer submission into a dispatch decision, driven by the
+ * registry snapshot from `command/list`. A `control` result runs a host action
+ * (never reaches the model); `send` falls through to `sendMessage` (Prompt
+ * commands, `/plan`, skills, and anything not recognized as a command).
+ *
+ * Local resolution (no server round-trip) per the "客户端解析" guidance: the
+ * client already holds the full command list, so `parseAssistantCommand` +
+ * name/alias lookup is authoritative.
+ */
+export type CommandDispatch =
+    | { action: "control"; controlAction: "compact" | "fork" }
+    | { action: "send" }
+
+export function resolveCommandDispatch(
+    value: string,
+    commands: CommandInfo[],
+): CommandDispatch {
+    const parsed = parseAssistantCommand(value)
+    if (parsed) {
+        const cmd = commands.find(
+            (c) => c.name === parsed.name || c.aliases.includes(parsed.name),
+        )
+        if (cmd?.kind === "control") {
+            if (cmd.controlAction === "compact") {
+                return { action: "control", controlAction: "compact" }
+            }
+            if (cmd.controlAction === "fork") {
+                return { action: "control", controlAction: "fork" }
+            }
+        }
+    }
+    return { action: "send" }
 }

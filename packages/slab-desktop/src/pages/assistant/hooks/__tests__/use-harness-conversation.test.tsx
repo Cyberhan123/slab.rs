@@ -366,6 +366,44 @@ describe("useHarnessConversation", () => {
     await unmount()
   })
 
+  it("fetches the command registry on restore and exposes it as commands", async () => {
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+
+    // Complete thread/resume so the restore path settles.
+    const resumeReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    expect(resumeReq.method).toBe("thread/resume")
+    FakeWebSocket.last!.simMessage(rpcResponse(resumeReq.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+
+    // The restore effect also fires command/list (fire-and-forget); respond with
+    // a snapshot and assert it lands in `commands`.
+    const commandReq = FakeWebSocket.last!.sent
+      .map((raw) => JSON.parse(raw))
+      .find((m) => m.method === "command/list")!
+    expect(commandReq).toBeDefined()
+    FakeWebSocket.last!.simMessage(
+      rpcResponse(commandReq.id, {
+        data: [
+          {
+            name: "compact",
+            aliases: [],
+            description: "Summarize history.",
+            kind: "control",
+            source: "builtin",
+            controlAction: "compact",
+          },
+        ],
+      }),
+    )
+    await flush()
+
+    await vi.waitFor(() => expect(result.current.commands).toHaveLength(1))
+    expect(result.current.commands[0]).toMatchObject({ name: "compact", kind: "control" })
+    await unmount()
+  })
+
   it("maps user messages to their turn index after restore", async () => {
     const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
     await driveOpenAndInit()

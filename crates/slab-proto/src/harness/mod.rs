@@ -18,13 +18,14 @@ pub mod operation;
 pub mod user_input;
 
 pub use messages::{
-    ApprovalResolveParams, ApprovalResolveResult, ApprovalScope, InitializeParams,
-    InitializeResult, OperationCategory, PermissionMode, ReasoningEffort, ShutdownParams,
-    ShutdownResult, SkillInfo, SkillSource, SkillsListParams, SkillsListResult,
-    ThreadArchiveParams, ThreadArchiveResult, ThreadCompactStartParams, ThreadCompactStartResult,
-    ThreadForkParams, ThreadForkResult, ThreadListParams, ThreadListResult, ThreadResumeParams,
-    ThreadResumeResult, ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams,
-    ThreadStartResult, TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
+    ApprovalResolveParams, ApprovalResolveResult, ApprovalScope, CommandInfo, CommandKind,
+    CommandListParams, CommandListResult, CommandSource, InitializeParams, InitializeResult,
+    OperationCategory, PermissionMode, ReasoningEffort, ShutdownParams, ShutdownResult, SkillInfo,
+    SkillSource, SkillsListParams, SkillsListResult, ThreadArchiveParams, ThreadArchiveResult,
+    ThreadCompactStartParams, ThreadCompactStartResult, ThreadForkParams, ThreadForkResult,
+    ThreadListParams, ThreadListResult, ThreadResumeParams, ThreadResumeResult,
+    ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams, ThreadStartResult,
+    TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
 };
 pub use model::{ModelInfo, ModelListParams, ModelListResult, ReasoningEffortOption};
 pub use notification::{
@@ -50,6 +51,7 @@ pub mod method {
     pub const TURN_INTERRUPT: &str = "turn/interrupt";
     pub const MODEL_LIST: &str = "model/list";
     pub const SKILLS_LIST: &str = "skills/list";
+    pub const COMMAND_LIST: &str = "command/list";
     pub const APPROVAL_RESOLVE: &str = "approval/resolve";
     pub const SHUTDOWN: &str = "shutdown";
     pub const WORKSPACE_MIGRATE: &str = "workspace/migrate";

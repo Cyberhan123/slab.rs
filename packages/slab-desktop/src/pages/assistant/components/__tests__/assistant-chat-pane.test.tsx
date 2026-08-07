@@ -100,6 +100,7 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     resolveApproval: vi.fn(),
     onCompact: vi.fn(),
     historyCreatedAt: null,
+    commands: [],
     compactionMarkers: [],
     isCompacting: false,
     onFork: vi.fn(),

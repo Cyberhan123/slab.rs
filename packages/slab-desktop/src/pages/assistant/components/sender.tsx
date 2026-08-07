@@ -40,7 +40,7 @@ import {
   XIcon,
 } from "lucide-react"
 
-import type { ApprovalScope, PermissionMode, ReasoningEffort } from "../lib/harness"
+import type { ApprovalScope, CommandInfo, PermissionMode, ReasoningEffort } from "../lib/harness"
 import type { ApprovalRequest } from "../hooks/use-harness-conversation"
 import { ApprovalCard } from "./approval-banner"
 
@@ -78,6 +78,8 @@ type SenderProps = {
   /** Pending human-approval requests rendered in a slot above the textarea. */
   approvals?: ApprovalRequest[]
   onResolveApproval?: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void> | void
+  /** Command registry snapshot driving the `/`-menu (`command/list`). */
+  commands: CommandInfo[]
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -89,7 +91,7 @@ function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
-function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApproval }: SenderProps) {
+function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApproval, commands }: SenderProps) {
   const { t } = useTranslation()
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -350,30 +352,28 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
                 <DropdownMenuLabel>
                   {t("pages.assistant.composer.commandSkill")}
                 </DropdownMenuLabel>
-                <DropdownMenuItem
-                  onSelect={(event) => {
-                    event.preventDefault()
-                    setValue((prev) => (prev.startsWith("/plan") ? prev : `/plan ${prev}`))
-                  }}
-                >
-                  /plan
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={(event) => {
-                    event.preventDefault()
-                    setValue("/compact")
-                  }}
-                >
-                  /compact
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={(event) => {
-                    event.preventDefault()
-                    setValue("/fork")
-                  }}
-                >
-                  /fork
-                </DropdownMenuItem>
+                {commands.map((cmd) => {
+                  const seed = `/${cmd.name}`
+                  return (
+                    <DropdownMenuItem
+                      key={cmd.name}
+                      title={cmd.description}
+                      onSelect={(event) => {
+                        event.preventDefault()
+                        // Control commands seed the exact trigger (ready to
+                        // submit); Prompt/Render commands prefix the input for
+                        // further typing.
+                        if (cmd.kind === "control") {
+                          setValue(seed)
+                        } else {
+                          setValue((prev) => (prev.startsWith(seed) ? prev : `${seed} ${prev}`))
+                        }
+                      }}
+                    >
+                      {seed}
+                    </DropdownMenuItem>
+                  )
+                })}
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>

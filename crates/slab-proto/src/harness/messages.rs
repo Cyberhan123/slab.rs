@@ -356,6 +356,56 @@ pub struct SkillsListResult {
     pub data: Vec<SkillInfo>,
 }
 
+// ============ command/list ============
+
+/// How a user-facing `/`-command dispatches on the client.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandKind {
+    #[default]
+    /// Intercepts submission and runs a host action; never reaches the model.
+    Control,
+    /// Expands into prompt text that is sent to the model.
+    Prompt,
+}
+
+/// Where a command was declared.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandSource {
+    #[default]
+    Builtin,
+    Skill,
+}
+
+/// A user-facing `/`-command surfaced by `command/list`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandInfo {
+    /// Trigger name, without the leading `/`.
+    pub name: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
+    pub description: String,
+    pub kind: CommandKind,
+    pub source: CommandSource,
+    /// `Control`-kind action key the client maps to a host callback
+    /// (e.g. `"compact"`, `"fork"`). Absent for non-`Control` kinds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_action: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandListParams {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandListResult {
+    pub data: Vec<CommandInfo>,
+}
+
 // ============ turn/start ============
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]

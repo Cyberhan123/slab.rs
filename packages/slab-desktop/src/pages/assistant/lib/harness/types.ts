@@ -62,6 +62,7 @@ export const HARNESS_METHOD = {
   TURN_INTERRUPT: "turn/interrupt",
   MODEL_LIST: "model/list",
   SKILLS_LIST: "skills/list",
+  COMMAND_LIST: "command/list",
   APPROVAL_RESOLVE: "approval/resolve",
   SHUTDOWN: "shutdown",
   WORKSPACE_MIGRATE: "workspace/migrate",
@@ -428,6 +429,30 @@ export interface SkillsListParams {}
 
 export interface SkillsListResult {
   data: SkillInfo[]
+}
+
+/** How a user-facing `/`-command dispatches on the client. */
+export type CommandKind = "control" | "prompt"
+
+/** Where a command was declared. */
+export type CommandSource = "builtin" | "skill"
+
+/** A user-facing `/`-command surfaced by `command/list`. */
+export interface CommandInfo {
+  /** Trigger name, without the leading `/`. */
+  name: string
+  aliases: string[]
+  description: string
+  kind: CommandKind
+  source: CommandSource
+  /** Control-kind action key mapped to a host callback (`"compact"` | `"fork"`). */
+  controlAction?: string
+}
+
+export interface CommandListParams {}
+
+export interface CommandListResult {
+  data: CommandInfo[]
 }
 
 export interface WorkspaceMigrateParams {

@@ -51,6 +51,7 @@ impl HarnessHost {
         router.on(method::THREAD_LIST, body::thread_list);
         router.on(method::MODEL_LIST, body::model_list);
         router.on(method::SKILLS_LIST, body::skills_list);
+        router.on(method::COMMAND_LIST, body::command_list);
         router.on(method::WORKSPACE_MIGRATE, body::workspace_migrate);
         // thread_op: resolve binding, inject real_id
         router.on(method::TURN_INTERRUPT, transform::thread_op(body::turn_interrupt));

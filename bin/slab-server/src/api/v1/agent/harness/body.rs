@@ -23,9 +23,10 @@ use slab_proto::harness::messages::{
 };
 use slab_proto::harness::method;
 use slab_proto::harness::{
-    ModelInfo, ModelListParams, ModelListResult, ModelLoadCompletedParams, ModelLoadDeltaParams,
-    ModelLoadError, ModelLoadPhase, SkillInfo, SkillSource as ProtoSkillSource, SkillsListParams,
-    SkillsListResult,
+    CommandInfo, CommandKind as ProtoCommandKind, CommandListParams, CommandListResult,
+    CommandSource as ProtoCommandSource, ModelInfo, ModelListParams, ModelListResult,
+    ModelLoadCompletedParams, ModelLoadDeltaParams, ModelLoadError, ModelLoadPhase, SkillInfo,
+    SkillSource as ProtoSkillSource, SkillsListParams, SkillsListResult,
 };
 use tokio::sync::mpsc;
 
@@ -319,6 +320,40 @@ pub(crate) async fn skills_list(
         })
         .collect();
     Ok(SkillsListResult { data })
+}
+
+pub(crate) async fn command_list(
+    session: HarnessSession,
+    _params: CommandListParams,
+) -> Result<CommandListResult, String> {
+    let workspace_root = session.state().workspace_root();
+    let app_home_skills_dir = slab_utils::app_home::skills_dir();
+    let skills = slab_agent_context::skill_manager::scan_skills(
+        workspace_root.as_deref(),
+        &app_home_skills_dir,
+    );
+    let registry = slab_app_core::domain::commands::build_command_registry(&skills);
+    let data = registry
+        .list()
+        .into_iter()
+        .map(|spec| CommandInfo {
+            name: spec.name.clone(),
+            aliases: spec.aliases.clone(),
+            description: spec.description.clone(),
+            kind: match spec.kind {
+                slab_app_core::domain::commands::CommandKind::Control => ProtoCommandKind::Control,
+                slab_app_core::domain::commands::CommandKind::Prompt => ProtoCommandKind::Prompt,
+            },
+            source: match spec.source {
+                slab_app_core::domain::commands::CommandSource::Builtin => {
+                    ProtoCommandSource::Builtin
+                }
+                slab_app_core::domain::commands::CommandSource::Skill => ProtoCommandSource::Skill,
+            },
+            control_action: spec.control_action.clone(),
+        })
+        .collect();
+    Ok(CommandListResult { data })
 }
 
 pub(crate) async fn thread_fork(

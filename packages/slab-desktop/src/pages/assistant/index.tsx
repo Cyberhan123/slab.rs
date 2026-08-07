@@ -69,6 +69,7 @@ function Assistant() {
         modelLoad,
         turnUsage,
         historyCreatedAt,
+        commands,
         compactionMarkers,
         isCompacting,
         isForking,
@@ -246,6 +247,7 @@ function Assistant() {
                 onCompact={() => compactThread()}
                 onFork={() => forkThread()}
                 historyCreatedAt={historyCreatedAt}
+                commands={commands}
                 compactionMarkers={compactionMarkers}
                 isCompacting={isCompacting}
                 isForking={isForking}

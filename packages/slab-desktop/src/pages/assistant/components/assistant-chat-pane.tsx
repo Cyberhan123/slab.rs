@@ -22,7 +22,7 @@ import MessageList from "@/pages/assistant/components/message-list"
 import { TokenUsageIndicator } from "@/pages/assistant/components/token-usage-indicator"
 import Sender from "@/pages/assistant/components/sender.tsx"
 import { MessageInteractionContext } from "@/pages/assistant/components/message-interaction-context"
-import { isCompactCommand, isForkCommand } from "@/pages/assistant/lib/assistant-commands"
+import { resolveCommandDispatch } from "@/pages/assistant/lib/assistant-commands"
 import { useWorkspaceConfirmDialog } from "@/pages/workspace/hooks/use-workspace-confirm"
 import { useGreeting } from "../hooks/use-greeting"
 import type {
@@ -31,7 +31,7 @@ import type {
     CompactionMarker,
     ModelLoadState,
 } from "../hooks/use-harness-conversation"
-import type { ApprovalScope, HarnessChatTransport, TurnUsage } from "../lib/harness"
+import type { ApprovalScope, CommandInfo, HarnessChatTransport, TurnUsage } from "../lib/harness"
 
 export type AssistantChatPaneProps = {
     disabled: boolean
@@ -59,6 +59,8 @@ export type AssistantChatPaneProps = {
     onFork: () => Promise<void>
     /** `thread.createdAt` (Unix ms) for the history-restored marker label. */
     historyCreatedAt: number | null
+    /** Command registry snapshot driving the `/`-menu + dispatch (`command/list`). */
+    commands: CommandInfo[]
     /** Session-scoped compaction markers rendered as in-stream dividers. */
     compactionMarkers: CompactionMarker[]
     /** True while a manual `/compact` round-trip is in flight. */
@@ -91,6 +93,7 @@ export function AssistantChatPane({
     onCompact,
     onFork,
     historyCreatedAt,
+    commands,
     compactionMarkers,
     isCompacting,
     isForking,
@@ -191,15 +194,20 @@ export function AssistantChatPane({
                         <TokenUsageIndicator usage={turnUsage} contextWindow={contextWindow} />
                         <Sender
                             onSubmit={async (value, { files, effort, permissionMode }) => {
-                                // `/compact` is a control command — never reaches the model.
-                                if (isCompactCommand(value)) {
-                                    await onCompact()
-                                    return
-                                }
-                                // `/fork` is a control command — never reaches the model.
-                                if (isForkCommand(value)) {
-                                    await onFork()
-                                    return
+                                // Registry-driven dispatch: Control commands run a
+                                // host action and never reach the model; everything
+                                // else (Prompt commands, `/plan`, skills, plain text)
+                                // falls through to sendMessage.
+                                const dispatch = resolveCommandDispatch(value, commands)
+                                if (dispatch.action === "control") {
+                                    if (dispatch.controlAction === "compact") {
+                                        await onCompact()
+                                        return
+                                    }
+                                    if (dispatch.controlAction === "fork") {
+                                        await onFork()
+                                        return
+                                    }
                                 }
                                 await onBeforeSubmit(value)
                                 sendMessage({ text: value, files, metadata: { effort, permissionMode } })
@@ -208,6 +216,7 @@ export function AssistantChatPane({
                             loading={disabled || isBusy || isCompacting || isForking}
                             approvals={approvals}
                             onResolveApproval={resolveApproval}
+                            commands={commands}
                         />
                         <p
                             className="w-full truncate text-xs text-muted-foreground"

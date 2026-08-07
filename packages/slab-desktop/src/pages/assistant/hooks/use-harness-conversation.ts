@@ -25,6 +25,7 @@ import {
   type CommandExecutionOutputDeltaParams,
   type FileChangeOutputDeltaParams,
   type CommandExecutionRequestApprovalParams,
+  type CommandInfo,
   type ContextCompactedParams,
   type ContextCompactingParams,
   type FileChangeApprovalChange,
@@ -116,6 +117,8 @@ export interface HarnessConversation {
   turnUsage: TurnUsage | null
   /** `thread.createdAt` (Unix ms) of the restored thread; null for fresh sessions. */
   historyCreatedAt: number | null
+  /** Command registry snapshot from `command/list` (drives the `/`-menu + dispatch). */
+  commands: CommandInfo[]
   /** Session-scoped compaction markers rendered as in-stream dividers. */
   compactionMarkers: CompactionMarker[]
   /** True while a manual `/compact` round-trip is in flight. */
@@ -199,6 +202,7 @@ export function useHarnessConversation(
   const [modelLoad, setModelLoad] = useState<ModelLoadState>(null)
   const [turnUsage, setTurnUsage] = useState<TurnUsage | null>(null)
   const [historyCreatedAt, setHistoryCreatedAt] = useState<number | null>(null)
+  const [commands, setCommands] = useState<CommandInfo[]>([])
   const [compactionMarkers, setCompactionMarkers] = useState<CompactionMarker[]>([])
   const [isCompacting, setIsCompacting] = useState(false)
   const [isForking, setIsForking] = useState(false)
@@ -539,6 +543,7 @@ export function useHarnessConversation(
     setTurnUsage(null)
     setHistoryCreatedAt(null)
     setCompactionMarkers([])
+    setCommands([])
     setUserMessageTurnIndex(new Map())
     if (!sessionId) {
       client.currentThreadId = null
@@ -575,6 +580,16 @@ export function useHarnessConversation(
             await new Promise((resolve) => setTimeout(resolve, RESTORE_BACKOFF_MS * attempt))
           }
         }
+
+        // Fetch the command registry snapshot (drives the `/`-menu + dispatch).
+        // Fire-and-forget: commands must not gate the restore path, and a
+        // failure just leaves the menu on its last (possibly empty) snapshot.
+        void client
+          .commandList()
+          .then((res) => {
+            if (!cancelled) setCommands(res.data)
+          })
+          .catch(() => {})
 
         try {
           const { thread } = await client.threadResume({})
@@ -638,6 +653,7 @@ export function useHarnessConversation(
     modelLoad,
     turnUsage,
     historyCreatedAt,
+    commands,
     compactionMarkers,
     isCompacting,
     isForking,

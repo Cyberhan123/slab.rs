@@ -29,6 +29,8 @@ import type {
   ShutdownResult,
   SkillsListParams,
   SkillsListResult,
+  CommandListParams,
+  CommandListResult,
   ThreadArchiveParams,
   ThreadArchiveResult,
   ThreadCompactStartParams,
@@ -325,6 +327,10 @@ export class HarnessClient {
 
   skillsList(params: SkillsListParams = {}): Promise<SkillsListResult> {
     return this.sendRequest(HARNESS_METHOD.SKILLS_LIST, params)
+  }
+
+  commandList(params: CommandListParams = {}): Promise<CommandListResult> {
+    return this.sendRequest(HARNESS_METHOD.COMMAND_LIST, params)
   }
 
   workspaceMigrate(params: WorkspaceMigrateParams = {}): Promise<WorkspaceMigrateResult> {
