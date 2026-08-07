@@ -71,6 +71,7 @@ impl From<AgentConfigInput> for AgentConfig {
                 .clamp(0, MAX_INVALID_TOOL_CALL_RETRIES),
             structured_output: v.structured_output.map(Into::into),
             transient: v.transient.unwrap_or(defaults.transient),
+            agent_type: None,
         }
     }
 }

@@ -311,6 +311,11 @@ fn build_agent_control(
     .with_plan_store(
         Arc::new(super::plan_store::InMemoryPlanStore::default()) as Arc<dyn PlanStorePort>
     )
+    // Slice 4: built-in agent registry (claude-style fixed agents). Hosts the
+    // showcase read-only `plan` agent; `delegate_subagent` resolves agent_type
+    // here and `allowed_tool_specs` applies each definition's tool constraint.
+    .with_agent_registry(Arc::new(super::agent_registry::BuiltinAgentRegistry::with_builtins())
+        as Arc<dyn slab_agent::AgentRegistry>)
     // INFRA-05: FIFO wait queue for agent spawns (0 ⇒ legacy reject-at-cap).
     .with_queue_capacity(runtime_limits.queue_capacity as usize)
     .with_compact(compact);

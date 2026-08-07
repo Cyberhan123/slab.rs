@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use slab_agent_tracing::{AgentTraceContext, AgentTraceSink, record_json};
@@ -50,6 +50,9 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub notify: &'a dyn AgentNotifyPort,
     pub approval: &'a dyn ApprovalPort,
     pub exec_policy: &'a dyn ExecPolicyPort,
+    /// Built-in agent registry (Slice 4). Read-only turn use — drives
+    /// [`crate::agent::filter_tools_for_agent`] from `config.agent_type`.
+    pub agent_registry: &'a dyn crate::agent::AgentRegistry,
     /// Owned `Arc` (not `&'a dyn`) because it is cloned into each call's
     /// [`crate::ToolContext`] so the plan tools can persist/query the durable plan.
     pub plan_store: Arc<dyn PlanStorePort>,
@@ -378,6 +381,22 @@ fn allowed_tool_specs(context: &TurnExecutionContext<'_>) -> Result<Vec<ToolSpec
     let exposure = context.exec_policy.permission_state_for(context.thread_id).exposure;
     let injected_deferred = context.tool_discovery.snapshot();
     let mut specs = context.tools.visible_tool_specs(exposure, &injected_deferred);
+    // Slice 4: per-agent tool constraint, layered above visibility/exposure and
+    // below `config.allowed_tools`. `agent_type` is set only by `delegate_subagent`
+    // after a successful registry lookup; a miss here is misconfiguration, so we
+    // fail open (the constraint is tool-shaping, not a security boundary) with a
+    // warning rather than starving the agent of tools.
+    let agent_constraint = context.config.agent_type.as_deref().and_then(|agent_type| {
+        let constraint = context.agent_registry.get(agent_type).map(|def| def.tools);
+        if constraint.is_none() {
+            warn!(
+                thread_id = context.thread_id,
+                agent_type, "agent_type not found in registry; skipping tool constraint"
+            );
+        }
+        constraint
+    });
+    specs = crate::agent::filter_tools_for_agent(&specs, agent_constraint.as_ref());
     if !context.config.allowed_tools.is_empty() {
         specs.retain(|tool| context.config.allowed_tools.contains(&tool.name));
     }

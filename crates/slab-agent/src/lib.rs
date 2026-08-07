@@ -23,6 +23,7 @@
 //! 3. Construct an [`AgentControl`] with the port adapters and router.
 //! 4. Call [`AgentControl::spawn`] to start a root agent.
 
+pub mod agent;
 pub mod compact;
 pub mod config;
 pub mod control;
@@ -49,6 +50,10 @@ mod turn_tool_record;
 #[cfg(test)]
 mod tests;
 
+pub use agent::{
+    AgentDefinition, AgentRegistry, ModelPolicy, NoopAgentRegistry, ToolConstraint,
+    filter_tools_for_agent,
+};
 pub use compact::{
     CompactContext, CompactOutcome, CompactPort, NoopCompactPort, SlidingWindowCompactPort,
     estimate_message_chars, estimate_message_tokens, estimate_tokens,

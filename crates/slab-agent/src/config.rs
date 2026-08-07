@@ -79,6 +79,13 @@ pub struct AgentConfig {
     /// True for short-lived sessions that should skip root-start background work.
     #[serde(default)]
     pub transient: bool,
+    /// Built-in agent type (Slice 4). INTERNAL — set only by `delegate_subagent`
+    /// after a successful registry lookup. `None` means no per-agent tool
+    /// constraint. Persisted so a delegated child carries its type across the
+    /// spawn boundary; `#[serde(default)]` keeps older snapshots deserializing
+    /// as `None`.
+    #[serde(default)]
+    pub agent_type: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -105,6 +112,7 @@ impl Default for AgentConfig {
             invalid_tool_call_retries: DEFAULT_INVALID_TOOL_CALL_RETRIES,
             structured_output: None,
             transient: false,
+            agent_type: None,
         }
     }
 }

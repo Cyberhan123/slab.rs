@@ -75,6 +75,7 @@ pub struct AgentControl {
     notify: Arc<dyn AgentNotifyPort>,
     approval: Arc<dyn ApprovalPort>,
     exec_policy: Arc<dyn crate::port::ExecPolicyPort>,
+    agent_registry: Arc<dyn crate::agent::AgentRegistry>,
     plan_store: Arc<dyn crate::port::PlanStorePort>,
     tool_router: Arc<ToolRouter>,
     hooks: AgentHookRegistry,
@@ -159,6 +160,7 @@ impl AgentControl {
             approval,
             exec_policy: Arc::new(slab_exec_policy::AllowAllExecPolicy),
             plan_store: Arc::new(crate::port::NoopPlanStore),
+            agent_registry: Arc::new(crate::agent::NoopAgentRegistry),
             tool_router,
             hooks: AgentHookRegistry::new(hooks),
             compact: Arc::new(SlidingWindowCompactPort::default()),
@@ -193,6 +195,7 @@ impl AgentControl {
             approval,
             exec_policy: Arc::new(slab_exec_policy::AllowAllExecPolicy),
             plan_store: Arc::new(crate::port::NoopPlanStore),
+            agent_registry: Arc::new(crate::agent::NoopAgentRegistry),
             tool_router,
             hooks: AgentHookRegistry::default(),
             compact,
@@ -259,6 +262,20 @@ impl AgentControl {
     pub fn with_plan_store(mut self, plan_store: Arc<dyn crate::port::PlanStorePort>) -> Self {
         self.plan_store = plan_store;
         self
+    }
+
+    /// Attach the built-in agent registry. When unset, a
+    /// [`crate::agent::NoopAgentRegistry`] stub is used — suitable for tests.
+    /// The host (app-core) injects a populated registry here.
+    pub fn with_agent_registry(mut self, registry: Arc<dyn crate::agent::AgentRegistry>) -> Self {
+        self.agent_registry = registry;
+        self
+    }
+
+    /// Access the agent registry (used by `delegate_subagent` to resolve
+    /// `agent_type` into a definition).
+    pub fn agent_registry(&self) -> Arc<dyn crate::agent::AgentRegistry> {
+        Arc::clone(&self.agent_registry)
     }
 
     /// Spawn a root agent thread (depth 0).
@@ -664,6 +681,7 @@ impl AgentControl {
         let approval = Arc::clone(&self.approval);
         let exec_policy = Arc::clone(&self.exec_policy);
         let plan_store = Arc::clone(&self.plan_store);
+        let agent_registry = Arc::clone(&self.agent_registry);
         let tools = Arc::clone(&self.tool_router);
         let hooks = self.hooks.clone();
         let compact = Arc::clone(&self.compact);
@@ -680,6 +698,7 @@ impl AgentControl {
             notify,
             approval,
             exec_policy,
+            agent_registry,
             plan_store,
             tools,
             tool_discovery: ToolDiscoveryState::new(),
