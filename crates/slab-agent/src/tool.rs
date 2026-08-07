@@ -9,7 +9,7 @@ use std::{
 use async_trait::async_trait;
 
 use crate::error::AgentError;
-use crate::port::{ParsedToolCall, ToolSpec};
+use crate::port::{NoopPlanStore, ParsedToolCall, PlanStorePort, ToolSpec};
 use crate::protocol::TurnItem;
 
 // ── Context & output types ───────────────────────────────────────────────────
@@ -42,6 +42,10 @@ pub struct ToolContext {
     pub workspace: Option<WorkspaceRef>,
     /// Durable plan scope associated with the thread, when plan-aware tools need it.
     pub plan: Option<PlanRef>,
+    /// Per-thread plan store backing Plan interaction mode. Defaults to a no-op
+    /// store; the agent wires the host-provided store per call so the `plan` /
+    /// `update_plan` / `present_plan` tools can read and persist the durable plan.
+    pub plan_store: Arc<dyn PlanStorePort>,
     /// Optional live-output observer. Set per-call by the agent for tools that
     /// stream output (e.g. `shell`); `None` by default.
     pub output: Option<Arc<dyn ToolOutputObserver>>,
@@ -55,6 +59,7 @@ impl std::fmt::Debug for ToolContext {
             .field("depth", &self.depth)
             .field("workspace", &self.workspace)
             .field("plan", &self.plan)
+            .field("plan_store", &"<port>")
             .field("output", &self.output.as_ref().map(|_| "<observer>"))
             .finish()
     }
@@ -69,6 +74,7 @@ impl ToolContext {
             depth: 0,
             workspace: None,
             plan: None,
+            plan_store: Arc::new(NoopPlanStore),
             output: None,
         }
     }
@@ -142,6 +148,7 @@ pub struct ToolContextBuilder {
     depth: u32,
     workspace: Option<WorkspaceRef>,
     plan: Option<PlanRef>,
+    plan_store: Arc<dyn PlanStorePort>,
     output: Option<Arc<dyn ToolOutputObserver>>,
 }
 
@@ -153,6 +160,7 @@ impl std::fmt::Debug for ToolContextBuilder {
             .field("depth", &self.depth)
             .field("workspace", &self.workspace)
             .field("plan", &self.plan)
+            .field("plan_store", &"<port>")
             .field("output", &self.output.as_ref().map(|_| "<observer>"))
             .finish()
     }
@@ -179,6 +187,13 @@ impl ToolContextBuilder {
         self
     }
 
+    /// Attach the host-provided plan store (wired by the agent per call so the
+    /// plan tools can persist/query the durable plan). Defaults to a no-op store.
+    pub fn plan_store(mut self, plan_store: Arc<dyn PlanStorePort>) -> Self {
+        self.plan_store = plan_store;
+        self
+    }
+
     /// Attach a live-output observer (used by streaming tools like `shell`).
     pub fn output(mut self, output: Arc<dyn ToolOutputObserver>) -> Self {
         self.output = Some(output);
@@ -192,6 +207,7 @@ impl ToolContextBuilder {
             depth: self.depth,
             workspace: self.workspace,
             plan: self.plan,
+            plan_store: self.plan_store,
             output: self.output,
         }
     }

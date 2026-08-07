@@ -9,8 +9,10 @@ use tokio::sync::RwLock;
 use tracing::warn;
 
 use crate::category::{OperationCategory, OperationDescriptor};
-use crate::decision::{ApprovalScope, ExecDecision, PermissionBaseline, PermissionMode};
-use crate::exposure::{PermissionStateSnapshot, ToolExposure};
+use crate::decision::{
+    ApprovalScope, ExecDecision, InteractionMode, PermissionBaseline, PermissionMode,
+};
+use crate::exposure::{PermissionStateSnapshot, ToolExposure, interaction_constraint};
 use crate::rule::{RuleAction, RuleSet};
 use crate::safety::{CommandSafetyChecker, SafetyDecision, is_sensitive_path};
 use crate::store::{RuleStore, workspace_rules_filename};
@@ -33,6 +35,12 @@ pub trait ExecPolicyPort: Send + Sync {
 
     /// Set the per-session mode for a thread (flows from `ThreadStartParams`).
     async fn set_thread_mode(&self, thread_id: &str, mode: PermissionMode);
+
+    /// Set the orthogonal interaction mode for a thread (flows from
+    /// `TurnStartParams.interaction_mode`). `Plan` narrows the agent to
+    /// read-only exploration; approving a `present_plan` flips it back to
+    /// `Default` so mutation tools re-appear next turn.
+    async fn set_interaction_mode(&self, thread_id: &str, mode: InteractionMode);
 
     /// Drop per-thread state when the thread ends.
     async fn clear_thread(&self, thread_id: &str);
@@ -87,6 +95,7 @@ fn behavior_to_exposure(behavior: Behavior) -> ToolExposure {
 /// so per-session mode is keyed by `thread_id` to avoid multi-session races.
 pub struct ExecPolicyEngine {
     modes: DashMap<String, PermissionMode>,
+    interaction_modes: DashMap<String, InteractionMode>,
     baseline: PermissionBaseline,
     rules: RwLock<RuleSet>,
     store: Arc<dyn RuleStore>,
@@ -94,11 +103,21 @@ pub struct ExecPolicyEngine {
 
 impl ExecPolicyEngine {
     pub fn new(baseline: PermissionBaseline, rules: RuleSet, store: Arc<dyn RuleStore>) -> Self {
-        Self { modes: DashMap::new(), baseline, rules: RwLock::new(rules), store }
+        Self {
+            modes: DashMap::new(),
+            interaction_modes: DashMap::new(),
+            baseline,
+            rules: RwLock::new(rules),
+            store,
+        }
     }
 
     fn mode_for(&self, thread_id: &str) -> PermissionMode {
         self.modes.get(thread_id).map(|m| *m).unwrap_or_default()
+    }
+
+    fn interaction_mode_for(&self, thread_id: &str) -> InteractionMode {
+        self.interaction_modes.get(thread_id).map(|m| *m).unwrap_or_default()
     }
 }
 
@@ -123,6 +142,16 @@ impl ExecPolicyPort for ExecPolicyEngine {
                 }
             }
             OperationCategory::Network => {}
+        }
+
+        // 1.5 Plan interaction mode — defense-in-depth. The exposure filter
+        //     already hides mutation tools in Plan mode, but if a non-read-only
+        //     operation reaches `evaluate` anyway, refuse it outright so Plan
+        //     mode can never be bypassed at the decision layer.
+        if self.interaction_mode_for(thread_id) == InteractionMode::Plan
+            && category != OperationCategory::ReadOnly
+        {
+            return ExecDecision::Deny;
         }
 
         // 2. FullControl: allow everything that survived hard-deny.
@@ -199,18 +228,25 @@ impl ExecPolicyPort for ExecPolicyEngine {
         self.modes.insert(thread_id.to_owned(), mode);
     }
 
+    async fn set_interaction_mode(&self, thread_id: &str, mode: InteractionMode) {
+        self.interaction_modes.insert(thread_id.to_owned(), mode);
+    }
+
     async fn clear_thread(&self, thread_id: &str) {
         self.modes.remove(thread_id);
+        self.interaction_modes.remove(thread_id);
     }
 
     fn permission_state_for(&self, thread_id: &str) -> PermissionStateSnapshot {
         let mode = self.mode_for(thread_id);
+        let interaction_mode = self.interaction_mode_for(thread_id);
         let behavior = resolve_behavior(mode.effective(), self.baseline);
-        PermissionStateSnapshot {
-            mode,
-            baseline: self.baseline,
-            exposure: behavior_to_exposure(behavior),
-        }
+        // Narrow the permission-behavior exposure by the interaction-mode
+        // constraint: Plan mode forces read-only regardless of the underlying
+        // permission mode (e.g. even FullControl can't mutate while planning).
+        let exposure =
+            behavior_to_exposure(behavior).intersect(interaction_constraint(interaction_mode));
+        PermissionStateSnapshot { mode, baseline: self.baseline, exposure, interaction_mode }
     }
 }
 
@@ -251,6 +287,7 @@ impl ExecPolicyPort for AllowAllExecPolicy {
     ) {
     }
     async fn set_thread_mode(&self, _thread_id: &str, _mode: PermissionMode) {}
+    async fn set_interaction_mode(&self, _thread_id: &str, _mode: InteractionMode) {}
     async fn clear_thread(&self, _thread_id: &str) {}
     fn permission_state_for(&self, _thread_id: &str) -> PermissionStateSnapshot {
         // Consistent with "allow everything": report full control + full exposure
@@ -259,6 +296,7 @@ impl ExecPolicyPort for AllowAllExecPolicy {
             mode: PermissionMode::FullControl,
             baseline: PermissionBaseline::FullAccess,
             exposure: ToolExposure::all(),
+            interaction_mode: InteractionMode::Default,
         }
     }
 }
@@ -505,5 +543,71 @@ mod tests {
             ws(),
         );
         assert_eq!(engine.permission_state_for("t1").exposure, ToolExposure::all());
+    }
+
+    #[tokio::test]
+    async fn set_interaction_mode_is_reflected_in_snapshot_and_clearable() {
+        let engine = engine_with_rules(
+            PermissionMode::FullControl,
+            PermissionBaseline::FullAccess,
+            vec![],
+            ws(),
+        );
+        assert_eq!(engine.permission_state_for("t1").interaction_mode, InteractionMode::Default);
+        engine.set_interaction_mode("t1", InteractionMode::Plan).await;
+        assert_eq!(engine.permission_state_for("t1").interaction_mode, InteractionMode::Plan);
+        engine.clear_thread("t1").await;
+        assert_eq!(engine.permission_state_for("t1").interaction_mode, InteractionMode::Default);
+    }
+
+    #[test]
+    fn exposure_intersect_plan_forces_read_only_even_under_full_control() {
+        // Plan mode narrows the exposure to read-only regardless of the
+        // underlying permission mode — even FullControl can't mutate while
+        // planning. This is what hides mutation tools from the LLM's tool list.
+        let engine = engine_with_rules(
+            PermissionMode::FullControl,
+            PermissionBaseline::FullAccess,
+            vec![],
+            ws(),
+        );
+        engine.interaction_modes.insert("t1".to_owned(), InteractionMode::Plan);
+        let snapshot = engine.permission_state_for("t1");
+        assert_eq!(snapshot.interaction_mode, InteractionMode::Plan);
+        assert_eq!(snapshot.exposure, ToolExposure::read_only());
+        assert!(snapshot.exposure.contains(OperationCategory::ReadOnly));
+        assert!(!snapshot.exposure.contains(OperationCategory::Shell));
+        assert!(!snapshot.exposure.contains(OperationCategory::FileEdit));
+        assert!(!snapshot.exposure.contains(OperationCategory::Network));
+    }
+
+    #[tokio::test]
+    async fn plan_mode_denies_mutation_in_evaluate() {
+        // Defense-in-depth: even if a mutation operation reaches evaluate under
+        // Plan mode (e.g. the model somehow calls a hidden tool), it is denied.
+        let engine = engine_with_rules(
+            PermissionMode::FullControl,
+            PermissionBaseline::FullAccess,
+            vec![],
+            ws(),
+        );
+        engine.set_interaction_mode("t1", InteractionMode::Plan).await;
+        assert_eq!(
+            engine.evaluate("t1", &OperationDescriptor::shell("ls")).await,
+            ExecDecision::Deny
+        );
+        assert_eq!(
+            engine.evaluate("t1", &OperationDescriptor::file_edit("/ws/a.rs")).await,
+            ExecDecision::Deny
+        );
+        assert_eq!(
+            engine.evaluate("t1", &OperationDescriptor::network("x")).await,
+            ExecDecision::Deny
+        );
+        // Read-only operations still pass (non-sensitive path).
+        assert_eq!(
+            engine.evaluate("t1", &OperationDescriptor::read_only("/ws/a.rs")).await,
+            ExecDecision::Allow
+        );
     }
 }

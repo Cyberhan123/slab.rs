@@ -8,7 +8,7 @@
 //! its limits by failing.
 
 use crate::category::OperationCategory;
-use crate::decision::{PermissionBaseline, PermissionMode};
+use crate::decision::{InteractionMode, PermissionBaseline, PermissionMode};
 
 /// A bit-set over [`OperationCategory`] describing which tool categories the
 /// agent is allowed to see and call for the current turn.
@@ -43,6 +43,15 @@ impl ToolExposure {
         self.0 & Self::bit_for(category) != 0
     }
 
+    /// Intersection with another exposure (bitwise AND). Used to narrow the
+    /// resolved behavior exposure by an orthogonal interaction constraint —
+    /// e.g. [`InteractionMode::Plan`] forces the effective exposure down to
+    /// read-only regardless of the underlying permission mode.
+    #[must_use]
+    pub fn intersect(self, other: ToolExposure) -> Self {
+        Self(self.0 & other.0)
+    }
+
     const fn bit_for(category: OperationCategory) -> u8 {
         match category {
             OperationCategory::Shell => Self::SHELL,
@@ -62,8 +71,22 @@ pub struct PermissionStateSnapshot {
     pub mode: PermissionMode,
     /// The global `agent.permissions` baseline.
     pub baseline: PermissionBaseline,
-    /// The tool categories the resolved behavior permits this turn.
+    /// The tool categories the resolved behavior permits this turn, already
+    /// narrowed by the interaction-mode constraint below.
     pub exposure: ToolExposure,
+    /// The orthogonal interaction mode (`Default` or `Plan`). `Plan` is what
+    /// forced `.exposure` down to read-only and enables plan-mode instructions.
+    pub interaction_mode: InteractionMode,
+}
+
+/// The exposure constraint an [`InteractionMode`] imposes, to be intersected
+/// with the permission-behavior exposure. `Plan` restricts the agent to
+/// read-only tools; `Default` imposes no extra constraint.
+pub fn interaction_constraint(mode: InteractionMode) -> ToolExposure {
+    match mode {
+        InteractionMode::Default => ToolExposure::all(),
+        InteractionMode::Plan => ToolExposure::read_only(),
+    }
 }
 
 #[cfg(test)]
@@ -97,5 +120,21 @@ mod tests {
         assert!(exposure.contains(OperationCategory::FileEdit));
         assert!(exposure.contains(OperationCategory::Shell));
         assert!(!exposure.contains(OperationCategory::Network));
+    }
+
+    #[test]
+    fn intersect_narrows_to_read_only() {
+        // Full exposure intersected with the Plan constraint (read-only) drops
+        // every mutation category but keeps read-only.
+        let narrowed = ToolExposure::all().intersect(interaction_constraint(InteractionMode::Plan));
+        assert_eq!(narrowed, ToolExposure::read_only());
+    }
+
+    #[test]
+    fn intersect_with_default_is_noop() {
+        let exposure = ToolExposure::read_only()
+            .with(OperationCategory::Shell)
+            .with(OperationCategory::FileEdit);
+        assert_eq!(exposure.intersect(interaction_constraint(InteractionMode::Default)), exposure);
     }
 }

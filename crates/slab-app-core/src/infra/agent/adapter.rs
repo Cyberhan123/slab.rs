@@ -183,14 +183,13 @@ fn e2e_llm_response(messages: &[ConversationMessage], tools: &[ToolSpec]) -> Llm
         || normalized_prompt.contains("plan_update")
         || normalized_prompt.contains("plan update");
 
-    if wants_plan_loop && !has_tool_result_after_prompt && e2e_tool_available(tools, "plan_update")
-    {
+    if wants_plan_loop && !has_tool_result_after_prompt && e2e_tool_available(tools, "plan") {
         return LlmResponse {
             content: None,
             content_already_streamed: false,
             tool_calls: vec![ParsedToolCall {
-                id: "e2e-plan-update".to_owned(),
-                name: "plan_update".to_owned(),
+                id: "e2e-plan".to_owned(),
+                name: "plan".to_owned(),
                 arguments: serde_json::json!({
                     "summary": "e2e assistant loop",
                     "items": [
@@ -206,7 +205,7 @@ fn e2e_llm_response(messages: &[ConversationMessage], tools: &[ToolSpec]) -> Llm
     }
 
     let content = if wants_plan_loop && has_tool_result_after_prompt {
-        "E2E loop complete after plan_update tool output.".to_owned()
+        "E2E loop complete after plan tool output.".to_owned()
     } else if prompt.trim().is_empty() {
         "E2E assistant persisted reply.".to_owned()
     } else {
@@ -539,9 +538,9 @@ mod tests {
         }
     }
 
-    fn plan_update_spec() -> ToolSpec {
+    fn plan_spec() -> ToolSpec {
         ToolSpec {
-            name: "plan_update".to_owned(),
+            name: "plan".to_owned(),
             description: "record a plan".to_owned(),
             parameters_schema: serde_json::json!({ "type": "object" }),
         }
@@ -593,15 +592,13 @@ mod tests {
     }
 
     #[test]
-    fn e2e_llm_requests_plan_update_before_tool_result() {
-        let response = e2e_llm_response(
-            &[text_message("user", "please run the tool loop")],
-            &[plan_update_spec()],
-        );
+    fn e2e_llm_requests_plan_before_tool_result() {
+        let response =
+            e2e_llm_response(&[text_message("user", "please run the tool loop")], &[plan_spec()]);
 
         assert_eq!(response.finish_reason.as_deref(), Some("tool_calls"));
         assert_eq!(response.tool_calls.len(), 1);
-        assert_eq!(response.tool_calls[0].name, "plan_update");
+        assert_eq!(response.tool_calls[0].name, "plan");
         assert!(response.tool_calls[0].arguments.contains("record plan"));
     }
 
@@ -612,13 +609,10 @@ mod tests {
                 text_message("user", "please run the tool loop"),
                 text_message("tool", "{\"summary\":\"e2e assistant loop\"}"),
             ],
-            &[plan_update_spec()],
+            &[plan_spec()],
         );
 
-        assert_eq!(
-            response.content.as_deref(),
-            Some("E2E loop complete after plan_update tool output.")
-        );
+        assert_eq!(response.content.as_deref(), Some("E2E loop complete after plan tool output."));
         assert!(response.tool_calls.is_empty());
         assert_eq!(response.finish_reason.as_deref(), Some("stop"));
     }

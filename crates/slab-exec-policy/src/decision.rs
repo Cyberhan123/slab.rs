@@ -41,6 +41,27 @@ impl PermissionMode {
     }
 }
 
+/// Orthogonal interaction mode (flows via `ThreadStartParams`/`TurnStartParams`
+/// alongside [`PermissionMode`]). Where `PermissionMode` decides
+/// allow/prompt/deny per category, `InteractionMode` is a higher-level
+/// *conversation shape*: `Plan` narrows the agent to read-only exploration plus
+/// the plan tools and gates execution behind an approval flip back to `Default`.
+/// The two compose — `Plan` intersects the resolved exposure down to read-only
+/// (see `interaction_constraint`) and hard-denies any non-read-only operation
+/// in `evaluate`, regardless of the underlying permission mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InteractionMode {
+    /// Normal agentic execution: the permission mode alone governs tool
+    /// visibility and approval.
+    #[default]
+    Default,
+    /// Read-only planning: mutation tools are hidden / denied, the agent
+    /// explores and drafts a plan, then calls `present_plan` to request
+    /// approval. On approval the thread flips back to [`InteractionMode::Default`].
+    Plan,
+}
+
 /// Persistence scope chosen by the user when approving a prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

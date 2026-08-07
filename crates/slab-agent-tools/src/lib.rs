@@ -33,7 +33,9 @@ pub use git::{GitCommitTool, GitDiffTool, GitStatusTool};
 pub use glob::FileGlobTool;
 pub use grep::GrepTool;
 pub use mcp::{McpCallTool, McpListToolsTool, McpProxyTool};
-pub use plan::PlanUpdateTool;
+pub use plan::{
+    PRESENT_PLAN_METADATA_KEY, PRESENT_PLAN_TOOL_NAME, PlanTool, PresentPlanTool, UpdatePlanTool,
+};
 pub use shell::{ShellPolicy, ShellTool};
 pub use slab_shell_command::{
     ShellLauncher, ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
@@ -71,7 +73,9 @@ pub fn register_all_tools(
     router.register(Box::new(ListDirTool::new(workspace_root.clone())));
     router.register(Box::new(FileGlobTool::new(workspace_root.clone())));
     router.register(Box::new(GrepTool::new(workspace_root.clone())));
-    router.register(Box::new(PlanUpdateTool::new()));
+    router.register(Box::new(PlanTool::new()));
+    router.register(Box::new(UpdatePlanTool::new()));
+    router.register(Box::new(PresentPlanTool::new()));
     router.register(Box::new(TaskCompleteTool::new()));
     router.register(Box::new(VerifyTool::new()));
     router.register(Box::new(WebSearchTool::new(web_search_config)));
@@ -123,7 +127,9 @@ mod tests {
         );
         assert!(router.get("shell").is_some());
         assert!(router.get("file_glob").is_some());
-        assert!(router.get("plan_update").is_some());
+        assert!(router.get("plan").is_some());
+        assert!(router.get("update_plan").is_some());
+        assert!(router.get("present_plan").is_some());
         assert!(router.get("task.complete").is_some());
         assert!(router.get("verify").is_some());
         assert!(router.get("web_search").is_some());
@@ -142,7 +148,7 @@ mod tests {
             None,
         );
         assert!(router.get("file_glob").is_some());
-        assert!(router.get("plan_update").is_some());
+        assert!(router.get("plan").is_some());
         assert!(router.get("apply_patch").is_some());
         assert!(router.get("git_status").is_none());
 

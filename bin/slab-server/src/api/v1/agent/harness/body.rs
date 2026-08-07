@@ -113,6 +113,15 @@ pub(crate) async fn turn_start(
         session.service().set_thread_mode(&real_id, runtime_mode).await;
     }
 
+    // Apply the orthogonal interaction mode (if any) — `plan` narrows the agent
+    // to read-only exploration; approving a `present_plan` flips it to `default`.
+    if let Some(mode) = params.interaction_mode {
+        let real_id = session.real_id_for(&params.thread_id);
+        let runtime_mode =
+            slab_app_core::infra::agent::exec_policy::interaction_mode_from_proto(mode);
+        session.service().set_interaction_mode(&real_id, runtime_mode).await;
+    }
+
     Ok(TurnStartResult {
         turn: Turn {
             id: "0".to_owned(),

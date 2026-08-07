@@ -20,12 +20,12 @@ pub mod user_input;
 pub use messages::{
     ApprovalResolveParams, ApprovalResolveResult, ApprovalScope, CommandInfo, CommandKind,
     CommandListParams, CommandListResult, CommandSource, InitializeParams, InitializeResult,
-    OperationCategory, PermissionMode, ReasoningEffort, ShutdownParams, ShutdownResult, SkillInfo,
-    SkillSource, SkillsListParams, SkillsListResult, ThreadArchiveParams, ThreadArchiveResult,
-    ThreadCompactStartParams, ThreadCompactStartResult, ThreadForkParams, ThreadForkResult,
-    ThreadListParams, ThreadListResult, ThreadResumeParams, ThreadResumeResult,
-    ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams, ThreadStartResult,
-    TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
+    InteractionMode, OperationCategory, PermissionMode, ReasoningEffort, ShutdownParams,
+    ShutdownResult, SkillInfo, SkillSource, SkillsListParams, SkillsListResult,
+    ThreadArchiveParams, ThreadArchiveResult, ThreadCompactStartParams, ThreadCompactStartResult,
+    ThreadForkParams, ThreadForkResult, ThreadListParams, ThreadListResult, ThreadResumeParams,
+    ThreadResumeResult, ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams,
+    ThreadStartResult, TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
 };
 pub use model::{ModelInfo, ModelListParams, ModelListResult, ReasoningEffortOption};
 pub use notification::{

@@ -47,6 +47,13 @@ const TASK_COMPLETE_METADATA_KEY: &str = "task_complete";
 /// execution — see [`handle_tool_search`].
 const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
 
+/// Tool name that presents the current plan for user approval. Mirrors
+/// `slab_agent_tools::PRESENT_PLAN_TOOL_NAME`; duplicated here because
+/// `slab-agent` cannot depend on `slab-agent-tools`. The loop detects the call
+/// by name and drives the approval gate; the plan snapshot travels in the
+/// tool's content (the metadata marker is a producer-side signal only).
+const PRESENT_PLAN_TOOL_NAME: &str = "present_plan";
+
 /// Structured completion payload extracted from a successful `task.complete`
 /// tool call. Consumed by the turn loop to emit the final answer (双轨 2).
 #[derive(Debug, Clone)]
@@ -339,6 +346,87 @@ async fn emit_approval_request(run: &ToolRunContext<'_, '_>) {
     run.context.notify.on_event_msg(run.context.thread_id, &msg).await;
 }
 
+/// Drive the `present_plan` approval gate after the tool ran. Emits the plan
+/// for approval via the existing `CommandExecutionRequestApproval` channel
+/// (plan summary shown as `command`), awaits the host approval decision, and on
+/// approval flips the thread to `InteractionMode::Default` so mutation tools
+/// unlock next turn. Returns the content + status to surface as the tool result
+/// (the verdict flows back to the LLM as the tool output).
+async fn drive_present_plan_approval(
+    context: &TurnExecutionContext<'_>,
+    call_id: &str,
+    plan_summary: String,
+    risk: &ToolRiskAssessment,
+) -> Result<(String, ToolCallStatus), AgentError> {
+    use slab_exec_policy::{InteractionMode, OperationCategory, OperationDescriptor};
+
+    let descriptor = OperationDescriptor::read_only("present_plan".to_owned());
+    let msg = EventMsg::CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams {
+        thread_id: context.thread_id.to_owned(),
+        turn_id: context.turn_index.to_string(),
+        item_id: call_id.to_owned(),
+        command: plan_summary,
+        cwd: String::new(),
+        reason: Some("Plan ready for approval".to_owned()),
+        category: Some(OperationCategory::ReadOnly),
+        allowed_scopes: default_allowed_scopes(),
+    });
+    context.notify.on_event_msg(context.thread_id, &msg).await;
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "plan_approval_required",
+        serde_json::json!({ "item_id": call_id, "tool_name": PRESENT_PLAN_TOOL_NAME }),
+    );
+
+    let decision = tokio::select! {
+        decision = context.approval.request_approval(
+            context.thread_id,
+            call_id,
+            PRESENT_PLAN_TOOL_NAME,
+            &descriptor,
+            Some(risk.clone()),
+        ) => decision,
+        _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+    };
+
+    Ok(match decision {
+        ApprovalDecision::Approved(_) => {
+            record_json(
+                context.trace,
+                &context.trace_context,
+                "slab-agent",
+                "plan_approval_resolved",
+                serde_json::json!({ "item_id": call_id, "approved": true }),
+            );
+            // Flip to Default so the exposure filter stops forcing read-only
+            // next turn; mutation tools re-appear in the LLM's tool list.
+            context
+                .exec_policy
+                .set_interaction_mode(context.thread_id, InteractionMode::Default)
+                .await;
+            (
+                "Plan approved. Mutation tools are now available — execute the plan and call update_plan as you complete each step.".to_owned(),
+                ToolCallStatus::Completed,
+            )
+        }
+        ApprovalDecision::Rejected => {
+            record_json(
+                context.trace,
+                &context.trace_context,
+                "slab-agent",
+                "plan_approval_resolved",
+                serde_json::json!({ "item_id": call_id, "approved": false }),
+            );
+            (
+                "Plan not approved. Stay in Plan mode, revise the plan, and call present_plan again when ready.".to_owned(),
+                ToolCallStatus::Failed,
+            )
+        }
+    })
+}
+
 /// Execute the given tool calls and persist their results.
 ///
 /// Returns `Some(TaskCompletion)` when a `task.complete` tool call succeeded,
@@ -351,7 +439,8 @@ pub(crate) async fn handle_tool_calls(
 ) -> Result<Option<TaskCompletion>, AgentError> {
     let mut tool_context_builder = ToolContext::for_thread(context.thread_id)
         .turn_index(context.turn_index)
-        .depth(context.depth);
+        .depth(context.depth)
+        .plan_store(Arc::clone(&context.plan_store));
     if let Some(workspace) = context.thread_context.workspace.as_ref() {
         let mut workspace = workspace.clone();
         if workspace.session_id.is_none() {
@@ -739,7 +828,7 @@ async fn handle_tool_call(
     } else {
         None
     };
-    let call_status = tool_state.transition(call_status)?;
+    let mut call_status = tool_state.transition(call_status)?;
     if context.cancellation.is_cancelled() {
         return Err(AgentError::Interrupted);
     }
@@ -753,7 +842,23 @@ async fn handle_tool_call(
             None
         };
 
-    let mut content = tool_output.content;
+    // A successful `present_plan` raises the plan for user approval via the same
+    // approval channel as RequireApproval operations. On approval the thread
+    // flips to Default interaction mode (mutation tools re-appear next turn); on
+    // rejection it stays in Plan mode and the verdict flows back to the LLM as
+    // the tool result. The plan summary shown in the approval card is the tool's
+    // own content; the metadata marker is the loop-side signal (mirrors the
+    // `task.complete` detection pattern).
+    let mut content =
+        if tool_call.name == PRESENT_PLAN_TOOL_NAME && call_status == ToolCallStatus::Completed {
+            let (approved_content, resolved_status) =
+                drive_present_plan_approval(context, &call_id, tool_output.content.clone(), &risk)
+                    .await?;
+            call_status = resolved_status;
+            approved_content
+        } else {
+            tool_output.content
+        };
     info!(
         thread_id = context.thread_id,
         turn_index = context.turn_index,

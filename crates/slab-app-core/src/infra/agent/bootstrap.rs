@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use slab_agent::{AgentControl, AgentRuntime, AgentThreadContext, ToolRouter, WorkspaceRef};
+use slab_agent::{
+    AgentControl, AgentRuntime, AgentThreadContext, PlanStorePort, ToolRouter, WorkspaceRef,
+};
 use slab_agent_tracing::{AgentTraceSink, BundleAgentTraceSink, NoopAgentTraceSink};
 use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
 
@@ -304,6 +306,11 @@ fn build_agent_control(
     )
     .with_thread_context(thread_context)
     .with_exec_policy(exec_policy)
+    // Plan interaction mode: per-thread in-memory plan store (the durable
+    // source of truth for the `plan` / `update_plan` / `present_plan` tools).
+    .with_plan_store(
+        Arc::new(super::plan_store::InMemoryPlanStore::default()) as Arc<dyn PlanStorePort>
+    )
     // INFRA-05: FIFO wait queue for agent spawns (0 ⇒ legacy reject-at-cap).
     .with_queue_capacity(runtime_limits.queue_capacity as usize)
     .with_compact(compact);

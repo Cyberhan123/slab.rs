@@ -72,6 +72,18 @@ pub enum PermissionMode {
     Custom,
 }
 
+/// Orthogonal interaction mode (flows via `TurnStartParams.interaction_mode`,
+/// alongside [`PermissionMode`]). `plan` narrows the agent to read-only
+/// exploration + the plan tools and gates execution behind an approval flip
+/// back to `default`. Mirrors `slab_exec_policy::InteractionMode`.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InteractionMode {
+    #[default]
+    Default,
+    Plan,
+}
+
 /// Persistence scope chosen by the user when approving a prompt. Mirrors
 /// `slab_exec_policy::ApprovalScope`.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -191,6 +203,11 @@ pub struct ThreadStartParams {
     /// full-control / custom). When unset the server uses `RequestApproval`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<PermissionMode>,
+    /// Orthogonal interaction mode (`default` / `plan`). When unset the server
+    /// uses `Default`. Accepted here for symmetry but, like `permission_mode`,
+    /// only applied on `turn_start` today.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_mode: Option<InteractionMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_instructions: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -422,6 +439,9 @@ pub struct TurnStartParams {
     /// Per-session permission mode override for this turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<PermissionMode>,
+    /// Orthogonal interaction mode override for this turn (`default` / `plan`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_mode: Option<InteractionMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -550,5 +570,27 @@ mod tests {
     fn reasoning_effort_xhigh_lowercases() {
         let json = serde_json::to_value(ReasoningEffort::Xhigh).unwrap();
         assert_eq!(json, "xhigh");
+    }
+
+    #[test]
+    fn interaction_mode_round_trips_snake_case() {
+        assert_eq!(serde_json::to_value(InteractionMode::Default).unwrap(), "default");
+        assert_eq!(serde_json::to_value(InteractionMode::Plan).unwrap(), "plan");
+        let back: InteractionMode = serde_json::from_str("\"plan\"").unwrap();
+        assert_eq!(back, InteractionMode::Plan);
+    }
+
+    #[test]
+    fn turn_start_params_interaction_mode_defaults_to_none() {
+        // An absent interaction_mode deserializes to None (server falls back to Default).
+        let params: TurnStartParams =
+            serde_json::from_str(r#"{"threadId":"t","input":[]}"#).unwrap();
+        assert_eq!(params.interaction_mode, None);
+
+        // And an explicit plan mode round-trips through the params.
+        let params: TurnStartParams =
+            serde_json::from_str(r#"{"threadId":"t","input":[],"interactionMode":"plan"}"#)
+                .unwrap();
+        assert_eq!(params.interaction_mode, Some(InteractionMode::Plan));
     }
 }

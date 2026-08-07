@@ -75,6 +75,7 @@ pub struct AgentControl {
     notify: Arc<dyn AgentNotifyPort>,
     approval: Arc<dyn ApprovalPort>,
     exec_policy: Arc<dyn crate::port::ExecPolicyPort>,
+    plan_store: Arc<dyn crate::port::PlanStorePort>,
     tool_router: Arc<ToolRouter>,
     hooks: AgentHookRegistry,
     compact: Arc<dyn CompactPort>,
@@ -157,6 +158,7 @@ impl AgentControl {
             notify,
             approval,
             exec_policy: Arc::new(slab_exec_policy::AllowAllExecPolicy),
+            plan_store: Arc::new(crate::port::NoopPlanStore),
             tool_router,
             hooks: AgentHookRegistry::new(hooks),
             compact: Arc::new(SlidingWindowCompactPort::default()),
@@ -190,6 +192,7 @@ impl AgentControl {
             notify,
             approval,
             exec_policy: Arc::new(slab_exec_policy::AllowAllExecPolicy),
+            plan_store: Arc::new(crate::port::NoopPlanStore),
             tool_router,
             hooks: AgentHookRegistry::default(),
             compact,
@@ -246,6 +249,15 @@ impl AgentControl {
     /// compaction inject their own [`CompactPort`] here.
     pub fn with_compact(mut self, compact: Arc<dyn CompactPort>) -> Self {
         self.compact = compact;
+        self
+    }
+
+    /// Attach the per-thread plan store backing Plan interaction mode. When
+    /// unset, a [`crate::port::NoopPlanStore`] stub is used (plans are not
+    /// persisted) — suitable for tests but not production. The host (app-core)
+    /// injects an in-memory per-thread store here.
+    pub fn with_plan_store(mut self, plan_store: Arc<dyn crate::port::PlanStorePort>) -> Self {
+        self.plan_store = plan_store;
         self
     }
 
@@ -577,9 +589,25 @@ impl AgentControl {
         self.exec_policy.set_thread_mode(thread_id, mode).await;
     }
 
-    /// Drop per-thread permission state when the thread ends.
+    /// Set the orthogonal interaction mode for a thread (flows from
+    /// `TurnStartParams.interaction_mode`). `Plan` narrows the agent to
+    /// read-only exploration; the `present_plan` approval gate flips it back to
+    /// `Default` so mutation tools re-appear next turn.
+    pub async fn set_interaction_mode(
+        &self,
+        thread_id: &str,
+        mode: slab_exec_policy::InteractionMode,
+    ) {
+        self.exec_policy.set_interaction_mode(thread_id, mode).await;
+    }
+
+    /// Drop per-thread state when the thread ends: permission/interaction mode
+    /// (exec policy) and the durable plan (plan store). Both are keyed by
+    /// `thread_id`; clearing here prevents cross-thread leakage on the
+    /// process-wide singleton.
     pub async fn clear_thread_mode(&self, thread_id: &str) {
         self.exec_policy.clear_thread(thread_id).await;
+        self.plan_store.clear(thread_id).await;
     }
 
     /// The shared exec-policy handle. Hosts use it to snapshot permission state
@@ -635,6 +663,7 @@ impl AgentControl {
         let notify = Arc::clone(&self.notify);
         let approval = Arc::clone(&self.approval);
         let exec_policy = Arc::clone(&self.exec_policy);
+        let plan_store = Arc::clone(&self.plan_store);
         let tools = Arc::clone(&self.tool_router);
         let hooks = self.hooks.clone();
         let compact = Arc::clone(&self.compact);
@@ -651,6 +680,7 @@ impl AgentControl {
             notify,
             approval,
             exec_policy,
+            plan_store,
             tools,
             tool_discovery: ToolDiscoveryState::new(),
             hooks,

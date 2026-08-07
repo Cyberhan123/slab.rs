@@ -1,5 +1,7 @@
 //! Single-turn execution logic (private to the crate).
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
@@ -17,7 +19,7 @@ use crate::{
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
         AgentNotifyPort, ApprovalPort, ExecPolicyPort, LlmPort, LlmStreamObserver, LlmUsage,
-        ParsedToolCall, ToolSpec,
+        ParsedToolCall, PlanStorePort, ToolSpec,
     },
     protocol::{
         AgentMessageDeltaParams, EventMsg, ItemCompletedParams, ItemStartedParams,
@@ -48,6 +50,9 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub notify: &'a dyn AgentNotifyPort,
     pub approval: &'a dyn ApprovalPort,
     pub exec_policy: &'a dyn ExecPolicyPort,
+    /// Owned `Arc` (not `&'a dyn`) because it is cloned into each call's
+    /// [`crate::ToolContext`] so the plan tools can persist/query the durable plan.
+    pub plan_store: Arc<dyn PlanStorePort>,
     pub hooks: &'a AgentHookRegistry,
     pub risk: &'a dyn ToolRiskAnalyzer,
     pub trace: &'a dyn AgentTraceSink,
@@ -849,9 +854,18 @@ mod tests {
         for external in ["web_search", "mcp_call", "mcp_list_tools", "mcp__server__tool"] {
             assert!(is_external_tool_name(external), "{external} should be external");
         }
-        for local in
-            ["read_file", "write_file", "shell", "grep", "plan_update", "task.complete", "verify"]
-        {
+        for local in [
+            "read_file",
+            "write_file",
+            "shell",
+            "grep",
+            "plan",
+            "update_plan",
+            "present_plan",
+            "task.complete",
+            "verify",
+        ] {
+            assert!(!is_external_tool_name(local), "{local} should stay available offline");
             assert!(!is_external_tool_name(local), "{local} should stay available offline");
         }
     }

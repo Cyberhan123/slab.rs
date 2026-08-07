@@ -1055,6 +1055,7 @@ impl crate::ExecPolicyPort for AskAllExecPolicy {
     ) {
     }
     async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
+    async fn set_interaction_mode(&self, _thread_id: &str, _mode: crate::InteractionMode) {}
     async fn clear_thread(&self, _thread_id: &str) {}
     fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
         // Full exposure keeps the tool list unfiltered in approval-flow tests.
@@ -1062,6 +1063,7 @@ impl crate::ExecPolicyPort for AskAllExecPolicy {
             mode: crate::PermissionMode::FullControl,
             baseline: crate::PermissionBaseline::FullAccess,
             exposure: crate::ToolExposure::all(),
+            interaction_mode: crate::InteractionMode::Default,
         }
     }
 }
@@ -1091,6 +1093,7 @@ impl crate::ExecPolicyPort for DenyAllExecPolicy {
     ) {
     }
     async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
+    async fn set_interaction_mode(&self, _thread_id: &str, _mode: crate::InteractionMode) {}
     async fn clear_thread(&self, _thread_id: &str) {}
     fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
         // Full exposure keeps the tool list unfiltered in denial-flow tests.
@@ -1098,6 +1101,7 @@ impl crate::ExecPolicyPort for DenyAllExecPolicy {
             mode: crate::PermissionMode::FullControl,
             baseline: crate::PermissionBaseline::FullAccess,
             exposure: crate::ToolExposure::all(),
+            interaction_mode: crate::InteractionMode::Default,
         }
     }
 }
@@ -1474,6 +1478,341 @@ async fn tool_search_no_match_returns_empty_and_does_not_inject() {
         "deferred tool should stay hidden after a non-matching search, got {:?}",
         calls[1]
     );
+}
+
+// ── present_plan approval gate (Plan → Default mode flip) ────────────────────
+
+/// In-memory plan store for tests (mirrors the app-core impl).
+#[derive(Default)]
+struct InMemoryPlanStore {
+    plan: Mutex<Option<crate::Plan>>,
+}
+
+#[async_trait]
+impl crate::PlanStorePort for InMemoryPlanStore {
+    async fn replace_plan(&self, _thread_id: &str, plan: crate::Plan) -> Result<(), AgentError> {
+        *self.plan.lock().unwrap() = Some(plan);
+        Ok(())
+    }
+    async fn current_plan(&self, _thread_id: &str) -> Option<crate::Plan> {
+        self.plan.lock().unwrap().clone()
+    }
+    async fn clear(&self, _thread_id: &str) {
+        *self.plan.lock().unwrap() = None;
+    }
+}
+
+/// Exec-policy stub starting in Plan mode. Exposure follows the mode (read-only
+/// while Plan, full after Default) so `visible_tool_specs` reflects it, and
+/// `set_interaction_mode` records the flip — exactly what the `present_plan`
+/// approval gate drives.
+struct PlanModeExecPolicy {
+    mode: Mutex<crate::InteractionMode>,
+    set_calls: Mutex<Vec<crate::InteractionMode>>,
+}
+
+impl PlanModeExecPolicy {
+    fn new() -> Self {
+        Self { mode: Mutex::new(crate::InteractionMode::Plan), set_calls: Mutex::new(Vec::new()) }
+    }
+}
+
+#[async_trait]
+impl crate::ExecPolicyPort for PlanModeExecPolicy {
+    async fn evaluate(
+        &self,
+        _thread_id: &str,
+        descriptor: &crate::OperationDescriptor,
+    ) -> crate::ExecDecision {
+        let plan = *self.mode.lock().unwrap() == crate::InteractionMode::Plan;
+        match descriptor.category {
+            crate::OperationCategory::ReadOnly => crate::ExecDecision::Allow,
+            _ if plan => crate::ExecDecision::Deny,
+            _ => crate::ExecDecision::Allow,
+        }
+    }
+    async fn remember(&self, _: &str, _: &crate::OperationDescriptor, _: crate::ApprovalScope) {}
+    async fn set_thread_mode(&self, _: &str, _: crate::PermissionMode) {}
+    async fn set_interaction_mode(&self, _thread_id: &str, mode: crate::InteractionMode) {
+        *self.mode.lock().unwrap() = mode;
+        self.set_calls.lock().unwrap().push(mode);
+    }
+    async fn clear_thread(&self, _: &str) {}
+    fn permission_state_for(&self, _: &str) -> crate::PermissionStateSnapshot {
+        let mode = *self.mode.lock().unwrap();
+        let exposure = match mode {
+            crate::InteractionMode::Plan => crate::ToolExposure::read_only(),
+            crate::InteractionMode::Default => crate::ToolExposure::all(),
+        };
+        crate::PermissionStateSnapshot {
+            mode: crate::PermissionMode::FullControl,
+            baseline: crate::PermissionBaseline::FullAccess,
+            exposure,
+            interaction_mode: mode,
+        }
+    }
+}
+
+struct ApprovingApproval;
+#[async_trait]
+impl ApprovalPort for ApprovingApproval {
+    async fn request_approval(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &crate::OperationDescriptor,
+        _: Option<crate::ToolRiskAssessment>,
+    ) -> ApprovalDecision {
+        ApprovalDecision::Approved(crate::ApprovalScope::RunOnce)
+    }
+}
+
+/// A mutation (FileEdit) tool used only to assert progressive exposure.
+struct MutatingTestTool;
+#[async_trait]
+impl ToolHandler for MutatingTestTool {
+    fn name(&self) -> &str {
+        "mutate_tool"
+    }
+    fn description(&self) -> &str {
+        "A mutating tool used to assert visibility."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object","properties":{}})
+    }
+    fn category(&self) -> crate::OperationCategory {
+        crate::OperationCategory::FileEdit
+    }
+    async fn execute(
+        &self,
+        _: &ToolContext,
+        _: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        Ok(ToolOutput { content: "mutated".into(), metadata: None })
+    }
+}
+
+/// Test-only `plan` tool (slab-agent tests cannot depend on slab-agent-tools).
+struct PlanStubTool;
+#[async_trait]
+impl ToolHandler for PlanStubTool {
+    fn name(&self) -> &str {
+        "plan"
+    }
+    fn description(&self) -> &str {
+        "Create a plan (test stub)."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object","properties":{"items":{"type":"array"}}})
+    }
+    async fn execute(
+        &self,
+        ctx: &ToolContext,
+        _: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let plan = crate::Plan {
+            plan_id: "plan-test".into(),
+            summary: Some("test plan".into()),
+            items: vec![crate::PlanItem {
+                step: "do thing".into(),
+                status: crate::PlanStatus::InProgress,
+                depends_on: None,
+                result_ref: None,
+            }],
+            counts: crate::PlanCounts { pending: 0, in_progress: 1, completed: 0, blocked: 0 },
+            current_step: Some(0),
+        };
+        ctx.plan_store
+            .replace_plan(&ctx.thread_id, plan.clone())
+            .await
+            .map_err(|e| AgentError::ToolExecution(e.to_string()))?;
+        Ok(ToolOutput { content: format!("plan created: {}", plan.summary_line()), metadata: None })
+    }
+}
+
+/// Test-only `present_plan` tool. The turn loop detects its name and drives the
+/// approval gate; this stub just surfaces the stored plan as content.
+struct PresentPlanStubTool;
+#[async_trait]
+impl ToolHandler for PresentPlanStubTool {
+    fn name(&self) -> &str {
+        "present_plan"
+    }
+    fn description(&self) -> &str {
+        "Present the plan (test stub)."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object","properties":{}})
+    }
+    async fn execute(
+        &self,
+        ctx: &ToolContext,
+        _: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let plan = ctx
+            .plan_store
+            .current_plan(&ctx.thread_id)
+            .await
+            .ok_or_else(|| AgentError::ToolExecution("no plan".into()))?;
+        Ok(ToolOutput {
+            content: format!("presenting plan for approval: {}", plan.summary_line()),
+            metadata: None,
+        })
+    }
+}
+
+struct PlanPresentLlm {
+    calls: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+#[async_trait]
+impl LlmPort for PlanPresentLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut calls = self.calls.lock().unwrap();
+        calls.push(tools.iter().map(|t| t.name.clone()).collect());
+        let idx = calls.len();
+        drop(calls);
+        let tc = |id: &str, name: &str, args: &str| ParsedToolCall {
+            id: id.into(),
+            name: name.into(),
+            arguments: args.into(),
+        };
+        Ok(match idx {
+            1 => LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![tc(
+                    "p1",
+                    "plan",
+                    r#"{"items":[{"step":"do","status":"in_progress"}]}"#,
+                )],
+                finish_reason: Some("tool_calls".into()),
+                usage: None,
+            },
+            2 => LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![tc("pp", "present_plan", "{}")],
+                finish_reason: Some("tool_calls".into()),
+                usage: None,
+            },
+            _ => LlmResponse {
+                content: Some("done".into()),
+                content_already_streamed: false,
+                tool_calls: vec![],
+                finish_reason: Some("stop".into()),
+                usage: None,
+            },
+        })
+    }
+}
+
+/// Drive a Plan-mode agent through `plan` → `present_plan` → final, capturing
+/// the per-turn visible tool lists and the interaction-mode transitions.
+async fn run_present_plan_agent(
+    approval: Arc<dyn ApprovalPort>,
+) -> (Arc<PlanModeExecPolicy>, Arc<Mutex<Vec<Vec<String>>>>) {
+    let tool_calls_capture: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(PlanPresentLlm { calls: Arc::clone(&tool_calls_capture) });
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(MutatingTestTool));
+    router.register(Box::new(PlanStubTool));
+    router.register(Box::new(PresentPlanStubTool));
+    let exec_policy: Arc<PlanModeExecPolicy> = Arc::new(PlanModeExecPolicy::new());
+    let plan_store: Arc<dyn crate::PlanStorePort> = Arc::new(InMemoryPlanStore::default());
+    let control = Arc::new(
+        AgentControl::new(llm, store, notify, approval, Arc::new(router), 8, 4)
+            .with_exec_policy(exec_policy.clone())
+            .with_plan_store(plan_store),
+    );
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("plan then present".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 6, ..AgentConfig::default() };
+    let thread_id = control.spawn("session-plan".into(), config, messages).await.expect("spawn");
+    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            if matches!(
+                *status_rx.borrow(),
+                ThreadStatus::Completed
+                    | ThreadStatus::Errored
+                    | ThreadStatus::Shutdown
+                    | ThreadStatus::Interrupted
+            ) {
+                return;
+            }
+        }
+    })
+    .await;
+    (exec_policy, tool_calls_capture)
+}
+
+#[tokio::test]
+async fn present_plan_approval_flips_plan_to_default_and_unlocks_mutation() {
+    let (exec_policy, calls) = run_present_plan_agent(Arc::new(ApprovingApproval)).await;
+    let calls = calls.lock().unwrap().clone();
+    assert!(calls.len() >= 3, "expected >=3 LLM turns, got {:?}", calls);
+
+    // Turn 1 (Plan mode): mutation tool hidden; plan + present_plan visible.
+    assert!(
+        !calls[0].iter().any(|n| n == "mutate_tool"),
+        "mutation tool should be hidden in Plan mode, got {:?}",
+        calls[0]
+    );
+    assert!(calls[0].iter().any(|n| n == "plan"), "plan tool visible");
+    assert!(calls[0].iter().any(|n| n == "present_plan"), "present_plan tool visible");
+
+    // The approval gate flipped the interaction mode back to Default.
+    let set_calls = exec_policy.set_calls.lock().unwrap().clone();
+    assert!(
+        set_calls.contains(&crate::InteractionMode::Default),
+        "mode should flip to Default on approval, got {:?}",
+        set_calls
+    );
+
+    // A later turn (after the flip) sees the mutation tool again.
+    let last = calls.last().expect("at least one turn");
+    assert!(
+        last.iter().any(|n| n == "mutate_tool"),
+        "mutation tool should be visible after approval flipped to Default, got {:?}",
+        last
+    );
+}
+
+#[tokio::test]
+async fn present_plan_rejected_keeps_plan_mode_and_hides_mutation() {
+    let (exec_policy, calls) = run_present_plan_agent(Arc::new(RejectingApproval)).await;
+    // Rejection must NOT flip to Default — the thread stays in Plan mode.
+    let set_calls = exec_policy.set_calls.lock().unwrap().clone();
+    assert!(
+        !set_calls.contains(&crate::InteractionMode::Default),
+        "mode should stay Plan on rejection, got {:?}",
+        set_calls
+    );
+    let calls = calls.lock().unwrap().clone();
+    for (i, turn) in calls.iter().enumerate() {
+        assert!(
+            !turn.iter().any(|n| n == "mutate_tool"),
+            "turn {i}: mutation tool should stay hidden after rejection, got {:?}",
+            turn
+        );
+    }
 }
 
 #[tokio::test]
@@ -2125,12 +2464,14 @@ impl crate::ExecPolicyPort for ReadOnlyExposurePolicy {
     ) {
     }
     async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
+    async fn set_interaction_mode(&self, _thread_id: &str, _mode: crate::InteractionMode) {}
     async fn clear_thread(&self, _thread_id: &str) {}
     fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
         crate::PermissionStateSnapshot {
             mode: crate::PermissionMode::Custom,
             baseline: crate::PermissionBaseline::ReadOnly,
             exposure: crate::ToolExposure::read_only(),
+            interaction_mode: crate::InteractionMode::Default,
         }
     }
 }

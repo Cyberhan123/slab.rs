@@ -105,8 +105,8 @@ impl ToolRiskAnalyzer for BasicToolRiskAnalyzer {
             // Read-only tools and deterministic control tools are safe to allow
             // without approval (ADR-008).
             "read_file" | "list_dir" | "file_glob" | "grep" | "web_search" | "mcp_list_tools"
-            | "git_status" | "git_diff" | "fs_watch" | "plan_update" | "task.complete"
-            | "verify" => {
+            | "git_status" | "git_diff" | "fs_watch" | "plan" | "update_plan" | "present_plan"
+            | "task.complete" | "verify" => {
                 ToolRiskAssessment { level: ToolRiskLevel::Low, labels: Vec::new(), reason: None }
             }
             _ => ToolRiskAssessment {
@@ -196,7 +196,9 @@ mod tests {
             "git_status",
             "git_diff",
             "fs_watch",
-            "plan_update",
+            "plan",
+            "update_plan",
+            "present_plan",
             "task.complete",
             "verify",
         ] {

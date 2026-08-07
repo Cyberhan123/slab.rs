@@ -13,6 +13,7 @@ use slab_types::ConversationMessage;
 
 use crate::config::AgentConfig;
 use crate::error::AgentError;
+use crate::plan::Plan;
 use crate::protocol::EventMsg;
 
 /// Thread lifecycle status, re-exported from `slab_types` for convenience.
@@ -366,6 +367,42 @@ pub trait PluginToolPort: Send + Sync {
         capability_id: &str,
         arguments: &serde_json::Value,
     ) -> Result<String, AgentError>;
+}
+
+/// Port for the per-thread plan store backing Plan interaction mode.
+///
+/// Keeps `slab-agent` free of storage concerns: the host (app-core) provides an
+/// in-memory per-thread map. The store is the single source of truth for the
+/// durable plan a thread authors with the `plan` / `update_plan` tools and
+/// presents via `present_plan`. Keyed by thread id so plans are isolated per
+/// thread and cleared on teardown (alongside the exec-policy per-thread state).
+#[async_trait]
+pub trait PlanStorePort: Send + Sync {
+    /// Replace the thread's current plan (creates or overwrites).
+    async fn replace_plan(&self, thread_id: &str, plan: Plan) -> Result<(), AgentError>;
+
+    /// Read the thread's current plan, if any.
+    async fn current_plan(&self, thread_id: &str) -> Option<Plan>;
+
+    /// Drop the thread's plan (called on thread teardown).
+    async fn clear(&self, thread_id: &str);
+}
+
+/// [`PlanStorePort`] that stores nothing — the default for [`crate::ToolContext`]
+/// in tests and legacy paths so existing tool tests keep compiling without a
+/// concrete store wired.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopPlanStore;
+
+#[async_trait]
+impl PlanStorePort for NoopPlanStore {
+    async fn replace_plan(&self, _thread_id: &str, _plan: Plan) -> Result<(), AgentError> {
+        Ok(())
+    }
+    async fn current_plan(&self, _thread_id: &str) -> Option<Plan> {
+        None
+    }
+    async fn clear(&self, _thread_id: &str) {}
 }
 
 /// Port for status-change and harness-protocol notifications.

@@ -176,6 +176,7 @@ mod tests {
             shell_allowed: true,
             file_write_allowed: true,
             network_allowed: true,
+            plan_mode: false,
         }
     }
 

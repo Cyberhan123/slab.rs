@@ -28,6 +28,7 @@ pub mod config;
 pub mod control;
 pub mod error;
 pub mod hook;
+pub mod plan;
 pub mod port;
 pub mod protocol;
 pub mod risk;
@@ -61,16 +62,19 @@ pub use llm_output::{
     AgentStreamAssembler, AgentStreamCompletion, AgentStreamDelta, RenderedToolCallOutput,
     parse_rendered_tool_call_output,
 };
+pub use plan::{Plan, PlanCounts, PlanItem, PlanStatus};
 pub use port::{
     AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, ExecPolicyPort, LlmPort,
-    LlmResponse, MemoryPressure, MemoryPressurePort, NoopMemoryPressurePort, PluginToolPort,
-    ThreadStatus, ToolRiskAssessment, ToolRiskLevel, TurnStateRecord,
+    LlmResponse, MemoryPressure, MemoryPressurePort, NoopMemoryPressurePort, NoopPlanStore,
+    PlanStorePort, PluginToolPort, ThreadStatus, ToolRiskAssessment, ToolRiskLevel,
+    TurnStateRecord,
 };
 pub use risk::{BasicToolRiskAnalyzer, ToolApprovalDecision, ToolApprovalPolicy, ToolRiskAnalyzer};
 pub use runtime::AgentRuntime;
 pub use slab_exec_policy::{
-    AllowAllExecPolicy, ApprovalScope, ExecDecision, ExecPolicyEngine, OperationCategory,
-    OperationDescriptor, PermissionBaseline, PermissionMode, PermissionStateSnapshot, ToolExposure,
+    AllowAllExecPolicy, ApprovalScope, ExecDecision, ExecPolicyEngine, InteractionMode,
+    OperationCategory, OperationDescriptor, PermissionBaseline, PermissionMode,
+    PermissionStateSnapshot, ToolExposure, interaction_constraint,
 };
 pub use tool::{
     AgentThreadContext, PlanRef, ToolApprovalRequest, ToolCallRender, ToolCapability, ToolContext,

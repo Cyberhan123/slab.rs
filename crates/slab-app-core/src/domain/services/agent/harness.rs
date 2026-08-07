@@ -108,6 +108,17 @@ impl HarnessService {
         self.0.runtime().control().set_thread_mode(thread_id, mode).await;
     }
 
+    /// Set the orthogonal interaction mode for a thread (flows from the harness
+    /// `turn/start` `interaction_mode` param). `plan` narrows the agent to
+    /// read-only exploration; approving a `present_plan` flips it to `default`.
+    pub async fn set_interaction_mode(
+        &self,
+        thread_id: &str,
+        mode: slab_exec_policy::InteractionMode,
+    ) {
+        self.0.runtime().control().set_interaction_mode(thread_id, mode).await;
+    }
+
     /// Send an approval decision for a pending tool-call.
     ///
     /// Both `thread_id` (from the URL path) and `call_id` must match so that

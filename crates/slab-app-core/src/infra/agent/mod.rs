@@ -7,6 +7,7 @@ pub mod exec_policy;
 pub(crate) mod hooks;
 pub(crate) mod memory;
 pub(crate) mod memory_breaker;
+pub(crate) mod plan_store;
 pub(crate) mod plugin_capability;
 pub(crate) mod rollout_persistence;
 pub(crate) mod rollout_store;
