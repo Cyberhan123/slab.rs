@@ -52,7 +52,7 @@ type ToolName =
   | "fs_watch"
   | "grep"
   | "list_dir"
-  | "plan_update"
+  | "update_plan"
   | "read_file"
   | "shell"
   | "web_search"
@@ -158,7 +158,7 @@ describe.sequential("assistant real-dev e2e fuzzing", () => {
     await expectPageText(page, visibleNeedle(normalReply.text))
 
     const loopPrompt =
-      `${marker} tool loop: use the plan_update tool once with a concise two-step plan, ` +
+      `${marker} tool loop: use the update_plan tool once with a concise two-step plan, ` +
       "then continue and provide a final non-empty answer."
     await sendAssistantMessage(page, loopPrompt)
     await expectPageText(page, loopPrompt)
@@ -524,7 +524,7 @@ async function waitForCompletedAssistantReply(
 
 async function waitForPlanUpdateLoop(sessionId: string, prompt: string): Promise<AgentSessionRestored> {
   return eventually(
-    `plan_update tool loop for '${prompt}'`,
+    `update_plan tool loop for '${prompt}'`,
     async () => {
       const restore = await restoreSession(sessionId)
       if (restore.thread?.status === "errored") {
@@ -545,7 +545,7 @@ async function waitForPlanUpdateLoop(sessionId: string, prompt: string): Promise
       const planCallIds = afterPrompt.flatMap((message) =>
         message.role === "assistant"
           ? (message.tool_calls ?? [])
-              .filter((toolCall) => toolCall.function.name === "plan_update")
+              .filter((toolCall) => toolCall.function.name === "update_plan")
               .map((toolCall) => toolCall.id)
               .filter((id): id is string => typeof id === "string" && id.length > 0)
           : []
@@ -900,7 +900,7 @@ function toolFuzzCases(): ToolFuzzCase[] {
         ],
         summary: `${marker} plan`,
       },
-      name: "plan_update",
+      name: "update_plan",
       validate: ({ toolMessages }) => {
         const output = parseToolJson(toolMessages[0].content)
         expect(output.summary).toBe(`${marker} plan`)
@@ -1025,7 +1025,7 @@ function toolFuzzCases(): ToolFuzzCase[] {
     },
     {
       args: {
-        allowed_tools: ["plan_update"],
+        allowed_tools: ["update_plan"],
         max_turns: 1,
         model: assistantModelId,
         system_prompt: "Reply with the exact requested marker only. Do not call tools.",

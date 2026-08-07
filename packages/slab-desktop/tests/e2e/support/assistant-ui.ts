@@ -294,18 +294,42 @@ export async function expectPlanCard(
 
 /** Assert the rich plan approval card rendered (tagged `assistant-approval-plan`,
  * approval-banner.tsx) and click the chosen scope (`approve` = run_once,
- * `reject` = deny). */
+ * `reject` = deny). `timeoutMs` governs only the card-appearance wait (a cold
+ * real-model first turn can take longer than the default to emit `plan` +
+ * `present_plan`); the click keeps its own 240s timeout. */
 export async function expectPlanApprovalCard(
   page: Page,
-  action: "approve" | "reject"
+  action: "approve" | "reject",
+  timeoutMs = 240_000
 ): Promise<void> {
   await eventually(
     "plan approval card",
     async () => page.locator('[data-testid="assistant-approval-plan"]').first().isVisible(),
-    240_000
+    timeoutMs
   )
   const scope = action === "approve" ? "run_once" : "deny"
   await page.getByTestId(`assistant-approval-${scope}`).click({ timeout: 240_000 })
+}
+
+/** Assert the plan-mode banner (`assistant-plan-mode-banner`, rendered by
+ * assistant-chat-pane.tsx while `interactionMode === "plan"`) is visible, or —
+ * when `visible` is false — that it has disappeared after the mode flipped back
+ * to `default` (e.g. on plan approval, which atomically flips the thread out of
+ * Plan mode both server- and client-side). */
+export async function expectPlanModeBanner(page: Page, visible: boolean): Promise<void> {
+  const banner = page.locator('[data-testid="assistant-plan-mode-banner"]')
+  await eventually(
+    visible ? "plan-mode banner visible" : "plan-mode banner hidden",
+    async () => {
+      const count = await banner.count()
+      if (count === 0) {
+        return visible ? null : true
+      }
+      const isVisible = await banner.first().isVisible()
+      return isVisible === visible ? true : null
+    },
+    60_000
+  )
 }
 
 export function latestAssistantTextAfter(

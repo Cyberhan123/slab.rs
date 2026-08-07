@@ -1394,14 +1394,12 @@ impl GGMLLlamaEngine {
                 }
             }
 
-            if effectively_completed
-                && !forward_failed
-                && !stream_error
-                && stream_tx.send(BaseStreamChunk::Done).await.is_err()
-            {
-                forward_failed = true;
-            }
-
+            // Resolve the managed session (Busy -> Ready, or drop) BEFORE sending
+            // the stream `Done` marker. The client starts its next inference as
+            // soon as it observes `Done`; committing after it sent `Done` left a
+            // window where a rapid back-to-back inference (e.g. after an
+            // auto-allowed tool such as `plan`, which does not gate on approval)
+            // saw the session key still Busy and was rejected with SessionKeyBusy.
             if key.is_some()
                 && effectively_completed
                 && !forward_failed
@@ -1444,6 +1442,14 @@ impl GGMLLlamaEngine {
                     );
                 }
                 engine.drop_managed_session(key, Some(sid)).await;
+            }
+
+            if effectively_completed && !forward_failed && !stream_error {
+                // `Done` is the client's stream-end signal. Sent only after the
+                // session was committed above, so a follow-on inference sees a
+                // Ready binding. Ignore send errors: `forward_failed` is no
+                // longer read after this point.
+                let _ = stream_tx.send(BaseStreamChunk::Done).await;
             }
         });
 

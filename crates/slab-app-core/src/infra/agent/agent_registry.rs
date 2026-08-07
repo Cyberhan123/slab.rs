@@ -48,17 +48,11 @@ fn plan_agent_definition() -> AgentDefinition {
             "git_commit".to_owned(),
             "delegate_subagent".to_owned(),
         ]),
-        system_prompt: PLAN_AGENT_SYSTEM_PROMPT.to_owned(),
+        system_prompt: slab_agent_context::render_plan_agent_prompt()
+            .expect("plan_agent system prompt template renders"),
         model: ModelPolicy::Inherit,
     }
 }
-
-const PLAN_AGENT_SYSTEM_PROMPT: &str = "\
-You are a planning agent. Read, search, and inspect the workspace to produce a \
-clear, actionable plan for the parent agent to execute. You CANNOT run shells, \
-edit files, apply patches, commit, or delegate — use read/grep/glob and the \
-plan tools (plan, update_plan, present_plan). Investigate thoroughly, then \
-output a structured plan; do not attempt to execute it yourself.";
 
 #[cfg(test)]
 mod tests {
@@ -92,6 +86,13 @@ mod tests {
         assert!(!denied.contains(&"git_status".to_owned()));
         assert!(!denied.contains(&"git_diff".to_owned()));
         assert!(!def.system_prompt.is_empty());
+        // Confirms the prompt is sourced from the jinja template (Slice 4 Phase F),
+        // not a stale const.
+        assert!(
+            def.system_prompt.contains("planning agent"),
+            "system prompt should come from the jinja template: {}",
+            def.system_prompt
+        );
         assert_eq!(def.model, ModelPolicy::Inherit);
     }
 

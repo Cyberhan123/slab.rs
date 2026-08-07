@@ -40,6 +40,7 @@ fn next_plan_id() -> String {
 struct PlanArgs {
     #[serde(default)]
     summary: Option<String>,
+    #[serde(deserialize_with = "deserialize_items")]
     items: Vec<PlanItemInput>,
 }
 
@@ -53,6 +54,27 @@ struct PlanItemInput {
     /// Optional `verify:<target>:<passed|failed>` reference binding execution evidence.
     #[serde(default)]
     result_ref: Option<String>,
+}
+
+/// Tolerant deserializer for the plan `items` array. Smaller models sometimes
+/// emit the array as a JSON-encoded string (e.g. Qwen3.5-9B sends
+/// `"items": "[{\"step\": ...}]"`) instead of a real array. Accept both shapes:
+/// a real array passes through; a string is parsed back into the typed vec so
+/// plan mode works end-to-end without forcing every model to emit a perfect
+/// array. Applies to both `plan` and `update_plan` (they share [`PlanArgs`]).
+fn deserialize_items<'de, D>(deserializer: D) -> Result<Vec<PlanItemInput>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::String(raw) => serde_json::from_str::<Vec<PlanItemInput>>(&raw).map_err(|error| {
+            D::Error::custom(format!("items string is not a JSON array: {error}"))
+        }),
+        other => serde_json::from_value::<Vec<PlanItemInput>>(other).map_err(D::Error::custom),
+    }
 }
 
 /// Validate + normalize the raw args into a typed [`Plan`] with the given id.
@@ -389,6 +411,30 @@ mod tests {
         let metadata = output.metadata.expect("metadata");
         assert_eq!(metadata["summary"], "code change");
         assert_eq!(metadata["counts"]["pending"], 1);
+    }
+
+    #[tokio::test]
+    async fn plan_accepts_items_as_a_stringified_json_array() {
+        // Smaller models (observed with Qwen3.5-9B in the Slice 5 e2e) sometimes
+        // emit the `items` array as a JSON-encoded string instead of a real
+        // array. The tolerant deserializer parses it back so plan mode completes
+        // end-to-end instead of erroring on `invalid type: string`.
+        let store = Arc::new(RecordingPlanStore::default()) as Arc<dyn PlanStorePort>;
+        let ctx = ctx_with_store(store.clone());
+        let stringified = json!([
+            { "step": "inspect", "status": "completed" },
+            { "step": "implement", "status": "in_progress" }
+        ])
+        .to_string();
+        PlanTool::new()
+            .execute(&ctx, &json!({ "summary": "stringified", "items": stringified }))
+            .await
+            .expect("plan accepts stringified items");
+        let stored = store.current_plan("thread").await.expect("plan persisted");
+        assert_eq!(stored.summary.as_deref(), Some("stringified"));
+        assert_eq!(stored.items.len(), 2);
+        assert_eq!(stored.counts.completed, 1);
+        assert_eq!(stored.counts.in_progress, 1);
     }
 
     #[tokio::test]

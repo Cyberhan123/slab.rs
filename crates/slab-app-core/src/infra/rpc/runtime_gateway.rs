@@ -61,8 +61,10 @@ impl RuntimeInferenceGateway for GrpcRuntimeInferenceGateway {
             RuntimeBackendId::GgmlLlama => {
                 let channel = self.channel(backend_id)?;
                 let grpc_request = runtime_protocol::encode_chat_request(&request);
-                let response =
-                    client::chat(channel, grpc_request).await.map_err(map_runtime_error("chat"))?;
+                let response = retry_on_session_busy("chat", || {
+                    client::chat(channel.clone(), grpc_request.clone())
+                })
+                .await?;
                 Ok(runtime_protocol::decode_chat_response(&response))
             }
             RuntimeBackendId::CandleLlama => {
@@ -87,9 +89,10 @@ impl RuntimeInferenceGateway for GrpcRuntimeInferenceGateway {
             RuntimeBackendId::GgmlLlama => {
                 let channel = self.channel(backend_id)?;
                 let grpc_request = runtime_protocol::encode_chat_request(&request);
-                let stream = client::chat_stream(channel, grpc_request)
-                    .await
-                    .map_err(map_runtime_error("chat stream"))?;
+                let stream = retry_on_session_busy("chat stream", || {
+                    client::chat_stream(channel.clone(), grpc_request.clone())
+                })
+                .await?;
                 Ok(stream
                     .map(|chunk| {
                         chunk
@@ -274,6 +277,40 @@ fn map_runtime_error(action: &'static str) -> impl Fn(anyhow::Error) -> AppCoreE
             );
         }
         AppCoreError::Internal(format!("grpc {action} failed: {error:#}"))
+    }
+}
+
+/// Run `op`, retrying on transient "session key busy" runtime errors.
+///
+/// The ggml.llama backend keys kv-cache sessions per agent and reports the key
+/// as busy/already-active if a second inference for the same key arrives while
+/// the previous one is still being torn down. This surfaces as rapid
+/// back-to-back inference after an auto-allowed (non-approval-gating) tool such
+/// as `plan` — unlike shell, whose approval gate inserts a delay that masks the
+/// race. The busy state is transient (the prior inference just finished), so a
+/// short bounded exponential backoff retries through it instead of failing the
+/// turn. Non-busy errors are surfaced immediately via [`map_runtime_error`].
+async fn retry_on_session_busy<F, Fut, T>(action: &'static str, op: F) -> Result<T, AppCoreError>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, anyhow::Error>>,
+{
+    const MAX_ATTEMPTS: usize = 5;
+    let mut backoff = std::time::Duration::from_millis(50);
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match op().await {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                if session_busy_detail(&error).is_some() && attempt < MAX_ATTEMPTS {
+                    tokio::time::sleep(backoff).await;
+                    backoff *= 2;
+                    continue;
+                }
+                return Err(map_runtime_error(action)(error));
+            }
+        }
     }
 }
 
@@ -541,5 +578,62 @@ mod tests {
             matches!(&error, AppCoreError::Conflict(message) if message.contains("session key")),
             "unexpected error: {error}"
         );
+    }
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn session_busy_status() -> anyhow::Error {
+        anyhow::Error::new(tonic::Status::new(
+            tonic::Code::ResourceExhausted,
+            "backend busy: ggml.llama session key 'agent:test' is busy",
+        ))
+    }
+
+    #[tokio::test]
+    async fn retry_on_session_busy_succeeds_after_transient_failures() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_clone = Arc::clone(&attempts);
+        let result: Result<u32, AppCoreError> = retry_on_session_busy("chat", move || {
+            let attempts = Arc::clone(&attempts_clone);
+            async move {
+                let n = attempts.fetch_add(1, Ordering::SeqCst);
+                if n < 2 { Err(session_busy_status()) } else { Ok(7u32) }
+            }
+        })
+        .await;
+        assert_eq!(result.unwrap(), 7);
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn retry_on_session_busy_surfaces_conflict_after_max_attempts() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_clone = Arc::clone(&attempts);
+        let result: Result<u32, AppCoreError> = retry_on_session_busy("chat", move || {
+            let attempts = Arc::clone(&attempts_clone);
+            async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Err(session_busy_status())
+            }
+        })
+        .await;
+        assert!(matches!(result, Err(AppCoreError::Conflict(_))));
+        assert_eq!(attempts.load(Ordering::SeqCst), 5);
+    }
+
+    #[tokio::test]
+    async fn retry_on_session_busy_does_not_retry_non_busy_errors() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_clone = Arc::clone(&attempts);
+        let result: Result<u32, AppCoreError> = retry_on_session_busy("chat", move || {
+            let attempts = Arc::clone(&attempts_clone);
+            async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Err(anyhow::Error::new(tonic::Status::internal("unrelated failure")))
+            }
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 }

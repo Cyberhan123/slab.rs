@@ -10,6 +10,7 @@
 //! `slab_agent::AgentHook`) and supplying an [`AgentContextSources`] impl.
 
 pub mod agent_md_manager;
+pub mod agent_prompt;
 pub mod developer_instruction;
 pub mod environment_instruction;
 pub mod error;
@@ -24,6 +25,7 @@ pub mod sources;
 pub mod system_instruction;
 pub mod user_instruction;
 
+pub use agent_prompt::render_plan_agent_prompt;
 pub use environment_instruction::EnvironmentContextFragment;
 pub use error::{ContextError, Result};
 pub use hooks::ContextInstructionHook;
