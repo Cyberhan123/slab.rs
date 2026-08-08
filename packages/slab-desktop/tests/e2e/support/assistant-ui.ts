@@ -176,30 +176,27 @@ export async function denyToolCall(page: Page): Promise<void> {
   await page.getByTestId("assistant-approval-deny").click({ timeout: 240_000 })
 }
 
-/** Select a per-message permission mode from the composer's Commands dropdown
- * (e.g. `full_control`, which short-circuits the engine to `Allow` and surfaces
- * no approval banner). The items are tagged
- * `assistant-permission-mode-<mode>`. */
+/** Select a per-message permission mode from the composer's dedicated permission
+ * button (left of Send). `full_control` short-circuits the engine to `Allow` and
+ * surfaces no approval banner. The trigger is tagged
+ * `assistant-permission-mode-trigger`; items `assistant-permission-mode-<mode>`. */
 export async function selectPermissionMode(
   page: Page,
   mode: "request_approval" | "approve_for_me" | "full_control" | "custom"
 ): Promise<void> {
-  await page.getByRole("button", { name: "Commands" }).click()
+  await page.getByTestId("assistant-permission-mode-trigger").click()
   await page.getByTestId(`assistant-permission-mode-${mode}`).click()
-  // The item `preventDefault`s to keep the menu open; dismiss before composing.
+  // The item `preventDefault`s to keep the popover open; dismiss before composing.
   await page.keyboard.press("Escape")
 }
 
-/** Select the interaction mode (`default` | `plan`) from the composer's Commands
- * dropdown. Items are tagged `assistant-interaction-mode-<mode>`. Mirrors
- * {@link selectPermissionMode} — the two selectors are orthogonal. */
-export async function selectInteractionMode(
-  page: Page,
-  mode: "default" | "plan"
-): Promise<void> {
+/** Toggle plan mode on/off via the `/plan` command in the composer's Commands
+ * menu (mirrors the Sender unit test). Plan mode runs the next turn as the
+ * read-only plan agent (`turn/start` `agentType: "plan"`); the
+ * `assistant-plan-mode-chip` reflects its on/off state. */
+export async function togglePlanMode(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Commands" }).click()
-  await page.getByTestId(`assistant-interaction-mode-${mode}`).click()
-  await page.keyboard.press("Escape")
+  await page.getByRole("menuitem", { name: "/plan" }).click()
 }
 
 export async function expectAssistantPageText(page: Page, text: string): Promise<void> {
@@ -311,21 +308,19 @@ export async function expectPlanApprovalCard(
   await page.getByTestId(`assistant-approval-${scope}`).click({ timeout: 240_000 })
 }
 
-/** Assert the plan-mode banner (`assistant-plan-mode-banner`, rendered by
- * assistant-chat-pane.tsx while `interactionMode === "plan"`) is visible, or —
- * when `visible` is false — that it has disappeared after the mode flipped back
- * to `default` (e.g. on plan approval, which atomically flips the thread out of
- * Plan mode both server- and client-side). */
-export async function expectPlanModeBanner(page: Page, visible: boolean): Promise<void> {
-  const banner = page.locator('[data-testid="assistant-plan-mode-banner"]')
+/** Assert the plan chip (`assistant-plan-mode-chip`, rendered by sender.tsx while
+ * plan mode is on) is visible, or — when `visible` is false — that it has
+ * disappeared (e.g. after plan approval clears plan mode, or the X was clicked). */
+export async function expectPlanChip(page: Page, visible: boolean): Promise<void> {
+  const chip = page.locator('[data-testid="assistant-plan-mode-chip"]')
   await eventually(
-    visible ? "plan-mode banner visible" : "plan-mode banner hidden",
+    visible ? "plan chip visible" : "plan chip hidden",
     async () => {
-      const count = await banner.count()
+      const count = await chip.count()
       if (count === 0) {
         return visible ? null : true
       }
-      const isVisible = await banner.first().isVisible()
+      const isVisible = await chip.first().isVisible()
       return isVisible === visible ? true : null
     },
     60_000

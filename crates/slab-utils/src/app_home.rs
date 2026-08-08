@@ -67,6 +67,13 @@ pub fn outputs_dir() -> PathBuf {
     app_home_dir().join("outputs")
 }
 
+/// Durable plans directory (`<app_home>/plans`). Plans authored in plan mode
+/// (the plan agent's `plan` / `update_plan` tools) are persisted here as JSON
+/// so they survive process restarts.
+pub fn plans_dir() -> PathBuf {
+    app_home_dir().join("plans")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +114,7 @@ mod tests {
             plugins_dir(),
             rules_dir(),
             outputs_dir(),
+            plans_dir(),
         ] {
             assert!(
                 path.starts_with(&home),

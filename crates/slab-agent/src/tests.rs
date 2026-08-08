@@ -13,9 +13,9 @@ use std::{
 };
 
 use crate::{
-    AgentControl, AgentControlLimits, AgentError, AgentHook, AgentThreadContext, HookEvent,
-    HookOutcome, PlanRef, ToolContext, ToolHandler, ToolOutput, ToolRouter, ToolVisibility,
-    WorkspaceRef,
+    AgentControl, AgentControlLimits, AgentDefinition, AgentError, AgentHook, AgentThreadContext,
+    HookEvent, HookOutcome, ModelPolicy, PlanRef, ToolConstraint, ToolContext, ToolHandler,
+    ToolOutput, ToolRouter, ToolVisibility, WorkspaceRef,
     compact::{CompactContext, CompactPort, SlidingWindowCompactPort},
     config::{AgentConfig, AgentToolChoice},
     port::{
@@ -1055,7 +1055,6 @@ impl crate::ExecPolicyPort for AskAllExecPolicy {
     ) {
     }
     async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
-    async fn set_interaction_mode(&self, _thread_id: &str, _mode: crate::InteractionMode) {}
     async fn clear_thread(&self, _thread_id: &str) {}
     fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
         // Full exposure keeps the tool list unfiltered in approval-flow tests.
@@ -1063,7 +1062,6 @@ impl crate::ExecPolicyPort for AskAllExecPolicy {
             mode: crate::PermissionMode::FullControl,
             baseline: crate::PermissionBaseline::FullAccess,
             exposure: crate::ToolExposure::all(),
-            interaction_mode: crate::InteractionMode::Default,
         }
     }
 }
@@ -1093,7 +1091,6 @@ impl crate::ExecPolicyPort for DenyAllExecPolicy {
     ) {
     }
     async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
-    async fn set_interaction_mode(&self, _thread_id: &str, _mode: crate::InteractionMode) {}
     async fn clear_thread(&self, _thread_id: &str) {}
     fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
         // Full exposure keeps the tool list unfiltered in denial-flow tests.
@@ -1101,7 +1098,6 @@ impl crate::ExecPolicyPort for DenyAllExecPolicy {
             mode: crate::PermissionMode::FullControl,
             baseline: crate::PermissionBaseline::FullAccess,
             exposure: crate::ToolExposure::all(),
-            interaction_mode: crate::InteractionMode::Default,
         }
     }
 }
@@ -1502,54 +1498,47 @@ impl crate::PlanStorePort for InMemoryPlanStore {
     }
 }
 
-/// Exec-policy stub starting in Plan mode. Exposure follows the mode (read-only
-/// while Plan, full after Default) so `visible_tool_specs` reflects it, and
-/// `set_interaction_mode` records the flip — exactly what the `present_plan`
-/// approval gate drives.
-struct PlanModeExecPolicy {
-    mode: Mutex<crate::InteractionMode>,
-    set_calls: Mutex<Vec<crate::InteractionMode>>,
-}
-
-impl PlanModeExecPolicy {
-    fn new() -> Self {
-        Self { mode: Mutex::new(crate::InteractionMode::Plan), set_calls: Mutex::new(Vec::new()) }
-    }
-}
+/// Full-exposure exec-policy stub: allows everything and reports full tool
+/// exposure. Read-only enforcement in plan mode now comes from the plan agent's
+/// tool denylist (`filter_tools_for_agent` via `agent_type`), not from the
+/// exec-policy exposure, so the present_plan approval tests no longer need a
+/// mode-tracking policy.
+struct FullExposureExecPolicy;
 
 #[async_trait]
-impl crate::ExecPolicyPort for PlanModeExecPolicy {
-    async fn evaluate(
-        &self,
-        _thread_id: &str,
-        descriptor: &crate::OperationDescriptor,
-    ) -> crate::ExecDecision {
-        let plan = *self.mode.lock().unwrap() == crate::InteractionMode::Plan;
-        match descriptor.category {
-            crate::OperationCategory::ReadOnly => crate::ExecDecision::Allow,
-            _ if plan => crate::ExecDecision::Deny,
-            _ => crate::ExecDecision::Allow,
-        }
+impl crate::ExecPolicyPort for FullExposureExecPolicy {
+    async fn evaluate(&self, _: &str, _: &crate::OperationDescriptor) -> crate::ExecDecision {
+        crate::ExecDecision::Allow
     }
     async fn remember(&self, _: &str, _: &crate::OperationDescriptor, _: crate::ApprovalScope) {}
     async fn set_thread_mode(&self, _: &str, _: crate::PermissionMode) {}
-    async fn set_interaction_mode(&self, _thread_id: &str, mode: crate::InteractionMode) {
-        *self.mode.lock().unwrap() = mode;
-        self.set_calls.lock().unwrap().push(mode);
-    }
     async fn clear_thread(&self, _: &str) {}
     fn permission_state_for(&self, _: &str) -> crate::PermissionStateSnapshot {
-        let mode = *self.mode.lock().unwrap();
-        let exposure = match mode {
-            crate::InteractionMode::Plan => crate::ToolExposure::read_only(),
-            crate::InteractionMode::Default => crate::ToolExposure::all(),
-        };
         crate::PermissionStateSnapshot {
             mode: crate::PermissionMode::FullControl,
             baseline: crate::PermissionBaseline::FullAccess,
-            exposure,
-            interaction_mode: mode,
+            exposure: crate::ToolExposure::all(),
         }
+    }
+}
+
+/// Test registry exposing a single `plan` agent whose denylist hides the test
+/// mutation tool — mirroring how the built-in plan agent's denylist hides
+/// mutation tools when a turn runs with `agent_type = "plan"`.
+struct PlanAgentRegistry;
+
+impl crate::AgentRegistry for PlanAgentRegistry {
+    fn get(&self, agent_type: &str) -> Option<AgentDefinition> {
+        (agent_type == "plan").then_some(AgentDefinition {
+            agent_type: "plan".into(),
+            description: "test plan agent".into(),
+            tools: ToolConstraint::Denylist(vec!["mutate_tool".into()]),
+            system_prompt: "test plan prompt".into(),
+            model: ModelPolicy::Inherit,
+        })
+    }
+    fn list(&self) -> Vec<AgentDefinition> {
+        vec![self.get("plan").expect("plan agent registered")]
     }
 }
 
@@ -1715,11 +1704,11 @@ impl LlmPort for PlanPresentLlm {
     }
 }
 
-/// Drive a Plan-mode agent through `plan` → `present_plan` → final, capturing
-/// the per-turn visible tool lists and the interaction-mode transitions.
-async fn run_present_plan_agent(
-    approval: Arc<dyn ApprovalPort>,
-) -> (Arc<PlanModeExecPolicy>, Arc<Mutex<Vec<Vec<String>>>>) {
+/// Drive a plan-agent turn through `plan` → `present_plan` → final, capturing
+/// the per-turn visible tool lists. Runs with `agent_type = "plan"` against a
+/// test registry whose plan denylist hides `mutate_tool`, so the capture shows
+/// progressive tool exposure driven by the plan agent constraint.
+async fn run_present_plan_agent(approval: Arc<dyn ApprovalPort>) -> Arc<Mutex<Vec<Vec<String>>>> {
     let tool_calls_capture: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
     let llm = Arc::new(PlanPresentLlm { calls: Arc::clone(&tool_calls_capture) });
     let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
@@ -1728,12 +1717,13 @@ async fn run_present_plan_agent(
     router.register(Box::new(MutatingTestTool));
     router.register(Box::new(PlanStubTool));
     router.register(Box::new(PresentPlanStubTool));
-    let exec_policy: Arc<PlanModeExecPolicy> = Arc::new(PlanModeExecPolicy::new());
+    let exec_policy: Arc<FullExposureExecPolicy> = Arc::new(FullExposureExecPolicy);
     let plan_store: Arc<dyn crate::PlanStorePort> = Arc::new(InMemoryPlanStore::default());
     let control = Arc::new(
         AgentControl::new(llm, store, notify, approval, Arc::new(router), 8, 4)
-            .with_exec_policy(exec_policy.clone())
-            .with_plan_store(plan_store),
+            .with_exec_policy(exec_policy)
+            .with_plan_store(plan_store)
+            .with_agent_registry(Arc::new(PlanAgentRegistry)),
     );
     let messages = vec![ConversationMessage {
         role: "user".into(),
@@ -1742,7 +1732,12 @@ async fn run_present_plan_agent(
         tool_call_id: None,
         tool_calls: vec![],
     }];
-    let config = AgentConfig { model: "mock".into(), max_turns: 6, ..AgentConfig::default() };
+    let config = AgentConfig {
+        model: "mock".into(),
+        max_turns: 6,
+        agent_type: Some("plan".into()),
+        ..AgentConfig::default()
+    };
     let thread_id = control.spawn("session-plan".into(), config, messages).await.expect("spawn");
     let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
     let _ = tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -1760,56 +1755,36 @@ async fn run_present_plan_agent(
         }
     })
     .await;
-    (exec_policy, tool_calls_capture)
+    tool_calls_capture
 }
 
 #[tokio::test]
-async fn present_plan_approval_flips_plan_to_default_and_unlocks_mutation() {
-    let (exec_policy, calls) = run_present_plan_agent(Arc::new(ApprovingApproval)).await;
-    let calls = calls.lock().unwrap().clone();
-    assert!(calls.len() >= 3, "expected >=3 LLM turns, got {:?}", calls);
+async fn present_plan_approval_runs_as_plan_agent_and_hides_mutation() {
+    let capture = run_present_plan_agent(Arc::new(ApprovingApproval)).await;
+    let calls = capture.lock().unwrap().clone();
+    assert!(calls.len() >= 2, "expected >=2 LLM turns, got {:?}", calls);
 
-    // Turn 1 (Plan mode): mutation tool hidden; plan + present_plan visible.
+    // The plan agent's denylist hides the mutation tool for the whole turn;
+    // plan + present_plan remain visible so the agent can author and submit.
     assert!(
         !calls[0].iter().any(|n| n == "mutate_tool"),
-        "mutation tool should be hidden in Plan mode, got {:?}",
+        "mutation tool should be hidden under the plan agent, got {:?}",
         calls[0]
     );
     assert!(calls[0].iter().any(|n| n == "plan"), "plan tool visible");
     assert!(calls[0].iter().any(|n| n == "present_plan"), "present_plan tool visible");
-
-    // The approval gate flipped the interaction mode back to Default.
-    let set_calls = exec_policy.set_calls.lock().unwrap().clone();
-    assert!(
-        set_calls.contains(&crate::InteractionMode::Default),
-        "mode should flip to Default on approval, got {:?}",
-        set_calls
-    );
-
-    // A later turn (after the flip) sees the mutation tool again.
-    let last = calls.last().expect("at least one turn");
-    assert!(
-        last.iter().any(|n| n == "mutate_tool"),
-        "mutation tool should be visible after approval flipped to Default, got {:?}",
-        last
-    );
 }
 
 #[tokio::test]
-async fn present_plan_rejected_keeps_plan_mode_and_hides_mutation() {
-    let (exec_policy, calls) = run_present_plan_agent(Arc::new(RejectingApproval)).await;
-    // Rejection must NOT flip to Default — the thread stays in Plan mode.
-    let set_calls = exec_policy.set_calls.lock().unwrap().clone();
-    assert!(
-        !set_calls.contains(&crate::InteractionMode::Default),
-        "mode should stay Plan on rejection, got {:?}",
-        set_calls
-    );
-    let calls = calls.lock().unwrap().clone();
+async fn present_plan_rejected_keeps_mutation_hidden() {
+    let capture = run_present_plan_agent(Arc::new(RejectingApproval)).await;
+    let calls = capture.lock().unwrap().clone();
+    // Rejection does not change the agent_type, so the plan agent denylist keeps
+    // the mutation tool hidden on every turn.
     for (i, turn) in calls.iter().enumerate() {
         assert!(
             !turn.iter().any(|n| n == "mutate_tool"),
-            "turn {i}: mutation tool should stay hidden after rejection, got {:?}",
+            "turn {i}: mutation tool should stay hidden under the plan agent, got {:?}",
             turn
         );
     }
@@ -2464,14 +2439,12 @@ impl crate::ExecPolicyPort for ReadOnlyExposurePolicy {
     ) {
     }
     async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
-    async fn set_interaction_mode(&self, _thread_id: &str, _mode: crate::InteractionMode) {}
     async fn clear_thread(&self, _thread_id: &str) {}
     fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
         crate::PermissionStateSnapshot {
             mode: crate::PermissionMode::Custom,
             baseline: crate::PermissionBaseline::ReadOnly,
             exposure: crate::ToolExposure::read_only(),
-            interaction_mode: crate::InteractionMode::Default,
         }
     }
 }
@@ -3722,6 +3695,59 @@ async fn fork_thread_clones_history_at_depth_plus_one() {
     let parent_message_count =
         store.messages.lock().unwrap().iter().filter(|m| m.thread_id == "parent-1").count();
     assert_eq!(parent_message_count, 2, "parent history untouched by fork");
+}
+
+#[tokio::test]
+async fn apply_agent_override_sets_and_clears_agent_type_and_prompt() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port.clone(), notify, approval, router, 8, 4));
+
+    // Seed a default thread (no agent_type, no system_prompt).
+    let now = "2026-01-01T00:00:00Z".to_owned();
+    store_port
+        .upsert_thread(&ThreadSnapshot {
+            id: "thread-1".into(),
+            session_id: "session-1".into(),
+            parent_id: None,
+            depth: 0,
+            status: ThreadStatus::Completed,
+            role_name: None,
+            config_json: serde_json::to_string(&AgentConfig::default()).expect("config"),
+            completion_text: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            archived_at: None,
+        })
+        .await
+        .expect("seed thread");
+
+    let plan_def = AgentDefinition {
+        agent_type: "plan".into(),
+        description: "read-only planner".into(),
+        tools: ToolConstraint::Denylist(vec!["shell".into()]),
+        system_prompt: "You are a planning agent.".into(),
+        model: ModelPolicy::Inherit,
+    };
+
+    // Setting the override persists agent_type + system_prompt on the config.
+    control.apply_agent_override("thread-1", Some(&plan_def)).await.expect("override applies");
+    let snap = control.thread_snapshot("thread-1").await.expect("read").expect("thread present");
+    let cfg: AgentConfig = serde_json::from_str(&snap.config_json).expect("config parses");
+    assert_eq!(cfg.agent_type.as_deref(), Some("plan"));
+    assert_eq!(cfg.system_prompt.as_deref(), Some("You are a planning agent."));
+
+    // Clearing the override removes both so the next turn runs as the default agent.
+    control.apply_agent_override("thread-1", None).await.expect("clear applies");
+    let snap = control.thread_snapshot("thread-1").await.expect("read").expect("thread present");
+    let cfg: AgentConfig = serde_json::from_str(&snap.config_json).expect("config parses");
+    assert!(cfg.agent_type.is_none(), "agent_type cleared");
+    assert!(cfg.system_prompt.is_none(), "system_prompt cleared");
 }
 
 // ── Error propagation tests ───────────────────────────────────────────────────────────

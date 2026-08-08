@@ -77,9 +77,8 @@ pub use port::{
 pub use risk::{BasicToolRiskAnalyzer, ToolApprovalDecision, ToolApprovalPolicy, ToolRiskAnalyzer};
 pub use runtime::AgentRuntime;
 pub use slab_exec_policy::{
-    AllowAllExecPolicy, ApprovalScope, ExecDecision, ExecPolicyEngine, InteractionMode,
-    OperationCategory, OperationDescriptor, PermissionBaseline, PermissionMode,
-    PermissionStateSnapshot, ToolExposure, interaction_constraint,
+    AllowAllExecPolicy, ApprovalScope, ExecDecision, ExecPolicyEngine, OperationCategory,
+    OperationDescriptor, PermissionBaseline, PermissionMode, PermissionStateSnapshot, ToolExposure,
 };
 pub use tool::{
     AgentThreadContext, PlanRef, ToolApprovalRequest, ToolCallRender, ToolCapability, ToolContext,

@@ -20,11 +20,9 @@ pub mod store;
 
 pub use category::{OperationCategory, OperationDescriptor};
 pub use compat::ShellPolicy;
-pub use decision::{
-    ApprovalScope, ExecDecision, InteractionMode, PermissionBaseline, PermissionMode,
-};
+pub use decision::{ApprovalScope, ExecDecision, PermissionBaseline, PermissionMode};
 pub use engine::{AllowAllExecPolicy, ExecPolicyEngine, ExecPolicyPort};
-pub use exposure::{PermissionStateSnapshot, ToolExposure, interaction_constraint};
+pub use exposure::{PermissionStateSnapshot, ToolExposure};
 pub use rule::{Rule, RuleAction, RuleError, RuleMatcher, RuleSet, RuleSource};
 pub use safety::{CommandSafetyChecker, SafetyDecision, is_destructive_command, is_sensitive_path};
 pub use store::{FsRuleStore, RuleStore, RuleStoreError, workspace_hash, workspace_rules_filename};

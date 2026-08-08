@@ -108,15 +108,34 @@ impl HarnessService {
         self.0.runtime().control().set_thread_mode(thread_id, mode).await;
     }
 
-    /// Set the orthogonal interaction mode for a thread (flows from the harness
-    /// `turn/start` `interaction_mode` param). `plan` narrows the agent to
-    /// read-only exploration; approving a `present_plan` flips it to `default`.
-    pub async fn set_interaction_mode(
+    /// Resolve a built-in agent definition by type (flows from the harness
+    /// `turn/start` `agent_type` param). Returns `None` for an empty/unknown
+    /// type, in which case the caller runs the default agent.
+    pub fn resolve_agent_definition(
+        &self,
+        agent_type: Option<&str>,
+    ) -> Option<slab_agent::AgentDefinition> {
+        let agent_type = agent_type?.trim();
+        if agent_type.is_empty() {
+            return None;
+        }
+        self.0.runtime().control().agent_registry().get(agent_type)
+    }
+
+    /// Apply (or clear) a built-in agent override for the next turn on a thread
+    /// (flows from the harness `turn/start` `agent_type` param). Re-applied every
+    /// turn so the thread does not stick as a non-default agent after approval.
+    pub async fn apply_agent_override(
         &self,
         thread_id: &str,
-        mode: slab_exec_policy::InteractionMode,
-    ) {
-        self.0.runtime().control().set_interaction_mode(thread_id, mode).await;
+        def: Option<&slab_agent::AgentDefinition>,
+    ) -> Result<(), AppCoreError> {
+        self.0
+            .runtime()
+            .control()
+            .apply_agent_override(thread_id, def)
+            .await
+            .map_err(AppCoreError::from)
     }
 
     /// Send an approval decision for a pending tool-call.

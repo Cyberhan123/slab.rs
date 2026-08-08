@@ -415,6 +415,46 @@ impl AgentControl {
         Ok(child_id)
     }
 
+    /// Apply (or clear) a built-in agent override for the next turn on a thread.
+    ///
+    /// Resolved from `TurnStartParams.agent_type`. When `def` is `Some`, the
+    /// thread's persisted [`AgentConfig`] is rewritten to carry the agent's
+    /// `agent_type` + `system_prompt` so the next `resume_thread` runs as that
+    /// agent (tool denylist via `allowed_tool_specs`, system prompt at turn 0).
+    /// When `def` is `None`, both are cleared so the thread runs as the default
+    /// agent. Re-applied every `turn_start` — this is the single chokepoint that
+    /// keeps a thread from sticking as the plan agent after a plan is approved.
+    pub async fn apply_agent_override(
+        &self,
+        thread_id: &str,
+        def: Option<&crate::agent::AgentDefinition>,
+    ) -> Result<(), AgentError> {
+        let snapshot = self
+            .store
+            .get_thread(thread_id)
+            .await?
+            .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+        let mut config =
+            serde_json::from_str::<AgentConfig>(&snapshot.config_json).map_err(|e| {
+                AgentError::Internal(format!("failed to deserialize agent config: {e}"))
+            })?;
+        match def {
+            Some(def) => {
+                config.agent_type = Some(def.agent_type.clone());
+                config.system_prompt = Some(def.system_prompt.clone());
+            }
+            None => {
+                config.agent_type = None;
+                config.system_prompt = None;
+            }
+        }
+        let config_json = serde_json::to_string(&config)
+            .map_err(|e| AgentError::Internal(format!("failed to serialize agent config: {e}")))?;
+        let updated = ThreadSnapshot { config_json, ..snapshot };
+        self.store.upsert_thread(&updated).await?;
+        Ok(())
+    }
+
     /// Return a persisted thread snapshot.
     pub async fn thread_snapshot(
         &self,
@@ -606,22 +646,9 @@ impl AgentControl {
         self.exec_policy.set_thread_mode(thread_id, mode).await;
     }
 
-    /// Set the orthogonal interaction mode for a thread (flows from
-    /// `TurnStartParams.interaction_mode`). `Plan` narrows the agent to
-    /// read-only exploration; the `present_plan` approval gate flips it back to
-    /// `Default` so mutation tools re-appear next turn.
-    pub async fn set_interaction_mode(
-        &self,
-        thread_id: &str,
-        mode: slab_exec_policy::InteractionMode,
-    ) {
-        self.exec_policy.set_interaction_mode(thread_id, mode).await;
-    }
-
-    /// Drop per-thread state when the thread ends: permission/interaction mode
-    /// (exec policy) and the durable plan (plan store). Both are keyed by
-    /// `thread_id`; clearing here prevents cross-thread leakage on the
-    /// process-wide singleton.
+    /// Drop per-thread state when the thread ends: the exec-policy permission
+    /// mode and the durable plan (plan store). Both are keyed by `thread_id`;
+    /// clearing here prevents cross-thread leakage on the process-wide singleton.
     pub async fn clear_thread_mode(&self, thread_id: &str) {
         self.exec_policy.clear_thread(thread_id).await;
         self.plan_store.clear(thread_id).await;

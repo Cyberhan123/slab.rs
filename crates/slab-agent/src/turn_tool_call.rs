@@ -376,10 +376,12 @@ async fn emit_approval_request(run: &ToolRunContext<'_, '_>) {
 
 /// Drive the `present_plan` approval gate after the tool ran. Emits the plan
 /// for approval via the existing `CommandExecutionRequestApproval` channel
-/// (plan summary shown as `command`), awaits the host approval decision, and on
-/// approval flips the thread to `InteractionMode::Default` so mutation tools
-/// unlock next turn. Returns the content + status to surface as the tool result
-/// (the verdict flows back to the LLM as the tool output).
+/// (plan summary shown as `command`), awaits the host approval decision, and
+/// returns the verdict. On approval the caller (the UI, by clearing the plan
+/// chip) runs the next turn as the default agent with the full tool set — this
+/// gate no longer flips a server-side mode. Returns the content + status to
+/// surface as the tool result (the verdict flows back to the LLM as the tool
+/// output).
 async fn drive_present_plan_approval(
     context: &TurnExecutionContext<'_>,
     call_id: &str,
@@ -387,7 +389,7 @@ async fn drive_present_plan_approval(
     plan_snapshot: Option<serde_json::Value>,
     risk: &ToolRiskAssessment,
 ) -> Result<(String, ToolCallStatus), AgentError> {
-    use slab_exec_policy::{InteractionMode, OperationCategory, OperationDescriptor};
+    use slab_exec_policy::{OperationCategory, OperationDescriptor};
 
     let descriptor = OperationDescriptor::read_only("present_plan".to_owned());
     let msg = EventMsg::CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams {
@@ -430,14 +432,12 @@ async fn drive_present_plan_approval(
                 "plan_approval_resolved",
                 serde_json::json!({ "item_id": call_id, "approved": true }),
             );
-            // Flip to Default so the exposure filter stops forcing read-only
-            // next turn; mutation tools re-appear in the LLM's tool list.
-            context
-                .exec_policy
-                .set_interaction_mode(context.thread_id, InteractionMode::Default)
-                .await;
+            // On approval the caller (the UI, by clearing the plan chip) runs the
+            // next turn as the default agent with the full tool set. Mutation
+            // tools stay hidden for the remainder of THIS turn (agent_type can't
+            // change mid-turn) — tell the model to wrap up and stop.
             (
-                "Plan approved. Mutation tools are now available — execute the plan and call update_plan as you complete each step.".to_owned(),
+                "Plan approved. Summarize the next steps in one sentence and end your turn; full tools become available on your next message.".to_owned(),
                 ToolCallStatus::Completed,
             )
         }

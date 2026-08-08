@@ -81,8 +81,21 @@ pub(crate) async fn turn_start(
     // the turn does NOT start.
     ensure_turn_model_loaded(&session, &params).await?;
 
+    // Resolve a built-in agent override (e.g. `plan`) for this turn. When set,
+    // the turn runs as that agent — read-only tool denylist + agent system
+    // prompt. Re-applied every turn below so the thread does not stick as a
+    // non-default agent after a plan is approved.
+    let agent_def = session.service().resolve_agent_definition(params.agent_type.as_deref());
+
     match session.existing_real(&params.thread_id) {
         Some(real_id) => {
+            // Re-apply (or clear) the agent override on the persisted config so
+            // the resumed turn picks it up.
+            session
+                .service()
+                .apply_agent_override(&real_id, agent_def.as_ref())
+                .await
+                .map_err(|e| e.to_string())?;
             let known_skills = scan_known_skills(session.state().workspace_root().as_deref());
             let content = join_user_text(&params.input, &known_skills);
             session.service().send_input(&real_id, content).await.map_err(|e| e.to_string())?;
@@ -90,8 +103,12 @@ pub(crate) async fn turn_start(
         None => {
             // First turn materializes the slab thread (create + run).
             let known_skills = scan_known_skills(session.state().workspace_root().as_deref());
-            let config =
+            let mut config: slab_agent::AgentConfig =
                 AgentConfigInput { model: params.model.clone(), ..Default::default() }.into();
+            if let Some(def) = &agent_def {
+                config.agent_type = Some(def.agent_type.clone());
+                config.system_prompt = Some(def.system_prompt.clone());
+            }
             let messages = messages_from_input(&params.input, &known_skills);
             let real_id = session
                 .service()
@@ -111,15 +128,6 @@ pub(crate) async fn turn_start(
         let runtime_mode =
             slab_app_core::infra::agent::exec_policy::permission_mode_from_proto(mode);
         session.service().set_thread_mode(&real_id, runtime_mode).await;
-    }
-
-    // Apply the orthogonal interaction mode (if any) — `plan` narrows the agent
-    // to read-only exploration; approving a `present_plan` flips it to `default`.
-    if let Some(mode) = params.interaction_mode {
-        let real_id = session.real_id_for(&params.thread_id);
-        let runtime_mode =
-            slab_app_core::infra::agent::exec_policy::interaction_mode_from_proto(mode);
-        session.service().set_interaction_mode(&real_id, runtime_mode).await;
     }
 
     Ok(TurnStartResult {

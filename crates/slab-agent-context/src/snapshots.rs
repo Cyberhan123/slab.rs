@@ -86,11 +86,6 @@ pub struct PermissionSnapshot {
     pub shell_allowed: bool,
     pub file_write_allowed: bool,
     pub network_allowed: bool,
-    /// True when the thread is in Plan interaction mode: the agent is exploring
-    /// read-only, drafting a plan with the `plan` tool, and must call
-    /// `present_plan` to request approval before any mutation work. Drives a
-    /// dedicated arm in `permissions.jinja`.
-    pub plan_mode: bool,
 }
 
 // ── Memory ────────────────────────────────────────────────────────────────────

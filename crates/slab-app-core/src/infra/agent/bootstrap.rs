@@ -306,10 +306,11 @@ fn build_agent_control(
     )
     .with_thread_context(thread_context)
     .with_exec_policy(exec_policy)
-    // Plan interaction mode: per-thread in-memory plan store (the durable
-    // source of truth for the `plan` / `update_plan` / `present_plan` tools).
+    // Plan agent: disk-backed plan store (durable JSON under `<app_home>/plans`,
+    // hot in-memory copy for live queries) — the source of truth for the
+    // `plan` / `update_plan` / `present_plan` tools.
     .with_plan_store(
-        Arc::new(super::plan_store::InMemoryPlanStore::default()) as Arc<dyn PlanStorePort>
+        Arc::new(super::plan_store::DiskBackedPlanStore::default()) as Arc<dyn PlanStorePort>
     )
     // Slice 4: built-in agent registry (claude-style fixed agents). Hosts the
     // showcase read-only `plan` agent; `delegate_subagent` resolves agent_type

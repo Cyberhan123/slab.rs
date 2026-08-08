@@ -1,80 +1,91 @@
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest"
+import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, inject, it } from "vitest"
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright"
 
 import type { E2eRuntimeEndpoints } from "./support/e2e-global-setup"
 import {
   createSession,
-  eventually,
   restoreSession,
-  type AgentSessionRestored,
   type AgentThreadMessageResponse,
   type ChatToolCall,
   type SessionResponse,
 } from "./support/e2e-runtime"
 import {
   expectPlanApprovalCard,
-  expectPlanModeBanner,
+  expectPlanChip,
   openAssistant,
-  selectInteractionMode,
   sendAssistantMessage,
+  togglePlanMode,
   waitForCompletedAssistantReply,
 } from "./support/assistant-ui"
 
-// Slice 5 e2e — the plan-mode full flow (master-plan headline acceptance
-// scenario). Plan mode narrows the tool set to read-only
-// (`interaction_constraint(Plan) → read_only()`), so a directive prompt can
-// deterministically steer the model through `plan` → `present_plan` → approval
-// gate. The plan-via-delegate (agent) scenario is NOT covered here: there is no
-// UI surface to select an agent_type (`agent_type` is internal-only), so it is
-// deferred to the future "agent_type → UI" slice.
+// Plan-as-agent e2e — the plan-mode full flow (master-plan headline acceptance
+// scenario). Plan mode runs the turn as the built-in read-only `plan` agent
+// (`turn/start` `agentType: "plan"`): the agent's tool denylist hides mutation
+// tools (shell/write_file/...) from the model, and its system prompt steers it
+// to explore read-only → `plan` → `present_plan` → approval gate. A directive
+// prompt makes the model deterministically call the plan tools.
+//
+// Each test uses a FRESH session + thread so every plan turn is turn 0 (the
+// plan-agent system prompt injects) and there is no cross-test state leakage.
 //
 // Env-gated: requires the shared local model (Qwen3.5-9B) + staged slab-server
 // sidecar provided by the e2e global setup. Run via `bun run test:e2e`.
 
 let env: E2eRuntimeEndpoints | undefined
+let browser: Browser | undefined
+let page: Page
+let session: SessionResponse
 
 describe("plan mode e2e", () => {
-  let browser: Browser | undefined
-  let context: BrowserContext | undefined
-  let page: Page
-  let session: SessionResponse
-
   beforeAll(async () => {
     env = inject("e2e-runtime")
-    session = await createSession(env.serverBaseUrl, `plan-mode-e2e-${Date.now()}`)
-
     browser = await chromium.launch({ headless: true })
-    context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
+  })
+
+  afterAll(async () => {
+    await browser?.close().catch(() => {})
+  })
+
+  beforeEach(async () => {
+    const endpoints = requireEnv()
+    session = await createSession(
+      endpoints.serverBaseUrl,
+      `plan-mode-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    )
+    const context: BrowserContext = await browser!.newContext({ viewport: { width: 1440, height: 960 } })
     await context.addInitScript(() => {
       window.localStorage.setItem("slab.ui.language", "en-US")
     })
     page = await context.newPage()
-    await openAssistant(page, env.uiBaseUrl, session.id)
+    // Close the per-test context when the page navigates away / test ends.
+    page.on("close", () => {
+      void context.close().catch(() => {})
+    })
+    await openAssistant(page, endpoints.uiBaseUrl, session.id)
   })
 
-  afterAll(async () => {
-    await context?.close().catch(() => {})
-    await browser?.close().catch(() => {})
+  afterEach(async () => {
+    await page.close().catch(() => {})
   })
 
-  // Headline scenario: toggle Plan mode → model drafts a plan (`plan`) and
-  // requests approval (`present_plan`) → approve → InteractionMode atomically
-  // flips back to Default (banner clears) and the turn completes. Proves the
-  // full Slice 2/3 plan loop end-to-end against a real model.
-  it("drafts a plan, requests approval, and flips out of plan mode when approved", async () => {
+  // Headline scenario: toggle plan mode → the plan agent drafts a plan (`plan`)
+  // and requests approval (`present_plan`) → approve → plan mode clears (chip
+  // disappears) and the turn completes. Proves the full plan-as-agent loop
+  // end-to-end against a real model.
+  it("drafts a plan, requests approval, and clears plan mode when approved", async () => {
     const testEnv = requireEnv()
     const prompt = [
       "Use the plan tool exactly once to draft a concise 2-step plan to list all Markdown (*.md) files in the workspace.",
       "Then call present_plan to request my approval.",
       "Do not call any other tools.",
-      // Bound the post-approval turn: once approved, mutation tools unlock. Keep
-      // the turn to a text reply so it completes instead of blocking on a
-      // fresh shell approval.
+      // Bound the post-approval turn: once approved the chip clears and the next
+      // turn would run as the default agent. Keep this turn to a text reply so it
+      // completes instead of starting execution work.
       "After your plan is approved, do NOT execute it and do not call any tools; reply with a short sentence confirming the plan was approved.",
     ].join("\n")
 
-    await selectInteractionMode(page, "plan")
-    await expectPlanModeBanner(page, true)
+    await togglePlanMode(page)
+    await expectPlanChip(page, true)
 
     await sendAssistantMessage(page, prompt)
     // `present_plan` blocks the turn on the approval gate, so wait for the rich
@@ -82,9 +93,9 @@ describe("plan mode e2e", () => {
     // ran) and approve it. A cold real-model first turn can be slow, so allow a
     // generous card-appearance window.
     await expectPlanApprovalCard(page, "approve", 600_000)
-    // Approving a plan flips the thread to Default both server-side (turn loop)
-    // and client-side (resolveApproval mirrors it); the banner clears.
-    await expectPlanModeBanner(page, false)
+    // Approving a plan clears plan mode client-side (the chip disappears); the
+    // next turn/start carries no `agentType` and runs as the default agent.
+    await expectPlanChip(page, false)
 
     const reply = await waitForCompletedAssistantReply(
       testEnv.serverBaseUrl,
@@ -97,9 +108,9 @@ describe("plan mode e2e", () => {
     expect(calledTool(reply.restore.messages, "present_plan")).toBe(true)
   }, 900_000)
 
-  // Reject path: denying the plan keeps the thread in Plan mode (banner stays)
-  // and the model recovers with a final reply instead of re-presenting.
-  it("keeps plan mode and recovers when the plan is rejected", async () => {
+  // Reject path: denying the plan keeps plan mode on (chip stays) and the model
+  // recovers with a final reply instead of re-presenting.
+  it("keeps plan mode on and recovers when the plan is rejected", async () => {
     const testEnv = requireEnv()
     const prompt = [
       "Use the plan tool exactly once to draft a concise 2-step plan to list all Markdown (*.md) files in the workspace.",
@@ -108,13 +119,13 @@ describe("plan mode e2e", () => {
       "If the plan is rejected, do NOT call present_plan again; reply with a short sentence saying the plan was not approved.",
     ].join("\n")
 
-    await selectInteractionMode(page, "plan")
-    await expectPlanModeBanner(page, true)
+    await togglePlanMode(page)
+    await expectPlanChip(page, true)
 
     await sendAssistantMessage(page, prompt)
     await expectPlanApprovalCard(page, "reject", 600_000)
-    // Rejection does NOT flip the mode — the banner stays.
-    await expectPlanModeBanner(page, true)
+    // Rejection does not clear plan mode — the chip stays.
+    await expectPlanChip(page, true)
 
     const reply = await waitForCompletedAssistantReply(
       testEnv.serverBaseUrl,
@@ -126,28 +137,28 @@ describe("plan mode e2e", () => {
     expect(calledTool(reply.restore.messages, "present_plan")).toBe(true)
   }, 900_000)
 
-  // Read-only enforcement: in Plan mode mutation tools are blocked by the
-  // approval policy — the model may still attempt `shell`, but the command is
-  // rejected and never executes. Assert the marker never appears in any tool
-  // output. Resolves as soon as the shell attempt is ruled on (or the thread
-  // ends), independent of how the model recovers afterwards.
+  // Read-only enforcement: the plan agent's denylist hides `shell` from the
+  // model's tool list, so a shell command can never execute. Drive the turn to
+  // completion, rejecting any `present_plan` the plan agent happens to call
+  // (its system prompt biases it toward presenting), then assert the shell
+  // marker never appears in any tool output.
   it("blocks the shell tool from executing in plan mode", async () => {
     const testEnv = requireEnv()
     const marker = `SLAB_PLAN_E2E_RO_${Date.now()}`
     const prompt = [
       `Use the shell tool to run this POSIX shell command: echo ${marker}`,
-      "If the shell tool is rejected, blocked, or unavailable, do NOT call any other tool (no plan, no read_file); reply with one short sentence and stop.",
+      "The shell tool is not available to you. Do not call plan or present_plan.",
+      "Reply with one short sentence saying the shell tool is unavailable and stop.",
     ].join("\n")
 
-    await selectInteractionMode(page, "plan")
-    await expectPlanModeBanner(page, true)
+    await togglePlanMode(page)
+    await expectPlanChip(page, true)
 
     await sendAssistantMessage(page, prompt)
-    const { restore } = await waitForShellBlocked(
+    const { restore } = await waitForTurnCompletedRejectingPlans(
+      page,
       testEnv.serverBaseUrl,
       session.id,
-      prompt,
-      marker,
       600_000
     )
     // The mutation command never executed: the marker is absent from every tool
@@ -167,10 +178,7 @@ function requireEnv(): E2eRuntimeEndpoints {
   return env
 }
 
-function calledTool(
-  messages: AgentThreadMessageResponse[],
-  name: string
-): boolean {
+function calledTool(messages: AgentThreadMessageResponse[], name: string): boolean {
   return messages.some(
     (message: AgentThreadMessageResponse) =>
       message.role === "assistant" &&
@@ -178,58 +186,34 @@ function calledTool(
   )
 }
 
-/// Resolve once the shell tool has been ruled on in plan mode (its result is
-/// present — rejected by the approval policy) OR the thread completed without
-/// ever running shell. Throws if the marker appears in any tool output (shell
-/// actually executed). Independent of the model's recovery behavior, so it
-/// resolves quickly on rejection instead of waiting for the turn to complete.
-async function waitForShellBlocked(
+/// Poll the thread until it reaches a terminal status, rejecting any `present_plan`
+/// approval card that appears along the way (the plan agent's system prompt may
+/// steer it to present even when the user asked it not to). Used by the
+/// read-only test so a stray `present_plan` can't block the turn indefinitely.
+async function waitForTurnCompletedRejectingPlans(
+  page: Page,
   baseUrl: string,
   sessionId: string,
-  prompt: string,
-  marker: string,
   timeoutMs: number
-): Promise<{ restore: AgentSessionRestored }> {
-  return eventually(
-    "shell blocked in plan mode",
-    async () => {
-      const restore = await restoreSession(baseUrl, sessionId)
-      if (restore.thread?.status === "errored") {
-        throw new Error(
-          `Agent thread errored: ${restore.thread.completion_text ?? "unknown error"}`
-        )
-      }
-      const promptIndex = restore.messages.findIndex(
-        (message) => message.role === "user" && message.content === prompt
-      )
-      if (promptIndex < 0) {
-        return null
-      }
-      const after = restore.messages.slice(promptIndex + 1)
-      const shellIds = after.flatMap((message) =>
-        message.role === "assistant"
-          ? (message.tool_calls ?? [])
-              .filter((toolCall: ChatToolCall) => toolCall.function.name === "shell")
-              .map((toolCall) => toolCall.id)
-              .filter((id): id is string => typeof id === "string" && id.length > 0)
-          : []
-      )
-      const shellRuled = after.some(
-        (message) =>
-          message.role === "tool" &&
-          typeof message.tool_call_id === "string" &&
-          shellIds.includes(message.tool_call_id)
-      )
-      // Fail fast if the command actually executed.
-      if (after.some((message) => message.role === "tool" && message.content.includes(marker))) {
-        throw new Error("shell executed in plan mode — marker present in tool output")
-      }
-      if (shellRuled || restore.thread?.status === "completed") {
-        return { restore }
-      }
-      return null
-    },
-    timeoutMs,
-    1_000
-  )
+): Promise<{ restore: Awaited<ReturnType<typeof restoreSession>> }> {
+  const deadline = Date.now() + timeoutMs
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    // Reject any visible plan approval card to unblock the turn.
+    const card = page.locator('[data-testid="assistant-approval-plan"]')
+    if (await card.first().isVisible().catch(() => false)) {
+      await page.getByTestId("assistant-approval-deny").click({ timeout: 10_000 }).catch(() => {})
+    }
+    const restore = await restoreSession(baseUrl, sessionId)
+    if (restore.thread?.status === "errored") {
+      throw new Error(`Agent thread errored: ${restore.thread.completion_text ?? "unknown error"}`)
+    }
+    if (restore.thread?.status === "completed") {
+      return { restore }
+    }
+    if (Date.now() > deadline) {
+      throw new Error("turn did not complete within timeout while rejecting plan approvals")
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000))
+  }
 }

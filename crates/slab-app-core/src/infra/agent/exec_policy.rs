@@ -106,16 +106,6 @@ pub fn permission_mode_from_proto(
     }
 }
 
-/// Convert the wire `InteractionMode` (from `slab-proto`) into the runtime type.
-pub fn interaction_mode_from_proto(
-    mode: slab_proto::harness::InteractionMode,
-) -> slab_exec_policy::InteractionMode {
-    match mode {
-        slab_proto::harness::InteractionMode::Default => slab_exec_policy::InteractionMode::Default,
-        slab_proto::harness::InteractionMode::Plan => slab_exec_policy::InteractionMode::Plan,
-    }
-}
-
 /// Build the [`ExecPolicyEngine`] wired with the DB-backed rule store and the
 /// current workspace's rules. Loads `default.rules` + the workspace's
 /// `hash-<workspace>.rules` lazily (never the whole directory). Synchronous

@@ -107,8 +107,8 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     isForking: false,
     userMessageTurnIndex: new Map<string, number>(),
     onRollbackFromTurn: vi.fn(),
-    interactionMode: "default" as const,
-    onInteractionModeChange: vi.fn(),
+    planMode: false,
+    onPlanModeChange: vi.fn(),
     ...overrides,
   }
 }

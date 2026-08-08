@@ -135,7 +135,6 @@ impl AgentContextSources for AppContextSources {
             shell_allowed,
             file_write_allowed,
             network_allowed,
-            plan_mode: state.interaction_mode == slab_exec_policy::InteractionMode::Plan,
         }
     }
 

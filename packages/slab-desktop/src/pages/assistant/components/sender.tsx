@@ -44,7 +44,6 @@ import {
 import type {
   ApprovalScope,
   CommandInfo,
-  InteractionMode,
   PermissionMode,
   ReasoningEffort,
 } from "../lib/harness"
@@ -60,12 +59,6 @@ const PERMISSION_MODES: ReadonlyArray<{ value: PermissionMode; label: string }> 
   { value: "custom", label: "pages.assistant.composer.permission.custom" },
 ]
 
-/** Per-session interaction modes offered in the composer (orthogonal to permission). */
-const INTERACTION_MODES: ReadonlyArray<{ value: InteractionMode; label: string }> = [
-  { value: "default", label: "pages.assistant.composer.interaction.default" },
-  { value: "plan", label: "pages.assistant.composer.interaction.plan" },
-]
-
 type EffortLevel = "low" | "medium" | "high"
 
 interface Attachment {
@@ -78,7 +71,8 @@ export type SenderSubmitOptions = {
   files: FileUIPart[]
   effort: ReasoningEffort
   permissionMode: PermissionMode
-  interactionMode: InteractionMode
+  /** Built-in agent type for this turn (`"plan"` when plan mode is active). */
+  agentType?: "plan"
 }
 
 type SenderProps = {
@@ -95,10 +89,10 @@ type SenderProps = {
   onResolveApproval?: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void> | void
   /** Command registry snapshot driving the `/`-menu (`command/list`). */
   commands: CommandInfo[]
-  /** Current interaction mode (lifted from the conversation hook). */
-  interactionMode: InteractionMode
-  /** Set the interaction mode (absolute); `/plan` toggles via this. */
-  onInteractionModeChange: (mode: InteractionMode) => void
+  /** Whether plan mode is active (turn runs as the read-only plan agent). */
+  planMode: boolean
+  /** Toggle plan mode on/off; `/plan` and the plan chip's X use this. */
+  onPlanModeChange: (enabled: boolean) => void
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -117,8 +111,8 @@ function Sender({
   approvals,
   onResolveApproval,
   commands,
-  interactionMode,
-  onInteractionModeChange,
+  planMode,
+  onPlanModeChange,
 }: SenderProps) {
   const { t } = useTranslation()
   const [value, setValue] = useState("")
@@ -166,11 +160,11 @@ function Sender({
     if (!message && attachments.length === 0) return
     if (isGenerating) return
 
-    // `/plan` toggles the client-side Plan interaction mode (no message sent).
-    // The server is the source of truth via the `turn/start` interactionMode.
+    // `/plan` toggles client-side plan mode (no message sent). The server runs
+    // the next turn as the read-only plan agent via `turn/start` agentType.
     const dispatch = resolveCommandDispatch(value, commands)
     if (dispatch.action === "togglePlan") {
-      onInteractionModeChange(interactionMode === "plan" ? "default" : "plan")
+      onPlanModeChange(!planMode)
       setValue("")
       setCommandMenuOpen(false)
       return
@@ -185,7 +179,11 @@ function Sender({
       })),
     )
 
-    await onSubmit(message, { files, effort, permissionMode, interactionMode }, event)
+    await onSubmit(
+      message,
+      { files, effort, permissionMode, agentType: planMode ? "plan" : undefined },
+      event,
+    )
 
     setValue("")
     setCommandMenuOpen(false)
@@ -369,44 +367,6 @@ function Sender({
               </DropdownMenuGroup>
               <DropdownMenuGroup>
                 <DropdownMenuLabel>
-                  {t("pages.assistant.composer.permission.title")}
-                </DropdownMenuLabel>
-                {PERMISSION_MODES.map((mode) => (
-                  <DropdownMenuItem
-                    key={mode.value}
-                    data-testid={`assistant-permission-mode-${mode.value}`}
-                    onSelect={(event) => {
-                      event.preventDefault()
-                      setPermissionMode(mode.value)
-                    }}
-                  >
-                    <ShieldCheck />
-                    {t(mode.label)}
-                    {permissionMode === mode.value ? <Check className="ml-auto size-3.5" /> : null}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>
-                  {t("pages.assistant.composer.interaction.title")}
-                </DropdownMenuLabel>
-                {INTERACTION_MODES.map((mode) => (
-                  <DropdownMenuItem
-                    key={mode.value}
-                    data-testid={`assistant-interaction-mode-${mode.value}`}
-                    onSelect={(event) => {
-                      event.preventDefault()
-                      onInteractionModeChange(mode.value)
-                    }}
-                  >
-                    <ListChecksIcon />
-                    {t(mode.label)}
-                    {interactionMode === mode.value ? <Check className="ml-auto size-3.5" /> : null}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>
                   {t("pages.assistant.composer.commandSkill")}
                 </DropdownMenuLabel>
                 {commands.map((cmd) => {
@@ -417,12 +377,12 @@ function Sender({
                       title={cmd.description}
                       onSelect={(event) => {
                         event.preventDefault()
-                        // `/plan` toggles Plan interaction mode directly (no
-                        // seeding, no message). Control commands seed the exact
-                        // trigger (ready to submit); Prompt/Render commands
-                        // prefix the input for further typing.
+                        // `/plan` toggles plan mode directly (no seeding, no
+                        // message). Control commands seed the exact trigger
+                        // (ready to submit); Prompt/Render commands prefix the
+                        // input for further typing.
                         if (cmd.name === "plan") {
-                          onInteractionModeChange(interactionMode === "plan" ? "default" : "plan")
+                          onPlanModeChange(!planMode)
                           setCommandMenuOpen(false)
                           return
                         }
@@ -440,36 +400,86 @@ function Sender({
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-          {showStop ? (
-            <InputGroupButton
-              aria-label={t("pages.assistant.composer.stopGeneratingResponse")}
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              className="ml-auto"
-              onClick={() => onStop?.()}
-            >
-              <SquareIcon className="size-4" />
-              <span className="sr-only">
-                {t("pages.assistant.composer.stopGeneratingResponse")}
-              </span>
-            </InputGroupButton>
-          ) : (
-            <InputGroupButton
-              aria-label="Send"
-              data-testid="assistant-send-button"
-              type="submit"
-              variant="default"
-              size="icon-sm"
-              disabled={!canSend}
-              className="ml-auto"
-            >
-              {isGenerating ? <Spinner /> : <ArrowUpIcon />}
-              <span className="sr-only">
-                {t("pages.assistant.composer.sendMessage")}
-              </span>
-            </InputGroupButton>
-          )}
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <InputGroupButton
+                aria-label={t("pages.assistant.composer.permission.title")}
+                data-testid="assistant-permission-mode-trigger"
+                type="button"
+                variant="outline"
+                size="sm"
+              >
+                <ShieldCheck className="size-4" />
+                {t(
+                  PERMISSION_MODES.find((m) => m.value === permissionMode)?.label ??
+                    PERMISSION_MODES[0].label,
+                )}
+              </InputGroupButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="top">
+              <DropdownMenuLabel>
+                {t("pages.assistant.composer.permission.title")}
+              </DropdownMenuLabel>
+              {PERMISSION_MODES.map((mode) => (
+                <DropdownMenuItem
+                  key={mode.value}
+                  data-testid={`assistant-permission-mode-${mode.value}`}
+                  onSelect={(event) => {
+                    event.preventDefault()
+                    setPermissionMode(mode.value)
+                  }}
+                >
+                  <ShieldCheck />
+                  {t(mode.label)}
+                  {permissionMode === mode.value ? <Check className="ml-auto size-3.5" /> : null}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <div className="ml-auto flex items-center gap-1">
+            {showStop ? (
+              <InputGroupButton
+                aria-label={t("pages.assistant.composer.stopGeneratingResponse")}
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={() => onStop?.()}
+              >
+                <SquareIcon className="size-4" />
+                <span className="sr-only">
+                  {t("pages.assistant.composer.stopGeneratingResponse")}
+                </span>
+              </InputGroupButton>
+            ) : (
+              <InputGroupButton
+                aria-label="Send"
+                data-testid="assistant-send-button"
+                type="submit"
+                variant="default"
+                size="icon-sm"
+                disabled={!canSend}
+              >
+                {isGenerating ? <Spinner /> : <ArrowUpIcon />}
+                <span className="sr-only">
+                  {t("pages.assistant.composer.sendMessage")}
+                </span>
+              </InputGroupButton>
+            )}
+            {planMode ? (
+              <InputGroupButton
+                aria-label={t("pages.assistant.planMode.exit")}
+                data-testid="assistant-plan-mode-chip"
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onPlanModeChange(false)}
+              >
+                <ListChecksIcon className="size-3.5" />
+                {t("pages.assistant.composer.interaction.plan")}
+                <XIcon className="size-3" />
+              </InputGroupButton>
+            ) : null}
+          </div>
         </InputGroupAddon>
       </InputGroup>
     </form>

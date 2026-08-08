@@ -43,7 +43,9 @@ describe("Sender", () => {
   it("submits trimmed text and clears the textarea", async () => {
     const onSubmit = vi.fn()
 
-    const screen = await render(<Sender onSubmit={onSubmit} commands={COMMANDS} interactionMode="default" onInteractionModeChange={vi.fn()} />)
+    const screen = await render(
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
 
     const textarea = screen.getByLabelText("Message")
     await userEvent.type(textarea, "  hello slab  ")
@@ -51,7 +53,7 @@ describe("Sender", () => {
 
     expect(onSubmit).toHaveBeenCalledWith(
       "hello slab",
-      expect.objectContaining({ files: [], effort: "off" }),
+      expect.objectContaining({ files: [], effort: "off", agentType: undefined }),
       expect.anything(),
     )
     await expect.element(textarea).toHaveValue("")
@@ -60,7 +62,9 @@ describe("Sender", () => {
   it("does not submit empty text", async () => {
     const onSubmit = vi.fn()
 
-    const screen = await render(<Sender onSubmit={onSubmit} commands={COMMANDS} interactionMode="default" onInteractionModeChange={vi.fn()} />)
+    const screen = await render(
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
 
     await userEvent.type(screen.getByLabelText("Message"), "   ")
     await expect.element(screen.getByRole("button", { name: "Send" })).toBeDisabled()
@@ -68,7 +72,9 @@ describe("Sender", () => {
   })
 
   it("disables input while loading", async () => {
-    const screen = await render(<Sender loading onSubmit={vi.fn()} commands={COMMANDS} interactionMode="default" onInteractionModeChange={vi.fn()} />)
+    const screen = await render(
+      <Sender loading onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
 
     await expect.element(screen.getByLabelText("Message")).toBeDisabled()
     await expect.element(screen.getByRole("button", { name: "Send" })).toBeDisabled()
@@ -77,7 +83,9 @@ describe("Sender", () => {
 
 describe("Sender slash-command menu", () => {
   it("opens the command menu when the user types a leading slash", async () => {
-    const screen = await render(<Sender onSubmit={vi.fn()} commands={COMMANDS} interactionMode="default" onInteractionModeChange={vi.fn()} />)
+    const screen = await render(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
 
     await userEvent.type(screen.getByLabelText("Message"), "/")
 
@@ -85,8 +93,10 @@ describe("Sender slash-command menu", () => {
     await expect.element(screen.getByText("/fork")).toBeInTheDocument()
   })
 
-  it("opens the same menu from the toolbar button, including Model/Permission", async () => {
-    const screen = await render(<Sender onSubmit={vi.fn()} commands={COMMANDS} interactionMode="default" onInteractionModeChange={vi.fn()} />)
+  it("opens the same menu from the toolbar button, including the Model group", async () => {
+    const screen = await render(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
 
     await userEvent.click(screen.getByRole("button", { name: "Commands" }))
 
@@ -95,7 +105,9 @@ describe("Sender slash-command menu", () => {
   })
 
   it("inserts a control command into the input when selected", async () => {
-    const screen = await render(<Sender onSubmit={vi.fn()} commands={COMMANDS} interactionMode="default" onInteractionModeChange={vi.fn()} />)
+    const screen = await render(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
 
     await userEvent.type(screen.getByLabelText("Message"), "/")
     await userEvent.click(screen.getByText("/compact"))
@@ -107,7 +119,9 @@ describe("Sender slash-command menu", () => {
     // Opening from the toolbar leaves the textarea empty, so a Prompt skill
     // command (e.g. /summarize) seeds `/summarize ` for further typing. (`/plan`
     // is special — it toggles plan mode instead of seeding; see below.)
-    const screen = await render(<Sender onSubmit={vi.fn()} commands={COMMANDS} interactionMode="default" onInteractionModeChange={vi.fn()} />)
+    const screen = await render(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
 
     await userEvent.click(screen.getByRole("button", { name: "Commands" }))
     await userEvent.click(screen.getByText("/summarize"))
@@ -119,59 +133,86 @@ describe("Sender slash-command menu", () => {
 describe("Sender plan-mode toggle", () => {
   it("toggles plan mode on when the `/plan` command is selected", async () => {
     const onSubmit = vi.fn()
-    const onInteractionModeChange = vi.fn()
+    const onPlanModeChange = vi.fn()
 
     const screen = await render(
-      <Sender
-        onSubmit={onSubmit}
-        commands={COMMANDS}
-        interactionMode="default"
-        onInteractionModeChange={onInteractionModeChange}
-      />,
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={onPlanModeChange} />,
     )
 
     await userEvent.click(screen.getByRole("button", { name: "Commands" }))
     await userEvent.click(screen.getByText("/plan"))
 
-    // Toggles default → plan and never seeds the composer or reaches the model.
-    expect(onInteractionModeChange).toHaveBeenCalledWith("plan")
+    // Toggles plan off → on and never seeds the composer or reaches the model.
+    expect(onPlanModeChange).toHaveBeenCalledWith(true)
     expect(onSubmit).not.toHaveBeenCalled()
     await expect.element(screen.getByLabelText("Message")).toHaveValue("")
   })
 
-  it("toggles plan back to default when already in plan mode", async () => {
-    const onInteractionModeChange = vi.fn()
+  it("toggles plan mode off when already on", async () => {
+    const onPlanModeChange = vi.fn()
 
     const screen = await render(
-      <Sender
-        onSubmit={vi.fn()}
-        commands={COMMANDS}
-        interactionMode="plan"
-        onInteractionModeChange={onInteractionModeChange}
-      />,
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={true} onPlanModeChange={onPlanModeChange} />,
     )
 
     await userEvent.click(screen.getByRole("button", { name: "Commands" }))
     await userEvent.click(screen.getByText("/plan"))
 
-    expect(onInteractionModeChange).toHaveBeenCalledWith("default")
+    expect(onPlanModeChange).toHaveBeenCalledWith(false)
   })
 
-  it("exposes the interaction-mode selector in the Commands menu", async () => {
-    const onInteractionModeChange = vi.fn()
+  it("renders the plan chip when plan mode is on and clears it via the X", async () => {
+    const onPlanModeChange = vi.fn()
 
     const screen = await render(
-      <Sender
-        onSubmit={vi.fn()}
-        commands={COMMANDS}
-        interactionMode="default"
-        onInteractionModeChange={onInteractionModeChange}
-      />,
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={true} onPlanModeChange={onPlanModeChange} />,
     )
 
-    await userEvent.click(screen.getByRole("button", { name: "Commands" }))
-    await userEvent.click(screen.getByTestId("assistant-interaction-mode-plan"))
+    const chip = screen.getByTestId("assistant-plan-mode-chip")
+    await expect.element(chip).toBeInTheDocument()
 
-    expect(onInteractionModeChange).toHaveBeenCalledWith("plan")
+    await userEvent.click(chip)
+
+    expect(onPlanModeChange).toHaveBeenCalledWith(false)
+  })
+
+  it("sends agentType 'plan' on submit when plan mode is on", async () => {
+    const onSubmit = vi.fn()
+
+    const screen = await render(
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={true} onPlanModeChange={vi.fn()} />,
+    )
+
+    await userEvent.type(screen.getByLabelText("Message"), "plan this")
+    await userEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      "plan this",
+      expect.objectContaining({ agentType: "plan" }),
+      expect.anything(),
+    )
+  })
+})
+
+describe("Sender permission-mode selector", () => {
+  it("exposes a dedicated permission button that updates the selected mode", async () => {
+    const onSubmit = vi.fn()
+
+    const screen = await render(
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    // Open the dedicated permission popover (left of Send).
+    await userEvent.click(screen.getByTestId("assistant-permission-mode-trigger"))
+    await userEvent.click(screen.getByTestId("assistant-permission-mode-full_control"))
+
+    await userEvent.type(screen.getByLabelText("Message"), "do work")
+    await userEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      "do work",
+      expect.objectContaining({ permissionMode: "full_control" }),
+      expect.anything(),
+    )
   })
 })

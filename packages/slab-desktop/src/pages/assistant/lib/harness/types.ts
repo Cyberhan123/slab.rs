@@ -115,13 +115,6 @@ export type PermissionMode =
   | "full_control"
   | "custom"
 
-/**
- * Orthogonal interaction mode (mirrors `slab_exec_policy::InteractionMode`).
- * `plan` narrows the agent to read-only exploration + the plan tools and gates
- * execution behind an approval flip back to `default`.
- */
-export type InteractionMode = "default" | "plan"
-
 // ── Plan value type (mirrors `slab_agent::Plan`, snake_case wire fields) ────
 
 export type PlanStatus = "pending" | "in_progress" | "completed" | "blocked"
@@ -306,7 +299,8 @@ export interface ThreadStartParams {
   approvalPolicy?: ApprovalPolicy
   sandbox?: SandboxMode
   permissionMode?: PermissionMode
-  interactionMode?: InteractionMode
+  /** Built-in agent type for this thread (e.g. "plan"). Unset = default agent. */
+  agentType?: string
   baseInstructions?: string
   developerInstructions?: string
   experimentalRawEvents?: boolean
@@ -339,7 +333,8 @@ export interface TurnStartParams {
   approvalPolicy?: ApprovalPolicy
   sandboxPolicy?: SandboxPolicy
   permissionMode?: PermissionMode
-  interactionMode?: InteractionMode
+  /** Built-in agent type to run this turn as (e.g. "plan"). Unset = default agent. */
+  agentType?: string
   model?: string
   effort?: ReasoningEffort
   outputSchema?: unknown

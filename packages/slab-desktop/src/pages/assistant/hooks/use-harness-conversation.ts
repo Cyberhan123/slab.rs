@@ -30,7 +30,6 @@ import {
   type ContextCompactingParams,
   type FileChangeApprovalChange,
   type FileChangeRequestApprovalParams,
-  type InteractionMode,
   type JsonRpcNotification,
   type ModelLoadDeltaParams,
   type ModelLoadPhase,
@@ -129,10 +128,10 @@ export interface HarnessConversation {
   isCompacting: boolean
   /** True while a `/fork` round-trip is in flight. */
   isForking: boolean
-  /** Current interaction mode (`default` | `plan`); lifted so approval-resolve can reset it. */
-  interactionMode: InteractionMode
-  /** Set the interaction mode (absolute). `/plan` toggles via the Sender. */
-  setInteractionMode: (mode: InteractionMode) => void
+  /** Whether plan mode is active (turn runs as the read-only plan agent). */
+  planMode: boolean
+  /** Toggle plan mode on/off. `/plan` and the plan chip use this. */
+  setPlanMode: (enabled: boolean) => void
   /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
   resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
   /** Manually compact the current (or given) thread via `thread/compact/start`. */
@@ -218,12 +217,12 @@ export function useHarnessConversation(
   const [userMessageTurnIndex, setUserMessageTurnIndex] = useState<Map<string, number>>(
     () => new Map(),
   )
-  // Interaction mode is lifted here (not in the Sender) so resolving a plan
-  // approval can flip it back to `default` atomically — the server flips its
-  // per-thread mode inside the approval handler, and the next `turn/start`
-  // carries this value, keeping client + server in sync. Ephemeral per session
-  // (not persisted to rollout): a restored session starts in `default`.
-  const [interactionMode, setInteractionMode] = useState<InteractionMode>("default")
+  // Plan mode is lifted here (not in the Sender) so resolving a plan approval
+  // can clear it atomically — the server runs the next turn as the default
+  // agent (no `agentType`) once the chip clears, keeping client + server in
+  // sync. Ephemeral per session (not persisted to rollout): a restored session
+  // starts with plan mode off.
+  const [planMode, setPlanMode] = useState<boolean>(false)
 
   const transport = useMemo(() => new HarnessChatTransport({ client, model }), [client, model])
 
@@ -399,11 +398,11 @@ export function useHarnessConversation(
         next.set(itemId, { ...existing, status: approved ? "approved" : "denied" })
         return next
       })
-      // Approving a plan flips the thread out of Plan mode (mutation tools
-      // unlock); mirror the server's mode flip here so the banner clears and
-      // the next turn/start carries `default`. Rejection keeps Plan mode.
+      // Approving a plan clears plan mode: the next turn/start carries no
+      // `agentType`, so it runs as the default agent with the full tool set.
+      // Rejection keeps plan mode on.
       if (approved && entry.kind === "plan") {
-        setInteractionMode("default")
+        setPlanMode(false)
       }
       try {
         const result = await client.approvalResolve({ threadId: entry.threadId, itemId, approved, scope })
@@ -569,7 +568,7 @@ export function useHarnessConversation(
     setCompactionMarkers([])
     setCommands([])
     setUserMessageTurnIndex(new Map())
-    setInteractionMode("default")
+    setPlanMode(false)
     if (!sessionId) {
       client.currentThreadId = null
       client.lastTurnIndex = -1
@@ -682,8 +681,8 @@ export function useHarnessConversation(
     compactionMarkers,
     isCompacting,
     isForking,
-    interactionMode,
-    setInteractionMode,
+    planMode,
+    setPlanMode,
     resolveApproval,
     compactThread,
     forkThread,

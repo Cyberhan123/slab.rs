@@ -21,6 +21,7 @@ import {
   type UIMessageChunk,
   createUIMessageStream,
 } from "ai"
+import { toast } from "sonner"
 
 import type { HarnessClient } from "./harness-client"
 import {
@@ -30,7 +31,6 @@ import {
   isTerminalNotification,
 } from "./stream"
 import type {
-  InteractionMode,
   JsonRpcNotification,
   PermissionMode,
   ReasoningEffort,
@@ -104,14 +104,11 @@ function readPermissionMode(metadata: unknown): PermissionMode | undefined {
   return undefined
 }
 
-/** Read the per-session interaction-mode selector carried via `sendMessage({ metadata })`. */
-function readInteractionMode(metadata: unknown): InteractionMode | undefined {
+/** Read the built-in agent type carried via `sendMessage({ metadata })` (`"plan"` when plan mode is on). */
+function readAgentType(metadata: unknown): "plan" | undefined {
   if (!metadata || typeof metadata !== "object") return undefined
-  const mode = (metadata as { interactionMode?: unknown }).interactionMode
-  if (mode === "default" || mode === "plan") {
-    return mode
-  }
-  return undefined
+  const agentType = (metadata as { agentType?: unknown }).agentType
+  return agentType === "plan" ? "plan" : undefined
 }
 
 export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatTransport<UI_MESSAGE> {
@@ -132,7 +129,7 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
     const input = buildTurnInput(options.messages)
     const effort = readEffort(options.requestMetadata)
     const permissionMode = readPermissionMode(options.requestMetadata)
-    const interactionMode = readInteractionMode(options.requestMetadata)
+    const agentType = readAgentType(options.requestMetadata)
 
     return createUIMessageStream({
       execute: async ({ writer }) => {
@@ -199,12 +196,15 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
           }
           if (effort) turnParams.effort = effort
           if (permissionMode) turnParams.permissionMode = permissionMode
-          if (interactionMode) turnParams.interactionMode = interactionMode
+          if (agentType) turnParams.agentType = agentType
           this.client
             .turnStart(turnParams)
             .catch((error) => {
               if (finished) return
               const message = error instanceof Error ? error.message : "turn failed"
+              // Surface a failed turn (e.g. model-load failure) visibly instead
+              // of a silent empty bubble — the part stream has no error slot.
+              toast.error(message)
               writer.write({ errorText: message, type: "error" })
               writer.write({ finishReason: "error", type: "finish" })
               done()

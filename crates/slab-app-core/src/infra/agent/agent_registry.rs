@@ -1,9 +1,10 @@
 //! Built-in agent registry — host adapter for [`slab_agent::AgentRegistry`].
 //!
-//! Holds claude-style fixed agent definitions registered at startup. Slice 4
-//! ships a single showcase `plan` agent (read-only architect). Adding a new
-//! built-in agent = pushing another [`AgentDefinition`] here. The constraint
-//! each definition carries is tool-shaping only — the exec_policy/approval port
+//! Holds claude-style fixed agent definitions registered at startup. Currently
+//! ships a single `plan` agent (read-only architect) — plan mode runs a turn as
+//! this agent via `TurnStartParams.agent_type = "plan"`. Adding a new built-in
+//! agent = pushing another [`AgentDefinition`]` here. The constraint each
+//! definition carries is tool-shaping only — the exec_policy/approval port
 //! remains the security boundary.
 
 use slab_agent::{AgentDefinition, AgentRegistry, ModelPolicy, ToolConstraint};
@@ -30,12 +31,12 @@ impl AgentRegistry for BuiltinAgentRegistry {
     }
 }
 
-/// The showcase `plan` agent: a read-only architect that can research, inspect,
-/// and propose plans but cannot execute mutations. Coexists with the orthogonal
-/// `InteractionMode::Plan` (Slice 2/3) — this is the plan-as-agent evolution
-/// groundwork, not a replacement. The denylist is precise (not a `git_*` glob)
-/// so read-only `git_status`/`git_diff` remain available to the architect, and
-/// it denies `delegate_subagent` so the agent cannot recurse.
+/// The built-in `plan` agent: a read-only architect that researches, inspects,
+/// and proposes a plan but cannot execute mutations. Plan mode runs a turn as
+/// this agent (`TurnStartParams.agent_type = "plan"`); the denylist below is the
+/// read-only enforcement. It is precise (not a `git_*` glob) so read-only
+/// `git_status`/`git_diff` remain available to the architect, and it denies
+/// `delegate_subagent` so the agent cannot recurse.
 fn plan_agent_definition() -> AgentDefinition {
     AgentDefinition {
         agent_type: "plan".to_owned(),
