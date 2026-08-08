@@ -64,7 +64,7 @@ pub fn register_all_tools(
 ) {
     router.register(Box::new(ShellTool::new(
         workspace_root.clone(),
-        sandbox_driver,
+        sandbox_driver.clone(),
         shell_launcher,
         shell_bash_path,
     )));
@@ -77,7 +77,7 @@ pub fn register_all_tools(
     router.register(Box::new(UpdatePlanTool::new()));
     router.register(Box::new(PresentPlanTool::new()));
     router.register(Box::new(TaskCompleteTool::new()));
-    router.register(Box::new(VerifyTool::new()));
+    router.register(Box::new(VerifyTool::new(sandbox_driver.clone())));
     router.register(Box::new(WebSearchTool::new(web_search_config)));
     // `tool_search` lets the model discover Deferred tools (plugins/MCP) so the
     // base tool list stays small. Its execution is intercepted by the dispatch
@@ -89,9 +89,9 @@ pub fn register_all_tools(
     if let Some(root) = workspace_root {
         router.register(Box::new(ApplyPatchTool::new(root.clone())));
         if git_tools {
-            router.register(Box::new(GitStatusTool::new(root.clone())));
-            router.register(Box::new(GitDiffTool::new(root.clone())));
-            router.register(Box::new(GitCommitTool::new(root)));
+            router.register(Box::new(GitStatusTool::new(root.clone(), sandbox_driver.clone())));
+            router.register(Box::new(GitDiffTool::new(root.clone(), sandbox_driver.clone())));
+            router.register(Box::new(GitCommitTool::new(root, sandbox_driver.clone())));
         }
     }
     if let Some(client) = mcp_client {

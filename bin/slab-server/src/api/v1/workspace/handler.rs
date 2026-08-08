@@ -489,7 +489,7 @@ async fn git_status(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<WorkspaceGitStatusView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_status(root)?.into()))
+    Ok(Json(WorkspaceService::git_status(root).await?.into()))
 }
 
 #[utoipa::path(
@@ -507,7 +507,7 @@ async fn git_stage(
     ValidatedJson(command): ValidatedJson<WorkspaceGitPathCommand>,
 ) -> Result<Json<WorkspaceGitOperationView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_stage(root, &command.path)?.into()))
+    Ok(Json(WorkspaceService::git_stage(root, &command.path).await?.into()))
 }
 
 #[utoipa::path(
@@ -525,7 +525,7 @@ async fn git_unstage(
     ValidatedJson(command): ValidatedJson<WorkspaceGitPathCommand>,
 ) -> Result<Json<WorkspaceGitOperationView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_unstage(root, &command.path)?.into()))
+    Ok(Json(WorkspaceService::git_unstage(root, &command.path).await?.into()))
 }
 
 #[utoipa::path(
@@ -543,7 +543,7 @@ async fn git_discard(
     ValidatedJson(command): ValidatedJson<WorkspaceGitPathCommand>,
 ) -> Result<Json<WorkspaceGitOperationView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_discard(root, &command.path)?.into()))
+    Ok(Json(WorkspaceService::git_discard(root, &command.path).await?.into()))
 }
 
 #[utoipa::path(
@@ -561,7 +561,7 @@ async fn git_commit(
     ValidatedJson(command): ValidatedJson<WorkspaceGitCommitCommand>,
 ) -> Result<Json<WorkspaceGitOperationView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_commit(root, &command.message)?.into()))
+    Ok(Json(WorkspaceService::git_commit(root, &command.message).await?.into()))
 }
 
 #[utoipa::path(
@@ -579,7 +579,7 @@ async fn git_diff(
     ValidatedJson(command): ValidatedJson<WorkspaceGitDiffCommand>,
 ) -> Result<Json<WorkspaceGitDiffView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_diff(root, &command.path, command.staged)?.into()))
+    Ok(Json(WorkspaceService::git_diff(root, &command.path, command.staged).await?.into()))
 }
 
 #[utoipa::path(

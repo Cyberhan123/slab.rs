@@ -6,7 +6,7 @@ use slab_agent::{
     AgentControl, AgentRuntime, AgentThreadContext, PlanStorePort, ToolRouter, WorkspaceRef,
 };
 use slab_agent_tracing::{AgentTraceSink, BundleAgentTraceSink, NoopAgentTraceSink};
-use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
+use slab_sandboxing::{SandboxEnvironment, create_platform_driver};
 
 use crate::context::AppContext;
 use crate::domain::services::agent::AgentCore;
@@ -152,8 +152,15 @@ fn build_agent_control(
     let memory_store = Arc::clone(&store);
     let exec_db = Arc::clone(&store);
     let workspace_root = crate::domain::services::workspace_root_from_config(&ctx.config);
+    // Derive the sandbox policy from the configured permission baseline so the
+    // two guardrail systems agree (a ReadOnly baseline yields a ReadOnly
+    // sandbox). Previously this was hardcoded to `WorkspaceWrite`, which left the
+    // sandbox permissive even when the baseline was `ReadOnly`.
+    let exec_baseline =
+        super::exec_policy::baseline_from_config(ctx.pmid.config().agent.permissions.baseline);
+    let sandbox_policy = exec_baseline.to_sandbox_policy();
     let sandbox_driver = workspace_root.clone().and_then(|root| {
-        let env = SandboxEnvironment::new(Some(root), SandboxPolicy::WorkspaceWrite);
+        let env = SandboxEnvironment::new(Some(root), sandbox_policy);
         match create_platform_driver(env) {
             Ok(driver) => available_sandbox_driver(driver),
             Err(error) => {
@@ -249,8 +256,6 @@ fn build_agent_control(
         memory_config.clone(),
         memory_root.clone(),
     );
-    let exec_baseline =
-        super::exec_policy::baseline_from_config(ctx.pmid.config().agent.permissions.baseline);
     let exec_policy = super::exec_policy::build_exec_policy_engine(
         exec_baseline,
         ctx.config.exec_rules_dir.clone(),
@@ -488,6 +493,19 @@ fn available_sandbox_driver(
         );
         return None;
     }
+    // Fail-closed: when the platform requires elevated sandbox setup
+    // (`capabilities().setup_required`, e.g. `windows_setup_required`) but the
+    // driver only reached `degraded` (setup not actually achieved), do NOT
+    // silently accept it — block the shell rather than run unisolated. Until
+    // elevation is provisioned (later phases) the driver stays `degraded`, so an
+    // opt-in `setup_required` blocks the shell rather than degrading quietly.
+    if driver.capabilities().setup_required && status.degraded {
+        tracing::warn!(
+            details = %status.details,
+            "sandbox setup is required but not achieved; shell tool stays blocked (fail-closed)"
+        );
+        return None;
+    }
     if status.degraded {
         tracing::warn!(details = %status.details, "sandbox driver is degraded");
     }
@@ -501,12 +519,15 @@ mod tests {
 
     use async_trait::async_trait;
     use slab_config::{AgentMcpConfig, AgentMcpEnvValueConfig, AgentMcpServerConfig};
-    use slab_sandboxing::{SandboxDriver, SandboxError, SandboxSetupStatus, SandboxedCommand};
+    use slab_sandboxing::{
+        SandboxCapabilities, SandboxDriver, SandboxError, SandboxSetupStatus, SandboxedCommand,
+    };
 
     use super::{agent_mcp_client_config_with_env, agent_trace_enabled, available_sandbox_driver};
 
     struct StatusDriver {
         status: SandboxSetupStatus,
+        setup_required: bool,
     }
 
     #[async_trait]
@@ -524,6 +545,10 @@ mod tests {
 
         fn setup_status(&self) -> SandboxSetupStatus {
             self.status.clone()
+        }
+
+        fn capabilities(&self) -> SandboxCapabilities {
+            SandboxCapabilities { setup_required: self.setup_required, ..Default::default() }
         }
     }
 
@@ -550,17 +575,37 @@ mod tests {
     fn unavailable_sandbox_driver_is_rejected() {
         let driver = Arc::new(StatusDriver {
             status: SandboxSetupStatus::unavailable("missing sandbox runtime"),
+            setup_required: false,
         });
 
         assert!(available_sandbox_driver(driver).is_none());
     }
 
     #[test]
-    fn degraded_available_sandbox_driver_is_allowed() {
-        let driver =
-            Arc::new(StatusDriver { status: SandboxSetupStatus::degraded("guard-only mode") });
+    fn degraded_available_sandbox_driver_is_allowed_when_setup_not_required() {
+        // Degraded (e.g. Windows lexical+Job mode) is acceptable as long as the
+        // user has not required elevated setup — this is the default path.
+        let driver = Arc::new(StatusDriver {
+            status: SandboxSetupStatus::degraded("guard-only mode"),
+            setup_required: false,
+        });
 
         assert!(available_sandbox_driver(driver).is_some());
+    }
+
+    #[test]
+    fn degraded_sandbox_driver_is_rejected_when_setup_required() {
+        // Fail-closed: setup is required but only degraded was reached → block
+        // the shell instead of silently accepting an unisolated driver.
+        let driver = Arc::new(StatusDriver {
+            status: SandboxSetupStatus::degraded("elevation not provisioned"),
+            setup_required: true,
+        });
+
+        assert!(
+            available_sandbox_driver(driver).is_none(),
+            "required-but-undeclined setup must block the shell"
+        );
     }
 
     #[test]

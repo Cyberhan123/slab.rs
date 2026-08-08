@@ -484,51 +484,54 @@ impl WorkspaceService {
         })
     }
 
-    pub fn git_status(root: impl AsRef<Path>) -> Result<WorkspaceGitStatusView, AppCoreError> {
-        GitRepository::new(root.as_ref()).status().map_err(map_git_error)
+    pub async fn git_status(
+        root: impl AsRef<Path>,
+    ) -> Result<WorkspaceGitStatusView, AppCoreError> {
+        GitRepository::new(root.as_ref()).status().await.map_err(map_git_error)
     }
 
-    pub fn git_stage(
+    pub async fn git_stage(
         root: impl AsRef<Path>,
         path: &str,
     ) -> Result<WorkspaceGitOperationView, AppCoreError> {
         normalize_relative_path(path)?;
-        GitRepository::new(root.as_ref()).stage(path).map_err(map_git_error)
+        GitRepository::new(root.as_ref()).stage(path).await.map_err(map_git_error)
     }
 
-    pub fn git_unstage(
+    pub async fn git_unstage(
         root: impl AsRef<Path>,
         path: &str,
     ) -> Result<WorkspaceGitOperationView, AppCoreError> {
         normalize_relative_path(path)?;
-        GitRepository::new(root.as_ref()).unstage(path).map_err(map_git_error)
+        GitRepository::new(root.as_ref()).unstage(path).await.map_err(map_git_error)
     }
 
-    pub fn git_discard(
+    pub async fn git_discard(
         root: impl AsRef<Path>,
         path: &str,
     ) -> Result<WorkspaceGitOperationView, AppCoreError> {
         normalize_relative_path(path)?;
-        GitRepository::new(root.as_ref()).discard(path).map_err(map_git_error)
+        GitRepository::new(root.as_ref()).discard(path).await.map_err(map_git_error)
     }
 
-    pub fn git_commit(
+    pub async fn git_commit(
         root: impl AsRef<Path>,
         message: &str,
     ) -> Result<WorkspaceGitOperationView, AppCoreError> {
         let result = GitRepository::new(root.as_ref())
             .commit(message, GitCommitOptions::workspace_default())
+            .await
             .map_err(map_git_error)?;
         Ok(WorkspaceGitOperationView { status: result.status })
     }
 
-    pub fn git_diff(
+    pub async fn git_diff(
         root: impl AsRef<Path>,
         path: &str,
         staged: bool,
     ) -> Result<WorkspaceGitDiffView, AppCoreError> {
         normalize_relative_path(path)?;
-        GitRepository::new(root.as_ref()).path_diff(path, staged).map_err(map_git_error)
+        GitRepository::new(root.as_ref()).path_diff(path, staged).await.map_err(map_git_error)
     }
 
     pub async fn run_console_command(

@@ -2,13 +2,14 @@ use std::{
     collections::BTreeMap,
     io::ErrorKind,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    sync::Arc,
 };
 
 use anyhow::Context;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use similar::{ChangeTag, TextDiff};
+use slab_sandboxing::{SandboxDriver, SandboxedOutput, spawn_sandboxed_option};
 use slab_utils::string::{decode_truncated_output, truncate_output_prefix};
 use tracing::debug;
 use walkdir::WalkDir;
@@ -25,11 +26,22 @@ static GIT_INTERNAL_PATH: Lazy<Regex> =
 
 pub struct GitRepository {
     root: PathBuf,
+    driver: Option<Arc<dyn SandboxDriver>>,
 }
 
 impl GitRepository {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self { root: root.into(), driver: None }
+    }
+
+    /// Construct with an explicit sandbox driver (agent-driven path). `None`
+    /// falls back to `PassThroughDriver` — the current host behavior (no
+    /// isolation, but spawn/timeout/tree-kill still owned by the driver).
+    pub fn new_with_driver(
+        root: impl Into<PathBuf>,
+        driver: Option<Arc<dyn SandboxDriver>>,
+    ) -> Self {
+        Self { root: root.into(), driver }
     }
 
     pub fn metadata(&self) -> Result<Option<GitRepositoryMetadata>, GitError> {
@@ -62,20 +74,23 @@ impl GitRepository {
         }))
     }
 
-    pub fn status(&self) -> Result<GitStatus, GitError> {
-        let porcelain = match git_output(&self.root, &["status", "--porcelain=v1", "-b"]) {
-            Ok(output) => output,
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                return Ok(GitStatus {
-                    available: false,
-                    message: Some("Git is not available on PATH.".to_string()),
-                    ..GitStatus::default()
-                });
-            }
-            Err(error) => return Err(GitError::Io(error)),
-        };
+    pub async fn status(&self) -> Result<GitStatus, GitError> {
+        let porcelain =
+            match git_output(self.driver.as_ref(), &self.root, &["status", "--porcelain=v1", "-b"])
+                .await
+            {
+                Ok(output) => output,
+                Err(error) if error.kind() == ErrorKind::NotFound => {
+                    return Ok(GitStatus {
+                        available: false,
+                        message: Some("Git is not available on PATH.".to_string()),
+                        ..GitStatus::default()
+                    });
+                }
+                Err(error) => return Err(GitError::Io(error)),
+            };
 
-        if !porcelain.status.success() {
+        if !porcelain.success() {
             let message = output_message(&porcelain);
             return Ok(GitStatus {
                 available: true,
@@ -88,7 +103,10 @@ impl GitRepository {
             });
         }
 
-        let metadata = self.metadata()?.or_else(|| metadata_from_git(&self.root));
+        let mut metadata = self.metadata()?;
+        if metadata.is_none() {
+            metadata = metadata_from_git(self.driver.as_ref(), &self.root).await;
+        }
         if let Err(error) = validate_status_with_gix(&self.root) {
             debug!(%error, "gix status read failed; using git porcelain status");
         }
@@ -101,31 +119,47 @@ impl GitRepository {
         ))
     }
 
-    pub fn stage(&self, path: &str) -> Result<GitOperationResult, GitError> {
+    pub async fn stage(&self, path: &str) -> Result<GitOperationResult, GitError> {
         let relative_path = validate_relative_path(path)?;
-        run_git_operation(&self.root, &["add", "--", relative_path.as_str()])?;
-        Ok(GitOperationResult { status: self.status()? })
+        run_git_operation(self.driver.as_ref(), &self.root, &["add", "--", relative_path.as_str()])
+            .await?;
+        Ok(GitOperationResult { status: self.status().await? })
     }
 
-    pub fn unstage(&self, path: &str) -> Result<GitOperationResult, GitError> {
-        let relative_path = validate_relative_path(path)?;
-        run_git_operation(&self.root, &["restore", "--staged", "--", relative_path.as_str()])?;
-        Ok(GitOperationResult { status: self.status()? })
-    }
-
-    pub fn discard(&self, path: &str) -> Result<GitOperationResult, GitError> {
+    pub async fn unstage(&self, path: &str) -> Result<GitOperationResult, GitError> {
         let relative_path = validate_relative_path(path)?;
         run_git_operation(
+            self.driver.as_ref(),
+            &self.root,
+            &["restore", "--staged", "--", relative_path.as_str()],
+        )
+        .await?;
+        Ok(GitOperationResult { status: self.status().await? })
+    }
+
+    pub async fn discard(&self, path: &str) -> Result<GitOperationResult, GitError> {
+        let relative_path = validate_relative_path(path)?;
+        // `restore` revives a deleted file from the index; if that fails (e.g.
+        // untracked file with no index entry), fall back to `clean -fd`.
+        if run_git_operation(
+            self.driver.as_ref(),
             &self.root,
             &["restore", "--staged", "--worktree", "--", relative_path.as_str()],
         )
-        .or_else(|_| {
-            run_git_operation(&self.root, &["clean", "-fd", "--", relative_path.as_str()])
-        })?;
-        Ok(GitOperationResult { status: self.status()? })
+        .await
+        .is_err()
+        {
+            run_git_operation(
+                self.driver.as_ref(),
+                &self.root,
+                &["clean", "-fd", "--", relative_path.as_str()],
+            )
+            .await?;
+        }
+        Ok(GitOperationResult { status: self.status().await? })
     }
 
-    pub fn diff(&self, path: Option<&str>, staged: bool) -> Result<GitDiff, GitError> {
+    pub async fn diff(&self, path: Option<&str>, staged: bool) -> Result<GitDiff, GitError> {
         let relative_path = path.map(validate_relative_path).transpose()?;
         let mut args = vec!["diff"];
         if staged {
@@ -134,8 +168,8 @@ impl GitRepository {
         if let Some(path) = relative_path.as_deref() {
             args.extend(["--", path]);
         }
-        let output = git_output(&self.root, &args)?;
-        if !output.status.success() {
+        let output = git_output(self.driver.as_ref(), &self.root, &args).await?;
+        if !output.success() {
             return Err(GitError::CommandFailed(output_message(&output)));
         }
 
@@ -143,7 +177,7 @@ impl GitRepository {
         if diff.trim().is_empty()
             && !staged
             && let Some(path) = relative_path.as_deref()
-            && is_untracked_git_path(&self.root, path)?
+            && is_untracked_git_path(self.driver.as_ref(), &self.root, path).await?
         {
             diff = untracked_path_diff(&self.root, path)?;
         }
@@ -151,10 +185,11 @@ impl GitRepository {
         Ok(GitDiff { path: relative_path, staged, diff })
     }
 
-    pub fn path_diff(&self, path: &str, staged: bool) -> Result<GitPathDiff, GitError> {
-        let diff = self.diff(Some(path), staged)?;
+    pub async fn path_diff(&self, path: &str, staged: bool) -> Result<GitPathDiff, GitError> {
+        let diff = self.diff(Some(path), staged).await?;
         let path = diff.path.unwrap_or_default();
-        let (original_content, modified_content) = path_diff_contents(&self.root, &path, staged)?;
+        let (original_content, modified_content) =
+            path_diff_contents(self.driver.as_ref(), &self.root, &path, staged).await?;
         Ok(GitPathDiff {
             path,
             staged: diff.staged,
@@ -164,7 +199,7 @@ impl GitRepository {
         })
     }
 
-    pub fn commit(
+    pub async fn commit(
         &self,
         message: &str,
         options: GitCommitOptions,
@@ -174,28 +209,28 @@ impl GitRepository {
             return Err(GitError::CommandFailed("commit message cannot be empty".to_string()));
         }
 
-        let status = self.status()?;
+        let status = self.status().await?;
         if options.auto_stage_when_index_empty && should_stage_all_before_commit(&status) {
-            run_git_operation(&self.root, &["add", "--all"])?;
+            run_git_operation(self.driver.as_ref(), &self.root, &["add", "--all"]).await?;
         }
 
-        run_git_operation(&self.root, &["commit", "-m", message])?;
-        let status = self.status()?;
+        run_git_operation(self.driver.as_ref(), &self.root, &["commit", "-m", message]).await?;
+        let status = self.status().await?;
         if options.push_after_clean_commit && should_push_after_commit(&status) {
-            run_git_operation(&self.root, &["push"])?;
-            return Ok(GitCommitResult { status: self.status()? });
+            run_git_operation(self.driver.as_ref(), &self.root, &["push"]).await?;
+            return Ok(GitCommitResult { status: self.status().await? });
         }
 
         Ok(GitCommitResult { status })
     }
 
-    pub fn commit_all(&self, message: &str) -> Result<GitCommitResult, GitError> {
+    pub async fn commit_all(&self, message: &str) -> Result<GitCommitResult, GitError> {
         let message = message.trim();
         if message.is_empty() {
             return Err(GitError::CommandFailed("commit message cannot be empty".to_string()));
         }
-        run_git_operation(&self.root, &["add", "--all"])?;
-        self.commit(message, GitCommitOptions::agent_default())
+        run_git_operation(self.driver.as_ref(), &self.root, &["add", "--all"]).await?;
+        self.commit(message, GitCommitOptions::agent_default()).await
     }
 }
 
@@ -208,21 +243,51 @@ fn validate_relative_path(path: &str) -> Result<String, GitError> {
     Ok(normalized)
 }
 
-fn git_output(root: &Path, args: &[&str]) -> std::io::Result<Output> {
-    Command::new("git").arg("-C").arg(root).args(args).output()
+async fn git_output(
+    driver: Option<&Arc<dyn SandboxDriver>>,
+    root: &Path,
+    args: &[&str],
+) -> std::io::Result<SandboxedOutput> {
+    let mut argv: Vec<String> =
+        vec!["git".to_owned(), "-C".to_owned(), root.to_string_lossy().into_owned()];
+    argv.extend(args.iter().map(|arg| (*arg).to_owned()));
+    spawn_sandboxed_option(driver, argv, Some(root.to_path_buf()))
+        .await
+        .map_err(sandbox_error_to_io)
 }
 
-fn run_git_operation(root: &Path, args: &[&str]) -> Result<(), GitError> {
-    let output = git_output(root, args)?;
-    if output.status.success() {
+/// Map a driver error back to `std::io::Error`. A spawn failure for a missing
+/// binary (git not on PATH) is reported as `ErrorKind::NotFound` so callers like
+/// [`GitRepository::status`] can degrade gracefully instead of hard-erroring.
+fn sandbox_error_to_io(error: slab_sandboxing::SandboxError) -> std::io::Error {
+    use slab_sandboxing::SandboxError;
+    if let SandboxError::SpawnFailed(message) = &error {
+        let lower = message.to_ascii_lowercase();
+        if lower.contains("os error 2") || lower.contains("not found") {
+            return std::io::Error::from_raw_os_error(2);
+        }
+    }
+    std::io::Error::other(error.to_string())
+}
+
+async fn run_git_operation(
+    driver: Option<&Arc<dyn SandboxDriver>>,
+    root: &Path,
+    args: &[&str],
+) -> Result<(), GitError> {
+    let output = git_output(driver, root, args).await?;
+    if output.success() {
         return Ok(());
     }
     Err(GitError::CommandFailed(output_message(&output)))
 }
 
-fn metadata_from_git(root: &Path) -> Option<GitRepositoryMetadata> {
-    let root_output = git_output(root, &["rev-parse", "--show-toplevel"]).ok()?;
-    if !root_output.status.success() {
+async fn metadata_from_git(
+    driver: Option<&Arc<dyn SandboxDriver>>,
+    root: &Path,
+) -> Option<GitRepositoryMetadata> {
+    let root_output = git_output(driver, root, &["rev-parse", "--show-toplevel"]).await.ok()?;
+    if !root_output.success() {
         return None;
     }
     let repository_root = String::from_utf8_lossy(&root_output.stdout).trim().to_owned();
@@ -230,9 +295,10 @@ fn metadata_from_git(root: &Path) -> Option<GitRepositoryMetadata> {
         return None;
     }
 
-    let git_dir = git_output(root, &["rev-parse", "--git-dir"])
+    let git_dir = git_output(driver, root, &["rev-parse", "--git-dir"])
+        .await
         .ok()
-        .filter(|output| output.status.success())
+        .filter(|output| output.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| Path::new(&repository_root).join(".git").to_string_lossy().into_owned());
@@ -290,10 +356,18 @@ fn status_from_entries(
     }
 }
 
-fn is_untracked_git_path(root: &Path, relative_path: &str) -> Result<bool, GitError> {
-    let output =
-        git_output(root, &["ls-files", "--others", "--exclude-standard", "--", relative_path])?;
-    if !output.status.success() {
+async fn is_untracked_git_path(
+    driver: Option<&Arc<dyn SandboxDriver>>,
+    root: &Path,
+    relative_path: &str,
+) -> Result<bool, GitError> {
+    let output = git_output(
+        driver,
+        root,
+        &["ls-files", "--others", "--exclude-standard", "--", relative_path],
+    )
+    .await?;
+    if !output.success() {
         return Err(GitError::CommandFailed(output_message(&output)));
     }
     Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
@@ -310,20 +384,21 @@ fn untracked_path_diff(root: &Path, relative_path: &str) -> Result<String, GitEr
     Ok(render_added_file_diff(relative_path, &content))
 }
 
-fn path_diff_contents(
+async fn path_diff_contents(
+    driver: Option<&Arc<dyn SandboxDriver>>,
     root: &Path,
     relative_path: &str,
     staged: bool,
 ) -> Result<(String, String), GitError> {
-    if !staged && is_untracked_git_path(root, relative_path)? {
+    if !staged && is_untracked_git_path(driver, root, relative_path).await? {
         return Ok(("".to_string(), read_worktree_text(root, relative_path)?));
     }
 
     let original_revision =
         if staged { format!("HEAD:{relative_path}") } else { format!(":{relative_path}") };
-    let original_content = read_git_blob(root, &original_revision)?;
+    let original_content = read_git_blob(driver, root, &original_revision).await?;
     let modified_content = if staged {
-        read_git_blob(root, &format!(":{relative_path}"))?
+        read_git_blob(driver, root, &format!(":{relative_path}")).await?
     } else {
         read_worktree_text(root, relative_path)?
     };
@@ -331,14 +406,18 @@ fn path_diff_contents(
     Ok((original_content, modified_content))
 }
 
-fn read_git_blob(root: &Path, revision: &str) -> Result<String, GitError> {
-    let output = git_output(root, &["cat-file", "-e", revision])?;
-    if !output.status.success() {
+async fn read_git_blob(
+    driver: Option<&Arc<dyn SandboxDriver>>,
+    root: &Path,
+    revision: &str,
+) -> Result<String, GitError> {
+    let output = git_output(driver, root, &["cat-file", "-e", revision]).await?;
+    if !output.success() {
         return Ok(String::new());
     }
 
-    let output = git_output(root, &["show", "--textconv", revision])?;
-    if output.status.success() {
+    let output = git_output(driver, root, &["show", "--textconv", revision]).await?;
+    if output.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
     }
     Err(GitError::CommandFailed(output_message(&output)))
@@ -391,7 +470,7 @@ fn render_added_file_diff(relative_path: &str, content: &str) -> String {
     truncate_output_prefix(output, MAX_GIT_DIFF_BYTES)
 }
 
-fn output_message(output: &Output) -> String {
+fn output_message(output: &SandboxedOutput) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if !stderr.is_empty() {
         return stderr;
@@ -513,6 +592,7 @@ fn should_push_after_commit(status: &GitStatus) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::{Command, Output};
     use std::{fs, path::Path};
 
     #[test]
@@ -625,8 +705,8 @@ mod tests {
         assert!(!should_push_after_commit(&GitStatus::default()));
     }
 
-    #[test]
-    fn status_stage_diff_and_commit_in_temp_repo() {
+    #[tokio::test]
+    async fn status_stage_diff_and_commit_in_temp_repo() {
         let root = tempfile::tempdir().expect("temp repo");
         if run_git(root.path(), &["init"]).is_none() {
             return;
@@ -637,23 +717,23 @@ mod tests {
         fs::write(root.path().join("hello.txt"), "hello\n").expect("write file");
 
         let repo = GitRepository::new(root.path());
-        let status = repo.status().expect("status should work");
+        let status = repo.status().await.expect("status should work");
         assert!(status.available);
         assert!(status.is_repository);
         assert_eq!(status.summary.untracked, 1);
 
-        let diff = repo.diff(Some("hello.txt"), false).expect("diff should work");
+        let diff = repo.diff(Some("hello.txt"), false).await.expect("diff should work");
         assert!(diff.diff.contains("hello"));
 
-        let staged = repo.stage("hello.txt").expect("stage should work");
+        let staged = repo.stage("hello.txt").await.expect("stage should work");
         assert_eq!(staged.status.summary.added, 1);
 
-        let result = repo.commit_all("initial commit").expect("commit should work");
+        let result = repo.commit_all("initial commit").await.expect("commit should work");
         assert!(result.status.entries.is_empty());
     }
 
-    #[test]
-    fn path_diff_contents_for_unstaged_tracked_file_use_index_and_worktree() {
+    #[tokio::test]
+    async fn path_diff_contents_for_unstaged_tracked_file_use_index_and_worktree() {
         let root = tempfile::tempdir().expect("temp repo");
         if run_git(root.path(), &["init"]).is_none() {
             return;
@@ -671,13 +751,14 @@ mod tests {
 
         let diff = GitRepository::new(root.path())
             .path_diff("hello.txt", false)
+            .await
             .expect("diff should work");
         assert_eq!(diff.original_content, "index\n");
         assert_eq!(diff.modified_content, "worktree\n");
     }
 
-    #[test]
-    fn path_diff_contents_for_staged_file_use_head_and_index() {
+    #[tokio::test]
+    async fn path_diff_contents_for_staged_file_use_head_and_index() {
         let root = tempfile::tempdir().expect("temp repo");
         if run_git(root.path(), &["init"]).is_none() {
             return;
@@ -693,14 +774,16 @@ mod tests {
         run_git(root.path(), &["add", "hello.txt"]).expect("stage index version");
         fs::write(root.path().join("hello.txt"), "worktree\n").expect("write worktree version");
 
-        let diff =
-            GitRepository::new(root.path()).path_diff("hello.txt", true).expect("diff should work");
+        let diff = GitRepository::new(root.path())
+            .path_diff("hello.txt", true)
+            .await
+            .expect("diff should work");
         assert_eq!(diff.original_content, "head\n");
         assert_eq!(diff.modified_content, "index\n");
     }
 
-    #[test]
-    fn path_diff_contents_for_untracked_file_use_empty_original() {
+    #[tokio::test]
+    async fn path_diff_contents_for_untracked_file_use_empty_original() {
         let root = tempfile::tempdir().expect("temp repo");
         if run_git(root.path(), &["init"]).is_none() {
             return;
@@ -709,13 +792,14 @@ mod tests {
 
         let diff = GitRepository::new(root.path())
             .path_diff("scratch.txt", false)
+            .await
             .expect("diff should work");
         assert_eq!(diff.original_content, "");
         assert_eq!(diff.modified_content, "scratch\n");
     }
 
-    #[test]
-    fn path_diff_contents_for_deleted_file_use_empty_modified() {
+    #[tokio::test]
+    async fn path_diff_contents_for_deleted_file_use_empty_modified() {
         let root = tempfile::tempdir().expect("temp repo");
         if run_git(root.path(), &["init"]).is_none() {
             return;
@@ -730,13 +814,14 @@ mod tests {
 
         let diff = GitRepository::new(root.path())
             .path_diff("hello.txt", false)
+            .await
             .expect("diff should work");
         assert_eq!(diff.original_content, "head\n");
         assert_eq!(diff.modified_content, "");
     }
 
-    #[test]
-    fn untracked_directory_diff_uses_relative_file_paths() {
+    #[tokio::test]
+    async fn untracked_directory_diff_uses_relative_file_paths() {
         let root = tempfile::tempdir().expect("temp repo");
         if run_git(root.path(), &["init"]).is_none() {
             return;
@@ -745,7 +830,7 @@ mod tests {
         fs::write(root.path().join("src").join("main.rs"), "fn main() {}\n").expect("write file");
 
         let repo = GitRepository::new(root.path());
-        let diff = repo.diff(Some("src"), false).expect("directory diff should work");
+        let diff = repo.diff(Some("src"), false).await.expect("directory diff should work");
         assert!(diff.diff.contains("diff --git a/src/main.rs b/src/main.rs"));
         assert!(diff.diff.contains("+fn main() {}"));
     }

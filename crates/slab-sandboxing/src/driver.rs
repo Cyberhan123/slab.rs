@@ -185,6 +185,10 @@ impl SandboxedOutput {
     pub fn stderr_str(&self) -> String {
         String::from_utf8_lossy(&self.stderr).into_owned()
     }
+    /// `true` when the process exited cleanly (zero status) without timing out.
+    pub fn success(&self) -> bool {
+        self.exit_code == 0 && !self.timed_out
+    }
 }
 
 #[async_trait]

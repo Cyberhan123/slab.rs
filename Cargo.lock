@@ -15663,6 +15663,7 @@ dependencies = [
  "serde",
  "similar",
  "slab-file",
+ "slab-sandboxing",
  "slab-utils",
  "tempfile",
  "thiserror 2.0.19",
