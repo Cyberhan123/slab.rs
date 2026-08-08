@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use slab_sandboxing::{
-    NetworkPolicy, SandboxDriver, SandboxEnvironment, SandboxError, SandboxPolicy,
-    SandboxedCommand, create_platform_driver,
+    IsolationStrength, NetworkPolicy, SandboxDriver, SandboxEnvironment, SandboxError,
+    SandboxIsolation, SandboxPolicy, SandboxedCommand, create_platform_driver,
 };
 use tempfile::TempDir;
 
@@ -37,6 +37,13 @@ async fn platform_driver_reports_capabilities() {
 
     assert!(driver.setup_status().available);
     assert!(capabilities.filesystem || capabilities.isolation as u8 > 0);
+    // Honest-reporting regression guard: a driver that claims `Full` isolation
+    // must actually OS-enforce the filesystem dimension. This is the exact
+    // regression the old Windows `filesystem: true` lie would re-introduce.
+    if capabilities.isolation == SandboxIsolation::Full {
+        assert_eq!(capabilities.filesystem_isolation, IsolationStrength::OsEnforced);
+        assert!(capabilities.filesystem, "Full isolation must report OS-enforced fs");
+    }
 }
 
 #[tokio::test]

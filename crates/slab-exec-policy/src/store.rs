@@ -194,7 +194,7 @@ mod tests {
 
         let loaded = store.load(None).await.expect("load");
         assert_eq!(
-            loaded.evaluate(OperationCategory::Shell, "cargo check -p x").map(|r| r.action),
+            loaded.evaluate(OperationCategory::Shell, "cargo check -p x", None).map(|r| r.action),
             Some(RuleAction::Allow)
         );
         assert!(dir.path().join(DEFAULT_RULES_FILE).exists());
@@ -222,7 +222,7 @@ mod tests {
 
         let loaded = store.load(Some(&workspace)).await.expect("load");
         assert_eq!(
-            loaded.evaluate(OperationCategory::Shell, "cargo test -p x").map(|r| r.action),
+            loaded.evaluate(OperationCategory::Shell, "cargo test -p x", None).map(|r| r.action),
             Some(RuleAction::Allow)
         );
     }

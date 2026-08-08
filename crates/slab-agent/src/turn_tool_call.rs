@@ -754,9 +754,8 @@ async fn handle_tool_call(
         .as_ref()
         .and_then(|handler| handler.describe_operation(&effective_args))
         .or_else(|| infer_descriptor(&tool_call.name, &effective_args, context))
-        .unwrap_or_else(|| {
-            slab_exec_policy::OperationDescriptor::read_only(tool_call.name.clone())
-        });
+        .unwrap_or_else(|| slab_exec_policy::OperationDescriptor::read_only(tool_call.name.clone()))
+        .with_tool_name(tool_call.name.clone());
     let decision = context.exec_policy.evaluate(context.thread_id, &descriptor).await;
     let approval_request = match decision {
         slab_exec_policy::ExecDecision::Allow => None,

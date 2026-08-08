@@ -5,8 +5,9 @@ use tracing::{debug, warn};
 #[cfg(target_os = "windows")]
 use crate::guard::validate_command;
 use crate::{
-    SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError, SandboxIsolation,
-    SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
+    IsolationStrength, SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError,
+    SandboxIsolation, SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
+    SetupKind,
 };
 
 pub struct WindowsSandboxDriver {
@@ -79,13 +80,23 @@ impl SandboxDriver for WindowsSandboxDriver {
     }
 
     fn capabilities(&self) -> SandboxCapabilities {
+        // HONEST reporting: on Windows today only the lexical `validate_command`
+        // guard runs (defense-in-depth, bypassable) plus a Job Object for tree
+        // cleanup. No OS mechanism enforces filesystem write containment or
+        // network blocking, so `filesystem`/`network` stay `false` and the
+        // isolation strength is `Lexical`. The real OS-enforced layer
+        // (restricted token + ACL + WFP) lands in later phases and will flip
+        // these to `OsEnforced`/`ElevatedAclTokenWfp`.
         SandboxCapabilities {
             platform: SandboxPlatform::Windows,
             isolation: SandboxIsolation::Degraded,
-            filesystem: true,
-            network: true,
+            filesystem: false,
+            network: false,
+            filesystem_isolation: IsolationStrength::Lexical,
+            network_isolation: IsolationStrength::Lexical,
             process_cleanup: true,
             setup_required: self.env.permissions.platform.windows_setup_required,
+            setup_kind: SetupKind::JobObject,
         }
     }
 

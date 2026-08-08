@@ -19,6 +19,7 @@ tracing = { workspace = true }
 dashmap = { workspace = true }
 ring = { workspace = true }
 dunce = { workspace = true }
+globset = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

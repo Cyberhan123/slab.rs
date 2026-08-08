@@ -1,11 +1,12 @@
 use async_trait::async_trait;
 
+use crate::{
+    IsolationStrength, SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError,
+    SandboxIsolation, SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
+    SetupKind,
+};
 #[cfg(target_os = "macos")]
 use crate::{NetworkPolicy, SandboxPolicy, guard::validate_command};
-use crate::{
-    SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError, SandboxIsolation,
-    SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
-};
 
 pub struct MacosSandboxDriver {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -76,17 +77,30 @@ impl SandboxDriver for MacosSandboxDriver {
     }
 
     fn capabilities(&self) -> SandboxCapabilities {
+        let available = cfg!(target_os = "macos");
         SandboxCapabilities {
             platform: SandboxPlatform::Macos,
-            isolation: if cfg!(target_os = "macos") {
+            isolation: if available {
                 SandboxIsolation::Full
             } else {
                 SandboxIsolation::Unsupported
             },
-            filesystem: cfg!(target_os = "macos"),
-            network: cfg!(target_os = "macos"),
-            process_cleanup: cfg!(target_os = "macos"),
+            // seatbelt `(deny default)` is OS-enforced for both dimensions.
+            filesystem: available,
+            network: available,
+            filesystem_isolation: if available {
+                IsolationStrength::OsEnforced
+            } else {
+                IsolationStrength::None
+            },
+            network_isolation: if available {
+                IsolationStrength::OsEnforced
+            } else {
+                IsolationStrength::None
+            },
+            process_cleanup: available,
             setup_required: false,
+            setup_kind: if available { SetupKind::Seatbelt } else { SetupKind::None },
         }
     }
 

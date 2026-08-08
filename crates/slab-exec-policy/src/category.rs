@@ -60,11 +60,24 @@ pub struct OperationDescriptor {
     /// Workspace root the operation is scoped to, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_root: Option<PathBuf>,
+    /// The invoking tool's name (e.g. `shell`, `write_file`, or a namespaced
+    /// plugin/MCP name like `mcp__github__create_issue`). The kernel sets this
+    /// for every call so rules can scope decisions to a specific tool — the
+    /// optional per-tool-name axis (Claude-Code-style `Bash(git *)`). `None`
+    /// means "unknown" and a tool-scoped rule will not match it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
 }
 
 impl OperationDescriptor {
     pub fn new(category: OperationCategory, subject: impl Into<String>) -> Self {
-        Self { category, subject: subject.into(), detail: None, workspace_root: None }
+        Self {
+            category,
+            subject: subject.into(),
+            detail: None,
+            workspace_root: None,
+            tool_name: None,
+        }
     }
 
     pub fn shell(command: impl Into<String>) -> Self {
@@ -92,6 +105,12 @@ impl OperationDescriptor {
     #[must_use]
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_tool_name(mut self, tool_name: impl Into<String>) -> Self {
+        self.tool_name = Some(tool_name.into());
         self
     }
 }

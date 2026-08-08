@@ -4,12 +4,13 @@ use async_trait::async_trait;
 #[cfg(target_os = "linux")]
 use tracing::debug;
 
+use crate::{
+    IsolationStrength, SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError,
+    SandboxIsolation, SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
+    SetupKind,
+};
 #[cfg(target_os = "linux")]
 use crate::{NetworkPolicy, SandboxPolicy, guard::validate_command};
-use crate::{
-    SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError, SandboxIsolation,
-    SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
-};
 
 pub struct LinuxSandboxDriver {
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -74,17 +75,32 @@ impl SandboxDriver for LinuxSandboxDriver {
     }
 
     fn capabilities(&self) -> SandboxCapabilities {
+        let available = Self::available();
         SandboxCapabilities {
             platform: SandboxPlatform::Linux,
-            isolation: if Self::available() {
+            isolation: if available {
                 SandboxIsolation::Full
             } else {
                 SandboxIsolation::Unsupported
             },
-            filesystem: Self::available(),
-            network: Self::available(),
-            process_cleanup: Self::available(),
+            // bwrap bind-mounts are OS-enforced filesystem containment and
+            // `--unshare-net` is OS-enforced network blocking. (seccomp/landlock
+            // land in a later phase, upgrading `setup_kind` to BwrapSeccomp.)
+            filesystem: available,
+            network: available,
+            filesystem_isolation: if available {
+                IsolationStrength::OsEnforced
+            } else {
+                IsolationStrength::None
+            },
+            network_isolation: if available {
+                IsolationStrength::OsEnforced
+            } else {
+                IsolationStrength::None
+            },
+            process_cleanup: available,
             setup_required: false,
+            setup_kind: if available { SetupKind::Bwrap } else { SetupKind::None },
         }
     }
 

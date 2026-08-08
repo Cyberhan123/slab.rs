@@ -57,32 +57,103 @@ pub struct SandboxedOutput {
     pub timed_out: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxPlatform {
     Windows,
     Linux,
     Macos,
+    #[default]
     Unsupported,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Coarse isolation level reported by a driver. New variants are additive so
+/// existing discriminants stay stable (the smoke test casts this to `u8`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxIsolation {
     Full,
+    #[default]
     Degraded,
     Passthrough,
     Unsupported,
+    /// Lexical/in-process guard only (no OS enforcement) but stronger than raw
+    /// passthrough — e.g. an allowlist gate before spawn.
+    Guard,
+    /// OS-enforced but partial (e.g. restricted token + ACL on Windows without
+    /// WFP, or firewall-only network blocking).
+    Elevated,
+    /// Kernel-level filtering (landlock, WFP callout, seccomp).
+    KernelFiltered,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// What mechanism actually backs one dimension of isolation — the honest
+/// counterpart to the legacy `filesystem` / `network` booleans on
+/// [`SandboxCapabilities`]. `Lexical` means an in-process text/path check
+/// (`validate_command`) that is defense-in-depth and bypassable; `OsEnforced`
+/// means the OS kernel enforces it. The booleans stay `false` unless a kernel
+/// mechanism is active, so callers cannot be lied to again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IsolationStrength {
+    #[default]
+    None,
+    Lexical,
+    OsEnforced,
+}
+
+/// How the sandbox is (or would be) provisioned. Maps 1:1 to the honest
+/// `capabilities()` report so callers branch on the real mechanism instead of
+/// guessing from booleans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SetupKind {
+    #[default]
+    None,
+    /// Windows: Job Object (tree-kill) + lexical guard only — today's state.
+    JobObject,
+    /// Lexical guard only (no Job Object, no OS isolation).
+    Guard,
+    /// Windows: restricted token + ACL filesystem containment, no WFP.
+    ElevatedAclToken,
+    /// Windows: full — restricted token + ACL + WFP/firewall network blocking.
+    ElevatedAclTokenWfp,
+    /// Linux: bubblewrap for the filesystem view.
+    Bwrap,
+    /// Linux: bubblewrap + seccomp (network syscalls blocked except AF_UNIX).
+    BwrapSeccomp,
+    /// Linux: bubblewrap + landlock fallback.
+    BwrapLandlock,
+    /// macOS: seatbelt (`sandbox-exec`).
+    Seatbelt,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SandboxCapabilities {
     pub platform: SandboxPlatform,
     pub isolation: SandboxIsolation,
+    /// OS-enforced filesystem write containment. `false` unless a kernel
+    /// mechanism (ACL/seatbelt/bwrap bind) actually enforces it — a lexical
+    /// guard alone does NOT set this. See [`IsolationStrength`] for nuance.
+    #[serde(default)]
     pub filesystem: bool,
+    /// OS-enforced network blocking. `false` unless a kernel mechanism
+    /// (WFP/seccomp/`--unshare-net`) actually enforces it.
+    #[serde(default)]
     pub network: bool,
+    #[serde(default)]
     pub process_cleanup: bool,
+    #[serde(default)]
     pub setup_required: bool,
+    /// Honest strength of the filesystem dimension.
+    #[serde(default)]
+    pub filesystem_isolation: IsolationStrength,
+    /// Honest strength of the network dimension.
+    #[serde(default)]
+    pub network_isolation: IsolationStrength,
+    /// The provisioning mechanism in effect.
+    #[serde(default)]
+    pub setup_kind: SetupKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,14 +197,9 @@ pub trait SandboxDriver: Send + Sync {
     }
 
     fn capabilities(&self) -> SandboxCapabilities {
-        SandboxCapabilities {
-            platform: SandboxPlatform::Unsupported,
-            isolation: SandboxIsolation::Degraded,
-            filesystem: false,
-            network: false,
-            process_cleanup: false,
-            setup_required: false,
-        }
+        // Conservative default: no platform, degraded, nothing OS-enforced.
+        // Matches `SandboxCapabilities::default()` exactly.
+        SandboxCapabilities::default()
     }
 
     fn setup_status(&self) -> SandboxSetupStatus {
@@ -186,14 +252,7 @@ impl SandboxDriver for PassThroughDriver {
     }
 
     fn capabilities(&self) -> SandboxCapabilities {
-        SandboxCapabilities {
-            platform: SandboxPlatform::Unsupported,
-            isolation: SandboxIsolation::Passthrough,
-            filesystem: false,
-            network: false,
-            process_cleanup: false,
-            setup_required: false,
-        }
+        SandboxCapabilities { isolation: SandboxIsolation::Passthrough, ..Default::default() }
     }
 }
 

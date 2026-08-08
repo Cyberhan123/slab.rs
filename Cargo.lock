@@ -15594,6 +15594,7 @@ dependencies = [
  "async-trait",
  "dashmap 6.2.1",
  "dunce",
+ "globset",
  "pretty_assertions",
  "ring",
  "serde",

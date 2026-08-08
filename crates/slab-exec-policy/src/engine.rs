@@ -146,7 +146,7 @@ impl ExecPolicyPort for ExecPolicyEngine {
         //    Allow rule (acceptForSession / AlwaysInWorkspace) is how repeat
         //    shell calls get silenced.
         let rules = self.rules.read().await;
-        if let Some(rule) = rules.evaluate(category, subject) {
+        if let Some(rule) = rules.evaluate(category, subject, descriptor.tool_name.as_deref()) {
             return match rule.action {
                 RuleAction::Allow => ExecDecision::Allow,
                 RuleAction::RequireApproval => ExecDecision::RequireApproval,

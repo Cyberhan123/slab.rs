@@ -33,6 +33,11 @@ pub enum RuleMatcher {
     Exact,
     Prefix,
     Contains,
+    /// Glob pattern compiled via `globset` (`*` matches any characters
+    /// including separators). A trailing ` *` also matches the bare prefix, so
+    /// `git *` matches `git`. Shell subjects are still screened for control
+    /// chars so a glob cannot smuggle `&&`/`|`.
+    Glob,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +46,11 @@ pub struct Rule {
     pub action: RuleAction,
     pub matcher: RuleMatcher,
     pub pattern: String,
+    /// Optional per-tool-name scope (Claude-Code-style `Bash(git *)`). `None`
+    /// matches any tool of [`category`]; `Some(pattern)` matches only the named
+    /// tool, where `pattern` supports a trailing `*` glob for namespaced tools
+    /// (e.g. `mcp__github__*`).
+    pub tool_name: Option<String>,
     pub source: RuleSource,
 }
 
@@ -146,10 +156,17 @@ impl RuleSet {
         self.rules.push(rule);
     }
 
-    /// First-match-wins evaluation scoped to `category`.
-    pub fn evaluate(&self, category: OperationCategory, subject: &str) -> Option<&Rule> {
+    /// First-match-wins evaluation scoped to `category` (and optionally to
+    /// `tool_name`). `tool_name` is the descriptor's tool name; a rule scoped
+    /// via `tool=<pattern>` only matches when it agrees.
+    pub fn evaluate(
+        &self,
+        category: OperationCategory,
+        subject: &str,
+        tool_name: Option<&str>,
+    ) -> Option<&Rule> {
         let subject = subject.trim();
-        self.rules.iter().find(|rule| rule.category == category && rule.matches(subject))
+        self.rules.iter().find(|rule| rule.category == category && rule.matches(subject, tool_name))
     }
 }
 
@@ -165,14 +182,29 @@ impl Rule {
             action,
             matcher,
             pattern: pattern.into(),
+            tool_name: None,
             source: RuleSource { path: PathBuf::new(), line: 0 },
         }
     }
 
-    /// Serialize back to the on-disk line format (category-prefixed).
+    /// Scope the rule to a specific tool name (supports a trailing `*` glob for
+    /// namespaced tools). Builder-style; `None` (the default) matches any tool.
+    #[must_use]
+    pub fn with_tool_name(mut self, tool_name: impl Into<String>) -> Self {
+        self.tool_name = Some(tool_name.into());
+        self
+    }
+
+    /// Serialize back to the on-disk line format. An optional leading
+    /// `tool=<pattern>` token encodes the per-tool-name scope; omit it for the
+    /// legacy "any tool of this category" semantics.
     pub fn to_line(&self) -> String {
+        let prefix = match &self.tool_name {
+            Some(tool) => format!("tool={tool} "),
+            None => String::new(),
+        };
         format!(
-            "{} {} {} {}",
+            "{prefix}{} {} {} {}",
             self.category.as_str(),
             action_token(self.action),
             matcher_token(self.matcher),
@@ -180,7 +212,15 @@ impl Rule {
         )
     }
 
-    fn matches(&self, subject: &str) -> bool {
+    fn matches(&self, subject: &str, tool_name: Option<&str>) -> bool {
+        // Per-tool-name axis: a scoped rule only matches the named tool. If the
+        // descriptor carries no tool name, a scoped rule does not apply.
+        if let Some(rule_tool) = &self.tool_name {
+            let Some(name) = tool_name else { return false };
+            if !tool_name_matches(rule_tool, name) {
+                return false;
+            }
+        }
         match self.matcher {
             RuleMatcher::Exact => subject == self.pattern,
             // Shell prefix matching enforces a token boundary and refuses shell
@@ -191,8 +231,40 @@ impl Rule {
                 _ => subject.starts_with(self.pattern.as_str()),
             },
             RuleMatcher::Contains => subject.contains(&self.pattern),
+            RuleMatcher::Glob => glob_matches(subject, &self.pattern, self.category),
         }
     }
+}
+
+/// Match a `tool=` pattern against a tool name. A trailing `*` is a wildcard
+/// prefix (so `mcp__github__*` matches `mcp__github__create_issue` and `*`
+/// alone matches everything); otherwise exact.
+fn tool_name_matches(pattern: &str, name: &str) -> bool {
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        name.starts_with(prefix)
+    } else {
+        name == pattern
+    }
+}
+
+/// Glob-match a subject against `pattern`. `*` matches any characters including
+/// separators (`literal_separator(false)`). A trailing ` *` also matches the
+/// bare prefix. Shell subjects are screened for control chars first.
+fn glob_matches(subject: &str, pattern: &str, category: OperationCategory) -> bool {
+    if category == OperationCategory::Shell && contains_shell_control(subject) {
+        return false;
+    }
+    let Ok(glob) = globset::GlobBuilder::new(pattern).literal_separator(false).build() else {
+        return false;
+    };
+    if glob.compile_matcher().is_match(subject) {
+        return true;
+    }
+    // Claude-Code nicety: `git *` should also match the bare `git`.
+    if let Some(prefix) = pattern.strip_suffix(" *") {
+        return subject == prefix;
+    }
+    false
 }
 
 fn is_rule_file(path: &Path) -> bool {
@@ -207,11 +279,29 @@ fn parse_rule_line(path: &Path, line: usize, raw_line: &str) -> Result<Option<Ru
         return Ok(None);
     }
 
+    // Optional leading `tool=<pattern>` scopes the rule to a tool name (a
+    // trailing `*` globs namespaced tools, e.g. `mcp__github__*`). Omit it for
+    // the legacy "any tool of this category" semantics. Recognized only at the
+    // start of the line so a legitimate `tool=` pattern is unambiguous.
+    let (tool_name, rest) = if let Some(after) = raw_line.strip_prefix("tool=") {
+        let (token, rest) = take_token(after)
+            .ok_or_else(|| invalid_rule(path, line, "missing tool name after 'tool='"))?;
+        let token = token.trim_end_matches(',');
+        if token.is_empty() {
+            return Err(invalid_rule(path, line, "empty tool name after 'tool='"));
+        }
+        (Some(token.to_owned()), rest)
+    } else {
+        (None, raw_line)
+    };
+
     // Disambiguate 4-token (category-prefixed) vs 3-token (legacy shell).
-    let (category, rest) = match take_token(raw_line) {
-        Some((first, rest)) => match OperationCategory::parse(first) {
-            Some(category) => (category, rest),
-            None => (OperationCategory::Shell, raw_line),
+    let (category, rest) = match take_token(rest) {
+        Some((first, after_first)) => match OperationCategory::parse(first) {
+            Some(category) => (category, after_first),
+            // Legacy 3-token form: `first` was the action, so re-parse the
+            // action from the (post-tool) line, not from after `first`.
+            None => (OperationCategory::Shell, rest),
         },
         None => return Err(invalid_rule(path, line, "missing action")),
     };
@@ -232,6 +322,7 @@ fn parse_rule_line(path: &Path, line: usize, raw_line: &str) -> Result<Option<Ru
         matcher: parse_matcher(matcher_token)
             .ok_or_else(|| invalid_rule(path, line, "unknown matcher"))?,
         pattern: pattern.to_owned(),
+        tool_name,
         source: RuleSource { path: path.to_path_buf(), line },
     }))
 }
@@ -259,6 +350,7 @@ fn parse_matcher(value: &str) -> Option<RuleMatcher> {
         "exact" => Some(RuleMatcher::Exact),
         "prefix" | "starts_with" => Some(RuleMatcher::Prefix),
         "contains" => Some(RuleMatcher::Contains),
+        "glob" | "wildcard" => Some(RuleMatcher::Glob),
         _ => None,
     }
 }
@@ -276,6 +368,7 @@ fn matcher_token(matcher: RuleMatcher) -> &'static str {
         RuleMatcher::Exact => "exact",
         RuleMatcher::Prefix => "prefix",
         RuleMatcher::Contains => "contains",
+        RuleMatcher::Glob => "glob",
     }
 }
 
@@ -336,11 +429,15 @@ mod tests {
 
         assert_eq!(rules.len(), 2);
         assert_eq!(
-            rules.evaluate(OperationCategory::Shell, "cargo check -p slab-agent").map(|r| r.action),
+            rules
+                .evaluate(OperationCategory::Shell, "cargo check -p slab-agent", None)
+                .map(|r| r.action),
             Some(RuleAction::Allow)
         );
         assert_eq!(
-            rules.evaluate(OperationCategory::Shell, "Remove-Item file.txt").map(|r| r.action),
+            rules
+                .evaluate(OperationCategory::Shell, "Remove-Item file.txt", None)
+                .map(|r| r.action),
             Some(RuleAction::Block)
         );
 
@@ -355,7 +452,7 @@ mod tests {
         fs::write(dir.join("legacy.rule"), "allow prefix cargo check\n").expect("write");
 
         let rules = RuleSet::from_dir(&dir).expect("rules load");
-        let rule = rules.evaluate(OperationCategory::Shell, "cargo check").expect("matched");
+        let rule = rules.evaluate(OperationCategory::Shell, "cargo check", None).expect("matched");
         assert_eq!(rule.category, OperationCategory::Shell);
         assert_eq!(rule.action, RuleAction::Allow);
 
@@ -370,16 +467,18 @@ mod tests {
         ]);
 
         assert_eq!(
-            rules.evaluate(OperationCategory::Network, "https://example.com").map(|r| r.action),
+            rules
+                .evaluate(OperationCategory::Network, "https://example.com", None)
+                .map(|r| r.action),
             Some(RuleAction::Allow)
         );
         // A shell subject containing "rm" must NOT match the network rule.
         assert_eq!(
-            rules.evaluate(OperationCategory::Shell, "rm -rf target").map(|r| r.action),
+            rules.evaluate(OperationCategory::Shell, "rm -rf target", None).map(|r| r.action),
             Some(RuleAction::Block)
         );
         // File-edit operations see no rules.
-        assert!(rules.evaluate(OperationCategory::FileEdit, "/etc/hosts").is_none());
+        assert!(rules.evaluate(OperationCategory::FileEdit, "/etc/hosts", None).is_none());
     }
 
     #[test]
@@ -400,7 +499,9 @@ mod tests {
         ]);
 
         assert_eq!(
-            rules.evaluate(OperationCategory::Shell, "cargo check -p slab-agent").map(|r| r.action),
+            rules
+                .evaluate(OperationCategory::Shell, "cargo check -p slab-agent", None)
+                .map(|r| r.action),
             Some(RuleAction::RequireApproval)
         );
     }
@@ -414,11 +515,13 @@ mod tests {
             "cargo check",
         )]);
 
-        assert!(rules.evaluate(OperationCategory::Shell, "cargo check -p slab-agent").is_some());
-        assert!(rules.evaluate(OperationCategory::Shell, "cargo checkout").is_none());
+        assert!(
+            rules.evaluate(OperationCategory::Shell, "cargo check -p slab-agent", None).is_some()
+        );
+        assert!(rules.evaluate(OperationCategory::Shell, "cargo checkout", None).is_none());
         assert!(
             rules
-                .evaluate(OperationCategory::Shell, "cargo check && Remove-Item file.txt")
+                .evaluate(OperationCategory::Shell, "cargo check && Remove-Item file.txt", None)
                 .is_none()
         );
     }
@@ -456,6 +559,119 @@ mod tests {
         let error = RuleSet::from_dir(&dir).expect_err("invalid rule should fail");
         assert!(matches!(error, RuleError::InvalidLine { .. }));
 
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    // ---- P2: Glob matcher ----
+
+    #[test]
+    fn glob_matcher_matches_wildcard_and_bare_prefix() {
+        let rules = RuleSet::from_rules(vec![Rule::new(
+            OperationCategory::Shell,
+            RuleAction::Allow,
+            RuleMatcher::Glob,
+            "git *",
+        )]);
+        // `*` matches any trailing args (including separators) …
+        assert!(matches!(
+            rules.evaluate(OperationCategory::Shell, "git add src/main.rs", None).map(|r| r.action),
+            Some(RuleAction::Allow)
+        ));
+        // … and the trailing-" *" nicety also matches the bare prefix.
+        assert!(matches!(
+            rules.evaluate(OperationCategory::Shell, "git", None).map(|r| r.action),
+            Some(RuleAction::Allow)
+        ));
+        // Non-matching command.
+        assert!(rules.evaluate(OperationCategory::Shell, "cargo build", None).is_none());
+    }
+
+    #[test]
+    fn glob_matcher_refuses_shell_control_chars() {
+        let rules = RuleSet::from_rules(vec![Rule::new(
+            OperationCategory::Shell,
+            RuleAction::Allow,
+            RuleMatcher::Glob,
+            "git *",
+        )]);
+        // A glob must not smuggle shell control chars past the guard.
+        assert!(rules.evaluate(OperationCategory::Shell, "git status && rm -rf /", None).is_none());
+    }
+
+    #[test]
+    fn glob_path_pattern_matches_across_separators() {
+        let rules = RuleSet::from_rules(vec![Rule::new(
+            OperationCategory::FileEdit,
+            RuleAction::Allow,
+            RuleMatcher::Glob,
+            "src/**/*.rs",
+        )]);
+        assert!(
+            rules.evaluate(OperationCategory::FileEdit, "src/deep/nested/mod.rs", None).is_some()
+        );
+        assert!(rules.evaluate(OperationCategory::FileEdit, "tests/main.rs", None).is_none());
+    }
+
+    // ---- P1: per-tool-name axis ----
+
+    #[test]
+    fn tool_name_axis_scopes_rule_to_named_tool() {
+        let rules = RuleSet::from_rules(vec![
+            Rule::new(OperationCategory::FileEdit, RuleAction::Allow, RuleMatcher::Glob, "*")
+                .with_tool_name("write_file"),
+        ]);
+
+        // Same category + subject, but only the named tool matches.
+        assert_eq!(
+            rules
+                .evaluate(OperationCategory::FileEdit, "/ws/a.txt", Some("write_file"))
+                .map(|r| r.action),
+            Some(RuleAction::Allow)
+        );
+        assert!(
+            rules.evaluate(OperationCategory::FileEdit, "/ws/a.txt", Some("apply_patch")).is_none()
+        );
+        // Unscoped (tool_name=None) descriptor does not match a scoped rule.
+        assert!(rules.evaluate(OperationCategory::FileEdit, "/ws/a.txt", None).is_none());
+    }
+
+    #[test]
+    fn tool_name_glob_matches_namespaced_tools() {
+        let rules = RuleSet::from_rules(vec![
+            Rule::new(OperationCategory::Shell, RuleAction::Block, RuleMatcher::Glob, "*")
+                .with_tool_name("mcp__github__*"),
+        ]);
+
+        assert_eq!(
+            rules
+                .evaluate(OperationCategory::Shell, "anything", Some("mcp__github__create_issue"))
+                .map(|r| r.action),
+            Some(RuleAction::Block)
+        );
+        assert!(
+            rules
+                .evaluate(OperationCategory::Shell, "anything", Some("mcp__linear__create_issue"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn parses_and_round_trips_tool_prefix() {
+        let dir = temp_rules_dir();
+        fs::create_dir_all(&dir).expect("dir");
+        fs::write(dir.join("scoped.rules"), "tool=write_file file_edit allow glob *\n")
+            .expect("write");
+        let rules = RuleSet::from_dir(&dir).expect("load");
+        let rule = rules.rules()[0].clone();
+        assert_eq!(rule.tool_name.as_deref(), Some("write_file"));
+        assert_eq!(rule.matcher, RuleMatcher::Glob);
+        assert_eq!(rule.to_line(), "tool=write_file file_edit allow glob *");
+        assert_eq!(
+            rules
+                .evaluate(OperationCategory::FileEdit, "/anywhere", Some("write_file"))
+                .map(|r| r.action),
+            Some(RuleAction::Allow)
+        );
         let _ = fs::remove_dir_all(dir);
     }
 }
