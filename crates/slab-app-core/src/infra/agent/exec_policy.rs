@@ -118,7 +118,8 @@ pub fn build_exec_policy_engine(
 ) -> Arc<dyn ExecPolicyPort> {
     let store = Arc::new(DbRuleStore::new(rules_dir.clone(), db));
     let rules = load_rules_sync(&rules_dir, workspace_root.as_deref());
-    Arc::new(ExecPolicyEngine::new(baseline, rules, store))
+    let policy_rules = load_policy_rules_sync(&rules_dir);
+    Arc::new(ExecPolicyEngine::new(baseline, rules, store).with_policy_rules(policy_rules))
 }
 
 /// Synchronously load `default.rules` + the current workspace's
@@ -153,4 +154,57 @@ fn load_rules_sync(
     }
 
     rules
+}
+
+const POLICY_RULES_FILE: &str = "policy.rules";
+
+/// Synchronously load the enterprise/policy rule partition — a reserved
+/// `policy.rules` in the rules dir, read FIRST (highest precedence). Missing ⇒
+/// empty; parse errors ⇒ warn + empty. The engine holds this in an immutable
+/// partition consulted before user/workspace rules, so a policy `Block` cannot
+/// be overridden. The regular loaders read only `default.rules` /
+/// `hash-<workspace>.rules` by explicit name, so `policy.rules` never leaks
+/// into those sets.
+fn load_policy_rules_sync(rules_dir: &std::path::Path) -> RuleSet {
+    let path = rules_dir.join(POLICY_RULES_FILE);
+    if !path.exists() {
+        return RuleSet::default();
+    }
+    match RuleSet::from_file(&path) {
+        Ok(rules) => rules,
+        Err(error) => {
+            warn!(error = %error, ?path, "failed to load policy rules");
+            RuleSet::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_policy_rules_sync;
+
+    #[test]
+    fn load_policy_rules_sync_reads_policy_file() {
+        let dir = tempfile::tempdir().expect("dir");
+        std::fs::write(dir.path().join("policy.rules"), "shell block contains secret\n")
+            .expect("write");
+        let rules = load_policy_rules_sync(dir.path());
+        assert_eq!(rules.len(), 1);
+    }
+
+    #[test]
+    fn load_policy_rules_sync_missing_is_empty() {
+        let dir = tempfile::tempdir().expect("dir");
+        assert!(load_policy_rules_sync(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn load_policy_rules_sync_does_not_load_default_rules() {
+        // Only the reserved policy.rules is read by this loader — default.rules
+        // must not bleed into the policy partition.
+        let dir = tempfile::tempdir().expect("dir");
+        std::fs::write(dir.path().join("default.rules"), "shell allow prefix cargo\n")
+            .expect("write");
+        assert!(load_policy_rules_sync(dir.path()).is_empty());
+    }
 }

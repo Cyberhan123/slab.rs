@@ -92,6 +92,52 @@ pub fn is_destructive_command(command: &str) -> bool {
         || lower.contains("del ")
 }
 
+/// Detects shell commands that reach the network. The acceptEdits envelope
+/// (WorkspaceWrite baseline) covers workspace writes + reads, not arbitrary
+/// egress, so a network-reaching command must still prompt even when it is
+/// non-destructive. Conservative denylist: a false positive only causes an extra
+/// approval prompt, never a hole.
+fn is_network_reaching_shell(command: &str) -> bool {
+    static NET_TOOLS: &[&str] = &[
+        "curl",
+        "wget",
+        "ssh",
+        "scp",
+        "sftp",
+        "rsync",
+        "nc",
+        "netcat",
+        "ftp",
+        "tftp",
+        "telnet",
+        "invoke-webrequest",
+        "iwr",
+    ];
+    let lower = command.to_ascii_lowercase();
+    for token in lower.split_whitespace() {
+        // Strip a leading path (/usr/bin/curl, C:\tools\wget.exe) so a qualified
+        // invocation still matches. Token-exact comparison keeps short names
+        // like `nc` from matching unrelated words.
+        let base = token.rsplit(['/', '\\']).next().unwrap_or(token);
+        let base = base.trim_end_matches(".exe");
+        if NET_TOOLS.contains(&base) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether a shell command is safe to auto-run under the acceptEdits
+/// (`ApproveForMe`) envelope without an approval prompt: it must be neither
+/// destructive nor network-reaching. This deliberately re-introduces a *scoped*
+/// shell auto-allow — the previous blanket safe-auto-allow was removed so every
+/// shell call surfaced an approval decision; acceptEdits scopes it to
+/// non-destructive, non-egress commands, and hard-deny safety + `Block` rules
+/// still apply upstream of this check.
+pub fn is_shell_autorun_safe(command: &str) -> bool {
+    !is_destructive_command(command) && !is_network_reaching_shell(command)
+}
+
 /// Detects sensitive filesystem paths (`.env`, `.pem`, `.ssh`, the slab DB,
 /// or paths mentioning `token`/`credential`). Reading or writing these always
 /// forces a human review, mirroring the legacy `approval_for_path` heuristic.
@@ -131,5 +177,25 @@ mod tests {
             SafetyDecision::Dangerous(_)
         ));
         assert!(matches!(CommandSafetyChecker::check("echo hello"), SafetyDecision::Safe));
+    }
+
+    #[test]
+    fn shell_autorun_safe_classifies_commands() {
+        // Non-destructive, non-network ⇒ safe to auto-run under acceptEdits.
+        assert!(is_shell_autorun_safe("git status"));
+        assert!(is_shell_autorun_safe("cargo build"));
+        assert!(is_shell_autorun_safe("ls -la"));
+        // Destructive ⇒ not safe (forces a prompt).
+        assert!(!is_shell_autorun_safe("rm -rf target"));
+        assert!(!is_shell_autorun_safe("git reset --hard"));
+        assert!(!is_shell_autorun_safe("Remove-Item file.txt"));
+        // Network-reaching ⇒ not safe, including path-qualified invocations.
+        assert!(!is_shell_autorun_safe("curl http://example.com"));
+        assert!(!is_shell_autorun_safe("wget https://example.com/file"));
+        assert!(!is_shell_autorun_safe("scp host:/x ."));
+        assert!(!is_shell_autorun_safe("/usr/bin/curl localhost"));
+        assert!(!is_shell_autorun_safe("C:\\tools\\wget.exe http://x"));
+        // Token-exact match: `nc` must not match unrelated words.
+        assert!(is_shell_autorun_safe("echo concurrency"));
     }
 }

@@ -169,7 +169,7 @@ export const assistant = {
     permission: {
       title: 'Permission mode',
       requestApproval: 'Request approval',
-      approveForMe: 'Approve for me (soon)',
+      approveForMe: 'Approve for me',
       fullControl: 'Full control',
       custom: 'Custom',
     },

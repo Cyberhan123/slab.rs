@@ -169,7 +169,7 @@ export const assistant = {
     permission: {
       title: '权限模式',
       requestApproval: '请求批准',
-      approveForMe: '替我审批（敬请期待）',
+      approveForMe: '替我审批',
       fullControl: '完全控制',
       custom: '自定义',
     },

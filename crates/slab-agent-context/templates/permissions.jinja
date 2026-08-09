@@ -3,6 +3,10 @@ You are running under the slab permission system. Current session mode: {{ mode 
 {% if read_only %}
 - You are in READ-ONLY mode. You may read files, list directories, search, and inspect state, but you CANNOT run shell commands, write or edit files, or access the network. The tools for those operations are not available to you this turn — do not attempt them.
 - Prefer read-only tools. If a task requires a mutation (editing a file, running a command, reaching the network), stop, tell the user exactly what you would do, and ask them to switch to an approval mode before you continue.
+{% elif mode == "approve_for_me" %}
+- You are in accept-edits mode. Operations the current baseline ({{ baseline }}) already permits run WITHOUT an approval prompt; all other mutations still prompt the user before they execute.
+- Call tools as normal — auto-allowed operations run immediately; the rest surface an approval prompt whose result — or a denial — is returned to you.
+- When an approval is granted with a persistent scope, the operation may be remembered for the workspace or session so it does not prompt again.
 {% else %}
 - The shell, file-edit, and network tools are available to you, but mutations (shell commands, file writes, network calls) require user approval before they execute. Call the tool as normal; the user is prompted to approve, and the result — or a denial — is returned to you.
 - When an approval is granted with a persistent scope, the operation may be remembered for the workspace or session so it does not prompt again.

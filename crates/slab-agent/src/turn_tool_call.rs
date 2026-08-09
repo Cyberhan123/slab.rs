@@ -756,6 +756,16 @@ async fn handle_tool_call(
         .or_else(|| infer_descriptor(&tool_call.name, &effective_args, context))
         .unwrap_or_else(|| slab_exec_policy::OperationDescriptor::read_only(tool_call.name.clone()))
         .with_tool_name(tool_call.name.clone());
+    // Backfill the workspace root when the tool did not set it (shell,
+    // web_search, …). The acceptEdits FileEdit-containment check needs it, and
+    // without it a remembered AlwaysInWorkspace approval for such a tool would
+    // leak into the global default.rules (the store falls back when the
+    // descriptor carries no workspace).
+    let descriptor = if descriptor.workspace_root.is_none() {
+        descriptor.with_workspace(workspace_root_of(context).map(std::path::PathBuf::from))
+    } else {
+        descriptor
+    };
     let decision = context.exec_policy.evaluate(context.thread_id, &descriptor).await;
     let approval_request = match decision {
         slab_exec_policy::ExecDecision::Allow => None,

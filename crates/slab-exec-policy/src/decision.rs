@@ -21,8 +21,10 @@ pub enum PermissionMode {
     /// Prompt for command-line / file-edit / network operations.
     #[default]
     RequestApproval,
-    /// Stub: not yet implemented (AI-driven auto-approval). Treated as
-    /// [`PermissionMode::RequestApproval`] until wired.
+    /// acceptEdits semantics: auto-allow what the active [`PermissionBaseline`]
+    /// already permits (workspace file edits + non-destructive shell under
+    /// `WorkspaceWrite`; reads under `ReadOnly`), prompt the rest. Hard-deny
+    /// safety and `Block` rules still apply.
     ApproveForMe,
     /// Run everything (hard-deny safety patterns still apply).
     FullControl,
@@ -32,12 +34,12 @@ pub enum PermissionMode {
 }
 
 impl PermissionMode {
-    /// Effective mode after resolving the `ApproveForMe` stub.
+    /// Effective mode after resolving any stub. `ApproveForMe` is no longer a
+    /// stub — it now carries acceptEdits semantics (auto-allow what the active
+    /// baseline permits, prompt the rest), so this is the identity. Retained as
+    /// a chokepoint in case a future mode needs pre-resolution.
     pub fn effective(self) -> Self {
-        match self {
-            Self::ApproveForMe => Self::RequestApproval,
-            other => other,
-        }
+        self
     }
 }
 

@@ -108,7 +108,7 @@ export type ReasoningEffort = "off" | "low" | "medium" | "high" | "xhigh"
 
 export type ApprovalPolicy = "never" | "on-request" | "on-failure" | "untrusted"
 
-/** Per-session permission mode. `approve_for_me` is a stub (treated as `request_approval`). */
+/** Per-session permission mode. `approve_for_me` = acceptEdits: auto-allow what the baseline permits, prompt the rest. */
 export type PermissionMode =
   | "request_approval"
   | "approve_for_me"
