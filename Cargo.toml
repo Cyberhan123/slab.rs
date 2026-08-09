@@ -41,6 +41,7 @@ members = [
     "crates/slab-ggml-sys",
     "crates/slab-hub",
     "crates/slab-sandboxing",
+    "crates/slab-windows-sandbox",
     "crates/slab-file",
     "crates/slab-git",
     "crates/slab-shell-command",
@@ -51,6 +52,7 @@ members = [
     "crates/slab-apply-patch",
     "crates/slab-exec-policy",
     "bin/slab-python-runtime",
+    "bin/slab-sandbox-helper",
 ]
 
 exclude = ["packages"]
@@ -103,6 +105,7 @@ slab-subtitle = { path = "./crates/slab-subtitle", package = "slab-subtitle", ve
 slab-ggml-sys = { path = "./crates/slab-ggml-sys", package = "slab-ggml-sys", version = "0.1.0" }
 slab-ggml = { path = "./crates/slab-ggml", package = "slab-ggml", version = "0.1.0" }
 slab-sandboxing = { path = "./crates/slab-sandboxing", package = "slab-sandboxing", version = "0.1.0" }
+slab-windows-sandbox = { path = "./crates/slab-windows-sandbox", package = "slab-windows-sandbox", version = "0.1.0" }
 slab-file = { path = "./crates/slab-file", package = "slab-file", version = "0.1.0" }
 slab-git = { path = "./crates/slab-git", package = "slab-git", version = "0.1.0" }
 slab-shell-command = { path = "./crates/slab-shell-command", package = "slab-shell-command", version = "0.1.0" }

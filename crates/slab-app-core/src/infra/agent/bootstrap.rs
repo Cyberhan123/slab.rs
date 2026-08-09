@@ -6,7 +6,9 @@ use slab_agent::{
     AgentControl, AgentRuntime, AgentThreadContext, PlanStorePort, ToolRouter, WorkspaceRef,
 };
 use slab_agent_tracing::{AgentTraceSink, BundleAgentTraceSink, NoopAgentTraceSink};
-use slab_sandboxing::{SandboxEnvironment, create_platform_driver};
+use slab_sandboxing::{
+    SandboxEnvironment, SandboxPermissions, SandboxPlatformConfig, create_platform_driver,
+};
 
 use crate::context::AppContext;
 use crate::domain::services::agent::AgentCore;
@@ -159,8 +161,23 @@ fn build_agent_control(
     let exec_baseline =
         super::exec_policy::baseline_from_config(ctx.pmid.config().agent.permissions.baseline);
     let sandbox_policy = exec_baseline.to_sandbox_policy();
+    // Mirror the platform-specific sandbox knobs (e.g. `windows_setup_required`) into the
+    // runtime `SandboxPermissions`. The fail-closed gate in `available_sandbox_driver` then
+    // blocks the shell when elevation is required but not yet provisioned.
+    let platform_cfg = &ctx.pmid.config().agent.permissions.platform;
+    let sandbox_permissions = SandboxPermissions {
+        platform: SandboxPlatformConfig {
+            windows_setup_required: platform_cfg.windows_setup_required,
+            ..SandboxPlatformConfig::default()
+        },
+        ..SandboxPermissions::default()
+    };
     let sandbox_driver = workspace_root.clone().and_then(|root| {
-        let env = SandboxEnvironment::new(Some(root), sandbox_policy);
+        let env = SandboxEnvironment::with_permissions(
+            Some(root),
+            sandbox_policy,
+            sandbox_permissions.clone(),
+        );
         match create_platform_driver(env) {
             Ok(driver) => available_sandbox_driver(driver),
             Err(error) => {

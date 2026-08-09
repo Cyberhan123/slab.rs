@@ -9,7 +9,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
 const targetDir = path.resolve(repoRoot, process.env.CARGO_TARGET_DIR ?? "target");
 const tauriBinariesDir = path.join(repoRoot, "bin", "slab-app", "src-tauri", "binaries");
-const sidecars = ["slab-server", "slab-runtime", "slab-js-runtime", "slab-python-runtime"];
+const sidecars = ["slab-server", "slab-runtime", "slab-js-runtime", "slab-python-runtime", "slab-sandbox-helper"];
 
 async function main() {
   const profile = parseProfile(process.argv.slice(2));

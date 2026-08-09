@@ -236,6 +236,13 @@
           "$ref": "#/$defs/AgentPermissionBaseline",
           "default": "workspace_write",
           "description": "Sandbox policy baseline used by `Custom` permission mode."
+        },
+        "platform": {
+          "$ref": "#/$defs/AgentSandboxPlatformConfig",
+          "default": {
+            "windows_setup_required": false
+          },
+          "description": "Platform-specific sandbox knobs. Mirrors `slab_sandboxing::SandboxPlatformConfig`\n(kept decoupled so this crate does not depend on the runtime sandbox crate); the host\nconverts it at the bootstrap boundary."
         }
       },
       "type": "object"
@@ -296,6 +303,16 @@
       },
       "type": "object"
     },
+    "AgentSandboxPlatformConfig": {
+      "description": "Platform-specific sandbox knobs, mapping 1:1 onto `slab_sandboxing::SandboxPlatformConfig`.\n`windows_setup_required` opts in to the elevated Windows helper for OS-enforced isolation\n(S2): when true and not yet provisioned, the shell tool is blocked (fail-closed). It is\nWindows-only and ignored on other platforms.",
+      "properties": {
+        "windows_setup_required": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "AgentSettingsConfig": {
       "description": "Agent-specific settings.",
       "properties": {
@@ -334,7 +351,10 @@
         "permissions": {
           "$ref": "#/$defs/AgentPermissionsConfig",
           "default": {
-            "baseline": "workspace_write"
+            "baseline": "workspace_write",
+            "platform": {
+              "windows_setup_required": false
+            }
           },
           "description": "Global permission baseline used by the agent's `Custom` permission mode.\nMaps onto the sandbox policy. Surfaced as a PMID setting."
         },
@@ -1909,7 +1929,10 @@
         },
         "offline": false,
         "permissions": {
-          "baseline": "workspace_write"
+          "baseline": "workspace_write",
+          "platform": {
+            "windows_setup_required": false
+          }
         },
         "runtime": {
           "limits": {

@@ -22,12 +22,7 @@ async-trait = { workspace = true }
 libc = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { workspace = true, features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_JobObjects",
-    "Win32_System_Threading",
-] }
+slab-windows-sandbox = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

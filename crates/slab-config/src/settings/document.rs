@@ -363,6 +363,11 @@ pub struct AgentPermissionsConfig {
     /// Sandbox policy baseline used by `Custom` permission mode.
     #[serde(default)]
     pub baseline: AgentPermissionBaseline,
+    /// Platform-specific sandbox knobs. Mirrors `slab_sandboxing::SandboxPlatformConfig`
+    /// (kept decoupled so this crate does not depend on the runtime sandbox crate); the host
+    /// converts it at the bootstrap boundary.
+    #[serde(default)]
+    pub platform: AgentSandboxPlatformConfig,
 }
 
 /// Sandbox policy baseline, mapping 1:1 onto `slab_sandboxing::SandboxPolicy`.
@@ -373,6 +378,16 @@ pub enum AgentPermissionBaseline {
     #[default]
     WorkspaceWrite,
     FullAccess,
+}
+
+/// Platform-specific sandbox knobs, mapping 1:1 onto `slab_sandboxing::SandboxPlatformConfig`.
+/// `windows_setup_required` opts in to the elevated Windows helper for OS-enforced isolation
+/// (S2): when true and not yet provisioned, the shell tool is blocked (fail-closed). It is
+/// Windows-only and ignored on other platforms.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct AgentSandboxPlatformConfig {
+    #[serde(default)]
+    pub windows_setup_required: bool,
 }
 
 /// Agent runtime budget / concurrency settings (ADR-013).

@@ -16061,6 +16061,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-sandbox-helper"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "slab-utils",
+ "slab-windows-sandbox",
+ "tokio",
+]
+
+[[package]]
 name = "slab-sandboxing"
 version = "0.1.0"
 dependencies = [
@@ -16071,11 +16081,11 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "serde_json",
+ "slab-windows-sandbox",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -16243,6 +16253,25 @@ dependencies = [
  "slab-utils",
  "sysinfo 0.39.6",
  "uuid",
+]
+
+[[package]]
+name = "slab-windows-sandbox"
+version = "0.1.0"
+dependencies = [
+ "dunce",
+ "globset",
+ "hex",
+ "ring",
+ "serde",
+ "serde_json",
+ "slab-utils",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

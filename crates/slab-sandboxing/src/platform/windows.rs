@@ -1,7 +1,15 @@
-use async_trait::async_trait;
-#[cfg(target_os = "windows")]
-use tracing::{debug, warn};
+//! Thin Windows shim. The real isolation logic lives in the `slab-windows-sandbox` sub-crate
+//! (which `slab-sandboxing` depends on, cfg-gated, downward only). This shim maps
+//! `SandboxedCommand` → the sub-crate's `SpawnRequest`, delegates the spawn, then feeds the
+//! returned `tokio::process::Child` + `kill_tree` closure into the shared `wait_for_child`.
+//!
+//! S2a: the executor is `JobOnlyExecutor` (Job-Object tree-cleanup + lexical guard — identical
+//! to the pre-S2 behavior). S2b swaps in the elevated Low-IL restricted-token executor.
 
+use async_trait::async_trait;
+
+#[cfg(target_os = "windows")]
+use crate::driver::{command_env, wait_for_child};
 #[cfg(target_os = "windows")]
 use crate::guard::validate_command;
 use crate::{
@@ -9,14 +17,26 @@ use crate::{
     SandboxIsolation, SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
     SetupKind,
 };
+#[cfg(target_os = "windows")]
+use slab_windows_sandbox::WindowsSandboxExecutor;
 
 pub struct WindowsSandboxDriver {
     env: SandboxEnvironment,
+    #[cfg(target_os = "windows")]
+    executor: slab_windows_sandbox::JobOnlyExecutor,
 }
 
 impl WindowsSandboxDriver {
     pub fn new(env: SandboxEnvironment) -> Self {
-        Self { env }
+        #[cfg(target_os = "windows")]
+        {
+            let setup_required = env.permissions.platform.windows_setup_required;
+            Self { env, executor: slab_windows_sandbox::JobOnlyExecutor::new(setup_required) }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Self { env }
+        }
     }
 }
 
@@ -35,85 +55,44 @@ impl SandboxDriver for WindowsSandboxDriver {
 
         #[cfg(target_os = "windows")]
         {
-            use std::process::Stdio;
-
-            use crate::driver::{command_env, wait_for_child};
-
+            // Lexical guard (defense-in-depth, bypassable) — unchanged from pre-S2.
             validate_command(&self.env, &cmd)?;
 
-            let program = cmd.argv.first().ok_or(SandboxError::EmptyCommand)?;
-            let mut command = tokio::process::Command::new(program);
-            command.args(&cmd.argv[1..]);
-            for (key, value) in command_env(&self.env, &cmd) {
-                command.env(key, value);
-            }
-            if let Some(ref cwd) = cmd.cwd {
-                command.current_dir(cwd);
-            }
-            command.kill_on_drop(true);
-            command.stdin(Stdio::null());
-            command.stdout(Stdio::piped());
-            command.stderr(Stdio::piped());
-
-            let spawned = command.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-            let job = JobHandle::new()?;
-            job.configure_kill_on_close()?;
-            let process_handle = spawned.raw_handle().ok_or_else(|| {
-                SandboxError::SetupFailed("spawned child has no process handle".to_string())
-            })?;
-            job.assign_process(process_handle as windows_sys::Win32::Foundation::HANDLE)?;
-
-            debug!(pid = spawned.id(), "spawned process in Windows Job Object");
-            // `wait_for_child` drops the job right after the direct child exits so
-            // `KILL_ON_JOB_CLOSE` tears down the whole tree; this is what releases
-            // the stdout/stderr pipes a backgrounded grandchild may be holding.
-            let kill_tree: Box<dyn FnOnce() + Send + 'static> = Box::new(move || drop(job));
-            let output =
-                wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone(), Some(kill_tree))
-                    .await?;
-            Ok(output)
+            let req = build_spawn_request(&self.env, &cmd);
+            let spawned = self.executor.spawn_job_only(&req).map_err(map_win_err)?;
+            // The shared output-capture/tree-kill loop owns the child; the executor's
+            // `kill_tree` closure (dropping the Job handle) fires after the child exits.
+            wait_for_child(spawned.child, cmd.timeout, cmd.output_sink.clone(), spawned.kill_tree)
+                .await
         }
     }
 
-    async fn prepare(&self) -> Result<SandboxSetupStatus, SandboxError> {
-        Ok(self.setup_status())
-    }
-
     fn capabilities(&self) -> SandboxCapabilities {
-        // HONEST reporting: on Windows today only the lexical `validate_command`
-        // guard runs (defense-in-depth, bypassable) plus a Job Object for tree
-        // cleanup. No OS mechanism enforces filesystem write containment or
-        // network blocking, so `filesystem`/`network` stay `false` and the
-        // isolation strength is `Lexical`. The real OS-enforced layer
-        // (restricted token + ACL + WFP) lands in later phases and will flip
-        // these to `OsEnforced`/`ElevatedAclTokenWfp`.
-        SandboxCapabilities {
-            platform: SandboxPlatform::Windows,
-            isolation: SandboxIsolation::Degraded,
-            filesystem: false,
-            network: false,
-            filesystem_isolation: IsolationStrength::Lexical,
-            network_isolation: IsolationStrength::Lexical,
-            process_cleanup: true,
-            setup_required: self.env.permissions.platform.windows_setup_required,
-            setup_kind: SetupKind::JobObject,
+        #[cfg(target_os = "windows")]
+        {
+            let snap = self.executor.capabilities();
+            capabilities_from_snapshot(&snap)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            SandboxCapabilities {
+                platform: SandboxPlatform::Windows,
+                isolation: SandboxIsolation::Unsupported,
+                ..SandboxCapabilities::default()
+            }
         }
     }
 
     fn setup_status(&self) -> SandboxSetupStatus {
         #[cfg(target_os = "windows")]
         {
-            if self.env.permissions.platform.windows_setup_required {
-                SandboxSetupStatus::degraded(
-                    "Windows elevated sandbox setup is required before full token, ACL, and firewall isolation.",
-                )
+            let snap = self.executor.capabilities();
+            if snap.provisioned {
+                SandboxSetupStatus::ready(snap.details)
             } else {
-                SandboxSetupStatus::degraded(
-                    "Windows Job Object cleanup and Slab policy guard are active; elevated token, ACL, and firewall setup has not been requested.",
-                )
+                SandboxSetupStatus::degraded(snap.details)
             }
         }
-
         #[cfg(not(target_os = "windows"))]
         {
             SandboxSetupStatus::unavailable("Windows sandbox is only available on Windows")
@@ -122,74 +101,77 @@ impl SandboxDriver for WindowsSandboxDriver {
 }
 
 #[cfg(target_os = "windows")]
-struct JobHandle(windows_sys::Win32::Foundation::HANDLE);
+fn build_spawn_request(
+    env: &SandboxEnvironment,
+    cmd: &SandboxedCommand,
+) -> slab_windows_sandbox::SpawnRequest {
+    use crate::policy::NetworkPolicy;
 
-#[cfg(target_os = "windows")]
-unsafe impl Send for JobHandle {}
-
-#[cfg(target_os = "windows")]
-impl JobHandle {
-    fn new() -> Result<Self, SandboxError> {
-        use windows_sys::Win32::System::JobObjects::CreateJobObjectW;
-
-        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-        if handle.is_null() {
-            return Err(SandboxError::SetupFailed(format!(
-                "CreateJobObjectW failed: {}",
-                std::io::Error::last_os_error()
-            )));
-        }
-        Ok(Self(handle))
+    let mut writable_roots = env.permissions.writable_roots.clone();
+    if let Some(root) = &env.workspace_root {
+        writable_roots.push(root.clone());
     }
-
-    fn configure_kill_on_close(&self) -> Result<(), SandboxError> {
-        use windows_sys::Win32::System::JobObjects::{
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JobObjectExtendedLimitInformation, SetInformationJobObject,
-        };
-
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let ok = unsafe {
-            SetInformationJobObject(
-                self.0,
-                JobObjectExtendedLimitInformation,
-                &mut info as *mut _ as *mut _,
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-        };
-        if ok == 0 {
-            return Err(SandboxError::SetupFailed(format!(
-                "SetInformationJobObject failed: {}",
-                std::io::Error::last_os_error()
-            )));
-        }
-        Ok(())
+    slab_windows_sandbox::SpawnRequest {
+        argv: cmd.argv.clone(),
+        env: command_env(env, cmd),
+        cwd: cmd.cwd.clone(),
+        denied_paths: env.permissions.denied_paths.clone(),
+        denied_globs: env.permissions.denied_globs.clone(),
+        writable_roots,
+        workspace_root: env.workspace_root.clone(),
+        network_blocked: matches!(env.permissions.network, NetworkPolicy::Blocked),
     }
+}
 
-    fn assign_process(
-        &self,
-        process: windows_sys::Win32::Foundation::HANDLE,
-    ) -> Result<(), SandboxError> {
-        use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+/// Translate the sub-crate's decoupled snapshot into slab-sandboxing's honest capability report.
+#[cfg(target_os = "windows")]
+fn capabilities_from_snapshot(
+    snap: &slab_windows_sandbox::CapabilitySnapshot,
+) -> SandboxCapabilities {
+    use slab_windows_sandbox::{FsIsolationStrength, WindowsSetupKind};
 
-        let ok = unsafe { AssignProcessToJobObject(self.0, process) };
-        if ok == 0 {
-            let error = std::io::Error::last_os_error();
-            warn!(%error, "failed to assign process to Windows Job Object");
-            return Err(SandboxError::SetupFailed(format!(
-                "AssignProcessToJobObject failed: {error}"
-            )));
-        }
-        Ok(())
+    let (filesystem_isolation, filesystem) = match snap.filesystem_isolation {
+        FsIsolationStrength::OsEnforced => (IsolationStrength::OsEnforced, true),
+        FsIsolationStrength::Lexical => (IsolationStrength::Lexical, false),
+        FsIsolationStrength::None => (IsolationStrength::None, false),
+    };
+    let setup_kind = match snap.setup_kind {
+        WindowsSetupKind::None => SetupKind::None,
+        WindowsSetupKind::JobObject => SetupKind::JobObject,
+        WindowsSetupKind::ElevatedAclToken => SetupKind::ElevatedAclToken,
+        WindowsSetupKind::ElevatedAclTokenWfp => SetupKind::ElevatedAclTokenWfp,
+    };
+    // S2 reports `Elevated` once real OS-enforced fs isolation is provisioned (S2b). Network
+    // stays lexical until WFP lands (S3).
+    let isolation = if snap.provisioned
+        && matches!(snap.filesystem_isolation, FsIsolationStrength::OsEnforced)
+    {
+        SandboxIsolation::Elevated
+    } else {
+        SandboxIsolation::Degraded
+    };
+    SandboxCapabilities {
+        platform: SandboxPlatform::Windows,
+        isolation,
+        filesystem,
+        network: false,
+        network_isolation: IsolationStrength::Lexical,
+        process_cleanup: true,
+        setup_required: snap.setup_required,
+        filesystem_isolation,
+        setup_kind,
     }
 }
 
 #[cfg(target_os = "windows")]
-impl Drop for JobHandle {
-    fn drop(&mut self) {
-        unsafe {
-            windows_sys::Win32::Foundation::CloseHandle(self.0);
-        }
+fn map_win_err(e: slab_windows_sandbox::WindowsSandboxError) -> SandboxError {
+    use slab_windows_sandbox::WindowsSandboxError;
+    match e {
+        WindowsSandboxError::EmptyCommand => SandboxError::EmptyCommand,
+        WindowsSandboxError::SpawnFailed(s) => SandboxError::SpawnFailed(s),
+        WindowsSandboxError::SetupFailed(s) => SandboxError::SetupFailed(s),
+        WindowsSandboxError::UnsupportedPlatform => SandboxError::UnsupportedPlatform,
+        WindowsSandboxError::PermissionDenied(s) => SandboxError::PermissionDenied(s),
+        other => SandboxError::SetupFailed(other.to_string()),
     }
 }

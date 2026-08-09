@@ -1,0 +1,22 @@
+[package]
+name = "slab-sandbox-helper"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "slab-sandbox-helper"
+path = "src/main.rs"
+doctest = false
+
+[dependencies]
+clap = { workspace = true }
+slab-utils = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+slab-windows-sandbox = { workspace = true }
+tokio = { workspace = true }
