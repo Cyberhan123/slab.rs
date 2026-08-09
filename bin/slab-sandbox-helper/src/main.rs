@@ -53,8 +53,8 @@ fn run(cli: Cli) {
             std::process::exit(code);
         }
         Some(Command::Serve { pipe }) => {
-            // The long-lived elevated daemon. Runs until killed. S2b1 handles Ping/Pong only;
-            // S2b2 adds the real Low-IL restricted-token Spawn/Kill handling.
+            // The long-lived elevated daemon. Runs until killed. S2b1 handled Ping/Pong only;
+            // S2b2 drives Provision/Spawn/Kill for the real Low-IL restricted-token child.
             let rt = match tokio::runtime::Runtime::new() {
                 Ok(rt) => rt,
                 Err(e) => {
@@ -62,8 +62,11 @@ fn run(cli: Cli) {
                     std::process::exit(1);
                 }
             };
+            let app_home = slab_utils::app_home::app_home_dir();
+            let key_path = app_home.join("sandbox-helper.key");
+            let marker_path = app_home.join("sandbox-marker.json");
             let code = rt.block_on(async {
-                match slab_windows_sandbox::run_daemon(pipe).await {
+                match slab_windows_sandbox::run_daemon(pipe, key_path, marker_path).await {
                     Ok(()) => 0,
                     Err(e) => {
                         eprintln!("slab-sandbox-helper daemon exited: {e}");

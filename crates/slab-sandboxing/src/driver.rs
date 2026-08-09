@@ -369,7 +369,7 @@ pub(crate) async fn wait_for_child(
 
 /// Await a read task for at most `grace`; on timeout abort it. The shared
 /// accumulator buffer retains whatever was read before the abort.
-async fn drain_with_grace(
+pub(crate) async fn drain_with_grace(
     mut handle: tokio::task::JoinHandle<std::io::Result<()>>,
     grace: Duration,
 ) {
@@ -377,6 +377,62 @@ async fn drain_with_grace(
         handle.abort();
         let _ = (&mut handle).await;
     }
+}
+
+/// Elevated-path sibling of [`wait_for_child`]: the child lives in the elevated daemon, so bytes
+/// arrive in pre-filled `Arc<Mutex<Vec<u8>>>` buffers and the exit is an `exit_future`. Mirrors
+/// `wait_for_child`'s semantics: on timeout, fire `kill_tree` (drops the daemon connection ⇒
+/// `KILL_ON_JOB_CLOSE`) then best-effort await; fire `kill_tree` before the final buffer snapshot.
+/// `wait_for_child` itself stays untouched (still the Job-only path).
+#[cfg(target_os = "windows")]
+pub(crate) async fn wait_for_elevated(
+    run: slab_windows_sandbox::ElevatedRun,
+    timeout: Option<Duration>,
+) -> Result<SandboxedOutput, SandboxError> {
+    let slab_windows_sandbox::ElevatedRun { stdout_buf, stderr_buf, mut exit_future, kill_tree } =
+        run;
+    let mut kill_tree = kill_tree;
+
+    let (exit_code, timed_out) = match timeout {
+        Some(t) => match tokio::time::timeout(t, &mut exit_future).await {
+            Ok(Ok(elev)) => (elev.exit_code, elev.timed_out),
+            Ok(Err(_)) => {
+                if let Some(k) = kill_tree.take() {
+                    k();
+                }
+                return Err(SandboxError::SpawnFailed("elevated exit stream errored".into()));
+            }
+            Err(_) => {
+                // Timed out: drop the daemon connection (kills the Job), best-effort await Exited.
+                if let Some(k) = kill_tree.take() {
+                    k();
+                }
+                match tokio::time::timeout(Duration::from_secs(3), &mut exit_future).await {
+                    Ok(Ok(elev)) => (elev.exit_code, true),
+                    _ => (1, true),
+                }
+            }
+        },
+        None => {
+            let elev = exit_future.await.map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
+            (elev.exit_code, elev.timed_out)
+        }
+    };
+
+    // Free the daemon connection now that we have the exit (the child already exited in the
+    // non-timeout path; in the timeout path it was already fired above).
+    if let Some(k) = kill_tree.take() {
+        k();
+    }
+
+    let stdout = stdout_buf.lock().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?.clone();
+    let mut stderr =
+        stderr_buf.lock().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?.clone();
+    if timed_out && stderr.is_empty() {
+        stderr.extend_from_slice(b"command timed out");
+    }
+
+    Ok(SandboxedOutput { stdout, stderr, exit_code, timed_out })
 }
 
 /// Read a child pipe to EOF. When a sink is present, forward each chunk

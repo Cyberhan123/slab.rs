@@ -98,7 +98,7 @@ pub struct HelperResult {
 }
 
 /// Persisted record of a successful provisioning — the marker used for drift detection (S2c).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SetupMarker {
     pub schema: u32,
     pub created_at_unix: i64,

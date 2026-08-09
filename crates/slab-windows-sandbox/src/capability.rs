@@ -63,4 +63,31 @@ impl CapabilitySnapshot {
             details: details.to_string(),
         }
     }
+
+    /// Elevated setup requested but not yet provisioned — fail-closed (degraded ⇒ gate blocks).
+    pub fn degraded_required() -> Self {
+        Self {
+            filesystem_isolation: FsIsolationStrength::Lexical,
+            setup_kind: WindowsSetupKind::ElevatedAclToken,
+            setup_required: true,
+            provisioned: false,
+            degraded: true,
+            details: "Windows elevated sandbox setup required but not yet provisioned \
+                      (shell blocked, fail-closed)."
+                .to_string(),
+        }
+    }
+
+    /// Real OS-enforced isolation: Low-IL restricted token + integrity-label ACLs provisioned.
+    pub fn elevated() -> Self {
+        Self {
+            filesystem_isolation: FsIsolationStrength::OsEnforced,
+            setup_kind: WindowsSetupKind::ElevatedAclToken,
+            setup_required: true,
+            provisioned: true,
+            degraded: false,
+            details: "Windows Low-IL restricted token + integrity-label ACLs are OS-enforced."
+                .to_string(),
+        }
+    }
 }

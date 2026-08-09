@@ -8,10 +8,34 @@ use serde::{Deserialize, Serialize};
 
 use crate::capability::{FsIsolationStrength, WindowsSetupKind};
 use crate::ipc::SetupMarker;
+use crate::pipe::OutputStreamKind;
+
+/// Inputs the executor needs to provision (the shim has the `SandboxEnvironment`; it builds this
+/// and hands it to `prepare()`). Carries the session-stable path set the daemon lowers to Low /
+/// denies, plus the runtime paths (helper exe, DPAPI key, IPC dir, marker).
+#[derive(Clone)]
+pub struct PrepareContext {
+    pub workspace_root: Option<PathBuf>,
+    pub denied_paths: Vec<PathBuf>,
+    pub denied_globs: Vec<String>,
+    pub writable_roots: Vec<PathBuf>,
+    pub network_blocked: bool,
+    pub helper_exe: PathBuf,
+    pub key_path: PathBuf,
+    pub ipc_dir: PathBuf,
+    pub marker_path: PathBuf,
+}
+
+/// The sub-crate's mirror of `slab_sandboxing::OutputSink`. This crate MUST NOT depend on
+/// `slab_sandboxing`, so the elevated relay accepts this erased trait; the shim wraps its own
+/// `OutputSink` in a 5-line adapter (see `SinkAdapter` in `platform/windows.rs`).
+pub trait ErasedOutputSink: Send + Sync {
+    fn on_output(&self, stream: OutputStreamKind, delta: &str);
+}
 
 /// A child process the sandbox should spawn, with the resolved policy attached. The shim in
 /// `slab_sandboxing::platform::windows` builds this from `SandboxEnvironment` + `SandboxedCommand`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpawnRequest {
     pub argv: Vec<String>,
     pub env: HashMap<String, String>,

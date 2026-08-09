@@ -11,6 +11,8 @@
 #![cfg_attr(not(target_os = "windows"), allow(unused_imports, clippy::all))]
 
 #[cfg(target_os = "windows")]
+mod acl;
+#[cfg(target_os = "windows")]
 mod capability;
 #[cfg(target_os = "windows")]
 mod creds;
@@ -36,6 +38,8 @@ mod marker;
 mod pipe;
 #[cfg(target_os = "windows")]
 mod request;
+#[cfg(target_os = "windows")]
+mod token;
 
 #[cfg(target_os = "windows")]
 pub use capability::{CapabilitySnapshot, FsIsolationStrength, WindowsSetupKind};
@@ -44,11 +48,13 @@ pub use creds::{key_fingerprint, load_or_create_key};
 #[cfg(target_os = "windows")]
 pub use daemon::run_daemon;
 #[cfg(target_os = "windows")]
-pub use elevation::{ElevatedHelper, Elevator, HelperLaunchError, ShellElevator, elevate};
+pub use elevation::{
+    ElevatedHelper, Elevator, HelperLaunchError, ShellElevator, elevate, launch_daemon_direct,
+};
 #[cfg(target_os = "windows")]
 pub use error::WindowsSandboxError;
 #[cfg(target_os = "windows")]
-pub use executor::{JobOnlyExecutor, WindowsSandboxExecutor};
+pub use executor::{ElevatedAclTokenExecutor, JobOnlyExecutor, WindowsSandboxExecutor};
 #[cfg(target_os = "windows")]
 pub use helper::run_payload;
 #[cfg(target_os = "windows")]
@@ -60,10 +66,11 @@ pub use ipc::{
 #[cfg(target_os = "windows")]
 pub use marker::{has_drift, read_marker, write_marker};
 #[cfg(target_os = "windows")]
-pub use pipe::{PipeFrame, ping, ping_with_timeout};
+pub use pipe::{OutputStreamKind, PipeFrame, ping, ping_with_timeout};
 #[cfg(target_os = "windows")]
 pub use request::{
-    ElevatedExit, ElevatedRun, ProvisionReport, SetupMode, SpawnRequest, SpawnedChild,
+    ElevatedExit, ElevatedRun, ErasedOutputSink, PrepareContext, ProvisionReport, SetupMode,
+    SpawnRequest, SpawnedChild,
 };
 
 /// Current IPC/marker schema version. Bumping invalidates older payloads/markers (drift).

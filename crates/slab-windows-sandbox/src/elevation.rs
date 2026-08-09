@@ -32,6 +32,13 @@ pub trait Elevator: Send + Sync {
     /// Launch `helper_exe` with `--payload <payload_path>` elevated; return the helper exit code
     /// (0 = success). Distinguish decline/timeout via [`HelperLaunchError`].
     fn run(&self, helper_exe: &Path, payload_path: &Path) -> Result<i32, HelperLaunchError>;
+
+    /// Launch the long-lived daemon (`helper_exe --serve --pipe <pipe_name>`) elevated and return
+    /// once it has been STARTED — does NOT wait for exit (the daemon runs until killed; liveness is
+    /// confirmed later by pinging the named pipe). Default: not supported (stub elevators).
+    fn run_serve(&self, _helper_exe: &Path, _pipe_name: &str) -> Result<(), HelperLaunchError> {
+        Err(HelperLaunchError::Failed("run_serve not supported by this elevator".into()))
+    }
 }
 
 /// Real UAC elevation via `ShellExecuteExW`. Default timeout 60s.
@@ -142,6 +149,87 @@ impl Elevator for ShellElevator {
         }
         Ok(exit_code)
     }
+
+    fn run_serve(&self, helper_exe: &Path, pipe_name: &str) -> Result<(), HelperLaunchError> {
+        use windows_sys::Win32::Foundation::GetLastError;
+        use windows_sys::Win32::UI::Shell::{
+            SEE_MASK_FLAG_NO_UI, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+        };
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
+
+        let verb = wide("runas");
+        let file = wide(&helper_exe.to_string_lossy());
+        let params = wide(&format!("--serve --pipe \"{pipe_name}\""));
+
+        // SAFETY: zeroed then filled; wide strings own their NUL-terminated buffers for the call.
+        let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+        info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+        info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+        info.lpVerb = verb.as_ptr();
+        info.lpFile = file.as_ptr();
+        info.lpParameters = params.as_ptr();
+        info.nShow = SW_HIDE;
+
+        let ok = unsafe { ShellExecuteExW(&mut info) };
+        if ok == 0 {
+            let last = unsafe { GetLastError() };
+            if last == ERROR_CANCELLED {
+                return Err(HelperLaunchError::Declined);
+            }
+            return Err(HelperLaunchError::Failed(format!(
+                "ShellExecuteExW(--serve) failed (last error {last})"
+            )));
+        }
+        // The daemon is long-lived: do NOT wait. Close the handle (no Job, so closing does not kill
+        // it); liveness is confirmed later by pinging the pipe. The daemon survives slab-server
+        // restart because nothing tracks/joins it.
+        if !info.hProcess.is_null() {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(info.hProcess);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Launch the daemon directly (no UAC) when the orchestrator is ALREADY elevated. The daemon
+/// inherits this process's elevated token. As with [`ShellElevator::run_serve`], the handles are
+/// closed (not tracked) so the daemon outlives the orchestrator.
+pub fn launch_daemon_direct(helper_exe: &Path, pipe_name: &str) -> Result<(), WindowsSandboxError> {
+    use crate::error::win32_ctx;
+    use windows_sys::Win32::System::Threading::{
+        CREATE_NO_WINDOW, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
+    };
+
+    let program = wide(&helper_exe.to_string_lossy());
+    let cmd = format!("--serve --pipe \"{pipe_name}\"");
+    let mut cmd_w = wide(&cmd);
+
+    let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
+    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+
+    let ok = unsafe {
+        CreateProcessW(
+            program.as_ptr(),
+            cmd_w.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            CREATE_NO_WINDOW,
+            std::ptr::null(),
+            std::ptr::null(),
+            &si,
+            &mut pi,
+        )
+    };
+    win32_ctx(ok, "CreateProcessW(daemon --serve)")?;
+    // Close both handles; the daemon keeps running (no Job join).
+    unsafe {
+        windows_sys::Win32::Foundation::CloseHandle(pi.hProcess);
+        windows_sys::Win32::Foundation::CloseHandle(pi.hThread);
+    }
+    Ok(())
 }
 
 /// Run a full signed round-trip: write payload, elevate, read+verify result.
@@ -322,5 +410,13 @@ mod tests {
             matches!(err, WindowsSandboxError::Ipc(crate::ipc::FileFramingError::Hmac)),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn run_serve_default_is_unsupported() {
+        // The Stub elevator does not override run_serve; the trait default must fail closed.
+        let stub = Stub::Exit(0);
+        let err = stub.run_serve(Path::new("helper.exe"), r"\\.\pipe\x").unwrap_err();
+        assert!(matches!(err, HelperLaunchError::Failed(_)), "{err:?}");
     }
 }

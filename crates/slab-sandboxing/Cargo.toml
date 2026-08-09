@@ -23,6 +23,7 @@ libc = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 slab-windows-sandbox = { workspace = true }
+slab-utils = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
