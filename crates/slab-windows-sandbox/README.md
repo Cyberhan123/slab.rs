@@ -14,6 +14,12 @@ child processes via an elevated helper (`slab-sandbox-helper`), opt-in through U
   `ShellExecuteExW("runas")`).
 - Owns the `SpawnedChild` seam: returns a raw `tokio::process::Child` + `kill_tree` closure to
   `slab-sandboxing`, which feeds it into the **shared** `wait_for_child` output loop.
+- **ConPTY (S6a, opt-in):** `conpty.rs` can spawn the elevated child under a Windows pseudoconsole
+  (`CreatePseudoConsole` + `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` combined with the AppContainer
+  `SECURITY_CAPABILITIES` attribute) for terminal-aware output (ANSI/TUI fidelity) instead of piped
+  stdio. Default off (`windows_use_conpty` config knob); the piped path remains the safe default.
+  The AppContainer+ConPTY combination is not a documented Win32 scenario and must be empirically
+  validated via the gated `os_conpty_*` test before it is relied on; fail-closed on attach failure.
 
 ## Hard boundaries
 
@@ -40,9 +46,11 @@ admin shell.
 ## Status
 
 Part of the slab permission + sandbox hardening mega-plan (Track S). **S2 (Low-IL restricted token +
-ACL filesystem isolation) and S3 (AppContainer + WFP network isolation) are implemented.** See
-`~/.claude/plans/delightful-coalescing-diffie.md` (Track S), the S2 sub-plan
-(`slab-mega-plan-snuggly-beacon.md`), and the S3 sub-plan (`slab-mega-plan-hashed-fountain.md`).
+ACL filesystem isolation), S3 (AppContainer + WFP network isolation), and S6a (opt-in ConPTY
+pseudoconsole) are implemented.** See `~/.claude/plans/delightful-coalescing-diffie.md` (Track S),
+the S2 sub-plan (`slab-mega-plan-snuggly-beacon.md`), the S3 sub-plan
+(`slab-mega-plan-hashed-fountain.md`), and the S5/S6 plan
+(`ultracode-slab-unified-crystal.md`).
 
 Honest capability once provisioned: `filesystem=true (OsEnforced)`,
 `network=true (OsEnforced)`, `setup_kind=ElevatedAclTokenWfp`, `isolation=Full`.
