@@ -104,6 +104,9 @@ pub struct SetupMarker {
     pub created_at_unix: i64,
     pub setup_kind: WindowsSetupKind,
     pub filesystem_isolation: FsIsolationStrength,
+    /// Honest network-isolation strength (S3). `None` for S2-only markers (wire-compatible default).
+    #[serde(default)]
+    pub network_isolation: FsIsolationStrength,
     pub key_fingerprint: String,
     #[serde(default)]
     pub denied_paths: Vec<PathBuf>,

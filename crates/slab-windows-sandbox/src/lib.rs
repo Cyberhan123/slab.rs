@@ -13,6 +13,8 @@
 #[cfg(target_os = "windows")]
 mod acl;
 #[cfg(target_os = "windows")]
+mod appcontainer;
+#[cfg(target_os = "windows")]
 mod capability;
 #[cfg(target_os = "windows")]
 mod creds;
@@ -40,6 +42,8 @@ mod pipe;
 mod request;
 #[cfg(target_os = "windows")]
 mod token;
+#[cfg(target_os = "windows")]
+mod wfp;
 
 #[cfg(target_os = "windows")]
 pub use capability::{CapabilitySnapshot, FsIsolationStrength, WindowsSetupKind};
@@ -73,5 +77,6 @@ pub use request::{
     SpawnRequest, SpawnedChild,
 };
 
-/// Current IPC/marker schema version. Bumping invalidates older payloads/markers (drift).
-pub const SCHEMA_VERSION: u32 = 1;
+/// Current IPC/marker schema version. Bumping invalidates older payloads/markers (drift). S3 → 2
+/// (adds `network_isolation` to `SetupMarker`; stale v1 markers re-provision via `has_drift`).
+pub const SCHEMA_VERSION: u32 = 2;

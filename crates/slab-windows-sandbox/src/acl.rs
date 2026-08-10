@@ -26,8 +26,8 @@ use std::path::Path;
 
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Authorization::{
-    BuildTrusteeWithSidW, DENY_ACCESS, EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, SE_FILE_OBJECT,
-    SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_W,
+    BuildTrusteeWithSidW, DENY_ACCESS, EXPLICIT_ACCESS_W, GRANT_ACCESS, GetNamedSecurityInfoW,
+    SE_FILE_OBJECT, SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
     ACE_HEADER, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, AclSizeInformation, AddMandatoryAce,
@@ -219,6 +219,85 @@ pub(crate) fn deny_write_low_sid(path: &Path) -> Result<(), WindowsSandboxError>
     if err != 0 {
         return Err(WindowsSandboxError::WindowsApi(format!(
             "SetNamedSecurityInfoW(DACL) failed: code {err}"
+        )));
+    }
+    Ok(())
+}
+
+/// Grant the AppContainer package SID write access on `path` (S3). AppContainer processes must be
+/// explicitly granted their package SID in the DACL (in addition to passing the Low-IL SACL
+/// write-up check) before they can create/edit files. MERGED into the existing DACL so the owner's
+/// access is preserved. Additive to [`lower_to_low_integrity`] (SACL) — run both on `writable_roots`.
+pub(crate) fn grant_appcontainer_write(
+    path: &Path,
+    package_sid: PSID,
+) -> Result<(), WindowsSandboxError> {
+    if !path.exists() {
+        std::fs::create_dir_all(path)
+            .map_err(|e| WindowsSandboxError::SetupFailed(format!("create_dir_all: {e}")))?;
+    }
+
+    // Read the existing DACL so the grant-ACE merges in without stripping the owner's access.
+    let wide = wide_path(path);
+    let mut existing_dacl: *mut ACL = std::ptr::null_mut();
+    let mut existing_sd: *mut c_void = std::ptr::null_mut();
+    let err = unsafe {
+        GetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut existing_dacl,
+            std::ptr::null_mut(),
+            &mut existing_sd,
+        )
+    };
+    if err != 0 {
+        return Err(WindowsSandboxError::WindowsApi(format!(
+            "GetNamedSecurityInfoW(DACL) failed: code {err}"
+        )));
+    }
+
+    // SID-based trustee + inheritable GRANT_ACCESS entry with the write mask.
+    let mut trustee: TRUSTEE_W = unsafe { zeroed() };
+    unsafe { BuildTrusteeWithSidW(&mut trustee, package_sid) };
+    let ea = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: DENY_WRITE_MASK,
+        grfAccessMode: GRANT_ACCESS,
+        grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+        Trustee: trustee,
+    };
+
+    let old_acl = if existing_dacl.is_null() { std::ptr::null() } else { existing_dacl };
+    let mut new_dacl: *mut ACL = std::ptr::null_mut();
+    let err = unsafe { SetEntriesInAclW(1, &ea, old_acl, &mut new_dacl) };
+    unsafe {
+        if !existing_sd.is_null() {
+            LocalFree(existing_sd as _);
+        }
+    }
+    if err != 0 {
+        return Err(WindowsSandboxError::WindowsApi(format!(
+            "SetEntriesInAclW failed: code {err}"
+        )));
+    }
+
+    let err = unsafe {
+        SetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            new_dacl,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { LocalFree(new_dacl as _) };
+    if err != 0 {
+        return Err(WindowsSandboxError::WindowsApi(format!(
+            "SetNamedSecurityInfoW(DACL grant) failed: code {err}"
         )));
     }
     Ok(())
@@ -428,5 +507,16 @@ mod tests {
         let target = dir.path().join("protected");
         std::fs::create_dir_all(&target).unwrap();
         deny_write_low_sid(&target).expect("apply deny-write-Low ACE");
+    }
+
+    #[test]
+    fn grant_appcontainer_write_applies() {
+        // The APPLY call sequence (GetNamedSecurityInfoW + BuildTrusteeWithSidW + SetEntriesInAclW
+        // + SetNamedSecurityInfoW) returning Ok proves the constructed grant-ACE merges cleanly.
+        let sid = crate::appcontainer::PackageSid::from_fingerprint("test-grant").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("workspace");
+        std::fs::create_dir_all(&target).unwrap();
+        grant_appcontainer_write(&target, sid.as_psid()).expect("grant AppContainer package SID");
     }
 }

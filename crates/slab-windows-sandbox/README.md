@@ -7,8 +7,11 @@ child processes via an elevated helper (`slab-sandbox-helper`), opt-in through U
 ## Role
 
 - Holds the Windows-specific isolation mechanism: Job Object tree-cleanup, restricted token
-  (`CreateRestrictedToken` + Low integrity label), SACL mandatory-label ACEs, and the elevated
-  helper IPC (HMAC-signed payload/result files, `ShellExecuteExW("runas")`).
+  (`CreateRestrictedToken` + Low integrity label), SACL mandatory-label ACEs, **AppContainer
+  network isolation** (S3 — the child runs as an AppContainer without `internetClient`, so the OS
+  default WFP rule blocks outbound traffic, plus a session-scoped user-mode WFP filter keyed on the
+  package SID), and the elevated helper IPC (HMAC-signed payload/result files,
+  `ShellExecuteExW("runas")`).
 - Owns the `SpawnedChild` seam: returns a raw `tokio::process::Child` + `kill_tree` closure to
   `slab-sandboxing`, which feeds it into the **shared** `wait_for_child` output loop.
 
@@ -36,5 +39,10 @@ admin shell.
 
 ## Status
 
-Part of the slab permission + sandbox hardening mega-plan (Track S). See
-`~/.claude/plans/delightful-coalescing-diffie.md` (S2 = Track S §177-186) and the S2 sub-plan.
+Part of the slab permission + sandbox hardening mega-plan (Track S). **S2 (Low-IL restricted token +
+ACL filesystem isolation) and S3 (AppContainer + WFP network isolation) are implemented.** See
+`~/.claude/plans/delightful-coalescing-diffie.md` (Track S), the S2 sub-plan
+(`slab-mega-plan-snuggly-beacon.md`), and the S3 sub-plan (`slab-mega-plan-hashed-fountain.md`).
+
+Honest capability once provisioned: `filesystem=true (OsEnforced)`,
+`network=true (OsEnforced)`, `setup_kind=ElevatedAclTokenWfp`, `isolation=Full`.

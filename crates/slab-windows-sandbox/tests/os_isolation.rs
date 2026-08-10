@@ -16,8 +16,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use slab_windows_sandbox::{
-    ElevatedAclTokenExecutor, ErasedOutputSink, OutputStreamKind, PrepareContext, SpawnRequest,
-    WindowsSandboxExecutor,
+    ElevatedAclTokenExecutor, ErasedOutputSink, FsIsolationStrength, OutputStreamKind,
+    PrepareContext, SpawnRequest, WindowsSandboxExecutor, WindowsSetupKind,
 };
 
 fn elevated_enabled() -> bool {
@@ -154,4 +154,67 @@ async fn os_low_il_child_blocked_outside_workspace() {
     let run = exec.spawn_elevated(&req, None).expect("spawn_elevated");
     let _exit = run.exit_future.await.expect("exit future");
     assert!(!outside.exists(), "Low-IL child must NOT write outside the workspace");
+}
+
+#[tokio::test]
+#[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
+async fn os_capabilities_report_wfp_os_enforced() {
+    if !elevated_enabled() {
+        eprintln!("skip: SLAB_SANDBOX_ELEVATED != 1");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let ctx = make_context(dir.path(), &workspace);
+    let exec = ElevatedAclTokenExecutor::new(ctx.clone());
+    exec.prepare(&ctx).expect("prepare");
+
+    // After provisioning (AppContainer spawn + WFP filter registered) the honest report must show
+    // BOTH dimensions OS-enforced under the WFP setup kind.
+    let caps = exec.capabilities();
+    assert!(caps.provisioned, "provisioned after prepare");
+    assert_eq!(caps.setup_kind, WindowsSetupKind::ElevatedAclTokenWfp);
+    assert_eq!(caps.network_isolation, FsIsolationStrength::OsEnforced);
+    assert_eq!(caps.filesystem_isolation, FsIsolationStrength::OsEnforced);
+}
+
+#[tokio::test]
+#[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
+async fn os_appcontainer_child_network_blocked() {
+    if !elevated_enabled() {
+        eprintln!("skip: SLAB_SANDBOX_ELEVATED != 1");
+        return;
+    }
+    // Probe egress with curl.exe (ships in System32 on Windows 10+). If absent, skip rather than
+    // produce a misleading pass (a not-found spawn also exits non-zero).
+    let curl = std::env::var_os("SystemRoot")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
+        .join("System32")
+        .join("curl.exe");
+    if !curl.exists() {
+        eprintln!("skip: System32\\curl.exe not found (needed to probe network egress)");
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let ctx = make_context(dir.path(), &workspace);
+    let exec = ElevatedAclTokenExecutor::new(ctx.clone());
+    exec.prepare(&ctx).expect("prepare");
+
+    // The AppContainer child has no internet capability + our WFP package-SID block filter, so its
+    // outbound connect must fail. curl exits 0 ONLY on a completed HTTP request.
+    let req = make_request(
+        &["curl.exe", "--max-time", "8", "-s", "-o", "NUL", "http://example.com"],
+        &workspace,
+    );
+    let run = exec.spawn_elevated(&req, None).expect("spawn_elevated");
+    let exit = run.exit_future.await.expect("exit future");
+    assert_ne!(
+        exit.exit_code, 0,
+        "AppContainer child must NOT complete outbound HTTP (network OS-blocked)"
+    );
 }

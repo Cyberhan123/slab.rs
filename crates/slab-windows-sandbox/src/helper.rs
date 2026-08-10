@@ -69,6 +69,7 @@ fn provision(payload: &ElevationPayload) -> Result<HelperResult, WindowsSandboxE
         created_at_unix: now_unix(),
         setup_kind: WindowsSetupKind::JobObject,
         filesystem_isolation: FsIsolationStrength::Lexical,
+        network_isolation: FsIsolationStrength::None,
         key_fingerprint: payload.key_fingerprint.clone(),
         denied_paths: Vec::new(),
         writable_roots_lowered: Vec::new(),

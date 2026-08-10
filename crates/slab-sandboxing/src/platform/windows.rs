@@ -222,17 +222,24 @@ fn capabilities_from_snapshot(
         FsIsolationStrength::Lexical => (IsolationStrength::Lexical, false),
         FsIsolationStrength::None => (IsolationStrength::None, false),
     };
+    let (network_isolation, network) = match snap.network_isolation {
+        FsIsolationStrength::OsEnforced => (IsolationStrength::OsEnforced, true),
+        FsIsolationStrength::Lexical => (IsolationStrength::Lexical, false),
+        FsIsolationStrength::None => (IsolationStrength::None, false),
+    };
     let setup_kind = match snap.setup_kind {
         WindowsSetupKind::None => SetupKind::None,
         WindowsSetupKind::JobObject => SetupKind::JobObject,
         WindowsSetupKind::ElevatedAclToken => SetupKind::ElevatedAclToken,
         WindowsSetupKind::ElevatedAclTokenWfp => SetupKind::ElevatedAclTokenWfp,
     };
-    // S2 reports `Elevated` once real OS-enforced fs isolation is provisioned (S2b). Network
-    // stays lexical until WFP lands (S3).
-    let isolation = if snap.provisioned
-        && matches!(snap.filesystem_isolation, FsIsolationStrength::OsEnforced)
-    {
+    let fs_enforced = matches!(snap.filesystem_isolation, FsIsolationStrength::OsEnforced);
+    let net_enforced = matches!(snap.network_isolation, FsIsolationStrength::OsEnforced);
+    // Both dimensions OS-enforced (S3: Low-IL ACL fs + AppContainer/WFP net) ⇒ Full. FS-only
+    // OS-enforced (S2b) ⇒ Elevated. Otherwise Degraded.
+    let isolation = if snap.provisioned && fs_enforced && net_enforced {
+        SandboxIsolation::Full
+    } else if snap.provisioned && fs_enforced {
         SandboxIsolation::Elevated
     } else {
         SandboxIsolation::Degraded
@@ -241,8 +248,8 @@ fn capabilities_from_snapshot(
         platform: SandboxPlatform::Windows,
         isolation,
         filesystem,
-        network: false,
-        network_isolation: IsolationStrength::Lexical,
+        network,
+        network_isolation,
         process_cleanup: true,
         setup_required: snap.setup_required,
         filesystem_isolation,

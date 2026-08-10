@@ -8,9 +8,10 @@ use std::time::Duration;
 use tokio::net::windows::named_pipe::ClientOptions;
 use tokio::sync::oneshot;
 
-use crate::capability::CapabilitySnapshot;
+use crate::capability::{CapabilitySnapshot, FsIsolationStrength, WindowsSetupKind};
 use crate::elevation::Elevator;
 use crate::error::WindowsSandboxError;
+use crate::ipc::SetupMarker;
 use crate::job::JobHandle;
 use crate::request::{
     ElevatedExit, ElevatedRun, ErasedOutputSink, PrepareContext, SpawnRequest, SpawnedChild,
@@ -116,11 +117,23 @@ pub struct ElevatedAclTokenExecutor {
 
 struct ElevatedState {
     provisioned: bool,
+    /// Provisioning mechanism the daemon actually applied (S3 distinguishes `ElevatedAclTokenWfp`
+    /// from the S2 `ElevatedAclToken` baseline). Captured from the `ProvisionOk` marker.
+    setup_kind: WindowsSetupKind,
+    /// Honest network-isolation strength the daemon reported in the marker (S3).
+    network_isolation: FsIsolationStrength,
 }
 
 impl ElevatedAclTokenExecutor {
     pub fn new(cfg: PrepareContext) -> Self {
-        Self { cfg, state: Mutex::new(ElevatedState { provisioned: false }) }
+        Self {
+            cfg,
+            state: Mutex::new(ElevatedState {
+                provisioned: false,
+                setup_kind: WindowsSetupKind::ElevatedAclToken,
+                network_isolation: FsIsolationStrength::None,
+            }),
+        }
     }
 
     /// Pipe name, derived from the key fingerprint so it is per-user + unguessable to other users.
@@ -131,10 +144,16 @@ impl ElevatedAclTokenExecutor {
 
 impl WindowsSandboxExecutor for ElevatedAclTokenExecutor {
     fn capabilities(&self) -> CapabilitySnapshot {
-        if self.state.lock().map(|s| s.provisioned).unwrap_or(false) {
-            CapabilitySnapshot::elevated()
-        } else {
-            CapabilitySnapshot::degraded_required()
+        // Marker-derived honest report: the daemon writes `setup_kind` + `network_isolation` into
+        // the ProvisionOk marker, so the orchestrator reports exactly what was enforced — not a
+        // hardcoded guess.
+        let s = self.state.lock().unwrap();
+        if !s.provisioned {
+            return CapabilitySnapshot::degraded_required();
+        }
+        match s.setup_kind {
+            WindowsSetupKind::ElevatedAclTokenWfp => CapabilitySnapshot::elevated_wfp(),
+            _ => CapabilitySnapshot::elevated(),
         }
     }
 
@@ -160,7 +179,7 @@ impl WindowsSandboxExecutor for ElevatedAclTokenExecutor {
         // Run the daemon IPC (connect/ping/provision — async) on a dedicated OS thread with its
         // own current-thread runtime. This avoids the `block_on`-inside-tokio panic regardless of
         // whether `prepare` is called from a runtime thread (bootstrap) or not.
-        let result = std::thread::spawn(move || -> Result<(), WindowsSandboxError> {
+        let marker = std::thread::spawn(move || -> Result<SetupMarker, WindowsSandboxError> {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -168,10 +187,15 @@ impl WindowsSandboxExecutor for ElevatedAclTokenExecutor {
             rt.block_on(prepare_daemon(pipe_name.clone(), key, helper_exe, cfg))
         })
         .join()
-        .map_err(|_| WindowsSandboxError::SetupFailed("provision thread panicked".into()))?;
-        result?;
-
-        self.state.lock().unwrap().provisioned = true;
+        .map_err(|_| WindowsSandboxError::SetupFailed("provision thread panicked".into()))??;
+        {
+            // Capture what the daemon actually enforced (S3: WFP + AppContainer ⇒ ElevatedAclTokenWfp
+            // + OsEnforced network) so `capabilities()` reports the truth, marker-derived.
+            let mut state = self.state.lock().unwrap();
+            state.provisioned = true;
+            state.setup_kind = marker.setup_kind;
+            state.network_isolation = marker.network_isolation;
+        }
         Ok(())
     }
 
@@ -266,13 +290,15 @@ fn daemon_pipe_name(fingerprint: &str) -> String {
     format!(r"\\.\pipe\slab-sandbox-helper-{fingerprint}")
 }
 
-/// Connect/ping/start/provision the daemon (async; run via a temp runtime in `prepare`).
+/// Connect/ping/start/provision the daemon (async; run via a temp runtime in `prepare`). Returns
+/// the `SetupMarker` the daemon writes back in `ProvisionOk` so `prepare` can capture the enforced
+/// `setup_kind` + `network_isolation`.
 async fn prepare_daemon(
     pipe_name: String,
     key: Vec<u8>,
     helper_exe: std::path::PathBuf,
     cfg: PrepareContext,
-) -> Result<(), WindowsSandboxError> {
+) -> Result<SetupMarker, WindowsSandboxError> {
     use crate::pipe::{PipeFrame, ping_with_timeout, read_frame, write_frame};
 
     // If no daemon is alive, start one (one UAC at enable-time; reconnect is no-UAC).
@@ -327,7 +353,7 @@ async fn prepare_daemon(
         .map_err(|_| WindowsSandboxError::ElevationTimeout)?
         .map_err(|e| WindowsSandboxError::SetupFailed(format!("provision read: {e}")))?;
     match reply {
-        PipeFrame::ProvisionOk { .. } => Ok(()),
+        PipeFrame::ProvisionOk { marker } => Ok(marker),
         other => Err(WindowsSandboxError::SetupFailed(format!(
             "unexpected reply to Provision: {other:?}"
         ))),

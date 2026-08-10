@@ -15,7 +15,7 @@ use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
 use std::os::windows::io::FromRawHandle;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::io::AsyncReadExt;
@@ -28,18 +28,22 @@ type SharedWriter = Arc<tokio::sync::Mutex<tokio::io::WriteHalf<NamedPipeServer>
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Security::{
     ACL, ACL_REVISION, AddAccessAllowedAce, AddMandatoryAce, CreateWellKnownSid, InitializeAcl,
-    InitializeSecurityDescriptor, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
-    SetSecurityDescriptorDacl, SetSecurityDescriptorSacl, WinLowLabelSid, WinWorldSid,
+    InitializeSecurityDescriptor, PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES,
+    SECURITY_DESCRIPTOR, SetSecurityDescriptorDacl, SetSecurityDescriptorSacl, WinLowLabelSid,
+    WinWorldSid,
 };
 use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE, SYNCHRONIZE};
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
-    GetExitCodeProcess, INFINITE, PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES,
-    STARTUPINFOW, TerminateProcess, WaitForSingleObject,
+    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
+    InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+    PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess,
+    UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 use crate::acl;
+use crate::appcontainer::PackageSid;
 use crate::capability::{FsIsolationStrength, WindowsSetupKind};
 use crate::creds;
 use crate::error::{WindowsSandboxError, win32_ctx};
@@ -47,10 +51,44 @@ use crate::ipc::SetupMarker;
 use crate::job::JobHandle;
 use crate::pipe::{self, OutputStreamKind, PipeFrame, read_frame, write_frame};
 use crate::token::LowIntegrityToken;
+use crate::wfp::WfpEngine;
 
 /// 4-byte-aligned scratch buffers for ACLs / SDs built for the stdio pipes.
 #[repr(C, align(4))]
 struct AclBuf([u8; 256]);
+
+/// Daemon-wide WFP + AppContainer identity state (S3). The WFP engine session + filters live for
+/// the daemon's lifetime — NOT per connection — so the first `Provision` opens + registers and
+/// later ones skip. The package SID is deterministic from the key fingerprint, so DACL grants +
+/// filters match the spawned AppContainer child after a daemon restart. When the daemon exits the
+/// `Arc<WfpState>` drops ⇒ `WfpEngine::Drop` ⇒ `FwpmEngineClose0` ⇒ the DYNAMIC session removes the
+/// filters automatically.
+struct WfpState {
+    engine: Mutex<Option<WfpEngine>>,
+    package_sid: PackageSid,
+}
+
+impl WfpState {
+    fn new(key: &[u8]) -> Result<Self, WindowsSandboxError> {
+        let fingerprint = creds::key_fingerprint(key);
+        let package_sid = PackageSid::from_fingerprint(&fingerprint)?;
+        Ok(Self { engine: Mutex::new(None), package_sid })
+    }
+
+    /// Open the WFP engine (DYNAMIC session) + register the package-SID block filters. Idempotent:
+    /// the first caller registers; later callers see `Some` and skip. Fail-closed: any error leaves
+    /// the slot `None`, so a subsequent `Provision` retries.
+    fn ensure_registered(&self) -> Result<(), WindowsSandboxError> {
+        let mut guard = self.engine.lock().expect("WFP engine mutex poisoned");
+        if guard.is_some() {
+            return Ok(());
+        }
+        let engine = WfpEngine::open()?;
+        engine.register_package_block(self.package_sid.as_psid())?;
+        *guard = Some(engine);
+        Ok(())
+    }
+}
 
 /// Run the daemon forever (until the process is killed). Loads the DPAPI key once (the daemon is
 /// the elevated owner) so it can verify frame tags + write the marker.
@@ -60,6 +98,7 @@ pub async fn run_daemon(
     marker_path: PathBuf,
 ) -> Result<(), WindowsSandboxError> {
     let key = creds::load_or_create_key(&key_path)?;
+    let wfp = Arc::new(WfpState::new(&key)?);
     let mut server = ServerOptions::new()
         .first_pipe_instance(true)
         .create(&pipe_name)
@@ -85,8 +124,11 @@ pub async fn run_daemon(
         let key = key.clone();
         let pipe_name_clone = pipe_name.clone();
         let marker_path_clone = marker_path.clone();
+        let wfp_clone = wfp.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(prev, key, pipe_name_clone, marker_path_clone).await {
+            if let Err(e) =
+                handle_connection(prev, key, pipe_name_clone, marker_path_clone, wfp_clone).await
+            {
                 tracing::warn!(error = %e, "daemon: connection handler failed");
             }
         });
@@ -101,6 +143,7 @@ struct ConnectionState {
     key: Vec<u8>,
     pipe_name: String,
     marker_path: PathBuf,
+    wfp: Arc<WfpState>,
 }
 
 /// Handle one client connection: read frames, dispatch. Ends when the client disconnects.
@@ -109,11 +152,18 @@ async fn handle_connection(
     key: Vec<u8>,
     pipe_name: String,
     marker_path: PathBuf,
+    wfp: Arc<WfpState>,
 ) -> Result<(), WindowsSandboxError> {
     let (mut reader, writer) = tokio::io::split(server);
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
-    let mut state =
-        ConnectionState { jobs: HashMap::new(), provisioned: false, key, pipe_name, marker_path };
+    let mut state = ConnectionState {
+        jobs: HashMap::new(),
+        provisioned: false,
+        key,
+        pipe_name,
+        marker_path,
+        wfp,
+    };
 
     loop {
         let frame = match read_frame(&mut reader).await {
@@ -158,14 +208,26 @@ async fn handle_connection(
                     // blocked by NO_WRITE_UP, but in-workspace protected names need the deny-ACE.
                     let _ = acl::deny_write_low_sid(p);
                 }
+                // S3: grant the AppContainer package SID write access on each writable root
+                // (additive to the Low-IL SACL above) so the AppContainer child can write its
+                // workspace. Fail-closed on any ACL error.
+                let package_sid = state.wfp.package_sid.as_psid();
+                for root in &writable_roots {
+                    acl::grant_appcontainer_write(root, package_sid)?;
+                }
+                // S3: register the WFP package-SID outbound block filter (idempotent, daemon-lifetime).
+                // Fail-closed: a registration failure ⇒ the shell stays blocked, never reports
+                // OsEnforced network without an actual filter in place.
+                state.wfp.ensure_registered()?;
                 let marker = SetupMarker {
                     schema: crate::SCHEMA_VERSION,
                     created_at_unix: SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .map(|d| d.as_secs() as i64)
                         .unwrap_or(0),
-                    setup_kind: WindowsSetupKind::ElevatedAclToken,
+                    setup_kind: WindowsSetupKind::ElevatedAclTokenWfp,
                     filesystem_isolation: FsIsolationStrength::OsEnforced,
+                    network_isolation: FsIsolationStrength::OsEnforced,
                     key_fingerprint,
                     denied_paths: denied_paths.clone(),
                     writable_roots_lowered: writable_roots.clone(),
@@ -191,7 +253,7 @@ async fn handle_connection(
                 if !pipe::tag_matches(&state.key, &(job_token.as_str(), &spawn), &tag) {
                     return Err(WindowsSandboxError::HmacMismatch);
                 }
-                match spawn_low_il_child(&job_token, &spawn, writer.clone()).await {
+                match spawn_low_il_child(&job_token, &spawn, writer.clone(), &state.wfp).await {
                     Ok(job) => {
                         state.jobs.insert(job_token, job);
                     }
@@ -240,8 +302,11 @@ async fn spawn_low_il_child(
     job_token: &str,
     spawn: &crate::request::SpawnRequest,
     writer: SharedWriter,
+    wfp: &WfpState,
 ) -> Result<JobHandle, WindowsSandboxError> {
-    let child = spawn_low_il_child_sync(spawn)?;
+    // PSID is extracted here as a temporary consumed by the SYNC spawn — it never crosses an
+    // `.await`, so the raw pointer does not poison the future's `Send` impl.
+    let child = spawn_low_il_child_sync(spawn, wfp.package_sid.as_psid())?;
 
     write_frame(
         &mut *writer.lock().await,
@@ -288,20 +353,67 @@ async fn spawn_low_il_child(
 /// (never crossing an `.await`), so the calling async future stays `Send`.
 fn spawn_low_il_child_sync(
     spawn: &crate::request::SpawnRequest,
+    package_sid: PSID,
 ) -> Result<SpawnedChild, WindowsSandboxError> {
     let token = LowIntegrityToken::new()?;
-    let (stdout_read, stdout_write) = create_low_il_pipe()?;
-    let (stderr_read, stderr_write) = create_low_il_pipe()?;
+    let (stdout_read, stdout_write) = create_appcontainer_pipe(package_sid)?;
+    let (stderr_read, stderr_write) = create_appcontainer_pipe(package_sid)?;
     let job = JobHandle::new()?;
     job.configure_kill_on_close()?;
 
-    // STARTUPINFOW: stdio = our (Low-IL-allowable) pipe write ends; null stdin.
-    let mut startup: STARTUPINFOW = unsafe { zeroed() };
-    startup.cb = size_of::<STARTUPINFOW>() as u32;
-    startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdInput = INVALID_HANDLE_VALUE;
-    startup.hStdOutput = stdout_write;
-    startup.hStdError = stderr_write;
+    // AppContainer identity overlay on top of the Low-IL restricted token. `SECURITY_CAPABILITIES`
+    // with the package SID and NO capabilities ⇒ the child is an AppContainer without
+    // `internetClient`, so the OS default WFP rule + our explicit package-SID filter block its
+    // outbound network. (windows-sys 0.61 has no `CreateAppContainerToken`/`PROC_THREAD_ATTRIBUTE_
+    // APPCONTAINER` — `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` + this struct is the primitive.)
+    let security_capabilities = SECURITY_CAPABILITIES {
+        AppContainerSid: package_sid,
+        Capabilities: std::ptr::null_mut(),
+        CapabilityCount: 0,
+        ..Default::default()
+    };
+
+    // Two-phase InitializeProcThreadAttributeList: first call with a null list to learn the size.
+    let mut attr_size: usize = 0;
+    // SAFETY: null list + out-size pointer is the documented "query size" call (returns FALSE).
+    unsafe {
+        InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut attr_size);
+    }
+    // Pointer-width-aligned backing store (the attribute list holds pointers internally; a plain
+    // `Vec<u8>` would be 1-byte aligned and may misalign).
+    let attr_words = attr_size.div_ceil(size_of::<u64>()).max(1);
+    let mut attr_buf: Vec<u64> = vec![0u64; attr_words];
+    let attr_list = attr_buf.as_mut_ptr() as *mut c_void;
+    win32_ctx(
+        // SAFETY: attr_list is a sufficiently-large, properly-aligned buffer.
+        unsafe { InitializeProcThreadAttributeList(attr_list, 1, 0, &mut attr_size) },
+        "InitializeProcThreadAttributeList",
+    )?;
+    win32_ctx(
+        // SAFETY: bind the SECURITY_CAPABILITIES (one attribute) into the list.
+        unsafe {
+            UpdateProcThreadAttribute(
+                attr_list,
+                0,
+                PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
+                &security_capabilities as *const SECURITY_CAPABILITIES as *const c_void,
+                size_of::<SECURITY_CAPABILITIES>(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        },
+        "UpdateProcThreadAttribute(SECURITY_CAPABILITIES)",
+    )?;
+
+    // STARTUPINFOEXW: the existing stdio handle setup (cb sized to the EX struct) + the attribute
+    // list carrying the AppContainer identity.
+    let mut startup_ex: STARTUPINFOEXW = unsafe { zeroed() };
+    startup_ex.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
+    startup_ex.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup_ex.StartupInfo.hStdInput = INVALID_HANDLE_VALUE;
+    startup_ex.StartupInfo.hStdOutput = stdout_write;
+    startup_ex.StartupInfo.hStdError = stderr_write;
+    startup_ex.lpAttributeList = attr_list;
 
     let mut cmd_line = wide(&build_command_line(&spawn.argv));
     let cwd = spawn.cwd.as_ref().map(|p| wide(&p.to_string_lossy()));
@@ -319,20 +431,27 @@ fn spawn_low_il_child_sync(
             std::ptr::null(),
             std::ptr::null(),
             1, // bInheritHandles = TRUE (only the inheritable stdio pipes inherit)
-            CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | env_flags,
+            CREATE_SUSPENDED
+                | CREATE_UNICODE_ENVIRONMENT
+                | CREATE_NO_WINDOW
+                | EXTENDED_STARTUPINFO_PRESENT
+                | env_flags,
             env_block.as_ref().map(|b| b.as_ptr() as *const c_void).unwrap_or(std::ptr::null()),
             cwd.as_ref().map(|w| w.as_ptr()).unwrap_or(std::ptr::null()),
-            &startup,
+            &startup_ex.StartupInfo,
             &mut pi,
         )
     };
-    win32_ctx(ok, "CreateProcessAsUserW")?;
-
+    // The child captured the attribute list; release our copy regardless of spawn outcome.
+    // SAFETY: the list was initialized above and is no longer referenced after this.
+    unsafe { DeleteProcThreadAttributeList(attr_list) };
     // Close child-side write ends in the daemon; the child holds its inherited copies.
     unsafe {
         CloseHandle(stdout_write);
         CloseHandle(stderr_write);
     }
+    // Fail-closed on spawn failure AFTER cleanup (no untracked process was created on failure).
+    win32_ctx(ok, "CreateProcessAsUserW")?;
 
     // Assign the Job WHILE SUSPENDED. On failure, terminate the suspended child (never resume an
     // untracked process) and fail closed.
@@ -394,9 +513,10 @@ fn spawn_pump(read_addr: usize, job_token: String, stream: OutputStreamKind, wri
     });
 }
 
-/// Create an anonymous pipe whose SD grants Everyone read/write AND carries a Low mandatory label,
-/// so a Low-IL child can write its stdio without a write-up (else it has no stdio and hangs).
-fn create_low_il_pipe() -> Result<(HANDLE, HANDLE), WindowsSandboxError> {
+/// Create an anonymous pipe whose SD grants Everyone AND the AppContainer package SID read/write,
+/// and carries a Low mandatory label, so the AppContainer (Low-IL) child can write its stdio
+/// without a write-up or a package-SID access denial (else it has no stdio and silently hangs).
+fn create_appcontainer_pipe(package_sid: PSID) -> Result<(HANDLE, HANDLE), WindowsSandboxError> {
     // The SID buffers (`_everyone_sid_buf` / `_low_sid_buf`) MUST outlive the SD built below — the
     // pointers point into them. The `_` prefix only suppresses the unused-by-name lint; the
     // bindings still live to end of scope (only a bare `_` would drop early).
@@ -419,6 +539,13 @@ fn create_low_il_pipe() -> Result<(HANDLE, HANDLE), WindowsSandboxError> {
         let pipe_access = FILE_GENERIC_READ | FILE_GENERIC_WRITE | SYNCHRONIZE;
         if AddAccessAllowedAce(pdacl, ACL_REVISION, pipe_access, everyone_sid) == 0 {
             return Err(WindowsSandboxError::WindowsApi("AddAccessAllowedAce failed".into()));
+        }
+        // S3: also grant the AppContainer package SID — AppContainer access checks need the package
+        // SID (or "All Application Packages") explicitly granted; "Everyone" alone is not reliable.
+        if AddAccessAllowedAce(pdacl, ACL_REVISION, pipe_access, package_sid) == 0 {
+            return Err(WindowsSandboxError::WindowsApi(
+                "AddAccessAllowedAce(package) failed".into(),
+            ));
         }
         if AddMandatoryAce(
             psacl,

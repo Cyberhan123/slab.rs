@@ -35,6 +35,9 @@ pub enum WindowsSetupKind {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CapabilitySnapshot {
     pub filesystem_isolation: FsIsolationStrength,
+    /// Honest strength of the network-isolation dimension (S3). `None` until a WFP filter + the
+    /// AppContainer child actually block outbound traffic at the OS level.
+    pub network_isolation: FsIsolationStrength,
     pub setup_kind: WindowsSetupKind,
     /// True when the platform config requests elevated setup (`windows_setup_required`).
     pub setup_required: bool,
@@ -56,6 +59,7 @@ impl CapabilitySnapshot {
         };
         Self {
             filesystem_isolation: FsIsolationStrength::Lexical,
+            network_isolation: FsIsolationStrength::None,
             setup_kind: WindowsSetupKind::JobObject,
             setup_required,
             provisioned: false,
@@ -68,6 +72,7 @@ impl CapabilitySnapshot {
     pub fn degraded_required() -> Self {
         Self {
             filesystem_isolation: FsIsolationStrength::Lexical,
+            network_isolation: FsIsolationStrength::None,
             setup_kind: WindowsSetupKind::ElevatedAclToken,
             setup_required: true,
             provisioned: false,
@@ -78,10 +83,12 @@ impl CapabilitySnapshot {
         }
     }
 
-    /// Real OS-enforced isolation: Low-IL restricted token + integrity-label ACLs provisioned.
+    /// Real OS-enforced filesystem isolation: Low-IL restricted token + integrity-label ACLs
+    /// provisioned (S2b). Network is still lexical-only — WFP/AppContainer land in S3.
     pub fn elevated() -> Self {
         Self {
             filesystem_isolation: FsIsolationStrength::OsEnforced,
+            network_isolation: FsIsolationStrength::None,
             setup_kind: WindowsSetupKind::ElevatedAclToken,
             setup_required: true,
             provisioned: true,
@@ -89,5 +96,46 @@ impl CapabilitySnapshot {
             details: "Windows Low-IL restricted token + integrity-label ACLs are OS-enforced."
                 .to_string(),
         }
+    }
+
+    /// Full OS-enforced isolation: S2b filesystem (Low-IL token + ACLs) PLUS S3 network blocking
+    /// (AppContainer child + WFP package-SID block filter). Reported only after the WFP filter is
+    /// registered AND the spawn uses the AppContainer `SECURITY_CAPABILITIES` attribute.
+    pub fn elevated_wfp() -> Self {
+        Self {
+            filesystem_isolation: FsIsolationStrength::OsEnforced,
+            network_isolation: FsIsolationStrength::OsEnforced,
+            setup_kind: WindowsSetupKind::ElevatedAclTokenWfp,
+            setup_required: true,
+            provisioned: true,
+            degraded: false,
+            details: "Windows AppContainer child + Low-IL ACLs + WFP package-SID network block \
+                      are OS-enforced."
+                .to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn elevated_wfp_reports_both_dimensions_os_enforced() {
+        let s = CapabilitySnapshot::elevated_wfp();
+        assert_eq!(s.filesystem_isolation, FsIsolationStrength::OsEnforced);
+        assert_eq!(s.network_isolation, FsIsolationStrength::OsEnforced);
+        assert_eq!(s.setup_kind, WindowsSetupKind::ElevatedAclTokenWfp);
+        assert!(s.provisioned);
+        assert!(!s.degraded);
+    }
+
+    #[test]
+    fn elevated_s2_reports_fs_only_no_network() {
+        // S2 `elevated()` is fs OsEnforced, network still None (WFP is S3).
+        let s = CapabilitySnapshot::elevated();
+        assert_eq!(s.filesystem_isolation, FsIsolationStrength::OsEnforced);
+        assert_eq!(s.network_isolation, FsIsolationStrength::None);
+        assert_eq!(s.setup_kind, WindowsSetupKind::ElevatedAclToken);
     }
 }

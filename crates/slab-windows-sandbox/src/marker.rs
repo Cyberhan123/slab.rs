@@ -52,6 +52,7 @@ mod tests {
             created_at_unix: 1,
             setup_kind: WindowsSetupKind::JobObject,
             filesystem_isolation: FsIsolationStrength::Lexical,
+            network_isolation: FsIsolationStrength::None,
             key_fingerprint: "abcd".into(),
             denied_paths: vec![],
             writable_roots_lowered: vec![],
@@ -87,5 +88,13 @@ mod tests {
     fn matching_marker_no_drift() {
         let m = sample_marker();
         assert!(!has_drift(Some(&m), "abcd"));
+    }
+
+    #[test]
+    fn stale_schema_marker_drifts() {
+        // SCHEMA_VERSION bumped in S3; a marker written by older code (schema 1) must re-provision.
+        let mut m = sample_marker();
+        m.schema = 1;
+        assert!(has_drift(Some(&m), "abcd"), "schema-1 marker must drift after the bump");
     }
 }
