@@ -40,6 +40,11 @@ pub enum McpClientError {
 
 pub struct StdioMcpClient {
     _child: Mutex<Child>,
+    // Drops AFTER `_child` (field order) — tears the whole server process tree down on client drop
+    // (Windows Job `KILL_ON_JOB_CLOSE` / Unix process-group `SIGKILL`). Fixes the orphan-on-shutdown
+    // bug where the server (and its forks) kept running after the client dropped. `Mutex` so the
+    // `FnOnce` (which is `Send` but not `Sync`) keeps the struct `Send + Sync`.
+    _kill_guard: Mutex<Option<Box<dyn FnOnce() + Send + 'static>>>,
     connection: JsonRpcConnection<tokio::process::ChildStdout, tokio::process::ChildStdin>,
 }
 
@@ -56,11 +61,20 @@ impl StdioMcpClient {
         command.stdin(std::process::Stdio::piped());
         command.stdout(std::process::Stdio::piped());
 
+        // S6c: reliable process-tree containment. `kill_on_drop` kills the direct child; the guard
+        // reaches grandchildren (Job on Windows, process-group on Unix). Network stays allowed —
+        // MCP servers need outbound network.
+        crate::sandbox::pre_spawn(&mut command);
+
         let mut child = command.spawn()?;
+        let kill_guard = crate::sandbox::post_spawn(&child);
         let stdin = child.stdin.take().ok_or(McpClientError::MissingStdin)?;
         let stdout = child.stdout.take().ok_or(McpClientError::MissingStdout)?;
-        let client =
-            Self { _child: Mutex::new(child), connection: JsonRpcConnection::new(stdout, stdin) };
+        let client = Self {
+            _child: Mutex::new(child),
+            _kill_guard: Mutex::new(kill_guard),
+            connection: JsonRpcConnection::new(stdout, stdin),
+        };
         client.initialize().await?;
         Ok(client)
     }

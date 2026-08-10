@@ -15869,12 +15869,14 @@ dependencies = [
 name = "slab-mcp-client"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "slab-jsonrpc",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
