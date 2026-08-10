@@ -42,6 +42,7 @@ members = [
     "crates/slab-hub",
     "crates/slab-sandboxing",
     "crates/slab-windows-sandbox",
+    "crates/slab-linux-sandbox",
     "crates/slab-file",
     "crates/slab-git",
     "crates/slab-shell-command",
@@ -106,6 +107,7 @@ slab-ggml-sys = { path = "./crates/slab-ggml-sys", package = "slab-ggml-sys", ve
 slab-ggml = { path = "./crates/slab-ggml", package = "slab-ggml", version = "0.1.0" }
 slab-sandboxing = { path = "./crates/slab-sandboxing", package = "slab-sandboxing", version = "0.1.0" }
 slab-windows-sandbox = { path = "./crates/slab-windows-sandbox", package = "slab-windows-sandbox", version = "0.1.0" }
+slab-linux-sandbox = { path = "./crates/slab-linux-sandbox", package = "slab-linux-sandbox", version = "0.1.0" }
 slab-file = { path = "./crates/slab-file", package = "slab-file", version = "0.1.0" }
 slab-git = { path = "./crates/slab-git", package = "slab-git", version = "0.1.0" }
 slab-shell-command = { path = "./crates/slab-shell-command", package = "slab-shell-command", version = "0.1.0" }
@@ -302,6 +304,7 @@ tauri-plugin-window-state = "2"
 windows = "0.62.2"
 windows-sys = "0.61.2"
 landlock = "0.4"
+seccompiler = "0.4"
 
 #deno dependencies
 

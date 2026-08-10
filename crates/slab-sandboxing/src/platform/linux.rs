@@ -1,29 +1,50 @@
-use std::path::PathBuf;
+//! Thin Linux shim. The real isolation logic lives in the `slab-linux-sandbox` sub-crate (which
+//! `slab-sandboxing` depends on, cfg-gated, downward only). This shim maps `SandboxedCommand` → the
+//! sub-crate's `SpawnRequest`, delegates the spawn, then feeds the result into the shared
+//! `wait_for_child`. bwrap stays the primary FS mechanism (already real `OsEnforced`); seccomp is
+//! always stacked on the network dimension; landlock is the FS fallback when bwrap is unavailable
+//! (`linux_allow_landlock_fallback`). bwrap and landlock are mutually exclusive on the FS dimension.
 
 use async_trait::async_trait;
 #[cfg(target_os = "linux")]
 use tracing::debug;
 
-use crate::{
-    IsolationStrength, SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError,
-    SandboxIsolation, SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
-    SetupKind,
-};
+#[cfg(target_os = "linux")]
+use crate::driver::wait_for_child;
+#[cfg(target_os = "linux")]
+use crate::{IsolationStrength, SetupKind};
 #[cfg(target_os = "linux")]
 use crate::{NetworkPolicy, SandboxPolicy, guard::validate_command};
+use crate::{
+    SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError, SandboxIsolation,
+    SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
+};
 
 pub struct LinuxSandboxDriver {
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     env: SandboxEnvironment,
+    #[cfg(target_os = "linux")]
+    executor: Box<dyn slab_linux_sandbox::LinuxSandboxExecutor>,
 }
 
 impl LinuxSandboxDriver {
     pub fn new(env: SandboxEnvironment) -> Self {
-        Self { env }
-    }
-
-    pub fn available() -> bool {
-        find_bwrap().is_some()
+        #[cfg(target_os = "linux")]
+        {
+            let network_blocked = matches!(env.permissions.network, NetworkPolicy::Blocked);
+            let managed_proxy_active = env.permissions.managed_proxy.is_some();
+            let allow_fallback = env.permissions.platform.linux_allow_landlock_fallback;
+            let executor = slab_linux_sandbox::select_executor(
+                allow_fallback,
+                network_blocked,
+                managed_proxy_active,
+            );
+            Self { env, executor }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Self { env }
+        }
     }
 }
 
@@ -42,77 +63,45 @@ impl SandboxDriver for LinuxSandboxDriver {
 
         #[cfg(target_os = "linux")]
         {
-            use std::process::Stdio;
-
-            use crate::driver::{command_env, unix_kill_tree, wait_for_child};
-
+            // Lexical guard (defense-in-depth, bypassable) — applies before delegation.
             validate_command(&self.env, &cmd)?;
 
-            let bwrap = find_bwrap()
-                .ok_or_else(|| SandboxError::BwrapNotAvailable("bwrap not found on PATH".into()))?;
-            let bwrap_args = build_bwrap_args(&self.env)?;
-            debug!(bwrap = ?bwrap, args = ?bwrap_args, "spawning bwrap sandbox");
-
-            let mut command = tokio::process::Command::new(&bwrap);
-            command.args(&bwrap_args);
-            command.args(&cmd.argv);
-            for (key, value) in command_env(&self.env, &cmd) {
-                command.env(key, value);
-            }
-            if let Some(ref cwd) = cmd.cwd {
-                command.current_dir(cwd);
-            }
-            command.kill_on_drop(true);
-            command.stdout(Stdio::piped());
-            command.stderr(Stdio::piped());
-
-            let spawned = command.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-            // bwrap runs with `--new-session`, so it is a session/group leader:
-            // killing its process group tears down the whole tree.
-            let kill_tree = unix_kill_tree(spawned.id());
-            wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone(), kill_tree).await
+            let req = build_spawn_request(&self.env, &cmd);
+            let spawned = self.executor.spawn(&req).map_err(map_linux_err)?;
+            debug!(pid = spawned.child.id(), "spawned Linux sandboxed child");
+            wait_for_child(spawned.child, cmd.timeout, cmd.output_sink.clone(), spawned.kill_tree)
+                .await
         }
     }
 
     fn capabilities(&self) -> SandboxCapabilities {
-        let available = Self::available();
-        SandboxCapabilities {
-            platform: SandboxPlatform::Linux,
-            isolation: if available {
-                SandboxIsolation::Full
-            } else {
-                SandboxIsolation::Unsupported
-            },
-            // bwrap bind-mounts are OS-enforced filesystem containment and
-            // `--unshare-net` is OS-enforced network blocking. (seccomp/landlock
-            // land in a later phase, upgrading `setup_kind` to BwrapSeccomp.)
-            filesystem: available,
-            network: available,
-            filesystem_isolation: if available {
-                IsolationStrength::OsEnforced
-            } else {
-                IsolationStrength::None
-            },
-            network_isolation: if available {
-                IsolationStrength::OsEnforced
-            } else {
-                IsolationStrength::None
-            },
-            process_cleanup: available,
-            setup_required: false,
-            setup_kind: if available { SetupKind::Bwrap } else { SetupKind::None },
+        #[cfg(target_os = "linux")]
+        {
+            let snap = self.executor.capabilities();
+            capabilities_from_snapshot(&snap)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            SandboxCapabilities {
+                platform: SandboxPlatform::Linux,
+                isolation: SandboxIsolation::Unsupported,
+                ..SandboxCapabilities::default()
+            }
         }
     }
 
     fn setup_status(&self) -> SandboxSetupStatus {
         #[cfg(target_os = "linux")]
         {
-            if Self::available() {
-                SandboxSetupStatus::ready("bubblewrap is available")
+            let snap = self.executor.capabilities();
+            if snap.provisioned {
+                SandboxSetupStatus::ready(snap.details)
+            } else if snap.setup_required {
+                // Fail-closed: landlock fallback opted-in but unavailable. `degraded` keeps
+                // `available=true` so the `setup_required && degraded` gate branch blocks the shell.
+                SandboxSetupStatus::degraded(snap.details)
             } else {
-                SandboxSetupStatus::unavailable(
-                    "bubblewrap is required for Slab Linux sandbox execution",
-                )
+                SandboxSetupStatus::unavailable(snap.details)
             }
         }
 
@@ -123,116 +112,101 @@ impl SandboxDriver for LinuxSandboxDriver {
     }
 }
 
-fn find_bwrap() -> Option<PathBuf> {
-    let path_var = std::env::var("PATH").ok()?;
-    let cwd = std::env::current_dir().ok();
-
-    for dir in std::env::split_paths(&path_var) {
-        if let Some(ref cwd_path) = cwd
-            && &dir == cwd_path
-        {
-            continue;
-        }
-        let candidate = dir.join("bwrap");
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
+/// Build the sub-crate `SpawnRequest` from the shared environment + command.
 #[cfg(target_os = "linux")]
-fn build_bwrap_args(env: &SandboxEnvironment) -> Result<Vec<String>, SandboxError> {
-    let mut args: Vec<String> = Vec::new();
-
-    args.push("--die-with-parent".into());
-    args.push("--new-session".into());
-    args.push("--unshare-user".into());
-    args.push("--unshare-pid".into());
-
-    if matches!(env.permissions.network, NetworkPolicy::Blocked)
-        && env.permissions.managed_proxy.is_none()
-    {
-        args.push("--unshare-net".into());
-    }
-
-    args.push("--proc".into());
-    args.push("/proc".into());
-    args.push("--dev".into());
-    args.push("/dev".into());
-    args.push("--ro-bind".into());
-    args.push("/".into());
-    args.push("/".into());
-
-    match env.policy {
-        SandboxPolicy::ReadOnly => {}
-        SandboxPolicy::WorkspaceWrite => {
-            if let Some(ref root) = env.workspace_root {
-                bind_rw(&mut args, root);
-                bind_protected_children(&mut args, env, root);
-            }
-            for writable_root in &env.permissions.writable_roots {
-                bind_rw(&mut args, writable_root);
-                bind_protected_children(&mut args, env, writable_root);
-            }
-            bind_rw(&mut args, &std::env::temp_dir());
-        }
-        SandboxPolicy::DangerFullAccess => {
-            args.push("--bind".into());
-            args.push("/".into());
-            args.push("/".into());
-        }
-    }
-
-    for readable in &env.permissions.readable_roots {
-        bind_ro(&mut args, readable);
-    }
-    for denied in &env.permissions.denied_paths {
-        mask_path(&mut args, denied);
-    }
-
-    args.push("--".into());
-    Ok(args)
-}
-
-#[cfg(target_os = "linux")]
-fn bind_rw(args: &mut Vec<String>, path: &std::path::Path) {
-    args.push("--bind".into());
-    args.push(path.display().to_string());
-    args.push(path.display().to_string());
-}
-
-#[cfg(target_os = "linux")]
-fn bind_ro(args: &mut Vec<String>, path: &std::path::Path) {
-    args.push("--ro-bind".into());
-    args.push(path.display().to_string());
-    args.push(path.display().to_string());
-}
-
-#[cfg(target_os = "linux")]
-fn bind_protected_children(
-    args: &mut Vec<String>,
+fn build_spawn_request(
     env: &SandboxEnvironment,
-    root: &std::path::Path,
-) {
-    for name in &env.permissions.protected_path_names {
-        let protected = root.join(name);
-        if protected.exists() {
-            bind_ro(args, &protected);
-        }
+    cmd: &SandboxedCommand,
+) -> slab_linux_sandbox::SpawnRequest {
+    use crate::driver::command_env;
+    use slab_linux_sandbox::SandboxPolicyMirror;
+
+    let sandbox_policy = match env.policy {
+        SandboxPolicy::ReadOnly => SandboxPolicyMirror::ReadOnly,
+        SandboxPolicy::WorkspaceWrite => SandboxPolicyMirror::WorkspaceWrite,
+        SandboxPolicy::DangerFullAccess => SandboxPolicyMirror::DangerFullAccess,
+    };
+
+    slab_linux_sandbox::SpawnRequest {
+        argv: cmd.argv.clone(),
+        env: command_env(env, cmd),
+        cwd: cmd.cwd.clone(),
+        network_blocked: matches!(env.permissions.network, NetworkPolicy::Blocked),
+        managed_proxy_active: env.permissions.managed_proxy.is_some(),
+        sandbox_policy,
+        workspace_root: env.workspace_root.clone(),
+        writable_roots: env.permissions.writable_roots.clone(),
+        readable_roots: env.permissions.readable_roots.clone(),
+        denied_paths: env.permissions.denied_paths.clone(),
+        protected_path_names: env.permissions.protected_path_names.clone(),
     }
 }
 
+/// Translate the sub-crate's decoupled snapshot into slab-sandboxing's honest capability report.
 #[cfg(target_os = "linux")]
-fn mask_path(args: &mut Vec<String>, path: &std::path::Path) {
-    if path.is_dir() {
-        args.push("--tmpfs".into());
-        args.push(path.display().to_string());
-        return;
+fn capabilities_from_snapshot(
+    snap: &slab_linux_sandbox::CapabilitySnapshot,
+) -> SandboxCapabilities {
+    use slab_linux_sandbox::{FsIsolationStrength, LinuxSetupKind};
+
+    let (filesystem_isolation, filesystem) = match snap.filesystem_isolation {
+        FsIsolationStrength::OsEnforced => (IsolationStrength::OsEnforced, true),
+        FsIsolationStrength::Lexical => (IsolationStrength::Lexical, false),
+        FsIsolationStrength::None => (IsolationStrength::None, false),
+    };
+    let (network_isolation, network) = match snap.network_isolation {
+        FsIsolationStrength::OsEnforced => (IsolationStrength::OsEnforced, true),
+        FsIsolationStrength::Lexical => (IsolationStrength::Lexical, false),
+        FsIsolationStrength::None => (IsolationStrength::None, false),
+    };
+    let setup_kind = match snap.setup_kind {
+        LinuxSetupKind::None => SetupKind::None,
+        LinuxSetupKind::Bwrap => SetupKind::Bwrap,
+        LinuxSetupKind::BwrapSeccomp => SetupKind::BwrapSeccomp,
+        LinuxSetupKind::BwrapLandlock => SetupKind::BwrapLandlock,
+    };
+
+    let fs_enforced = matches!(snap.filesystem_isolation, FsIsolationStrength::OsEnforced);
+    let net_enforced = matches!(snap.network_isolation, FsIsolationStrength::OsEnforced);
+    // bwrap = namespace isolation (process can't see non-bound paths) ⇒ Full.
+    // landlock = path-access filtering in the same namespace ⇒ KernelFiltered.
+    // Both dims OsEnforced otherwise ⇒ Full (bwrap+seccomp) / Elevated (fs only, e.g. managed proxy).
+    let isolation = if snap.provisioned && fs_enforced && net_enforced {
+        match snap.setup_kind {
+            LinuxSetupKind::BwrapLandlock => SandboxIsolation::KernelFiltered,
+            _ => SandboxIsolation::Full,
+        }
+    } else if snap.provisioned && fs_enforced {
+        SandboxIsolation::Elevated
+    } else if snap.provisioned {
+        SandboxIsolation::Degraded
+    } else {
+        SandboxIsolation::Unsupported
+    };
+
+    SandboxCapabilities {
+        platform: SandboxPlatform::Linux,
+        isolation,
+        filesystem,
+        network,
+        filesystem_isolation,
+        network_isolation,
+        process_cleanup: true,
+        setup_required: snap.setup_required,
+        setup_kind,
     }
-    if path.exists() {
-        args.push("--bind".into());
-        args.push("/dev/null".into());
-        args.push(path.display().to_string());
+}
+
+/// Map the sub-crate's error into the shared `SandboxError`.
+#[cfg(target_os = "linux")]
+fn map_linux_err(e: slab_linux_sandbox::LinuxSandboxError) -> SandboxError {
+    use slab_linux_sandbox::LinuxSandboxError;
+    match e {
+        LinuxSandboxError::EmptyCommand => SandboxError::EmptyCommand,
+        LinuxSandboxError::SpawnFailed(s) => SandboxError::SpawnFailed(s),
+        LinuxSandboxError::BwrapNotAvailable(s) => SandboxError::BwrapNotAvailable(s),
+        LinuxSandboxError::PermissionDenied(s) => SandboxError::PermissionDenied(s),
+        LinuxSandboxError::UnsupportedPlatform => SandboxError::UnsupportedPlatform,
+        other => SandboxError::SetupFailed(other.to_string()),
     }
 }

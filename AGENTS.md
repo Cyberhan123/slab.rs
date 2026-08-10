@@ -110,6 +110,7 @@ Start with the nearest local README for the code you are changing.
 - Agent control plane and tools: `crates/slab-agent/README.md`, `crates/slab-agent-tools/README.md`
 - Agent session rollout event-source (JSONL true source): `crates/slab-agent-rollout/README.md`
 - Windows OS-enforced sandbox (restricted token + integrity-label ACLs beneath `slab-sandboxing`): `crates/slab-windows-sandbox/README.md`
+- Linux OS-enforced sandbox (seccomp + landlock + bwrap beneath `slab-sandboxing`): `crates/slab-linux-sandbox/README.md`
 - Elevated Windows sandbox helper binary: `bin/slab-sandbox-helper/README.md`
 - Plugin model and packaging: `plugins/README.md`, `crates/slab-plugin/README.md`, `packages/slab-plugin-sdk/README.md`, `packages/slab-plugin-cli/README.md`, `packages/slab-plugin-ui/README.md`
 - Desktop frontend and UI packages: `packages/slab-desktop/README.md`, `packages/slab-components/README.md`, `packages/slab-i18n/README.md`

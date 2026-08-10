@@ -16,15 +16,17 @@ use std::sync::Arc;
 use crate::driver::{OutputSink, OutputStream, command_env, wait_for_child, wait_for_elevated};
 #[cfg(target_os = "windows")]
 use crate::guard::validate_command;
+#[cfg(target_os = "windows")]
+use crate::{IsolationStrength, SetupKind};
 use crate::{
-    IsolationStrength, SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError,
-    SandboxIsolation, SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
-    SetupKind,
+    SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError, SandboxIsolation,
+    SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
 };
 #[cfg(target_os = "windows")]
 use slab_windows_sandbox::{ErasedOutputSink, WindowsSandboxExecutor};
 
 pub struct WindowsSandboxDriver {
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     env: SandboxEnvironment,
     #[cfg(target_os = "windows")]
     executor: Box<dyn WindowsSandboxExecutor>,

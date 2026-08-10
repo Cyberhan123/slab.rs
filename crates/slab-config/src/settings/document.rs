@@ -384,10 +384,32 @@ pub enum AgentPermissionBaseline {
 /// `windows_setup_required` opts in to the elevated Windows helper for OS-enforced isolation
 /// (S2): when true and not yet provisioned, the shell tool is blocked (fail-closed). It is
 /// Windows-only and ignored on other platforms.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+///
+/// `linux_allow_landlock_fallback` (S4) gates the landlock filesystem-isolation fallback used when
+/// `bwrap` is unavailable (containers without user namespaces). Default `true` matches the runtime
+/// default; when `false` and neither bwrap nor landlock is available, the shell is blocked
+/// (fail-closed). Linux-only; ignored on other platforms.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AgentSandboxPlatformConfig {
     #[serde(default)]
     pub windows_setup_required: bool,
+    #[serde(default = "default_linux_allow_landlock_fallback")]
+    pub linux_allow_landlock_fallback: bool,
+}
+
+impl Default for AgentSandboxPlatformConfig {
+    fn default() -> Self {
+        Self {
+            windows_setup_required: false,
+            linux_allow_landlock_fallback: default_linux_allow_landlock_fallback(),
+        }
+    }
+}
+
+/// Default for `linux_allow_landlock_fallback` — `true`, matching the runtime default in
+/// `slab_sandboxing::SandboxPlatformConfig` so an unset field keeps the landlock fallback on.
+fn default_linux_allow_landlock_fallback() -> bool {
+    true
 }
 
 /// Agent runtime budget / concurrency settings (ADR-013).
