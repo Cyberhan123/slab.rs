@@ -243,6 +243,7 @@ mod tests {
             writable_roots: vec![PathBuf::from(r"C:\ws")],
             workspace_root: Some(PathBuf::from(r"C:\ws")),
             network_blocked: false,
+            use_conpty: false,
         }
     }
 
@@ -350,6 +351,7 @@ mod tests {
             writable_roots: vec![],
             workspace_root: None,
             network_blocked: false,
+            use_conpty: false,
         };
         let sb = SpawnRequest { env: env_b, ..sa.clone() };
         let ta = spawn_tag(&key, "t", &sa).unwrap();

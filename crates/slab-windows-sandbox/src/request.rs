@@ -52,6 +52,12 @@ pub struct SpawnRequest {
     /// Advisory only in S2 (Low-IL does not block sockets); S3 (WFP) enforces it.
     #[serde(default)]
     pub network_blocked: bool,
+    /// S6a: run the elevated child under a Windows pseudoconsole (ConPTY) instead of piped stdio,
+    /// giving the child a real terminal (ANSI/TUI fidelity). Default `false` (piped). Meaningful
+    /// only on the elevated AppContainer path; ignored by the job-only path. Opt-in via the
+    /// `windows_use_conpty` config knob. Covered by the Spawn frame HMAC (it is a field of `spawn`).
+    #[serde(default)]
+    pub use_conpty: bool,
 }
 
 /// Result of the non-elevated spawn path: a local `tokio::process::Child` plus a tree-kill

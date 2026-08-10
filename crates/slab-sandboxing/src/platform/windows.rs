@@ -209,6 +209,9 @@ fn build_spawn_request(
         writable_roots,
         workspace_root: env.workspace_root.clone(),
         network_blocked: matches!(env.permissions.network, NetworkPolicy::Blocked),
+        // Opt-in ConPTY (S6a). Meaningful only on the elevated AppContainer path; the job-only
+        // executor ignores it. Default false keeps the working piped-stdio path.
+        use_conpty: env.permissions.platform.windows_use_conpty,
     }
 }
 

@@ -68,6 +68,7 @@ pub struct SandboxPlatformConfig {
     pub windows_setup_required: bool,
     pub linux_allow_landlock_fallback: bool,
     pub macos_use_sandbox_exec: bool,
+    pub windows_use_conpty: bool,
 }
 
 impl Default for SandboxPlatformConfig {
@@ -76,6 +77,7 @@ impl Default for SandboxPlatformConfig {
             windows_setup_required: false,
             linux_allow_landlock_fallback: true,
             macos_use_sandbox_exec: true,
+            windows_use_conpty: false,
         }
     }
 }

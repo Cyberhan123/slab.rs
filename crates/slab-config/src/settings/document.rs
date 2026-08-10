@@ -394,6 +394,10 @@ pub enum AgentPermissionBaseline {
 /// provides OS-enforced filesystem + network isolation. Default `true` matches the runtime default;
 /// when `false` the child runs without the seatbelt profile and the driver honestly reports
 /// `Degraded`/lexical isolation (only the lexical guard applies). macOS-only; ignored elsewhere.
+///
+/// `windows_use_conpty` (S6a) opts the elevated Windows shell into a pseudoconsole (ConPTY) for
+/// terminal-aware child output (ANSI/TUI fidelity) instead of piped stdio. Default `false` (piped
+/// stays the safe default); ignored unless `windows_setup_required` is also enabled. Windows-only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AgentSandboxPlatformConfig {
     #[serde(default)]
@@ -402,6 +406,8 @@ pub struct AgentSandboxPlatformConfig {
     pub linux_allow_landlock_fallback: bool,
     #[serde(default = "default_macos_use_sandbox_exec")]
     pub macos_use_sandbox_exec: bool,
+    #[serde(default)]
+    pub windows_use_conpty: bool,
 }
 
 impl Default for AgentSandboxPlatformConfig {
@@ -410,6 +416,7 @@ impl Default for AgentSandboxPlatformConfig {
             windows_setup_required: false,
             linux_allow_landlock_fallback: default_linux_allow_landlock_fallback(),
             macos_use_sandbox_exec: default_macos_use_sandbox_exec(),
+            windows_use_conpty: false,
         }
     }
 }

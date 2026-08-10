@@ -286,11 +286,19 @@ async fn handle_connection(
 
 /// Result of the synchronous spawn: the Job plus the stdio read ends + process handle as `usize`
 /// (raw `HANDLE`s are not `Send`, so they cross into async code as addresses and are cast back).
-struct SpawnedChild {
-    job: JobHandle,
-    stdout_read: usize,
-    stderr_read: usize,
-    process: usize,
+/// The ConPTY fields are `0` on the piped path; on the ConPTY path `stderr_read` is `0` (the PTY
+/// merges streams) and the exit-watcher tears the pseudoconsole + its consumed handles down after
+/// the child exits.
+pub(crate) struct SpawnedChild {
+    pub(crate) job: JobHandle,
+    pub(crate) stdout_read: usize,
+    pub(crate) stderr_read: usize,
+    pub(crate) process: usize,
+    /// ConPTY only: the pseudoconsole handle (`HPCON`). Closed BEFORE the consumed handles below.
+    pub(crate) pseudoconsole: usize,
+    /// ConPTY only: `hInput`/`hOutput` consumed by `CreatePseudoConsole` (must outlive it).
+    pub(crate) pty_input_read: usize,
+    pub(crate) pty_output_write: usize,
 }
 
 /// Spawn one Low-IL restricted child. CREATE_SUSPENDED → assign Job → resume (fail-closed if
@@ -306,7 +314,12 @@ async fn spawn_low_il_child(
 ) -> Result<JobHandle, WindowsSandboxError> {
     // PSID is extracted here as a temporary consumed by the SYNC spawn — it never crosses an
     // `.await`, so the raw pointer does not poison the future's `Send` impl.
-    let child = spawn_low_il_child_sync(spawn, wfp.package_sid.as_psid())?;
+    let use_conpty = spawn.use_conpty;
+    let child = if use_conpty {
+        crate::conpty::spawn_low_il_child_conpty_sync(spawn, wfp.package_sid.as_psid())?
+    } else {
+        spawn_low_il_child_sync(spawn, wfp.package_sid.as_psid())?
+    };
 
     write_frame(
         &mut *writer.lock().await,
@@ -314,15 +327,40 @@ async fn spawn_low_il_child(
     )
     .await?;
 
-    // Two pump tasks: read child stdout/stderr → Output frames, until EOF (child exits).
-    spawn_pump(child.stdout_read, job_token.to_string(), OutputStreamKind::Stdout, writer.clone());
-    spawn_pump(child.stderr_read, job_token.to_string(), OutputStreamKind::Stderr, writer.clone());
+    // Pump child stdout → Output frames until EOF. ConPTY merges streams into one, so on the
+    // ConPTY path there is only the stdout pump (no separate stderr pump). `spawn_pump` returns the
+    // pump's JoinHandle; on the ConPTY path the exit-watcher awaits it so trailing Output frames are
+    // sent before Exited (otherwise the orchestrator resolves on Exited and drops the output tail).
+    let stdout_pump = spawn_pump(
+        child.stdout_read,
+        job_token.to_string(),
+        OutputStreamKind::Stdout,
+        writer.clone(),
+    );
+    // stderr pump is piped-path-only; its handle is dropped (fire-and-forget — tokio detaches it).
+    let _stderr_pump = if use_conpty {
+        None
+    } else {
+        Some(spawn_pump(
+            child.stderr_read,
+            job_token.to_string(),
+            OutputStreamKind::Stderr,
+            writer.clone(),
+        ))
+    };
+    let pump_to_await = use_conpty.then_some(stdout_pump);
 
     // Exit-watcher: wait for process exit (on a blocking thread), then send Exited. It owns the
-    // process handle (closes it after). The Job (in the connection map) is what enforces tree-kill.
+    // process handle (closes it after). On the ConPTY path it also tears down the pseudoconsole +
+    // the handles it consumed (hInput/hOutput must outlive ClosePseudoConsole, so order matters),
+    // then awaits the stdout pump so the output tail is drained first. The Job (in the connection
+    // map) is what enforces tree-kill on disconnect.
     let w = writer.clone();
     let jt = job_token.to_string();
     let proc_addr = child.process;
+    let hpc = child.pseudoconsole;
+    let pty_in = child.pty_input_read;
+    let pty_out = child.pty_output_write;
     tokio::spawn(async move {
         let code = tokio::task::spawn_blocking(move || -> i32 {
             let proc = proc_addr as HANDLE;
@@ -333,11 +371,26 @@ async fn spawn_low_il_child(
                     c = 1;
                 }
                 CloseHandle(proc);
+                if hpc != 0 {
+                    windows_sys::Win32::System::Console::ClosePseudoConsole(hpc as isize);
+                    if pty_in != 0 {
+                        CloseHandle(pty_in as HANDLE);
+                    }
+                    if pty_out != 0 {
+                        CloseHandle(pty_out as HANDLE);
+                    }
+                }
             }
             c as i32
         })
         .await
         .unwrap_or(1);
+        // ConPTY-only: the spawn_blocking just closed the PTY, so the stdout pump is about to hit
+        // EOF. Await its drain (bounded by a timeout in case the pump is stuck) BEFORE sending
+        // Exited so the orchestrator does not drop trailing Output frames.
+        if let Some(pump) = pump_to_await {
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(500), pump).await;
+        }
         let _ = write_frame(
             &mut *w.lock().await,
             &PipeFrame::Exited { job_token: jt, code, timed_out: false },
@@ -481,12 +534,21 @@ fn spawn_low_il_child_sync(
         stdout_read: stdout_read as usize,
         stderr_read: stderr_read as usize,
         process: pi.hProcess as usize,
+        pseudoconsole: 0,
+        pty_input_read: 0,
+        pty_output_write: 0,
     })
 }
 
 /// Spawn a pump task that reads `read_addr` (a pipe read-handle as `usize`) until EOF, forwarding
-/// each chunk as an `Output` frame.
-fn spawn_pump(read_addr: usize, job_token: String, stream: OutputStreamKind, writer: SharedWriter) {
+/// each chunk as an `Output` frame. Returns the task's `JoinHandle` so a caller can await EOF (used
+/// by the ConPTY exit-watcher to drain the output tail before sending `Exited`).
+fn spawn_pump(
+    read_addr: usize,
+    job_token: String,
+    stream: OutputStreamKind,
+    writer: SharedWriter,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let read_handle = read_addr as HANDLE;
         // Wrap the raw anonymous-pipe handle in an async file. tokio::fs::File runs reads on a
@@ -510,7 +572,7 @@ fn spawn_pump(read_addr: usize, job_token: String, stream: OutputStreamKind, wri
                 Err(_) => break,
             }
         }
-    });
+    })
 }
 
 /// Create an anonymous pipe whose SD grants Everyone AND the AppContainer package SID read/write,
@@ -602,7 +664,7 @@ fn make_well_known(sid_kind: i32) -> Result<([u8; 256], HANDLE), WindowsSandboxE
 
 /// Quote + space-join argv into a single command line for `lpCommandLine` (caller must free-quote
 /// conservatively; argv[0] is also passed separately as lpApplicationName).
-fn build_command_line(argv: &[String]) -> String {
+pub(crate) fn build_command_line(argv: &[String]) -> String {
     argv.iter()
         .map(|a| {
             if a.contains(' ') || a.is_empty() {
@@ -617,7 +679,7 @@ fn build_command_line(argv: &[String]) -> String {
 
 /// Build a unicode (`CREATE_UNICODE_ENVIRONMENT`) env block from a map. Returns (block, flags); if
 /// the map is empty the block is `None` and the child inherits the daemon's environment.
-fn build_unicode_env(env: &HashMap<String, String>) -> (Option<Vec<u16>>, u32) {
+pub(crate) fn build_unicode_env(env: &HashMap<String, String>) -> (Option<Vec<u16>>, u32) {
     if env.is_empty() {
         return (None, 0);
     }
@@ -634,7 +696,7 @@ fn build_unicode_env(env: &HashMap<String, String>) -> (Option<Vec<u16>>, u32) {
 }
 
 /// Encode a string as a NUL-terminated UTF-16 buffer.
-fn wide(s: &str) -> Vec<u16> {
+pub(crate) fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 

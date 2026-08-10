@@ -67,6 +67,7 @@ fn make_request(argv: &[&str], cwd: &std::path::Path) -> SpawnRequest {
         writable_roots: vec![],
         workspace_root: None,
         network_blocked: false,
+        use_conpty: false,
     }
 }
 
@@ -108,6 +109,40 @@ async fn os_elevated_prepare_and_spawn_relays_stdout() {
         String::from_utf8_lossy(&buf).into_owned()
     };
     assert!(stdout.contains("slab-os-marker"), "stdout relayed: {stdout}");
+}
+
+#[tokio::test]
+#[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
+async fn os_conpty_restricted_child_echo_roundtrip() {
+    if !elevated_enabled() {
+        eprintln!("skip: SLAB_SANDBOX_ELEVATED != 1 (run elevated)");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let ctx = make_context(dir.path(), &workspace);
+
+    let exec = ElevatedAclTokenExecutor::new(ctx.clone());
+    exec.prepare(&ctx).expect("prepare (daemon + ACLs)");
+
+    let cap = Arc::new(Capture(std::sync::Mutex::new(Vec::new())));
+    // ConPTY under the Low-IL AppContainer restricted token: the child sees a real pseudoconsole,
+    // so echo output arrives on the merged PTY stream (pumped as Stdout).
+    let mut req = make_request(&["cmd", "/c", "echo slab-os-marker"], &workspace);
+    req.use_conpty = true;
+    let run = exec
+        .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
+        .expect("spawn_elevated(conpty)");
+
+    let exit = run.exit_future.await.expect("exit future");
+    assert!(!exit.timed_out, "conpty command timed out");
+    assert_eq!(exit.exit_code, 0, "conpty child exited cleanly");
+    let stdout = {
+        let buf = cap.0.lock().unwrap();
+        String::from_utf8_lossy(&buf).into_owned()
+    };
+    assert!(stdout.contains("slab-os-marker"), "conpty stdout relayed: {stdout}");
 }
 
 #[tokio::test]

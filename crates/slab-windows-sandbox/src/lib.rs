@@ -17,6 +17,8 @@ mod appcontainer;
 #[cfg(target_os = "windows")]
 mod capability;
 #[cfg(target_os = "windows")]
+mod conpty;
+#[cfg(target_os = "windows")]
 mod creds;
 #[cfg(target_os = "windows")]
 mod daemon;
