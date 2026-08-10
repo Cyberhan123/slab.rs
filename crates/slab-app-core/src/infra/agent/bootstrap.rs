@@ -169,7 +169,7 @@ fn build_agent_control(
         platform: SandboxPlatformConfig {
             windows_setup_required: platform_cfg.windows_setup_required,
             linux_allow_landlock_fallback: platform_cfg.linux_allow_landlock_fallback,
-            ..SandboxPlatformConfig::default()
+            macos_use_sandbox_exec: platform_cfg.macos_use_sandbox_exec,
         },
         ..SandboxPermissions::default()
     };

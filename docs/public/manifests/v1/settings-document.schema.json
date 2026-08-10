@@ -241,6 +241,7 @@
           "$ref": "#/$defs/AgentSandboxPlatformConfig",
           "default": {
             "linux_allow_landlock_fallback": true,
+            "macos_use_sandbox_exec": true,
             "windows_setup_required": false
           },
           "description": "Platform-specific sandbox knobs. Mirrors `slab_sandboxing::SandboxPlatformConfig`\n(kept decoupled so this crate does not depend on the runtime sandbox crate); the host\nconverts it at the bootstrap boundary."
@@ -305,9 +306,13 @@
       "type": "object"
     },
     "AgentSandboxPlatformConfig": {
-      "description": "Platform-specific sandbox knobs, mapping 1:1 onto `slab_sandboxing::SandboxPlatformConfig`.\n`windows_setup_required` opts in to the elevated Windows helper for OS-enforced isolation\n(S2): when true and not yet provisioned, the shell tool is blocked (fail-closed). It is\nWindows-only and ignored on other platforms.\n\n`linux_allow_landlock_fallback` (S4) gates the landlock filesystem-isolation fallback used when\n`bwrap` is unavailable (containers without user namespaces). Default `true` matches the runtime\ndefault; when `false` and neither bwrap nor landlock is available, the shell is blocked\n(fail-closed). Linux-only; ignored on other platforms.",
+      "description": "Platform-specific sandbox knobs, mapping 1:1 onto `slab_sandboxing::SandboxPlatformConfig`.\n`windows_setup_required` opts in to the elevated Windows helper for OS-enforced isolation\n(S2): when true and not yet provisioned, the shell tool is blocked (fail-closed). It is\nWindows-only and ignored on other platforms.\n\n`linux_allow_landlock_fallback` (S4) gates the landlock filesystem-isolation fallback used when\n`bwrap` is unavailable (containers without user namespaces). Default `true` matches the runtime\ndefault; when `false` and neither bwrap nor landlock is available, the shell is blocked\n(fail-closed). Linux-only; ignored on other platforms.\n\n`macos_use_sandbox_exec` (S5) gates the macOS seatbelt (`/usr/bin/sandbox-exec`) wrapper that\nprovides OS-enforced filesystem + network isolation. Default `true` matches the runtime default;\nwhen `false` the child runs without the seatbelt profile and the driver honestly reports\n`Degraded`/lexical isolation (only the lexical guard applies). macOS-only; ignored elsewhere.",
       "properties": {
         "linux_allow_landlock_fallback": {
+          "default": true,
+          "type": "boolean"
+        },
+        "macos_use_sandbox_exec": {
           "default": true,
           "type": "boolean"
         },
@@ -359,6 +364,7 @@
             "baseline": "workspace_write",
             "platform": {
               "linux_allow_landlock_fallback": true,
+              "macos_use_sandbox_exec": true,
               "windows_setup_required": false
             }
           },
@@ -1938,6 +1944,7 @@
           "baseline": "workspace_write",
           "platform": {
             "linux_allow_landlock_fallback": true,
+            "macos_use_sandbox_exec": true,
             "windows_setup_required": false
           }
         },

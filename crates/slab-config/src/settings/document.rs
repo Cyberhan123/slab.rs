@@ -389,12 +389,19 @@ pub enum AgentPermissionBaseline {
 /// `bwrap` is unavailable (containers without user namespaces). Default `true` matches the runtime
 /// default; when `false` and neither bwrap nor landlock is available, the shell is blocked
 /// (fail-closed). Linux-only; ignored on other platforms.
+///
+/// `macos_use_sandbox_exec` (S5) gates the macOS seatbelt (`/usr/bin/sandbox-exec`) wrapper that
+/// provides OS-enforced filesystem + network isolation. Default `true` matches the runtime default;
+/// when `false` the child runs without the seatbelt profile and the driver honestly reports
+/// `Degraded`/lexical isolation (only the lexical guard applies). macOS-only; ignored elsewhere.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AgentSandboxPlatformConfig {
     #[serde(default)]
     pub windows_setup_required: bool,
     #[serde(default = "default_linux_allow_landlock_fallback")]
     pub linux_allow_landlock_fallback: bool,
+    #[serde(default = "default_macos_use_sandbox_exec")]
+    pub macos_use_sandbox_exec: bool,
 }
 
 impl Default for AgentSandboxPlatformConfig {
@@ -402,6 +409,7 @@ impl Default for AgentSandboxPlatformConfig {
         Self {
             windows_setup_required: false,
             linux_allow_landlock_fallback: default_linux_allow_landlock_fallback(),
+            macos_use_sandbox_exec: default_macos_use_sandbox_exec(),
         }
     }
 }
@@ -409,6 +417,12 @@ impl Default for AgentSandboxPlatformConfig {
 /// Default for `linux_allow_landlock_fallback` — `true`, matching the runtime default in
 /// `slab_sandboxing::SandboxPlatformConfig` so an unset field keeps the landlock fallback on.
 fn default_linux_allow_landlock_fallback() -> bool {
+    true
+}
+
+/// Default for `macos_use_sandbox_exec` — `true`, matching the runtime default in
+/// `slab_sandboxing::SandboxPlatformConfig` so an unset field keeps the seatbelt wrapper on.
+fn default_macos_use_sandbox_exec() -> bool {
     true
 }
 
