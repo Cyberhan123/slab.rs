@@ -339,17 +339,18 @@ async fn spawn_low_il_child(
     .await?;
 
     // Pump child stdout → Output frames until EOF. ConPTY merges streams into one, so on the
-    // ConPTY path there is only the stdout pump (no separate stderr pump). `spawn_pump` returns the
-    // pump's JoinHandle; on the ConPTY path the exit-watcher awaits it so trailing Output frames are
-    // sent before Exited (otherwise the orchestrator resolves on Exited and drops the output tail).
+    // ConPTY path there is only the stdout pump (no separate stderr pump). Both pump JoinHandles are
+    // drained by the exit-watcher BEFORE it sends Exited — otherwise the orchestrator resolves on
+    // Exited and drops Output frames (cmd's echoed stdout, or its error on stderr) arriving a hair
+    // later. (This relay race left every non-ConPTY spawn showing empty stdout/stderr.)
     let stdout_pump = spawn_pump(
         child.stdout_read,
         job_token.to_string(),
         OutputStreamKind::Stdout,
         writer.clone(),
     );
-    // stderr pump is piped-path-only; its handle is dropped (fire-and-forget — tokio detaches it).
-    let _stderr_pump = if use_conpty {
+    // stderr pump is piped-path-only (ConPTY merges it into stdout).
+    let stderr_pump = if use_conpty {
         None
     } else {
         Some(spawn_pump(
@@ -359,7 +360,8 @@ async fn spawn_low_il_child(
             writer.clone(),
         ))
     };
-    let pump_to_await = use_conpty.then_some(stdout_pump);
+    let pumps_to_drain: Vec<tokio::task::JoinHandle<()>> =
+        std::iter::once(stdout_pump).chain(stderr_pump).collect();
 
     // Exit-watcher: wait for process exit (on a blocking thread), then send Exited. It owns the
     // process handle (closes it after). On the ConPTY path it also tears down the pseudoconsole +
@@ -396,10 +398,10 @@ async fn spawn_low_il_child(
         })
         .await
         .unwrap_or(1);
-        // ConPTY-only: the spawn_blocking just closed the PTY, so the stdout pump is about to hit
-        // EOF. Await its drain (bounded by a timeout in case the pump is stuck) BEFORE sending
-        // Exited so the orchestrator does not drop trailing Output frames.
-        if let Some(pump) = pump_to_await {
+        // Drain every pump BEFORE sending Exited so the orchestrator does not drop trailing Output
+        // frames (stdout output + stderr errors). The process has exited, so its inherited write
+        // ends are closed and each pump is about to hit EOF; the timeout only bounds a stuck pump.
+        for pump in pumps_to_drain {
             let _ = tokio::time::timeout(std::time::Duration::from_millis(500), pump).await;
         }
         let _ = write_frame(
