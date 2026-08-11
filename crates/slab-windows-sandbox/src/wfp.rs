@@ -84,11 +84,13 @@ impl WfpEngine {
 
         // SAFETY: all calls operate on our own engine handle with valid pointers.
         unsafe {
-            let err = FwpmTransactionBegin0(self.0, 0);
-            if err != 0 {
-                return Err(self.abort("FwpmTransactionBegin0", err));
-            }
-
+            // Provider + sublayer are PERSISTENT (survive daemon restarts) and idempotent. Add them
+            // OUTSIDE the filter transaction and tolerate any non-zero: a re-provision legitimately
+            // returns FWP_E_ALREADY_EXISTS, and — critically — an error returned by an add INSIDE an
+            // explicit transaction aborts it, which would make the filter adds below fail with
+            // FWP_E_NO_TXN_IN_PROGRESS (0x8032000C). Untransactional adds auto-commit individually,
+            // so an already-exists here is harmless. The filter adds below are the fail-closed gate;
+            // a genuinely-broken provider surfaces there as FWP_E_PROVIDER_NOT_FOUND.
             let provider = FWPM_PROVIDER0 {
                 providerKey: PROVIDER_GUID,
                 displayData: display,
@@ -96,8 +98,6 @@ impl WfpEngine {
             };
             let err = FwpmProviderAdd0(self.0, &provider, std::ptr::null_mut());
             if err != 0 {
-                // Provider persists across daemon restarts; a re-provision legitimately hits
-                // "already exists". The filter-add below fails closed if the provider is truly broken.
                 tracing::warn!(
                     code = err,
                     "FwpmProviderAdd0 non-zero (likely already-exists; continuing)"
@@ -117,6 +117,14 @@ impl WfpEngine {
                     code = err,
                     "FwpmSubLayerAdd0 non-zero (likely already-exists; continuing)"
                 );
+            }
+
+            // Fresh transaction for the two block filters only. The provider/sublayer already exist
+            // (just added or persisted from a prior run), so the filters' providerKey/subLayerKey
+            // resolve cleanly. If either add fails we abort and surface Err (fail-closed).
+            let err = FwpmTransactionBegin0(self.0, 0);
+            if err != 0 {
+                return Err(self.abort("FwpmTransactionBegin0", err));
             }
 
             // One condition: match connections whose AppContainer package SID == package_sid.
