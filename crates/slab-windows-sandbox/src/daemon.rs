@@ -126,10 +126,21 @@ pub async fn run_daemon(
         let marker_path_clone = marker_path.clone();
         let wfp_clone = wfp.clone();
         tokio::spawn(async move {
+            // Compute the error-log path before `handle_connection` consumes `marker_path_clone`.
+            let error_log = marker_path_clone.with_file_name("daemon-error.log");
             if let Err(e) =
                 handle_connection(prev, key, pipe_name_clone, marker_path_clone, wfp_clone).await
             {
                 tracing::warn!(error = %e, "daemon: connection handler failed");
+                // The daemon's stderr is hidden (CREATE_NO_WINDOW), so persist the failure reason
+                // next to the marker where the orchestrator/test can surface it. Captures BOTH the
+                // Provision HMAC-mismatch path and any ACL/WFP error.
+                let line = format!("daemon connection failed: {e}\n");
+                let _ = std::fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&error_log)
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
             }
         });
     }

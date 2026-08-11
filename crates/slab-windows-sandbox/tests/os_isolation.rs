@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use slab_windows_sandbox::{
     ElevatedAclTokenExecutor, ErasedOutputSink, FsIsolationStrength, OutputStreamKind,
-    PrepareContext, SpawnRequest, WindowsSandboxExecutor, WindowsSetupKind,
+    PrepareContext, SpawnRequest, WindowsSandboxError, WindowsSandboxExecutor, WindowsSetupKind,
 };
 
 fn elevated_enabled() -> bool {
@@ -50,6 +50,31 @@ fn make_context(dir: &std::path::Path, workspace: &std::path::Path) -> PrepareCo
         key_path: dir.join("sandbox-helper.key"),
         ipc_dir: dir.join("sandbox-ipc"),
         marker_path: dir.join("sandbox-marker.json"),
+    }
+}
+
+/// Wrap `prepare` so that on failure we print the daemon's captured stderr/stdout log (written by
+/// `launch_daemon_direct` next to the marker). The daemon otherwise hides its output behind
+/// `CREATE_NO_WINDOW`, leaving provisioning failures opaque.
+fn prepare_with_diag(
+    exec: &ElevatedAclTokenExecutor,
+    ctx: &PrepareContext,
+) -> Result<(), WindowsSandboxError> {
+    match exec.prepare(ctx) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let log = ctx.marker_path.with_file_name("daemon-error.log");
+            match std::fs::read_to_string(&log) {
+                Ok(contents) if !contents.is_empty() => {
+                    eprintln!(
+                        "=== daemon-error log ({}) ===\n{contents}=== end log ===",
+                        log.display()
+                    );
+                }
+                _ => eprintln!("(no daemon-error log at {})", log.display()),
+            }
+            Err(e)
+        }
     }
 }
 
@@ -132,7 +157,7 @@ async fn os_elevated_prepare_and_spawn_relays_stdout() {
     let ctx = make_context(dir.path(), &workspace);
 
     let exec = ElevatedAclTokenExecutor::new(ctx.clone());
-    exec.prepare(&ctx).expect("prepare (daemon + ACLs)");
+    prepare_with_diag(&exec, &ctx).expect("prepare (daemon + ACLs)");
 
     let cap = Arc::new(Capture(std::sync::Mutex::new(Vec::new())));
     let req = make_request(&["cmd", "/c", "echo slab-os-marker"], &workspace);
@@ -162,7 +187,7 @@ async fn os_conpty_restricted_child_echo_roundtrip() {
     let ctx = make_context(dir.path(), &workspace);
 
     let exec = ElevatedAclTokenExecutor::new(ctx.clone());
-    exec.prepare(&ctx).expect("prepare (daemon + ACLs)");
+    prepare_with_diag(&exec, &ctx).expect("prepare (daemon + ACLs)");
 
     let cap = Arc::new(Capture(std::sync::Mutex::new(Vec::new())));
     // ConPTY under the Low-IL AppContainer restricted token: the child sees a real pseudoconsole,
@@ -195,7 +220,7 @@ async fn os_low_il_child_writes_inside_workspace() {
     std::fs::create_dir_all(&workspace).unwrap();
     let ctx = make_context(dir.path(), &workspace);
     let exec = ElevatedAclTokenExecutor::new(ctx.clone());
-    exec.prepare(&ctx).expect("prepare");
+    prepare_with_diag(&exec, &ctx).expect("prepare");
 
     let target = workspace.join("out.txt");
     // `cmd /c echo hi > out.txt` — the Low-IL child CAN write inside the lowered workspace.
@@ -218,7 +243,7 @@ async fn os_low_il_child_blocked_outside_workspace() {
     std::fs::create_dir_all(&workspace).unwrap();
     let ctx = make_context(dir.path(), &workspace);
     let exec = ElevatedAclTokenExecutor::new(ctx.clone());
-    exec.prepare(&ctx).expect("prepare");
+    prepare_with_diag(&exec, &ctx).expect("prepare");
 
     // Write OUTSIDE the workspace (into the parent temp dir, which is Medium-IL). The Low-IL
     // child's NO_WRITE_UP must block this: the file is not created.
@@ -241,7 +266,7 @@ async fn os_capabilities_report_wfp_os_enforced() {
     std::fs::create_dir_all(&workspace).unwrap();
     let ctx = make_context(dir.path(), &workspace);
     let exec = ElevatedAclTokenExecutor::new(ctx.clone());
-    exec.prepare(&ctx).expect("prepare");
+    prepare_with_diag(&exec, &ctx).expect("prepare");
 
     // After provisioning (AppContainer spawn + WFP filter registered) the honest report must show
     // BOTH dimensions OS-enforced under the WFP setup kind.
@@ -276,7 +301,7 @@ async fn os_appcontainer_child_network_blocked() {
     std::fs::create_dir_all(&workspace).unwrap();
     let ctx = make_context(dir.path(), &workspace);
     let exec = ElevatedAclTokenExecutor::new(ctx.clone());
-    exec.prepare(&ctx).expect("prepare");
+    prepare_with_diag(&exec, &ctx).expect("prepare");
 
     // The AppContainer child has no internet capability + our WFP package-SID block filter, so its
     // outbound connect must fail. curl exits 0 ONLY on a completed HTTP request.
