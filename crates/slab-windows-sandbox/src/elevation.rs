@@ -77,7 +77,7 @@ impl Elevator for ShellElevator {
 
         let verb = wide("runas");
         let file = wide(&helper_exe.to_string_lossy());
-        let params = wide(&format!("--payload \"{}\"", payload_path.to_string_lossy()));
+        let params = wide(&format!("payload \"{}\"", payload_path.to_string_lossy()));
 
         // SAFETY: zeroed struct then filled; wide strings own their NUL-terminated buffers for
         // the duration of the call. hProcess is owned below and closed before return.
@@ -159,7 +159,8 @@ impl Elevator for ShellElevator {
 
         let verb = wide("runas");
         let file = wide(&helper_exe.to_string_lossy());
-        let params = wide(&format!("--serve --pipe \"{pipe_name}\""));
+        // The helper's clap takes a positional subcommand (`serve <PIPE>`), not `--serve --pipe`.
+        let params = wide(&format!("serve \"{pipe_name}\""));
 
         // SAFETY: zeroed then filled; wide strings own their NUL-terminated buffers for the call.
         let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
@@ -202,7 +203,9 @@ pub fn launch_daemon_direct(helper_exe: &Path, pipe_name: &str) -> Result<(), Wi
     };
 
     let program = wide(&helper_exe.to_string_lossy());
-    let cmd = format!("--serve --pipe \"{pipe_name}\"");
+    // CreateProcessW's lpCommandLine is the child's full command line (argv[0] first); clap takes
+    // the `serve <PIPE>` positional subcommand. Quote the exe path as argv[0].
+    let cmd = format!("\"{}\" serve \"{pipe_name}\"", helper_exe.to_string_lossy());
     let mut cmd_w = wide(&cmd);
 
     let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };

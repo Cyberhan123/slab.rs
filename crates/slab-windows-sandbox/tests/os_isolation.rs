@@ -81,6 +81,41 @@ impl ErasedOutputSink for Capture {
     }
 }
 
+/// Regression (non-elevated, always runs when the helper is built): `launch_daemon_direct` must
+/// construct a command line the helper's clap accepts — positional `serve <PIPE>`, not the
+/// `--serve --pipe` flag form clap rejects (which silently exits the helper before it creates the
+/// pipe, surfacing downstream as a "pipe not found" timeout). Launching the daemon + a Ping/Pong
+/// handshake need NO admin (only Provision's ACL/WFP does). Self-skips if the helper binary is not
+/// built next to the test binary.
+#[tokio::test]
+async fn launch_daemon_direct_starts_helper_and_pings() {
+    let helper_exe = match resolve_helper_exe() {
+        Some(p) => p,
+        None => {
+            eprintln!(
+                "skip: slab-sandbox-helper.exe not built next to test binary \
+                 (run `cargo build -p slab-sandbox-helper`)"
+            );
+            return;
+        }
+    };
+    let pipe = format!(r"\\.\pipe\slab-sandbox-launch-regression-{}", std::process::id());
+    slab_windows_sandbox::launch_daemon_direct(&helper_exe, &pipe)
+        .expect("launch_daemon_direct spawns the helper");
+
+    let echoed = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        slab_windows_sandbox::ping(&pipe, "regression-nonce"),
+    )
+    .await
+    .expect(
+        "timed out waiting for the daemon's pipe — the helper likely rejected the command line \
+         (clap parse) and exited before creating the pipe",
+    )
+    .expect("ping handshake failed");
+    assert_eq!(echoed, "regression-nonce");
+}
+
 #[tokio::test]
 #[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
 async fn os_elevated_prepare_and_spawn_relays_stdout() {
