@@ -95,6 +95,7 @@ fn make_request(argv: &[&str], cwd: &std::path::Path) -> SpawnRequest {
         use_conpty: false,
         diagnostic_plain_spawn: false,
         diagnostic_no_low_il_token: false,
+        diagnostic_new_console: false,
     }
 }
 
@@ -515,5 +516,78 @@ async fn os_diagnostic_no_token_whoami() {
         exit.exit_code, 0,
         "whoami should run with the daemon's normal token (see diag above)"
     );
+    assert!(!cap.stdout_string().is_empty(), "whoami should print (see diag above)");
+}
+
+/// DIAGNOSTIC: like `os_diagnostic_no_token_whoami` but the child INHERITS the daemon's full
+/// environment (empty env map ⇒ no env block ⇒ inherit). The spawn env is otherwise {SystemRoot}
+/// only — a near-empty env can break console-app CRT init. If whoami runs here but not under the
+/// {SystemRoot}-only env, the minimal environment was the init-failure cause.
+#[tokio::test]
+#[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
+async fn os_diagnostic_no_token_inherit_env() {
+    if !elevated_enabled() {
+        eprintln!("skip: SLAB_SANDBOX_ELEVATED != 1");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let ctx = make_context(dir.path(), &workspace);
+    let exec = ElevatedAclTokenExecutor::new(ctx.clone());
+    prepare_with_diag(&exec, &ctx).expect("prepare");
+
+    let cap = Arc::new(Capture::new());
+    let mut req = make_request(&["C:\\Windows\\System32\\whoami.exe"], &workspace);
+    req.diagnostic_plain_spawn = true;
+    req.diagnostic_no_low_il_token = true;
+    req.env.clear(); // inherit the daemon's full environment
+    let run = exec
+        .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
+        .expect("spawn_elevated");
+    let exit = run.exit_future.await.expect("exit future");
+    eprintln!(
+        "inherit_env diag: whoami exit_code={}, stdout={:?}, stderr={:?}",
+        exit.exit_code,
+        cap.stdout_string(),
+        cap.stderr_string()
+    );
+    assert_eq!(exit.exit_code, 0, "whoami should run with inherited env (see diag above)");
+    assert!(!cap.stdout_string().is_empty(), "whoami should print (see diag above)");
+}
+
+/// DIAGNOSTIC: like `os_diagnostic_no_token_whoami` but the child gets its OWN console
+/// (`CREATE_NEW_CONSOLE`) instead of inheriting the daemon's (none). Tests whether the no-console
+/// condition aborts console-app init. A console window may flash — that is expected.
+#[tokio::test]
+#[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
+async fn os_diagnostic_no_token_new_console() {
+    if !elevated_enabled() {
+        eprintln!("skip: SLAB_SANDBOX_ELEVATED != 1");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let ctx = make_context(dir.path(), &workspace);
+    let exec = ElevatedAclTokenExecutor::new(ctx.clone());
+    prepare_with_diag(&exec, &ctx).expect("prepare");
+
+    let cap = Arc::new(Capture::new());
+    let mut req = make_request(&["C:\\Windows\\System32\\whoami.exe"], &workspace);
+    req.diagnostic_plain_spawn = true;
+    req.diagnostic_no_low_il_token = true;
+    req.diagnostic_new_console = true;
+    let run = exec
+        .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
+        .expect("spawn_elevated");
+    let exit = run.exit_future.await.expect("exit future");
+    eprintln!(
+        "new_console diag: whoami exit_code={}, stdout={:?}, stderr={:?}",
+        exit.exit_code,
+        cap.stdout_string(),
+        cap.stderr_string()
+    );
+    assert_eq!(exit.exit_code, 0, "whoami should run with a new console (see diag above)");
     assert!(!cap.stdout_string().is_empty(), "whoami should print (see diag above)");
 }

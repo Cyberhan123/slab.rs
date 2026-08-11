@@ -71,6 +71,11 @@ pub struct SpawnRequest {
     /// cause. Not wired to any production config surface.
     #[serde(default)]
     pub diagnostic_no_low_il_token: bool,
+    /// DIAGNOSTIC ONLY (temporary): when set, add `CREATE_NEW_CONSOLE` to the creation flags (give the
+    /// child its own console instead of inheriting the daemon's none). Tests whether the no-console
+    /// condition aborts console-app init. Not wired to any production config surface.
+    #[serde(default)]
+    pub diagnostic_new_console: bool,
 }
 
 /// Result of the non-elevated spawn path: a local `tokio::process::Child` plus a tree-kill

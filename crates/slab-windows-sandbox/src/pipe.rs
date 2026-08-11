@@ -246,6 +246,7 @@ mod tests {
             use_conpty: false,
             diagnostic_plain_spawn: false,
             diagnostic_no_low_il_token: false,
+            diagnostic_new_console: false,
         }
     }
 
@@ -356,6 +357,7 @@ mod tests {
             use_conpty: false,
             diagnostic_plain_spawn: false,
             diagnostic_no_low_il_token: false,
+            diagnostic_new_console: false,
         };
         let sb = SpawnRequest { env: env_b, ..sa.clone() };
         let ta = spawn_tag(&key, "t", &sa).unwrap();

@@ -38,9 +38,9 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
-    CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
-    GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
+    CREATE_NEW_CONSOLE, CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
+    CreateProcessAsUserW, CreateProcessW, DeleteProcThreadAttributeList,
+    EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, ResumeThread,
     STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, TerminateProcess,
     UpdateProcThreadAttribute, WaitForSingleObject,
@@ -604,6 +604,13 @@ fn spawn_plain_low_il_sync(
     let cwd = spawn.cwd.as_ref().map(|p| wide(&p.to_string_lossy()));
     let (env_block, env_flags) = build_unicode_env(&spawn.env);
 
+    // DIAGNOSTIC: optionally give the child its own console (CREATE_NEW_CONSOLE) instead of
+    // inheriting the daemon's none, to test whether the no-console condition aborts console-app init.
+    let mut creation_flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | env_flags;
+    if spawn.diagnostic_new_console {
+        creation_flags |= CREATE_NEW_CONSOLE;
+    }
+
     let mut pi: PROCESS_INFORMATION = unsafe { zeroed() };
     // DIAGNOSTIC: diagnostic_no_low_il_token ⇒ CreateProcessW (the daemon's own token, NO Low-IL
     // restriction) instead of CreateProcessAsUserW(LowIntegrityToken). Isolates whether the
@@ -616,7 +623,7 @@ fn spawn_plain_low_il_sync(
                 std::ptr::null(),
                 std::ptr::null(),
                 1,
-                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | env_flags,
+                creation_flags,
                 env_block.as_ref().map(|b| b.as_ptr() as *const c_void).unwrap_or(std::ptr::null()),
                 cwd.as_ref().map(|w| w.as_ptr()).unwrap_or(std::ptr::null()),
                 &startup,
@@ -632,7 +639,7 @@ fn spawn_plain_low_il_sync(
                 std::ptr::null(),
                 std::ptr::null(),
                 1, // bInheritHandles = TRUE (the inheritable stdio pipes inherit)
-                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | env_flags,
+                creation_flags,
                 env_block.as_ref().map(|b| b.as_ptr() as *const c_void).unwrap_or(std::ptr::null()),
                 cwd.as_ref().map(|w| w.as_ptr()).unwrap_or(std::ptr::null()),
                 &startup,
