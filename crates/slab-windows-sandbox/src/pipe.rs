@@ -244,6 +244,7 @@ mod tests {
             workspace_root: Some(PathBuf::from(r"C:\ws")),
             network_blocked: false,
             use_conpty: false,
+            diagnostic_plain_spawn: false,
         }
     }
 
@@ -352,6 +353,7 @@ mod tests {
             workspace_root: None,
             network_blocked: false,
             use_conpty: false,
+            diagnostic_plain_spawn: false,
         };
         let sb = SpawnRequest { env: env_b, ..sa.clone() };
         let ta = spawn_tag(&key, "t", &sa).unwrap();

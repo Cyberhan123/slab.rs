@@ -58,6 +58,13 @@ pub struct SpawnRequest {
     /// `windows_use_conpty` config knob. Covered by the Spawn frame HMAC (it is a field of `spawn`).
     #[serde(default)]
     pub use_conpty: bool,
+    /// DIAGNOSTIC ONLY (temporary): spawn with the Low-IL token but NO AppContainer identity, NO
+    /// `CREATE_NO_WINDOW`, and a plain STARTUPINFO. Used to isolate why AppContainer children die on
+    /// init — if a binary runs here but not under SECURITY_CAPABILITIES, the AppContainer identity
+    /// (or CREATE_NO_WINDOW) is the culprit; if it still dies, the Low-IL token itself is unusable.
+    /// Not wired to any production config surface.
+    #[serde(default)]
+    pub diagnostic_plain_spawn: bool,
 }
 
 /// Result of the non-elevated spawn path: a local `tokio::process::Child` plus a tree-kill

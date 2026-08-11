@@ -38,8 +38,8 @@ use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
     DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
     InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
-    PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess,
-    UpdateProcThreadAttribute, WaitForSingleObject,
+    PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
+    TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 use crate::acl;
@@ -377,11 +377,14 @@ async fn spawn_low_il_child(
     tokio::spawn(async move {
         let code = tokio::task::spawn_blocking(move || -> i32 {
             let proc = proc_addr as HANDLE;
-            let mut c: u32 = 1;
+            // Sentinel default: if GetExitCodeProcess fails, the exit surfaces as -16 (i32) —
+            // distinct from any real exit code — so a diagnostic run can tell a genuine exit 1 from
+            // a failed exit-code read.
+            let mut c: u32 = 0xFFFF_FFF0;
             unsafe {
                 WaitForSingleObject(proc, INFINITE);
                 if GetExitCodeProcess(proc, &mut c) == 0 {
-                    c = 1;
+                    c = 0xFFFF_FFF0;
                 }
                 CloseHandle(proc);
                 if hpc != 0 {
@@ -426,6 +429,21 @@ fn spawn_low_il_child_sync(
     let (stderr_read, stderr_write) = create_appcontainer_pipe(package_sid)?;
     let job = JobHandle::new()?;
     job.configure_kill_on_close()?;
+
+    // DIAGNOSTIC (temporary): plain Low-IL spawn — no AppContainer identity, no CREATE_NO_WINDOW,
+    // plain STARTUPINFO — to isolate why SECURITY_CAPABILITIES children die on init. See
+    // SpawnRequest::diagnostic_plain_spawn.
+    if spawn.diagnostic_plain_spawn {
+        return spawn_plain_low_il_sync(
+            spawn,
+            &token,
+            stdout_read,
+            stdout_write,
+            stderr_read,
+            stderr_write,
+            job,
+        );
+    }
 
     // AppContainer identity overlay on top of the Low-IL restricted token. `SECURITY_CAPABILITIES`
     // with the package SID and NO capabilities ⇒ the child is an AppContainer without
@@ -530,6 +548,85 @@ fn spawn_low_il_child_sync(
         return Err(e);
     }
     // Resume the main thread. 0xffffffff ⇒ ResumeThread failed ⇒ terminate + fail closed.
+    let prev = unsafe { ResumeThread(pi.hThread) };
+    unsafe {
+        CloseHandle(pi.hThread);
+    }
+    if prev == u32::MAX {
+        unsafe {
+            TerminateProcess(pi.hProcess, 1);
+            CloseHandle(pi.hProcess);
+        }
+        return Err(WindowsSandboxError::SpawnFailed("ResumeThread failed".into()));
+    }
+
+    Ok(SpawnedChild {
+        job,
+        stdout_read: stdout_read as usize,
+        stderr_read: stderr_read as usize,
+        process: pi.hProcess as usize,
+        pseudoconsole: 0,
+        pty_input_read: 0,
+        pty_output_write: 0,
+    })
+}
+
+/// DIAGNOSTIC (temporary): spawn with the Low-IL token but NO AppContainer identity, NO
+/// `CREATE_NO_WINDOW`, and a plain STARTUPINFO. If a binary runs here but dies under the
+/// SECURITY_CAPABILITIES path, the AppContainer identity (or CREATE_NO_WINDOW) is the culprit; if it
+/// still dies, the Low-IL token itself is unusable for console apps. Shares the token/pipe/Job setup
+/// with [`spawn_low_il_child_sync`]; only the CreateProcess call differs.
+fn spawn_plain_low_il_sync(
+    spawn: &crate::request::SpawnRequest,
+    token: &LowIntegrityToken,
+    stdout_read: HANDLE,
+    stdout_write: HANDLE,
+    stderr_read: HANDLE,
+    stderr_write: HANDLE,
+    job: JobHandle,
+) -> Result<SpawnedChild, WindowsSandboxError> {
+    let mut startup: STARTUPINFOW = unsafe { zeroed() };
+    startup.cb = size_of::<STARTUPINFOW>() as u32;
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = INVALID_HANDLE_VALUE;
+    startup.hStdOutput = stdout_write;
+    startup.hStdError = stderr_write;
+
+    let mut cmd_line = wide(&build_command_line(&spawn.argv));
+    let cwd = spawn.cwd.as_ref().map(|p| wide(&p.to_string_lossy()));
+    let (env_block, env_flags) = build_unicode_env(&spawn.env);
+
+    let mut pi: PROCESS_INFORMATION = unsafe { zeroed() };
+    let ok = unsafe {
+        CreateProcessAsUserW(
+            token.raw(),
+            std::ptr::null(),
+            cmd_line.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1, // bInheritHandles = TRUE (the inheritable stdio pipes inherit)
+            CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | env_flags,
+            env_block.as_ref().map(|b| b.as_ptr() as *const c_void).unwrap_or(std::ptr::null()),
+            cwd.as_ref().map(|w| w.as_ptr()).unwrap_or(std::ptr::null()),
+            &startup,
+            &mut pi,
+        )
+    };
+    // Close the daemon's write ends; the child holds its inherited copies.
+    unsafe {
+        CloseHandle(stdout_write);
+        CloseHandle(stderr_write);
+    }
+    win32_ctx(ok, "CreateProcessAsUserW(plain diag)")?;
+
+    if let Err(e) = job.assign_process(pi.hProcess) {
+        unsafe {
+            TerminateProcess(pi.hProcess, 1);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        }
+        return Err(e);
+    }
     let prev = unsafe { ResumeThread(pi.hThread) };
     unsafe {
         CloseHandle(pi.hThread);
