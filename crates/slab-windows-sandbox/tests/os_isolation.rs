@@ -189,7 +189,11 @@ async fn os_elevated_prepare_and_spawn_relays_stdout() {
     assert!(!exit.timed_out, "command timed out");
     let stdout = cap.stdout_string();
     let stderr = cap.stderr_string();
-    assert!(stdout.contains("slab-os-marker"), "stdout relayed: {stdout:?}\nstderr: {stderr:?}");
+    assert!(
+        stdout.contains("slab-os-marker"),
+        "stdout relayed: {stdout:?}\nstderr: {stderr:?}\nexit_code: {}",
+        exit.exit_code
+    );
 }
 
 #[tokio::test]
@@ -246,15 +250,26 @@ async fn os_low_il_child_writes_inside_workspace() {
 
     let target = workspace.join("out.txt");
     let cap = Arc::new(Capture::new());
-    // `cmd /c echo hi > out.txt` — the Low-IL child CAN write inside the lowered workspace.
+    // `cmd /c echo hi > out.txt` — the Low-IL child CAN write inside the lowered workspace. The file
+    // is a side-effect INDEPENDENT of the stdio pipes, so it is the decisive probe for whether cmd
+    // actually executed under the AppContainer token (vs. failing to start with no output).
     let req = make_request(&["cmd", "/c", "echo hi", ">", target.to_str().unwrap()], &workspace);
     let run = exec
         .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
         .expect("spawn_elevated");
     let exit = run.exit_future.await.expect("exit future");
+    let file_created = target.exists();
+    let file_contents = std::fs::read(&target)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
     let stderr = cap.stderr_string();
-    assert_eq!(exit.exit_code, 0, "in-workspace write should succeed\nstderr: {stderr:?}");
-    assert!(target.exists(), "workspace write produced the file\nstderr: {stderr:?}");
+    let stdout = cap.stdout_string();
+    eprintln!(
+        "writes_inside diag: exit_code={}, file_created={}, file_contents={:?}, stderr={:?}, stdout={:?}",
+        exit.exit_code, file_created, file_contents, stderr, stdout
+    );
+    assert_eq!(exit.exit_code, 0, "in-workspace write should succeed (see diag above)");
+    assert!(file_created, "workspace write produced the file (see diag above)");
 }
 
 #[tokio::test]
