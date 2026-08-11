@@ -245,6 +245,7 @@ mod tests {
             network_blocked: false,
             use_conpty: false,
             diagnostic_plain_spawn: false,
+            diagnostic_no_low_il_token: false,
         }
     }
 
@@ -354,6 +355,7 @@ mod tests {
             network_blocked: false,
             use_conpty: false,
             diagnostic_plain_spawn: false,
+            diagnostic_no_low_il_token: false,
         };
         let sb = SpawnRequest { env: env_b, ..sa.clone() };
         let ta = spawn_tag(&key, "t", &sa).unwrap();

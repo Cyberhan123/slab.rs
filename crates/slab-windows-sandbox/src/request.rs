@@ -65,6 +65,12 @@ pub struct SpawnRequest {
     /// Not wired to any production config surface.
     #[serde(default)]
     pub diagnostic_plain_spawn: bool,
+    /// DIAGNOSTIC ONLY (temporary): when set WITH `diagnostic_plain_spawn`, spawn via `CreateProcessW`
+    /// (the daemon's own token) instead of `CreateProcessAsUserW(LowIntegrityToken)` — i.e. drop the
+    /// Low-IL restriction entirely. If a binary runs here, the LowIntegrityToken is the init-failure
+    /// cause. Not wired to any production config surface.
+    #[serde(default)]
+    pub diagnostic_no_low_il_token: bool,
 }
 
 /// Result of the non-elevated spawn path: a local `tokio::process::Child` plus a tree-kill

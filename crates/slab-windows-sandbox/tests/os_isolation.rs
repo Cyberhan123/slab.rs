@@ -94,6 +94,7 @@ fn make_request(argv: &[&str], cwd: &std::path::Path) -> SpawnRequest {
         network_blocked: false,
         use_conpty: false,
         diagnostic_plain_spawn: false,
+        diagnostic_no_low_il_token: false,
     }
 }
 
@@ -464,5 +465,55 @@ async fn os_diagnostic_plain_low_il_whoami() {
         cap.stderr_string()
     );
     assert_eq!(exit.exit_code, 0, "whoami should run under plain Low-IL (see diag above)");
+    assert!(!cap.stdout_string().is_empty(), "whoami should print (see diag above)");
+}
+
+/// DIAGNOSTIC: spawn whoami with `diagnostic_plain_spawn` + `diagnostic_no_low_il_token` — i.e.
+/// `CreateProcessW` with the daemon's OWN token (no Low-IL restriction), no AppContainer. The
+/// least-restrictive elevated spawn. If whoami runs here but not under the LowIntegrityToken, the
+/// Low-IL token is definitively the init-failure cause (and the fix is to drop it / use the standard
+/// kernel-derived AppContainer token).
+#[tokio::test]
+#[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
+async fn os_diagnostic_no_token_whoami() {
+    if !elevated_enabled() {
+        eprintln!("skip: SLAB_SANDBOX_ELEVATED != 1");
+        return;
+    }
+    let whoami = std::env::var_os("SystemRoot")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
+        .join("System32")
+        .join("whoami.exe");
+    if !whoami.exists() {
+        eprintln!("skip: System32\\whoami.exe not found");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let ctx = make_context(dir.path(), &workspace);
+    let exec = ElevatedAclTokenExecutor::new(ctx.clone());
+    prepare_with_diag(&exec, &ctx).expect("prepare");
+
+    let cap = Arc::new(Capture::new());
+    let whoami_str = whoami.to_string_lossy().into_owned();
+    let mut req = make_request(&[whoami_str.as_str()], &workspace);
+    req.diagnostic_plain_spawn = true;
+    req.diagnostic_no_low_il_token = true;
+    let run = exec
+        .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
+        .expect("spawn_elevated");
+    let exit = run.exit_future.await.expect("exit future");
+    eprintln!(
+        "no_token diag: whoami exit_code={}, stdout={:?}, stderr={:?}",
+        exit.exit_code,
+        cap.stdout_string(),
+        cap.stderr_string()
+    );
+    assert_eq!(
+        exit.exit_code, 0,
+        "whoami should run with the daemon's normal token (see diag above)"
+    );
     assert!(!cap.stdout_string().is_empty(), "whoami should print (see diag above)");
 }

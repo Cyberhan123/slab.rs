@@ -36,10 +36,11 @@ use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WR
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
-    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
-    InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
-    PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
-    TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
+    CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
+    GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
+    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, ResumeThread,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, TerminateProcess,
+    UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 use crate::acl;
@@ -597,27 +598,47 @@ fn spawn_plain_low_il_sync(
     let (env_block, env_flags) = build_unicode_env(&spawn.env);
 
     let mut pi: PROCESS_INFORMATION = unsafe { zeroed() };
-    let ok = unsafe {
-        CreateProcessAsUserW(
-            token.raw(),
-            std::ptr::null(),
-            cmd_line.as_mut_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            1, // bInheritHandles = TRUE (the inheritable stdio pipes inherit)
-            CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | env_flags,
-            env_block.as_ref().map(|b| b.as_ptr() as *const c_void).unwrap_or(std::ptr::null()),
-            cwd.as_ref().map(|w| w.as_ptr()).unwrap_or(std::ptr::null()),
-            &startup,
-            &mut pi,
-        )
+    // DIAGNOSTIC: diagnostic_no_low_il_token ⇒ CreateProcessW (the daemon's own token, NO Low-IL
+    // restriction) instead of CreateProcessAsUserW(LowIntegrityToken). Isolates whether the
+    // LowIntegrityToken is the init-failure cause.
+    let ok = if spawn.diagnostic_no_low_il_token {
+        unsafe {
+            CreateProcessW(
+                std::ptr::null(),
+                cmd_line.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | env_flags,
+                env_block.as_ref().map(|b| b.as_ptr() as *const c_void).unwrap_or(std::ptr::null()),
+                cwd.as_ref().map(|w| w.as_ptr()).unwrap_or(std::ptr::null()),
+                &startup,
+                &mut pi,
+            )
+        }
+    } else {
+        unsafe {
+            CreateProcessAsUserW(
+                token.raw(),
+                std::ptr::null(),
+                cmd_line.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1, // bInheritHandles = TRUE (the inheritable stdio pipes inherit)
+                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | env_flags,
+                env_block.as_ref().map(|b| b.as_ptr() as *const c_void).unwrap_or(std::ptr::null()),
+                cwd.as_ref().map(|w| w.as_ptr()).unwrap_or(std::ptr::null()),
+                &startup,
+                &mut pi,
+            )
+        }
     };
     // Close the daemon's write ends; the child holds its inherited copies.
     unsafe {
         CloseHandle(stdout_write);
         CloseHandle(stderr_write);
     }
-    win32_ctx(ok, "CreateProcessAsUserW(plain diag)")?;
+    win32_ctx(ok, "CreateProcess(plain diag)")?;
 
     if let Err(e) = job.assign_process(pi.hProcess) {
         unsafe {
