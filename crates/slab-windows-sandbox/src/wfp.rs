@@ -17,8 +17,8 @@
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::NetworkManagement::WindowsFilteringPlatform::{
     FWP_ACTION_BLOCK, FWP_CONDITION_VALUE0, FWP_CONDITION_VALUE0_0, FWP_MATCH_EQUAL, FWP_SID,
-    FWPM_ACTION0, FWPM_CONDITION_ALE_PACKAGE_ID, FWPM_FILTER_CONDITION0, FWPM_FILTER0,
-    FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_PROVIDER0,
+    FWPM_ACTION0, FWPM_CONDITION_ALE_PACKAGE_ID, FWPM_DISPLAY_DATA0, FWPM_FILTER_CONDITION0,
+    FWPM_FILTER0, FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_PROVIDER0,
     FWPM_SESSION_FLAG_DYNAMIC, FWPM_SESSION0, FWPM_SUBLAYER0, FwpmEngineClose0, FwpmEngineOpen0,
     FwpmFilterAdd0, FwpmProviderAdd0, FwpmSubLayerAdd0, FwpmTransactionAbort0,
     FwpmTransactionBegin0, FwpmTransactionCommit0,
@@ -75,6 +75,13 @@ impl WfpEngine {
         &self,
         package_sid: PSID,
     ) -> Result<(), WindowsSandboxError> {
+        // WFP requires a non-null `displayData.name` on every provider/sublayer/filter add, else it
+        // returns FWP_E_NULL_DISPLAY_NAME (0x80320023). The string is copied by the engine, so the
+        // Vec only needs to outlive the calls below.
+        let name = wide("slab-sandbox network block");
+        let name_ptr = name.as_ptr() as *mut u16;
+        let display = FWPM_DISPLAY_DATA0 { name: name_ptr, description: std::ptr::null_mut() };
+
         // SAFETY: all calls operate on our own engine handle with valid pointers.
         unsafe {
             let err = FwpmTransactionBegin0(self.0, 0);
@@ -82,7 +89,11 @@ impl WfpEngine {
                 return Err(self.abort("FwpmTransactionBegin0", err));
             }
 
-            let provider = FWPM_PROVIDER0 { providerKey: PROVIDER_GUID, ..Default::default() };
+            let provider = FWPM_PROVIDER0 {
+                providerKey: PROVIDER_GUID,
+                displayData: display,
+                ..Default::default()
+            };
             let err = FwpmProviderAdd0(self.0, &provider, std::ptr::null_mut());
             if err != 0 {
                 // Provider persists across daemon restarts; a re-provision legitimately hits
@@ -97,6 +108,7 @@ impl WfpEngine {
                 subLayerKey: SUBLAYER_GUID,
                 providerKey: &PROVIDER_GUID as *const GUID as *mut GUID,
                 weight: 0x4000,
+                displayData: display,
                 ..Default::default()
             };
             let err = FwpmSubLayerAdd0(self.0, &sublayer, std::ptr::null_mut());
@@ -123,6 +135,7 @@ impl WfpEngine {
                 FWPM_LAYER_ALE_AUTH_CONNECT_V4,
                 SUBLAYER_GUID,
                 provider_key_ptr,
+                name_ptr,
                 &mut condition,
             );
             let err = FwpmFilterAdd0(self.0, &v4, std::ptr::null_mut(), &mut id);
@@ -134,6 +147,7 @@ impl WfpEngine {
                 FWPM_LAYER_ALE_AUTH_CONNECT_V6,
                 SUBLAYER_GUID,
                 provider_key_ptr,
+                name_ptr,
                 &mut condition,
             );
             let err = FwpmFilterAdd0(self.0, &v6, std::ptr::null_mut(), &mut id);
@@ -172,18 +186,25 @@ fn build_block_filter(
     layer_key: GUID,
     sublayer_key: GUID,
     provider_key: *mut GUID,
+    display_name: *mut u16,
     condition: &mut FWPM_FILTER_CONDITION0,
 ) -> FWPM_FILTER0 {
     FWPM_FILTER0 {
         layerKey: layer_key,
         subLayerKey: sublayer_key,
         providerKey: provider_key,
+        displayData: FWPM_DISPLAY_DATA0 { name: display_name, description: std::ptr::null_mut() },
         flags: 0, // NO FWPM_FILTER_FLAG_PERSISTENT — session-scoped only
         numFilterConditions: 1,
         filterCondition: condition as *mut FWPM_FILTER_CONDITION0,
         action: FWPM_ACTION0 { r#type: FWP_ACTION_BLOCK, ..Default::default() },
         ..Default::default()
     }
+}
+
+/// Encode a string as a NUL-terminated UTF-16 buffer (for the WFP display-name PCWSTR fields).
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 #[cfg(test)]
@@ -206,6 +227,7 @@ mod tests {
         let f = build_block_filter(
             FWPM_LAYER_ALE_AUTH_CONNECT_V4,
             SUBLAYER_GUID,
+            std::ptr::null_mut(),
             std::ptr::null_mut(),
             &mut cond,
         );
@@ -231,11 +253,13 @@ mod tests {
             FWPM_LAYER_ALE_AUTH_CONNECT_V4,
             SUBLAYER_GUID,
             std::ptr::null_mut(),
+            std::ptr::null_mut(),
             &mut cond,
         );
         let v6 = build_block_filter(
             FWPM_LAYER_ALE_AUTH_CONNECT_V6,
             SUBLAYER_GUID,
+            std::ptr::null_mut(),
             std::ptr::null_mut(),
             &mut cond,
         );
