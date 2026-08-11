@@ -168,6 +168,20 @@ async fn launch_daemon_direct_starts_helper_and_pings() {
     assert_eq!(echoed, "regression-nonce");
 }
 
+/// Control experiment (runs in the TEST process, NOT the daemon): spawn `cmd /c exit 42` directly via
+/// std::process::Command. If this returns 42, the test process's context can spawn runnable console
+/// children — which isolates the elevated daemon (launched + CREATE_NO_WINDOW via
+/// launch_daemon_direct) as the spawn failure, since the bare-spawn probe through the daemon
+/// returned 1. Always runs (non-elevated); no helper/daemon needed.
+#[tokio::test]
+async fn control_test_process_can_spawn_cmd() {
+    let out = std::process::Command::new("cmd").args(["/c", "exit", "42"]).output();
+    let code = out.as_ref().ok().and_then(|o| o.status.code()).unwrap_or(-999);
+    eprintln!("control (test process): cmd /c exit 42 => exit_code={code}");
+    let out = out.expect("test process should spawn cmd");
+    assert_eq!(out.status.code(), Some(42), "test process should run cmd /c exit 42 fine");
+}
+
 #[tokio::test]
 #[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
 async fn os_elevated_prepare_and_spawn_relays_stdout() {
