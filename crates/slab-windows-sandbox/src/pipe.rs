@@ -249,6 +249,7 @@ mod tests {
             diagnostic_new_console: false,
             diagnostic_bare_spawn: false,
             diagnostic_std_spawn: false,
+            diagnostic_dump_context: false,
         }
     }
 
@@ -362,6 +363,7 @@ mod tests {
             diagnostic_new_console: false,
             diagnostic_bare_spawn: false,
             diagnostic_std_spawn: false,
+            diagnostic_dump_context: false,
         };
         let sb = SpawnRequest { env: env_b, ..sa.clone() };
         let ta = spawn_tag(&key, "t", &sa).unwrap();

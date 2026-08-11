@@ -98,6 +98,7 @@ fn make_request(argv: &[&str], cwd: &std::path::Path) -> SpawnRequest {
         diagnostic_new_console: false,
         diagnostic_bare_spawn: false,
         diagnostic_std_spawn: false,
+        diagnostic_dump_context: false,
     }
 }
 
@@ -679,4 +680,80 @@ async fn os_diagnostic_std_spawn() {
         exit.exit_code, 42,
         "daemon should spawn cmd via std::process::Command — see diag above"
     );
+}
+
+/// DIAGNOSTIC: snapshot BOTH the test process's context (which CAN spawn — the control) AND the
+/// daemon's context (which CANNOT spawn), then diff them. Whatever differs is (or is correlated
+/// with) why the daemon's children abort during CRT init. Covers handoff candidates a (Job), b
+/// (window-station/desktop), c (token). The std-spawn is also re-run to restate the failure
+/// (expected exit 1, NOT 42 — we do NOT assert 42 here; this test is a pure probe).
+#[tokio::test]
+#[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
+async fn os_diagnostic_context_diff() {
+    if !elevated_enabled() {
+        eprintln!("skip: SLAB_SANDBOX_ELEVATED != 1 (run elevated)");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let mut ctx = make_context(dir.path(), &workspace);
+
+    // Override marker_path to an ACCESSIBLE location (target/debug, next to the test exe) so the
+    // daemon's diagnostic dumps (daemon-context.json, daemon-spawn-entered.txt) are readable from a
+    // non-elevated shell even if the test hangs and the tempdir is locked.
+    let mut dump_dir = std::env::current_exe().unwrap();
+    dump_dir.pop(); // .../deps
+    dump_dir.pop(); // target/debug
+    ctx.marker_path = dump_dir.join("diag-marker.json");
+    let test_ctx_path = dump_dir.join("diag-test-context.json");
+    let daemon_ctx_path = dump_dir.join("daemon-context.json");
+    let daemon_entered_path = dump_dir.join("daemon-spawn-entered.txt");
+    // Clean any stale diagnostic artifacts so presence is meaningful.
+    let _ = std::fs::remove_file(&daemon_ctx_path);
+    let _ = std::fs::remove_file(&daemon_entered_path);
+
+    // 1. Control: snapshot THIS (test) process — the one that spawns cmd ⇒ 42 fine.
+    eprintln!("MARKER: dumping test context");
+    slab_windows_sandbox::dump_process_context(&test_ctx_path);
+    let test_ctx = std::fs::read_to_string(&test_ctx_path).unwrap_or_default();
+    eprintln!("=== TEST process context (can spawn) ===\n{test_ctx}");
+
+    // 2. Daemon: prepare, then spawn cmd /c exit 42 with std-spawn + context dump.
+    let exec = ElevatedAclTokenExecutor::new(ctx.clone());
+    eprintln!("MARKER: calling prepare");
+    prepare_with_diag(&exec, &ctx).expect("prepare");
+    eprintln!("MARKER: prepare done");
+
+    let cap = Arc::new(Capture::new());
+    let mut req = make_request(&["cmd", "/c", "exit", "42"], &workspace);
+    req.diagnostic_std_spawn = true;
+    req.diagnostic_dump_context = true;
+    eprintln!("MARKER: calling spawn_elevated");
+    let run = exec
+        .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
+        .expect("spawn_elevated");
+    eprintln!("MARKER: spawn_elevated returned; awaiting exit (30s timeout)");
+    // Test-only timeout: if the daemon does not respond to the Spawn within 30s, fail loudly instead
+    // of hanging the whole elevated test run (which previously required a manual daemon kill).
+    let exit = tokio::time::timeout(std::time::Duration::from_secs(30), run.exit_future)
+        .await
+        .expect("spawn hung — daemon did not send Exited within 30s")
+        .expect("exit future");
+    eprintln!("MARKER: exit received");
+
+    let daemon_ctx = std::fs::read_to_string(&daemon_ctx_path).unwrap_or_default();
+    let daemon_entered = daemon_entered_path.exists();
+    eprintln!(
+        "=== DAEMON process context ===\n{daemon_ctx}\n\
+         daemon_spawn_arm_entered={daemon_entered}\n\
+         std_spawn in daemon => exit_code={}, stdout={:?}, stderr={:?}",
+        exit.exit_code,
+        cap.stdout_string(),
+        cap.stderr_string()
+    );
+
+    assert!(!test_ctx.is_empty(), "test context snapshot should be written");
+    assert!(daemon_entered, "daemon should reach the Spawn arm (entered marker)");
+    assert!(!daemon_ctx.is_empty(), "daemon context snapshot should be written");
 }

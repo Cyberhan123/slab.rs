@@ -89,6 +89,13 @@ pub struct SpawnRequest {
     /// daemon process itself cannot spawn children. Not wired to any production config surface.
     #[serde(default)]
     pub diagnostic_std_spawn: bool,
+    /// DIAGNOSTIC ONLY (temporary): when set, the daemon writes a snapshot of its own process
+    /// context (Job membership + limits, window-station/desktop, console presence, token integrity)
+    /// to `daemon-context.json` next to the marker, BEFORE the spawn. The orchestrator/test reads it
+    /// (and compares against the test process's snapshot, taken via [`crate::dump_process_context`])
+    /// to find why the daemon's children abort during CRT init. Not wired to any production surface.
+    #[serde(default)]
+    pub diagnostic_dump_context: bool,
 }
 
 /// Result of the non-elevated spawn path: a local `tokio::process::Child` plus a tree-kill

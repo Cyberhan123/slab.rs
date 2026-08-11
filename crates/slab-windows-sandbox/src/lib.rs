@@ -52,6 +52,8 @@ pub use capability::{CapabilitySnapshot, FsIsolationStrength, WindowsSetupKind};
 #[cfg(target_os = "windows")]
 pub use creds::{key_fingerprint, load_or_create_key};
 #[cfg(target_os = "windows")]
+pub use daemon::dump_process_context;
+#[cfg(target_os = "windows")]
 pub use daemon::run_daemon;
 #[cfg(target_os = "windows")]
 pub use elevation::{

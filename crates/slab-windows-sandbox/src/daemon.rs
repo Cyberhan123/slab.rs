@@ -70,13 +70,25 @@ struct AclBuf([u8; 256]);
 struct WfpState {
     engine: Mutex<Option<WfpEngine>>,
     package_sid: PackageSid,
+    /// Daemon-global provisioning flag. Set by the first connection's `Provision`; read by every
+    /// connection's `Spawn`. This MUST be daemon-global (shared via the `Arc<WfpState>`), NOT
+    /// per-connection: the orchestrator's `spawn_elevated` opens one fresh connection per spawn and
+    /// sends only a `Spawn` frame — it relies on the daemon remembering PRIOR provisioning. When this
+    /// lived on per-connection `ConnectionState`, every spawn hit the `!provisioned` short-circuit
+    /// and returned exit 1 WITHOUT ever spawning (which masked the real spawn path for the whole
+    /// elevated-spawn-debug saga).
+    provisioned: std::sync::atomic::AtomicBool,
 }
 
 impl WfpState {
     fn new(key: &[u8]) -> Result<Self, WindowsSandboxError> {
         let fingerprint = creds::key_fingerprint(key);
         let package_sid = PackageSid::from_fingerprint(&fingerprint)?;
-        Ok(Self { engine: Mutex::new(None), package_sid })
+        Ok(Self {
+            engine: Mutex::new(None),
+            package_sid,
+            provisioned: std::sync::atomic::AtomicBool::new(false),
+        })
     }
 
     /// Open the WFP engine (DYNAMIC session) + register the package-SID block filters. Idempotent:
@@ -154,7 +166,6 @@ pub async fn run_daemon(
 /// `jobs` drops and every `JobHandle` fires `KILL_ON_JOB_CLOSE` ⇒ all children torn down.
 struct ConnectionState {
     jobs: HashMap<String, JobHandle>,
-    provisioned: bool,
     key: Vec<u8>,
     pipe_name: String,
     marker_path: PathBuf,
@@ -171,14 +182,7 @@ async fn handle_connection(
 ) -> Result<(), WindowsSandboxError> {
     let (mut reader, writer) = tokio::io::split(server);
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
-    let mut state = ConnectionState {
-        jobs: HashMap::new(),
-        provisioned: false,
-        key,
-        pipe_name,
-        marker_path,
-        wfp,
-    };
+    let mut state = ConnectionState { jobs: HashMap::new(), key, pipe_name, marker_path, wfp };
 
     loop {
         let frame = match read_frame(&mut reader).await {
@@ -251,13 +255,14 @@ async fn handle_connection(
                     daemon_pid: Some(std::process::id()),
                 };
                 crate::marker::write_marker(&state.marker_path, &marker)?;
-                state.provisioned = true;
+                // Daemon-global: any later connection's Spawn sees provisioned = true.
+                state.wfp.provisioned.store(true, std::sync::atomic::Ordering::SeqCst);
                 write_frame(&mut *writer.lock().await, &PipeFrame::ProvisionOk { marker }).await?;
             }
 
             PipeFrame::Spawn { job_token, spawn, tag } => {
-                if !state.provisioned {
-                    // Fail-closed: no spawn before provisioning.
+                if !state.wfp.provisioned.load(std::sync::atomic::Ordering::SeqCst) {
+                    // Fail-closed: no spawn before provisioning (daemon-global flag).
                     let _ = write_frame(
                         &mut *writer.lock().await,
                         &PipeFrame::Exited { job_token, code: 1, timed_out: false },
@@ -267,6 +272,18 @@ async fn handle_connection(
                 }
                 if !pipe::tag_matches(&state.key, &(job_token.as_str(), &spawn), &tag) {
                     return Err(WindowsSandboxError::HmacMismatch);
+                }
+                // DIAGNOSTIC (temporary): snapshot the daemon's own context before the spawn, so the
+                // test can diff it against the test process's snapshot. See SpawnRequest field + the
+                // elevated-spawn-debug handoff. No-op unless the request opts in. The "entered" marker
+                // is written FIRST so that if the dump (or the spawn) hangs, we can still tell the
+                // daemon reached the Spawn arm.
+                if spawn.diagnostic_dump_context {
+                    let _ = std::fs::write(
+                        state.marker_path.with_file_name("daemon-spawn-entered.txt"),
+                        format!("job_token={job_token} daemon_pid={}", std::process::id()),
+                    );
+                    dump_process_context(&state.marker_path.with_file_name("daemon-context.json"));
                 }
                 match spawn_low_il_child(&job_token, &spawn, writer.clone(), &state.wfp).await {
                     Ok(job) => {
@@ -996,6 +1013,204 @@ pub(crate) fn build_unicode_env(env: &HashMap<String, String>) -> (Option<Vec<u1
 /// Encode a string as a NUL-terminated UTF-16 buffer.
 pub(crate) fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+// ============================================================================
+// DIAGNOSTIC (temporary): `dump_process_context`. Remove this whole block — and
+// the `Win32_System_StationsAndDesktops` feature, the `SpawnRequest::diagnostic_
+// dump_context` field, the re-export in `lib.rs`, and the `os_diagnostic_context_
+// diff` test — once the elevated-daemon-can't-spawn-children saga is resolved.
+// ============================================================================
+
+/// Snapshot this process's spawn-relevant context — Job membership + limits (candidate a),
+/// window-station + desktop (candidate b), console presence, token integrity + elevation
+/// (candidate c) — to `path` as JSON. Called from BOTH the test process (which CAN spawn
+/// children — the control) and the elevated daemon (which CANNOT), so the two can be diffed to
+/// find why the daemon's children abort during CRT init. Best-effort: each section is guarded so a
+/// failure in one does not abort the others.
+pub fn dump_process_context(path: &std::path::Path) {
+    use windows_sys::Win32::System::JobObjects::{
+        IsProcessInJob, JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        QueryInformationJobObject,
+    };
+    use windows_sys::Win32::System::StationsAndDesktops::{
+        GetProcessWindowStation, GetThreadDesktop,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetCurrentThreadId};
+
+    let mut m = serde_json::Map::new();
+    m.insert("pid".into(), json_num_u32(std::process::id()));
+
+    // (a) Job membership + the immediate Job's limit flags. NULL hJob ⇒ query the calling process's
+    // associated Job (nested Jobs: the closest one). The limit flags reveal an active-process cap or
+    // a kill-on-close/breakaway policy that could block child creation.
+    let mut job = serde_json::Map::new();
+    let mut in_job: i32 = 0;
+    unsafe { IsProcessInJob(GetCurrentProcess(), std::ptr::null_mut(), &mut in_job) };
+    job.insert("in_job".into(), serde_json::Value::Bool(in_job != 0));
+    if in_job != 0 {
+        let mut ext: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
+        let mut ret = 0u32;
+        let ok = unsafe {
+            QueryInformationJobObject(
+                std::ptr::null_mut(),
+                JobObjectExtendedLimitInformation,
+                &mut ext as *mut _ as *mut c_void,
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                &mut ret,
+            )
+        };
+        job.insert("query_ok".into(), serde_json::Value::Bool(ok != 0));
+        if ok != 0 {
+            let flags = ext.BasicLimitInformation.LimitFlags;
+            job.insert("limit_flags_hex".into(), serde_json::Value::String(format!("{flags:#x}")));
+            job.insert(
+                "active_process_limit".into(),
+                json_num_u32(ext.BasicLimitInformation.ActiveProcessLimit),
+            );
+            job.insert(
+                "limit_kill_on_job_close".into(),
+                serde_json::Value::Bool(flags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0),
+            );
+            job.insert(
+                "limit_active_process".into(),
+                serde_json::Value::Bool(flags & JOB_OBJECT_LIMIT_ACTIVE_PROCESS != 0),
+            );
+            job.insert(
+                "limit_breakaway_ok".into(),
+                serde_json::Value::Bool(flags & JOB_OBJECT_LIMIT_BREAKAWAY_OK != 0),
+            );
+            job.insert(
+                "limit_silent_breakaway_ok".into(),
+                serde_json::Value::Bool(flags & JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK != 0),
+            );
+        }
+    }
+    m.insert("job".into(), serde_json::Value::Object(job));
+
+    // (b) Window-station + desktop names. A daemon bound to a non-interactive window-station or a
+    // desktop it cannot access would produce children that fail console/CRT init.
+    let mut ws = serde_json::Map::new();
+    ws.insert(
+        "window_station".into(),
+        user_object_name(unsafe { GetProcessWindowStation() })
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    ws.insert(
+        "desktop".into(),
+        user_object_name(unsafe { GetThreadDesktop(GetCurrentThreadId()) })
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    m.insert("winsta_desktop".into(), serde_json::Value::Object(ws));
+
+    // Console presence (NULL with CREATE_NO_WINDOW — expected). Included only as a sanity signal.
+    m.insert(
+        "has_console".into(),
+        serde_json::Value::Bool(
+            !unsafe { windows_sys::Win32::System::Console::GetConsoleWindow() }.is_null(),
+        ),
+    );
+
+    // (c) Token integrity level + elevation. The daemon should inherit the elevated High-IL token; a
+    // surprise Low/Medium-IL or non-elevated token would explain init failures.
+    let mut tok = serde_json::Map::new();
+    tok.insert("elevated".into(), serde_json::Value::Bool(crate::token::is_process_elevated()));
+    if let Some((label, rid)) = read_integrity() {
+        tok.insert("integrity".into(), serde_json::Value::String(label.to_string()));
+        tok.insert("integrity_rid".into(), json_num_u32(rid));
+    } else {
+        tok.insert("integrity".into(), serde_json::Value::Null);
+    }
+    m.insert("token".into(), serde_json::Value::Object(tok));
+
+    let val = serde_json::Value::Object(m);
+    let _ = std::fs::write(path, serde_json::to_string_pretty(&val).unwrap_or_default());
+}
+
+/// Read the user object (window-station / desktop) name for the given handle via
+/// `GetUserObjectInformationW(UOI_NAME)`. Returns None on any failure.
+fn user_object_name(handle: *mut c_void) -> Option<String> {
+    use windows_sys::Win32::System::StationsAndDesktops::{GetUserObjectInformationW, UOI_NAME};
+    if handle.is_null() {
+        return None;
+    }
+    let mut buf = [0u16; 256];
+    let mut needed = 0u32;
+    let ok = unsafe {
+        GetUserObjectInformationW(
+            handle,
+            UOI_NAME,
+            buf.as_mut_ptr() as *mut c_void,
+            (buf.len() * 2) as u32,
+            &mut needed,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Some(String::from_utf16_lossy(&buf[..end]))
+}
+
+/// Read this process's token integrity label. Returns (name, rid). None on any failure.
+fn read_integrity() -> Option<(&'static str, u32)> {
+    use windows_sys::Win32::Security::{
+        GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL,
+        TOKEN_QUERY, TokenIntegrityLevel,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut htok: HANDLE = std::ptr::null_mut();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut htok) } == 0 {
+        return None;
+    }
+    // TOKEN_MANDATORY_LABEL holds a pointer to a SID; use a generous, 8-byte-aligned byte buffer
+    // (the struct needs pointer alignment — a plain `[u8; N]` is 1-byte aligned and would misalign).
+    #[repr(C, align(8))]
+    struct TokenInfoBuf([u8; 64]);
+    let mut buf = TokenInfoBuf([0u8; 64]);
+    let mut ret = 0u32;
+    let ok = unsafe {
+        GetTokenInformation(
+            htok,
+            TokenIntegrityLevel,
+            buf.0.as_mut_ptr() as *mut c_void,
+            buf.0.len() as u32,
+            &mut ret,
+        )
+    };
+    unsafe { CloseHandle(htok) };
+    if ok == 0 {
+        return None;
+    }
+    let label = unsafe { &*(buf.0.as_ptr() as *const TOKEN_MANDATORY_LABEL) };
+    let sid = label.Label.Sid;
+    if sid.is_null() {
+        return None;
+    }
+    let count = unsafe { *GetSidSubAuthorityCount(sid) } as usize;
+    if count == 0 {
+        return None;
+    }
+    let rid = unsafe { *GetSidSubAuthority(sid, (count - 1) as u32) };
+    let name = match rid {
+        0x0000_0000 => "Untrusted",
+        0x0000_1000 => "Low",
+        0x0000_2000 => "Medium",
+        0x0000_3000 => "High",
+        0x0000_4000 => "System",
+        0x0000_5000 => "Protected",
+        _ => "Other",
+    };
+    Some((name, rid))
+}
+
+fn json_num_u32(n: u32) -> serde_json::Value {
+    serde_json::Value::Number(serde_json::Number::from(n))
 }
 
 #[cfg(test)]

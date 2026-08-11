@@ -223,7 +223,7 @@ pub fn launch_daemon_direct(
 ) -> Result<(), WindowsSandboxError> {
     use crate::error::win32_ctx;
     use windows_sys::Win32::System::Threading::{
-        CREATE_NEW_CONSOLE, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
+        CREATE_NO_WINDOW, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
     };
 
     let program = wide(&helper_exe.to_string_lossy());
@@ -242,11 +242,13 @@ pub fn launch_daemon_direct(
     si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
     let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
 
-    // CREATE_NEW_CONSOLE (not CREATE_NO_WINDOW): the daemon gets its OWN console. A console-less
-    // daemon (CREATE_NO_WINDOW) could not spawn runnable console children — even the bare-minimum
-    // `cmd /c exit 42` exited 1 — because the children inherited no console and aborted during CRT
-    // init. Giving the daemon a console lets its children inherit one. The daemon window is the cost
-    // (acceptable for an elevated helper); a hidden-console variant can follow if this is confirmed.
+    // CREATE_NO_WINDOW: the daemon runs windowless (no console flash on every spawn), matching how
+    // codex's elevated helper runs. The `CREATE_NEW_CONSOLE` experiment (commit 833f3794) tested
+    // whether a console-less daemon was why its children aborted during CRT init — it was NOT: even
+    // WITH a console, `cmd /c exit 42` spawned via `std` inside the daemon returned exit 1 (the
+    // os_diagnostic_std_spawn probe, 2026-08-11). So the daemon-can't-spawn-children failure is NOT a
+    // console-presence issue; it is something else about the daemon's process context. See the
+    // elevated-spawn-debug handoff (`~/.claude/plans/slab-elevated-spawn-debug-handoff.md`).
     let ok = unsafe {
         CreateProcessW(
             program.as_ptr(),
@@ -254,7 +256,7 @@ pub fn launch_daemon_direct(
             std::ptr::null(),
             std::ptr::null(),
             0,
-            CREATE_NEW_CONSOLE,
+            CREATE_NO_WINDOW,
             std::ptr::null(),
             std::ptr::null(),
             &si,
