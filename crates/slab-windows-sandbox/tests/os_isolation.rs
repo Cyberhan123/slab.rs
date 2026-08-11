@@ -96,13 +96,33 @@ fn make_request(argv: &[&str], cwd: &std::path::Path) -> SpawnRequest {
     }
 }
 
-/// A capturing sink so the test can assert output relay.
-struct Capture(std::sync::Mutex<Vec<u8>>);
+/// A capturing sink that records stdout + stderr separately so a failing test can print the
+/// child's stderr (where `cmd` writes its actual error) instead of a bare empty-stdout panic.
+struct Capture {
+    stdout: std::sync::Mutex<Vec<u8>>,
+    stderr: std::sync::Mutex<Vec<u8>>,
+}
+impl Capture {
+    fn new() -> Self {
+        Self {
+            stdout: std::sync::Mutex::new(Vec::new()),
+            stderr: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+    fn stdout_string(&self) -> String {
+        String::from_utf8_lossy(&self.stdout.lock().unwrap()).into_owned()
+    }
+    fn stderr_string(&self) -> String {
+        String::from_utf8_lossy(&self.stderr.lock().unwrap()).into_owned()
+    }
+}
 impl ErasedOutputSink for Capture {
     fn on_output(&self, stream: OutputStreamKind, delta: &str) {
-        if matches!(stream, OutputStreamKind::Stdout) {
-            self.0.lock().unwrap().extend_from_slice(delta.as_bytes());
-        }
+        let buf = match stream {
+            OutputStreamKind::Stdout => &self.stdout,
+            OutputStreamKind::Stderr => &self.stderr,
+        };
+        buf.lock().unwrap().extend_from_slice(delta.as_bytes());
     }
 }
 
@@ -159,7 +179,7 @@ async fn os_elevated_prepare_and_spawn_relays_stdout() {
     let exec = ElevatedAclTokenExecutor::new(ctx.clone());
     prepare_with_diag(&exec, &ctx).expect("prepare (daemon + ACLs)");
 
-    let cap = Arc::new(Capture(std::sync::Mutex::new(Vec::new())));
+    let cap = Arc::new(Capture::new());
     let req = make_request(&["cmd", "/c", "echo slab-os-marker"], &workspace);
     let run = exec
         .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
@@ -167,11 +187,9 @@ async fn os_elevated_prepare_and_spawn_relays_stdout() {
 
     let exit = run.exit_future.await.expect("exit future");
     assert!(!exit.timed_out, "command timed out");
-    let stdout = {
-        let buf = cap.0.lock().unwrap();
-        String::from_utf8_lossy(&buf).into_owned()
-    };
-    assert!(stdout.contains("slab-os-marker"), "stdout relayed: {stdout}");
+    let stdout = cap.stdout_string();
+    let stderr = cap.stderr_string();
+    assert!(stdout.contains("slab-os-marker"), "stdout relayed: {stdout:?}\nstderr: {stderr:?}");
 }
 
 #[tokio::test]
@@ -189,7 +207,7 @@ async fn os_conpty_restricted_child_echo_roundtrip() {
     let exec = ElevatedAclTokenExecutor::new(ctx.clone());
     prepare_with_diag(&exec, &ctx).expect("prepare (daemon + ACLs)");
 
-    let cap = Arc::new(Capture(std::sync::Mutex::new(Vec::new())));
+    let cap = Arc::new(Capture::new());
     // ConPTY under the Low-IL AppContainer restricted token: the child sees a real pseudoconsole,
     // so echo output arrives on the merged PTY stream (pumped as Stdout).
     let mut req = make_request(&["cmd", "/c", "echo slab-os-marker"], &workspace);
@@ -200,12 +218,16 @@ async fn os_conpty_restricted_child_echo_roundtrip() {
 
     let exit = run.exit_future.await.expect("exit future");
     assert!(!exit.timed_out, "conpty command timed out");
-    assert_eq!(exit.exit_code, 0, "conpty child exited cleanly");
-    let stdout = {
-        let buf = cap.0.lock().unwrap();
-        String::from_utf8_lossy(&buf).into_owned()
-    };
-    assert!(stdout.contains("slab-os-marker"), "conpty stdout relayed: {stdout}");
+    let stdout = cap.stdout_string();
+    let stderr = cap.stderr_string();
+    assert_eq!(
+        exit.exit_code, 0,
+        "conpty child exited cleanly\nstdout: {stdout:?}\nstderr: {stderr:?}"
+    );
+    assert!(
+        stdout.contains("slab-os-marker"),
+        "conpty stdout relayed: {stdout:?}\nstderr: {stderr:?}"
+    );
 }
 
 #[tokio::test]
@@ -223,12 +245,16 @@ async fn os_low_il_child_writes_inside_workspace() {
     prepare_with_diag(&exec, &ctx).expect("prepare");
 
     let target = workspace.join("out.txt");
+    let cap = Arc::new(Capture::new());
     // `cmd /c echo hi > out.txt` — the Low-IL child CAN write inside the lowered workspace.
     let req = make_request(&["cmd", "/c", "echo hi", ">", target.to_str().unwrap()], &workspace);
-    let run = exec.spawn_elevated(&req, None).expect("spawn_elevated");
+    let run = exec
+        .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
+        .expect("spawn_elevated");
     let exit = run.exit_future.await.expect("exit future");
-    assert_eq!(exit.exit_code, 0, "in-workspace write should succeed");
-    assert!(target.exists(), "workspace write produced the file");
+    let stderr = cap.stderr_string();
+    assert_eq!(exit.exit_code, 0, "in-workspace write should succeed\nstderr: {stderr:?}");
+    assert!(target.exists(), "workspace write produced the file\nstderr: {stderr:?}");
 }
 
 #[tokio::test]

@@ -37,8 +37,8 @@ use windows_sys::Win32::Security::{
     SetSecurityDescriptorSacl, WinLowLabelSid,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    DELETE, FILE_APPEND_DATA, FILE_DELETE_CHILD, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
-    FILE_WRITE_EA,
+    DELETE, FILE_ALL_ACCESS, FILE_APPEND_DATA, FILE_DELETE_CHILD, FILE_WRITE_ATTRIBUTES,
+    FILE_WRITE_DATA, FILE_WRITE_EA,
 };
 use windows_sys::Win32::System::SystemServices::{
     SECURITY_DESCRIPTOR_REVISION, SYSTEM_MANDATORY_LABEL_ACE_TYPE,
@@ -56,6 +56,16 @@ const DENY_WRITE_MASK: u32 = FILE_WRITE_DATA
     | FILE_DELETE_CHILD
     | FILE_WRITE_ATTRIBUTES
     | DELETE;
+
+/// Full access (read + write + traverse + delete) granted to the AppContainer package SID on its
+/// writable roots. AppContainer processes are deny-by-default: they can access ONLY objects whose
+/// DACL names their package SID (or ALL APPLICATION PACKAGES). A write-only grant leaves the child
+/// unable to READ or TRAVERSE the workspace, so it cannot use it as a working directory — even
+/// `cmd /c echo X` then exits 1 with no output. Full access on the workspace is sound: the SACL
+/// Low mandatory label (NO_WRITE_UP) still bounds the Low-IL writer to the lowered root, and the
+/// [`deny_write_low_sid`] DENY ACE on protected paths (.git/...) beats this grant in DACL
+/// evaluation, so those stay read-only.
+const APPCONTAINER_GRANT_MASK: u32 = FILE_ALL_ACCESS;
 
 /// Aligned scratch buffer for a single-ACE ACL (DWORD alignment required by `ACL`).
 #[repr(C, align(4))]
@@ -224,10 +234,13 @@ pub(crate) fn deny_write_low_sid(path: &Path) -> Result<(), WindowsSandboxError>
     Ok(())
 }
 
-/// Grant the AppContainer package SID write access on `path` (S3). AppContainer processes must be
-/// explicitly granted their package SID in the DACL (in addition to passing the Low-IL SACL
-/// write-up check) before they can create/edit files. MERGED into the existing DACL so the owner's
-/// access is preserved. Additive to [`lower_to_low_integrity`] (SACL) — run both on `writable_roots`.
+/// Grant the AppContainer package SID FULL access (read + write + traverse) on `path` (S3).
+/// AppContainer processes are deny-by-default and can access ONLY objects whose DACL names their
+/// package SID, so they must be granted not just write but also the read/traverse rights needed to
+/// use the path as a working directory — a write-only grant leaves even `cmd /c echo` unable to `cd`
+/// into the workspace. MERGED into the existing DACL so the owner's access is preserved. Additive to
+/// [`lower_to_low_integrity`] (SACL) — run both on `writable_roots`. Protected subpaths (`.git/...`)
+/// stay read-only via [`deny_write_low_sid`]'s DENY ACE, which beats this grant in DACL evaluation.
 pub(crate) fn grant_appcontainer_write(
     path: &Path,
     package_sid: PSID,
@@ -259,11 +272,11 @@ pub(crate) fn grant_appcontainer_write(
         )));
     }
 
-    // SID-based trustee + inheritable GRANT_ACCESS entry with the write mask.
+    // SID-based trustee + inheritable GRANT_ACCESS entry with the full-access mask.
     let mut trustee: TRUSTEE_W = unsafe { zeroed() };
     unsafe { BuildTrusteeWithSidW(&mut trustee, package_sid) };
     let ea = EXPLICIT_ACCESS_W {
-        grfAccessPermissions: DENY_WRITE_MASK,
+        grfAccessPermissions: APPCONTAINER_GRANT_MASK,
         grfAccessMode: GRANT_ACCESS,
         grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
         Trustee: trustee,
