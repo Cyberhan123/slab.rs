@@ -301,13 +301,21 @@ async fn prepare_daemon(
 ) -> Result<SetupMarker, WindowsSandboxError> {
     use crate::pipe::{PipeFrame, ping_with_timeout, read_frame, write_frame};
 
-    // If no daemon is alive, start one (one UAC at enable-time; reconnect is no-UAC).
+    // If no daemon is alive, start one (one UAC at enable-time; reconnect is no-UAC). Thread the
+    // key + marker paths so the daemon loads the SAME key the orchestrator signs with (HMAC must
+    // match) and writes the marker where the orchestrator expects.
     if !daemon_alive(&pipe_name).await {
         if crate::token::is_process_elevated() {
-            crate::elevation::launch_daemon_direct(&helper_exe, &pipe_name)?;
+            crate::elevation::launch_daemon_direct(
+                &helper_exe,
+                &pipe_name,
+                &cfg.key_path,
+                &cfg.marker_path,
+            )?;
         } else {
-            crate::elevation::ShellElevator::default().run_serve(&helper_exe, &pipe_name).map_err(
-                |e| match e {
+            crate::elevation::ShellElevator::default()
+                .run_serve(&helper_exe, &pipe_name, &cfg.key_path, &cfg.marker_path)
+                .map_err(|e| match e {
                     crate::elevation::HelperLaunchError::Declined => {
                         WindowsSandboxError::ElevationDeclined
                     }
@@ -317,8 +325,7 @@ async fn prepare_daemon(
                     crate::elevation::HelperLaunchError::Failed(m) => {
                         WindowsSandboxError::ElevationFailed(m)
                     }
-                },
-            )?;
+                })?;
         }
         // Wait up to 15s for the daemon to create its pipe + answer a ping.
         let _ = ping_with_timeout(&pipe_name, "prepare", Duration::from_secs(15)).await?;

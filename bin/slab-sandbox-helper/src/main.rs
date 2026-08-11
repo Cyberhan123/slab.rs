@@ -26,6 +26,13 @@ enum Command {
     Serve {
         /// Named pipe path, e.g. `\\.\pipe\slab-sandbox-helper-<hash>`.
         pipe: String,
+        /// Path to the DPAPI-sealed HMAC key. Defaults to `<app_home>/sandbox-helper.key`. The
+        /// orchestrator passes its own key path so both sides share one key (HMAC must match).
+        #[arg(long)]
+        key: Option<PathBuf>,
+        /// Path to the setup marker JSON. Defaults to `<app_home>/sandbox-marker.json`.
+        #[arg(long)]
+        marker: Option<PathBuf>,
     },
     /// Print version.
     Version,
@@ -52,7 +59,7 @@ fn run(cli: Cli) {
             let code = slab_windows_sandbox::run_payload(&payload, &key_path);
             std::process::exit(code);
         }
-        Some(Command::Serve { pipe }) => {
+        Some(Command::Serve { pipe, key, marker }) => {
             // The long-lived elevated daemon. Runs until killed. S2b1 handled Ping/Pong only;
             // S2b2 drives Provision/Spawn/Kill for the real Low-IL restricted-token child.
             let rt = match tokio::runtime::Runtime::new() {
@@ -63,8 +70,8 @@ fn run(cli: Cli) {
                 }
             };
             let app_home = slab_utils::app_home::app_home_dir();
-            let key_path = app_home.join("sandbox-helper.key");
-            let marker_path = app_home.join("sandbox-marker.json");
+            let key_path = key.unwrap_or_else(|| app_home.join("sandbox-helper.key"));
+            let marker_path = marker.unwrap_or_else(|| app_home.join("sandbox-marker.json"));
             let code = rt.block_on(async {
                 match slab_windows_sandbox::run_daemon(pipe, key_path, marker_path).await {
                     Ok(()) => 0,

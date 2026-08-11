@@ -33,10 +33,18 @@ pub trait Elevator: Send + Sync {
     /// (0 = success). Distinguish decline/timeout via [`HelperLaunchError`].
     fn run(&self, helper_exe: &Path, payload_path: &Path) -> Result<i32, HelperLaunchError>;
 
-    /// Launch the long-lived daemon (`helper_exe --serve --pipe <pipe_name>`) elevated and return
-    /// once it has been STARTED — does NOT wait for exit (the daemon runs until killed; liveness is
-    /// confirmed later by pinging the named pipe). Default: not supported (stub elevators).
-    fn run_serve(&self, _helper_exe: &Path, _pipe_name: &str) -> Result<(), HelperLaunchError> {
+    /// Launch the long-lived daemon (`helper_exe serve <pipe_name> --key <key> --marker <marker>`)
+    /// elevated and return once it has been STARTED — does NOT wait for exit (the daemon runs until
+    /// killed; liveness is confirmed later by pinging the named pipe). The key + marker paths are
+    /// threaded so the daemon loads the SAME key the orchestrator signs with (HMAC must match) and
+    /// writes the marker where the orchestrator expects. Default: not supported (stub elevators).
+    fn run_serve(
+        &self,
+        _helper_exe: &Path,
+        _pipe_name: &str,
+        _key_path: &Path,
+        _marker_path: &Path,
+    ) -> Result<(), HelperLaunchError> {
         Err(HelperLaunchError::Failed("run_serve not supported by this elevator".into()))
     }
 }
@@ -150,7 +158,13 @@ impl Elevator for ShellElevator {
         Ok(exit_code)
     }
 
-    fn run_serve(&self, helper_exe: &Path, pipe_name: &str) -> Result<(), HelperLaunchError> {
+    fn run_serve(
+        &self,
+        helper_exe: &Path,
+        pipe_name: &str,
+        key_path: &Path,
+        marker_path: &Path,
+    ) -> Result<(), HelperLaunchError> {
         use windows_sys::Win32::Foundation::GetLastError;
         use windows_sys::Win32::UI::Shell::{
             SEE_MASK_FLAG_NO_UI, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
@@ -160,7 +174,12 @@ impl Elevator for ShellElevator {
         let verb = wide("runas");
         let file = wide(&helper_exe.to_string_lossy());
         // The helper's clap takes a positional subcommand (`serve <PIPE>`), not `--serve --pipe`.
-        let params = wide(&format!("serve \"{pipe_name}\""));
+        // Thread key/marker so the daemon shares the orchestrator's key (HMAC must match).
+        let params = wide(&format!(
+            "serve \"{pipe_name}\" --key \"{}\" --marker \"{}\"",
+            key_path.to_string_lossy(),
+            marker_path.to_string_lossy()
+        ));
 
         // SAFETY: zeroed then filled; wide strings own their NUL-terminated buffers for the call.
         let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
@@ -196,7 +215,12 @@ impl Elevator for ShellElevator {
 /// Launch the daemon directly (no UAC) when the orchestrator is ALREADY elevated. The daemon
 /// inherits this process's elevated token. As with [`ShellElevator::run_serve`], the handles are
 /// closed (not tracked) so the daemon outlives the orchestrator.
-pub fn launch_daemon_direct(helper_exe: &Path, pipe_name: &str) -> Result<(), WindowsSandboxError> {
+pub fn launch_daemon_direct(
+    helper_exe: &Path,
+    pipe_name: &str,
+    key_path: &Path,
+    marker_path: &Path,
+) -> Result<(), WindowsSandboxError> {
     use crate::error::win32_ctx;
     use windows_sys::Win32::System::Threading::{
         CREATE_NO_WINDOW, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
@@ -204,8 +228,14 @@ pub fn launch_daemon_direct(helper_exe: &Path, pipe_name: &str) -> Result<(), Wi
 
     let program = wide(&helper_exe.to_string_lossy());
     // CreateProcessW's lpCommandLine is the child's full command line (argv[0] first); clap takes
-    // the `serve <PIPE>` positional subcommand. Quote the exe path as argv[0].
-    let cmd = format!("\"{}\" serve \"{pipe_name}\"", helper_exe.to_string_lossy());
+    // the `serve <PIPE>` positional subcommand. Quote the exe path as argv[0]. Thread key/marker so
+    // the daemon loads the SAME key the orchestrator signs with (HMAC must match).
+    let cmd = format!(
+        "\"{}\" serve \"{pipe_name}\" --key \"{}\" --marker \"{}\"",
+        helper_exe.to_string_lossy(),
+        key_path.to_string_lossy(),
+        marker_path.to_string_lossy()
+    );
     let mut cmd_w = wide(&cmd);
 
     let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
@@ -419,7 +449,9 @@ mod tests {
     fn run_serve_default_is_unsupported() {
         // The Stub elevator does not override run_serve; the trait default must fail closed.
         let stub = Stub::Exit(0);
-        let err = stub.run_serve(Path::new("helper.exe"), r"\\.\pipe\x").unwrap_err();
+        let err = stub
+            .run_serve(Path::new("helper.exe"), r"\\.\pipe\x", Path::new("k"), Path::new("m"))
+            .unwrap_err();
         assert!(matches!(err, HelperLaunchError::Failed(_)), "{err:?}");
     }
 }

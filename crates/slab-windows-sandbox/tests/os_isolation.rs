@@ -100,7 +100,10 @@ async fn launch_daemon_direct_starts_helper_and_pings() {
         }
     };
     let pipe = format!(r"\\.\pipe\slab-sandbox-launch-regression-{}", std::process::id());
-    slab_windows_sandbox::launch_daemon_direct(&helper_exe, &pipe)
+    let dir = tempfile::tempdir().unwrap();
+    let key_path = dir.path().join("helper.key");
+    let marker_path = dir.path().join("marker.json");
+    slab_windows_sandbox::launch_daemon_direct(&helper_exe, &pipe, &key_path, &marker_path)
         .expect("launch_daemon_direct spawns the helper");
 
     let echoed = tokio::time::timeout(
