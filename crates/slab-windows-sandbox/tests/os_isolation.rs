@@ -345,15 +345,76 @@ async fn os_appcontainer_child_network_blocked() {
     prepare_with_diag(&exec, &ctx).expect("prepare");
 
     // The AppContainer child has no internet capability + our WFP package-SID block filter, so its
-    // outbound connect must fail. curl exits 0 ONLY on a completed HTTP request.
+    // outbound connect must fail. curl exits 0 ONLY on a completed HTTP request. Capture output +
+    // print the exit code: 6/7/28 ⇒ curl ran and the network was blocked; 1/other ⇒ curl failed to
+    // init under the AppContainer token (the cmd tests show the same, so this distinguishes
+    // cmd-specific failure from a token-wide inability to run any binary).
+    let cap = Arc::new(Capture::new());
     let req = make_request(
         &["curl.exe", "--max-time", "8", "-s", "-o", "NUL", "http://example.com"],
         &workspace,
     );
-    let run = exec.spawn_elevated(&req, None).expect("spawn_elevated");
+    let run = exec
+        .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
+        .expect("spawn_elevated");
     let exit = run.exit_future.await.expect("exit future");
+    eprintln!(
+        "network_blocked diag: curl exit_code={}, stdout={:?}, stderr={:?}",
+        exit.exit_code,
+        cap.stdout_string(),
+        cap.stderr_string()
+    );
     assert_ne!(
         exit.exit_code, 0,
         "AppContainer child must NOT complete outbound HTTP (network OS-blocked)"
     );
+}
+
+/// Diagnostic probe: can a simple, non-cmd binary run AND produce output under the AppContainer
+/// token? `whoami.exe` (System32) exits 0 + prints the user identity on stdout. Combined with the
+/// curl + cmd results this disambiguates the spawn failures:
+///   - exit=0 + output present  ⇒ the token runs simple programs and the stdio relay works ⇒ the
+///     cmd failures are cmd-specific init failures.
+///   - exit=0 + no output       ⇒ simple programs run but the stdio relay is broken.
+///   - exit!=0                  ⇒ simple programs fail to init too ⇒ token-wide problem.
+#[tokio::test]
+#[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
+async fn os_appcontainer_runs_simple_binary() {
+    if !elevated_enabled() {
+        eprintln!("skip: SLAB_SANDBOX_ELEVATED != 1");
+        return;
+    }
+    let whoami = std::env::var_os("SystemRoot")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
+        .join("System32")
+        .join("whoami.exe");
+    if !whoami.exists() {
+        eprintln!("skip: System32\\whoami.exe not found");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let ctx = make_context(dir.path(), &workspace);
+    let exec = ElevatedAclTokenExecutor::new(ctx.clone());
+    prepare_with_diag(&exec, &ctx).expect("prepare");
+
+    let cap = Arc::new(Capture::new());
+    // Full path as argv[0] so CreateProcessAsUserW resolves it directly from System32 (no PATH
+    // search). whoami exits 0 and prints the user identity.
+    let whoami_str = whoami.to_string_lossy().into_owned();
+    let req = make_request(&[whoami_str.as_str()], &workspace);
+    let run = exec
+        .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
+        .expect("spawn_elevated");
+    let exit = run.exit_future.await.expect("exit future");
+    eprintln!(
+        "simple_binary diag: whoami exit_code={}, stdout={:?}, stderr={:?}",
+        exit.exit_code,
+        cap.stdout_string(),
+        cap.stderr_string()
+    );
+    assert_eq!(exit.exit_code, 0, "whoami should run (see diag above)");
+    assert!(!cap.stdout_string().is_empty(), "whoami should print (see diag above)");
 }
