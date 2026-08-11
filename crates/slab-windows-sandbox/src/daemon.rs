@@ -434,6 +434,13 @@ fn spawn_low_il_child_sync(
     let job = JobHandle::new()?;
     job.configure_kill_on_close()?;
 
+    // DIAGNOSTIC (temporary): bare CreateProcessW — no token, no inherited pipes, no Job assignment,
+    // default STARTUPINFO. Tests whether the daemon can spawn a runnable child AT ALL. See
+    // SpawnRequest::diagnostic_bare_spawn.
+    if spawn.diagnostic_bare_spawn {
+        return spawn_bare_sync(spawn, stdout_read, stdout_write, stderr_read, stderr_write, job);
+    }
+
     // DIAGNOSTIC (temporary): plain Low-IL spawn — no AppContainer identity, no CREATE_NO_WINDOW,
     // plain STARTUPINFO — to isolate why SECURITY_CAPABILITIES children die on init. See
     // SpawnRequest::diagnostic_plain_spawn.
@@ -569,6 +576,57 @@ fn spawn_low_il_child_sync(
 
     Ok(SpawnedChild {
         job,
+        stdout_read: stdout_read as usize,
+        stderr_read: stderr_read as usize,
+        process: pi.hProcess as usize,
+        pseudoconsole: 0,
+        pty_input_read: 0,
+        pty_output_write: 0,
+    })
+}
+
+/// DIAGNOSTIC (temporary): BARE `CreateProcessW` — no token, no inherited pipes (bInheritHandles =
+/// FALSE), no Job assignment, default STARTUPINFO. The child is headless. With `cmd /c exit 42` this
+/// tests whether the daemon can spawn a runnable child AT ALL: exit 42 ⇒ yes (so the
+/// pipes/Job/token/STARTUPINFO setup is the init-failure cause); exit 1 ⇒ the daemon context itself
+/// cannot run children. The pipes + job are created only to satisfy the SpawnedChild plumbing; they
+/// are not connected to the child.
+fn spawn_bare_sync(
+    spawn: &crate::request::SpawnRequest,
+    stdout_read: HANDLE,
+    stdout_write: HANDLE,
+    stderr_read: HANDLE,
+    stderr_write: HANDLE,
+    job: JobHandle,
+) -> Result<SpawnedChild, WindowsSandboxError> {
+    let mut cmd_line = wide(&build_command_line(&spawn.argv));
+    let mut startup: STARTUPINFOW = unsafe { zeroed() };
+    startup.cb = size_of::<STARTUPINFOW>() as u32;
+    let mut pi: PROCESS_INFORMATION = unsafe { zeroed() };
+    // SAFETY: bare CreateProcessW — NULL app name (parsed from cmd line), default STARTUPINFO.
+    let ok = unsafe {
+        CreateProcessW(
+            std::ptr::null(),
+            cmd_line.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,                // bInheritHandles = FALSE — headless child, no inherited stdio
+            0,                // no creation flags — run immediately, no Job, no suspend
+            std::ptr::null(), // inherit the daemon's environment
+            std::ptr::null(), // inherit the daemon's cwd
+            &startup,
+            &mut pi,
+        )
+    };
+    // The child did not inherit these; close the daemon's copies.
+    unsafe {
+        CloseHandle(stdout_write);
+        CloseHandle(stderr_write);
+    }
+    win32_ctx(ok, "CreateProcessW(bare diag)")?;
+    unsafe { CloseHandle(pi.hThread) };
+    Ok(SpawnedChild {
+        job, // not assigned to the child; dropping it is a no-op
         stdout_read: stdout_read as usize,
         stderr_read: stderr_read as usize,
         process: pi.hProcess as usize,

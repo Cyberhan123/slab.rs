@@ -96,6 +96,7 @@ fn make_request(argv: &[&str], cwd: &std::path::Path) -> SpawnRequest {
         diagnostic_plain_spawn: false,
         diagnostic_no_low_il_token: false,
         diagnostic_new_console: false,
+        diagnostic_bare_spawn: false,
     }
 }
 
@@ -590,4 +591,39 @@ async fn os_diagnostic_no_token_new_console() {
     );
     assert_eq!(exit.exit_code, 0, "whoami should run with a new console (see diag above)");
     assert!(!cap.stdout_string().is_empty(), "whoami should print (see diag above)");
+}
+
+/// DIAGNOSTIC: the definitive "can the daemon spawn ANYTHING" probe. Spawns `cmd /c exit 42` via a
+/// BARE CreateProcessW — no token, no inherited pipes, no Job, default STARTUPINFO (headless child).
+/// If exit_code == 42, the daemon CAN spawn a runnable child, so the init failures are caused by the
+/// production spawn's pipes/Job/token/STARTUPINFO setup (bisect from there). If exit_code == 1, the
+/// daemon context itself cannot run children — a deeper problem with the elevated daemon.
+#[tokio::test]
+#[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
+async fn os_diagnostic_bare_spawn() {
+    if !elevated_enabled() {
+        eprintln!("skip: SLAB_SANDBOX_ELEVATED != 1");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let ctx = make_context(dir.path(), &workspace);
+    let exec = ElevatedAclTokenExecutor::new(ctx.clone());
+    prepare_with_diag(&exec, &ctx).expect("prepare");
+
+    let cap = Arc::new(Capture::new());
+    let mut req = make_request(&["cmd", "/c", "exit", "42"], &workspace);
+    req.diagnostic_bare_spawn = true;
+    let run = exec
+        .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
+        .expect("spawn_elevated");
+    let exit = run.exit_future.await.expect("exit future");
+    eprintln!(
+        "bare_spawn diag: cmd /c exit 42 => exit_code={}, stdout={:?}, stderr={:?}",
+        exit.exit_code,
+        cap.stdout_string(),
+        cap.stderr_string()
+    );
+    assert_eq!(exit.exit_code, 42, "daemon should spawn a runnable child (bare) — see diag above");
 }

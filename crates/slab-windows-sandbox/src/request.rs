@@ -76,6 +76,13 @@ pub struct SpawnRequest {
     /// condition aborts console-app init. Not wired to any production config surface.
     #[serde(default)]
     pub diagnostic_new_console: bool,
+    /// DIAGNOSTIC ONLY (temporary): when set, spawn via a BARE `CreateProcessW` — no token, no pipes
+    /// inherited (bInheritHandles=FALSE), no Job assignment, default STARTUPINFO. The child is
+    /// headless. Used with `cmd /c exit 42` to test whether the daemon can spawn a runnable child AT
+    /// ALL: exit 42 ⇒ yes (so the pipes/Job/token/STARTUPINFO setup is the init-failure cause); exit
+    /// 1 ⇒ the daemon context itself cannot run children. Not wired to any production config surface.
+    #[serde(default)]
+    pub diagnostic_bare_spawn: bool,
 }
 
 /// Result of the non-elevated spawn path: a local `tokio::process::Child` plus a tree-kill
