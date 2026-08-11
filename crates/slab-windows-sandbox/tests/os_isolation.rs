@@ -97,6 +97,7 @@ fn make_request(argv: &[&str], cwd: &std::path::Path) -> SpawnRequest {
         diagnostic_no_low_il_token: false,
         diagnostic_new_console: false,
         diagnostic_bare_spawn: false,
+        diagnostic_std_spawn: false,
     }
 }
 
@@ -641,4 +642,41 @@ async fn os_diagnostic_bare_spawn() {
         cap.stderr_string()
     );
     assert_eq!(exit.exit_code, 42, "daemon should spawn a runnable child (bare) — see diag above");
+}
+
+/// DIAGNOSTIC: spawn `cmd /c exit 42` via std::process::Command INSIDE the daemon — exactly what the
+/// control experiment uses in the test process (which returned 42). If this returns 42 in the
+/// daemon, the raw CreateProcessW variants have a bug (std reveals the diff); if it returns 1, the
+/// daemon process itself cannot spawn children (architecture issue, not a spawn-param bug).
+#[tokio::test]
+#[ignore = "requires SLAB_SANDBOX_ELEVATED=1 + elevated shell; see module docs"]
+async fn os_diagnostic_std_spawn() {
+    if !elevated_enabled() {
+        eprintln!("skip: SLAB_SANDBOX_ELEVATED != 1");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let ctx = make_context(dir.path(), &workspace);
+    let exec = ElevatedAclTokenExecutor::new(ctx.clone());
+    prepare_with_diag(&exec, &ctx).expect("prepare");
+
+    let cap = Arc::new(Capture::new());
+    let mut req = make_request(&["cmd", "/c", "exit", "42"], &workspace);
+    req.diagnostic_std_spawn = true;
+    let run = exec
+        .spawn_elevated(&req, Some(cap.clone() as Arc<dyn ErasedOutputSink>))
+        .expect("spawn_elevated");
+    let exit = run.exit_future.await.expect("exit future");
+    eprintln!(
+        "std_spawn diag: cmd /c exit 42 (via std) => exit_code={}, stdout={:?}, stderr={:?}",
+        exit.exit_code,
+        cap.stdout_string(),
+        cap.stderr_string()
+    );
+    assert_eq!(
+        exit.exit_code, 42,
+        "daemon should spawn cmd via std::process::Command — see diag above"
+    );
 }

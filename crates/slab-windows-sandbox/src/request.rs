@@ -83,6 +83,12 @@ pub struct SpawnRequest {
     /// 1 ⇒ the daemon context itself cannot run children. Not wired to any production config surface.
     #[serde(default)]
     pub diagnostic_bare_spawn: bool,
+    /// DIAGNOSTIC ONLY (temporary): when set, spawn via `std::process::Command` (exactly what the
+    /// control experiment uses in the TEST process) instead of raw CreateProcessW. If this runs in
+    /// the daemon but raw CreateProcessW does not, the raw call has a bug; if it also fails, the
+    /// daemon process itself cannot spawn children. Not wired to any production config surface.
+    #[serde(default)]
+    pub diagnostic_std_spawn: bool,
 }
 
 /// Result of the non-elevated spawn path: a local `tokio::process::Child` plus a tree-kill
@@ -92,7 +98,7 @@ pub struct SpawnedChild {
     pub kill_tree: Option<Box<dyn FnOnce() + Send + 'static>>,
 }
 
-/// Result of the elevated spawn path (S2b): the child lives in the elevated daemon, so bytes
+/// Result of the elevated spawn path (S2b): the child lives in the elevated daemon, so bytes//////
 /// arrive over the named pipe. The buffers are filled by the pipe-relay reader; `exit_future`
 /// resolves when the daemon reports process exit; `kill_tree` sends a fire-and-forget Kill RPC.
 pub struct ElevatedRun {

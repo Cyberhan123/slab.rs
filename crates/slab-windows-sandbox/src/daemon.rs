@@ -428,6 +428,12 @@ fn spawn_low_il_child_sync(
     spawn: &crate::request::SpawnRequest,
     package_sid: PSID,
 ) -> Result<SpawnedChild, WindowsSandboxError> {
+    // DIAGNOSTIC (temporary): spawn via std::process::Command (exactly what the control experiment
+    // uses in the TEST process). If this runs in the daemon but raw CreateProcessW does not, the raw
+    // call has a bug; if it also fails, the daemon process itself cannot spawn children.
+    if spawn.diagnostic_std_spawn {
+        return spawn_std_sync(spawn);
+    }
     let token = LowIntegrityToken::new()?;
     let (stdout_read, stdout_write) = create_appcontainer_pipe(package_sid)?;
     let (stderr_read, stderr_write) = create_appcontainer_pipe(package_sid)?;
@@ -579,6 +585,61 @@ fn spawn_low_il_child_sync(
         stdout_read: stdout_read as usize,
         stderr_read: stderr_read as usize,
         process: pi.hProcess as usize,
+        pseudoconsole: 0,
+        pty_input_read: 0,
+        pty_output_write: 0,
+    })
+}
+
+/// DIAGNOSTIC (temporary): spawn via `std::process::Command` — exactly what the control experiment
+/// uses in the TEST process (which successfully ran `cmd /c exit 42` ⇒ 42). If this runs in the
+/// daemon but the raw CreateProcessW variants do not, the raw call has a bug; if it also fails, the
+/// daemon process itself cannot spawn children. Opens a fresh process handle (by PID) for the exit-
+/// watcher and leaks the std Child + its pipes so their handles stay open for the relay plumbing.
+fn spawn_std_sync(
+    spawn: &crate::request::SpawnRequest,
+) -> Result<SpawnedChild, WindowsSandboxError> {
+    use std::os::windows::io::AsRawHandle;
+    use std::process::{Command, Stdio};
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+
+    let prog = spawn.argv.first().ok_or(WindowsSandboxError::EmptyCommand)?;
+    let mut cmd = Command::new(prog);
+    cmd.args(&spawn.argv[1..]);
+    if let Some(cwd) = &spawn.cwd {
+        cmd.current_dir(cwd);
+    }
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child =
+        cmd.spawn().map_err(|e| WindowsSandboxError::SpawnFailed(format!("std spawn: {e}")))?;
+    let pid = child.id();
+    // Fresh handle for the exit-watcher: SYNCHRONIZE (WaitForSingleObject) + QUERY_LIMITED
+    // (GetExitCodeProcess). The std Child's own handle is leaked below so Drop doesn't kill it.
+    let proc_handle =
+        unsafe { OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if proc_handle.is_null() {
+        return Err(WindowsSandboxError::WindowsApi(format!(
+            "OpenProcess(std child pid {pid}) failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+    let stdout_read = stdout_pipe.as_ref().map(|p| p.as_raw_handle() as usize).unwrap_or(0);
+    let stderr_read = stderr_pipe.as_ref().map(|p| p.as_raw_handle() as usize).unwrap_or(0);
+    // Leak the std Child + pipes so their handles stay open (the exit-watcher + pumps own them now).
+    std::mem::forget(child);
+    if let Some(p) = stdout_pipe {
+        std::mem::forget(p);
+    }
+    if let Some(p) = stderr_pipe {
+        std::mem::forget(p);
+    }
+    Ok(SpawnedChild {
+        job: JobHandle::new()?, // not assigned; dropping is a no-op
+        stdout_read,
+        stderr_read,
+        process: proc_handle as usize,
         pseudoconsole: 0,
         pty_input_read: 0,
         pty_output_write: 0,
