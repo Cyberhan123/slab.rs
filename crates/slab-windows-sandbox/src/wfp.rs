@@ -29,12 +29,15 @@ use windows_sys::core::GUID;
 
 use crate::error::WindowsSandboxError;
 
-/// Fixed identity of the slab-sandbox WFP provider (compile-time GUID). Providers/sublayers persist
-/// across daemon restarts (unlike DYNAMIC-session filters), so re-registration tolerates "already
-/// exists".
-const PROVIDER_GUID: GUID = GUID::from_u128(0x8f3a1c2e_4b7d_4a01_9e6f_112233445566);
-/// Fixed identity of the slab-sandbox WFP sublayer.
-const SUBLAYER_GUID: GUID = GUID::from_u128(0x9e4b2d3f_5c8e_4b12_af70_223344556677);
+// The WFP provider + sublayer GUIDs are generated RANDOMLY per daemon instance (in
+// `WfpEngine::register_package_block`), NOT fixed constants. Fixed keys collide across concurrent
+// daemons (the elevated OS tests run 6 in parallel) and across a stray old daemon vs a freshly
+// spawned one after a slab-server restart: the second daemon's `FwpmProviderAdd0` returns
+// already-exists (the object is owned by the sibling's still-live session) and its filter that
+// references that provider fails with FWP_E_WRONG_SESSION (0x8032000C). Random per-instance keys
+// give each daemon its own objects — no cross-session conflict. The package SID the filter
+// conditions on stays fingerprint-derived + stable, so the block still matches the spawned
+// AppContainer child; only the provider/sublayer keys randomize.
 
 /// An open WFP engine session. Dropping closes the engine, which (because the session is DYNAMIC)
 /// removes every filter added through it.
@@ -66,65 +69,70 @@ impl WfpEngine {
         Ok(Self(handle))
     }
 
-    /// Register provider + sublayer + V4/V6 outbound block filters scoped to `package_sid`.
+    /// Register a provider + sublayer + V4/V6 outbound block filters scoped to `package_sid`.
     ///
-    /// Provider/sublayer are idempotent (they persist across restarts; tolerate "already exists" or
-    /// any non-zero there with a warning). The filter adds and the commit are the real fail-closed
-    /// gate: if anything is genuinely broken the filter add fails and we abort.
+    /// The provider/sublayer GUIDs are generated **randomly per daemon instance** (see the note on
+    /// the removed module constants above), so each daemon owns its own objects. The filter adds +
+    /// commit are the fail-closed gate. Every Fwpm step's return code is appended to a `trace`
+    /// string surfaced in any error — the daemon's stdout/stderr are hidden behind
+    /// `CREATE_NO_WINDOW`, so the trace in `daemon-error.log` is the only visibility into which step
+    /// failed.
     pub(crate) fn register_package_block(
         &self,
         package_sid: PSID,
     ) -> Result<(), WindowsSandboxError> {
-        // WFP requires a non-null `displayData.name` on every provider/sublayer/filter add, else it
-        // returns FWP_E_NULL_DISPLAY_NAME (0x80320023). The string is copied by the engine, so the
-        // Vec only needs to outlive the calls below.
+        // Per-instance random GUIDs. `WfpState::ensure_registered` calls this at most once per
+        // daemon, so this is one provider/sublayer pair per daemon lifetime. Random (not fixed, not
+        // fingerprint-derived) keys avoid cross-session collisions: a fixed key collides with
+        // sibling daemons (the parallel OS tests) and with a stray old daemon after a slab-server
+        // restart, surfacing as FWP_E_ALREADY_EXISTS on the add and FWP_E_WRONG_SESSION (0x8032000C)
+        // on the filter. The package SID the filter conditions on stays fingerprint-derived +
+        // stable, so the block still matches the spawned AppContainer child.
+        let provider_guid = GUID::from_u128(uuid::Uuid::new_v4().as_u128());
+        let sublayer_guid = GUID::from_u128(uuid::Uuid::new_v4().as_u128());
+
+        // WFP requires a non-null `displayData.name` on every add, else FWP_E_NULL_DISPLAY_NAME
+        // (0x80320023). The string is copied by the engine, so the Vec only needs to outlive the calls.
         let name = wide("slab-sandbox network block");
         let name_ptr = name.as_ptr() as *mut u16;
         let display = FWPM_DISPLAY_DATA0 { name: name_ptr, description: std::ptr::null_mut() };
 
+        let mut trace = String::new();
+
         // SAFETY: all calls operate on our own engine handle with valid pointers.
         unsafe {
-            // Provider + sublayer are PERSISTENT (survive daemon restarts) and idempotent. Add them
-            // OUTSIDE the filter transaction and tolerate any non-zero: a re-provision legitimately
-            // returns FWP_E_ALREADY_EXISTS, and — critically — an error returned by an add INSIDE an
-            // explicit transaction aborts it, which would make the filter adds below fail with
-            // FWP_E_NO_TXN_IN_PROGRESS (0x8032000C). Untransactional adds auto-commit individually,
-            // so an already-exists here is harmless. The filter adds below are the fail-closed gate;
-            // a genuinely-broken provider surfaces there as FWP_E_PROVIDER_NOT_FOUND.
+            // Provider + sublayer (this session's own, random keys) — untransactional auto-commit.
+            // With unique keys there is no already-exists to tolerate; a non-zero here is unexpected,
+            // but we record it into the trace and let the fail-closed filter add below surface it.
             let provider = FWPM_PROVIDER0 {
-                providerKey: PROVIDER_GUID,
+                providerKey: provider_guid,
                 displayData: display,
                 ..Default::default()
             };
-            let err = FwpmProviderAdd0(self.0, &provider, std::ptr::null_mut());
-            if err != 0 {
-                tracing::warn!(
-                    code = err,
-                    "FwpmProviderAdd0 non-zero (likely already-exists; continuing)"
-                );
+            let rc = FwpmProviderAdd0(self.0, &provider, std::ptr::null_mut());
+            trace.push_str(&format!("provider_add=0x{rc:x}; "));
+            if rc != 0 {
+                tracing::warn!(code = rc, "FwpmProviderAdd0 non-zero");
             }
 
             let sublayer = FWPM_SUBLAYER0 {
-                subLayerKey: SUBLAYER_GUID,
-                providerKey: &PROVIDER_GUID as *const GUID as *mut GUID,
+                subLayerKey: sublayer_guid,
+                providerKey: &provider_guid as *const GUID as *mut GUID,
                 weight: 0x4000,
                 displayData: display,
                 ..Default::default()
             };
-            let err = FwpmSubLayerAdd0(self.0, &sublayer, std::ptr::null_mut());
-            if err != 0 {
-                tracing::warn!(
-                    code = err,
-                    "FwpmSubLayerAdd0 non-zero (likely already-exists; continuing)"
-                );
+            let rc = FwpmSubLayerAdd0(self.0, &sublayer, std::ptr::null_mut());
+            trace.push_str(&format!("sublayer_add=0x{rc:x}; "));
+            if rc != 0 {
+                tracing::warn!(code = rc, "FwpmSubLayerAdd0 non-zero");
             }
 
-            // Fresh transaction for the two block filters only. The provider/sublayer already exist
-            // (just added or persisted from a prior run), so the filters' providerKey/subLayerKey
-            // resolve cleanly. If either add fails we abort and surface Err (fail-closed).
-            let err = FwpmTransactionBegin0(self.0, 0);
-            if err != 0 {
-                return Err(self.abort("FwpmTransactionBegin0", err));
+            // Filters in their own transaction; both adds + commit must succeed (fail-closed).
+            let rc = FwpmTransactionBegin0(self.0, 0);
+            trace.push_str(&format!("txn_begin=0x{rc:x}; "));
+            if rc != 0 {
+                return Err(self.abort("FwpmTransactionBegin0", rc, &trace));
             }
 
             // One condition: match connections whose AppContainer package SID == package_sid.
@@ -136,48 +144,53 @@ impl WfpEngine {
                     Anonymous: FWP_CONDITION_VALUE0_0 { sid: package_sid as *mut SID },
                 },
             };
-            let provider_key_ptr = &PROVIDER_GUID as *const GUID as *mut GUID;
+            let provider_key_ptr = &provider_guid as *const GUID as *mut GUID;
 
             let mut id: u64 = 0;
             let v4 = build_block_filter(
                 FWPM_LAYER_ALE_AUTH_CONNECT_V4,
-                SUBLAYER_GUID,
+                sublayer_guid,
                 provider_key_ptr,
                 name_ptr,
                 &mut condition,
             );
-            let err = FwpmFilterAdd0(self.0, &v4, std::ptr::null_mut(), &mut id);
-            if err != 0 {
-                return Err(self.abort("FwpmFilterAdd0(V4)", err));
+            let rc = FwpmFilterAdd0(self.0, &v4, std::ptr::null_mut(), &mut id);
+            trace.push_str(&format!("filter_v4_add=0x{rc:x}; "));
+            if rc != 0 {
+                return Err(self.abort("FwpmFilterAdd0(V4)", rc, &trace));
             }
 
             let v6 = build_block_filter(
                 FWPM_LAYER_ALE_AUTH_CONNECT_V6,
-                SUBLAYER_GUID,
+                sublayer_guid,
                 provider_key_ptr,
                 name_ptr,
                 &mut condition,
             );
-            let err = FwpmFilterAdd0(self.0, &v6, std::ptr::null_mut(), &mut id);
-            if err != 0 {
-                return Err(self.abort("FwpmFilterAdd0(V6)", err));
+            let rc = FwpmFilterAdd0(self.0, &v6, std::ptr::null_mut(), &mut id);
+            trace.push_str(&format!("filter_v6_add=0x{rc:x}; "));
+            if rc != 0 {
+                return Err(self.abort("FwpmFilterAdd0(V6)", rc, &trace));
             }
 
-            let err = FwpmTransactionCommit0(self.0);
-            if err != 0 {
-                return Err(self.abort("FwpmTransactionCommit0", err));
+            let rc = FwpmTransactionCommit0(self.0);
+            trace.push_str(&format!("commit=0x{rc:x}; "));
+            if rc != 0 {
+                return Err(self.abort("FwpmTransactionCommit0", rc, &trace));
             }
         }
         Ok(())
     }
 
-    /// Abort the in-flight transaction and format an error.
-    fn abort(&self, ctx: &str, code: u32) -> WindowsSandboxError {
+    /// Abort the in-flight transaction and format an error including the per-step `trace`.
+    fn abort(&self, ctx: &str, code: u32, trace: &str) -> WindowsSandboxError {
         // SAFETY: aborting a transaction on our own engine handle.
         unsafe {
             FwpmTransactionAbort0(self.0);
         }
-        WindowsSandboxError::WindowsApi(format!("{ctx} failed: code {code}"))
+        WindowsSandboxError::WindowsApi(format!(
+            "{ctx} failed: code 0x{code:x} ({code}); trace: {trace}"
+        ))
     }
 }
 
@@ -218,6 +231,10 @@ fn wide(s: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Dummy sublayer GUID for the pure `build_block_filter` unit tests (the real code generates a
+    /// random per-instance GUID; see `WfpEngine::register_package_block`).
+    const SUBLAYER_GUID: GUID = GUID::from_u128(0x9e4b2d3f_5c8e_4b12_af70_223344556677);
 
     /// `windows_sys::core::GUID` has no `PartialEq`/`Debug` derives, so compare fields by hand.
     fn guid_eq(a: &GUID, b: &GUID) -> bool {
