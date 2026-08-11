@@ -223,7 +223,7 @@ pub fn launch_daemon_direct(
 ) -> Result<(), WindowsSandboxError> {
     use crate::error::win32_ctx;
     use windows_sys::Win32::System::Threading::{
-        CREATE_NO_WINDOW, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
+        CREATE_NEW_CONSOLE, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
     };
 
     let program = wide(&helper_exe.to_string_lossy());
@@ -242,6 +242,11 @@ pub fn launch_daemon_direct(
     si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
     let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
 
+    // CREATE_NEW_CONSOLE (not CREATE_NO_WINDOW): the daemon gets its OWN console. A console-less
+    // daemon (CREATE_NO_WINDOW) could not spawn runnable console children — even the bare-minimum
+    // `cmd /c exit 42` exited 1 — because the children inherited no console and aborted during CRT
+    // init. Giving the daemon a console lets its children inherit one. The daemon window is the cost
+    // (acceptable for an elevated helper); a hidden-console variant can follow if this is confirmed.
     let ok = unsafe {
         CreateProcessW(
             program.as_ptr(),
@@ -249,7 +254,7 @@ pub fn launch_daemon_direct(
             std::ptr::null(),
             std::ptr::null(),
             0,
-            CREATE_NO_WINDOW,
+            CREATE_NEW_CONSOLE,
             std::ptr::null(),
             std::ptr::null(),
             &si,

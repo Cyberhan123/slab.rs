@@ -172,8 +172,9 @@ async fn launch_daemon_direct_starts_helper_and_pings() {
 /// std::process::Command. If this returns 42, the test process's context can spawn runnable console
 /// children — which isolates the elevated daemon (launched + CREATE_NO_WINDOW via
 /// launch_daemon_direct) as the spawn failure, since the bare-spawn probe through the daemon
-/// returned 1. Always runs (non-elevated); no helper/daemon needed.
+/// returned 1. `#[ignore]` so it runs under the same `--ignored` invocation as the OS tests.
 #[tokio::test]
+#[ignore = "runs under --ignored alongside the OS tests; needs no elevation"]
 async fn control_test_process_can_spawn_cmd() {
     let out = std::process::Command::new("cmd").args(["/c", "exit", "42"]).output();
     let code = out.as_ref().ok().and_then(|o| o.status.code()).unwrap_or(-999);
