@@ -165,3 +165,47 @@ mod tests {
         // Drop runs here — must not panic.
     }
 }
+
+#[cfg(test)]
+mod behavior {
+    use super::{post_spawn, pre_spawn};
+
+    // Behavioral coverage for the orphan fix: spawn a long-lived child, build the containment guard,
+    // drop ONLY the guard (not the child), and assert the child is torn down. This is the only
+    // runnable end-to-end check of tree-kill (no elevation needed); it runs on every host.
+    #[tokio::test]
+    async fn containment_guard_kills_child_tree_on_drop() {
+        let mut command = if cfg!(windows) {
+            // `cmd /c ping` makes cmd fork ping as a grandchild, so this also exercises tree-kill
+            // (the Job/process-group must reach ping, not just cmd).
+            let mut c = tokio::process::Command::new("cmd");
+            c.args(["/c", "ping", "-n", "30", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = tokio::process::Command::new("sh");
+            c.args(["-c", "sleep 30"]);
+            c
+        };
+        pre_spawn(&mut command);
+        let mut child = command.spawn().expect("spawn long-lived child");
+        let guard = post_spawn(&child);
+        assert!(guard.is_some(), "containment guard should be created");
+
+        // Drop ONLY the guard — the Job close / process-group SIGKILL must kill the tree. The child
+        // handle is still held, so `kill_on_drop` is NOT what fires here.
+        drop(guard);
+
+        // Poll for exit without depending on the tokio `time` feature. If the guard failed to kill,
+        // the deadline trips long before the child's natural ~30s exit.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if child.try_wait().expect("try_wait").is_some() {
+                break;
+            }
+            if std::time::Instant::now() > deadline {
+                panic!("containment guard drop did not kill the child within 5s");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
+}
