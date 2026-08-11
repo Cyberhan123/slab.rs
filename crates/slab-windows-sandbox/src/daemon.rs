@@ -32,7 +32,10 @@ use windows_sys::Win32::Security::{
     SECURITY_DESCRIPTOR, SetSecurityDescriptorDacl, SetSecurityDescriptorSacl, WinLowLabelSid,
     WinWorldSid,
 };
-use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE, SYNCHRONIZE};
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    OPEN_EXISTING, SYNCHRONIZE,
+};
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
@@ -492,10 +495,11 @@ fn spawn_low_il_child_sync(
 
     // STARTUPINFOEXW: the existing stdio handle setup (cb sized to the EX struct) + the attribute
     // list carrying the AppContainer identity.
+    let null_stdin = create_null_stdin()?;
     let mut startup_ex: STARTUPINFOEXW = unsafe { zeroed() };
     startup_ex.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
     startup_ex.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup_ex.StartupInfo.hStdInput = INVALID_HANDLE_VALUE;
+    startup_ex.StartupInfo.hStdInput = null_stdin;
     startup_ex.StartupInfo.hStdOutput = stdout_write;
     startup_ex.StartupInfo.hStdError = stderr_write;
     startup_ex.lpAttributeList = attr_list;
@@ -530,10 +534,12 @@ fn spawn_low_il_child_sync(
     // The child captured the attribute list; release our copy regardless of spawn outcome.
     // SAFETY: the list was initialized above and is no longer referenced after this.
     unsafe { DeleteProcThreadAttributeList(attr_list) };
-    // Close child-side write ends in the daemon; the child holds its inherited copies.
+    // Close child-side write ends + the null stdin in the daemon; the child holds its inherited
+    // copies.
     unsafe {
         CloseHandle(stdout_write);
         CloseHandle(stderr_write);
+        CloseHandle(null_stdin);
     }
     // Fail-closed on spawn failure AFTER cleanup (no untracked process was created on failure).
     win32_ctx(ok, "CreateProcessAsUserW")?;
@@ -586,10 +592,11 @@ fn spawn_plain_low_il_sync(
     stderr_write: HANDLE,
     job: JobHandle,
 ) -> Result<SpawnedChild, WindowsSandboxError> {
+    let null_stdin = create_null_stdin()?;
     let mut startup: STARTUPINFOW = unsafe { zeroed() };
     startup.cb = size_of::<STARTUPINFOW>() as u32;
     startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdInput = INVALID_HANDLE_VALUE;
+    startup.hStdInput = null_stdin;
     startup.hStdOutput = stdout_write;
     startup.hStdError = stderr_write;
 
@@ -633,10 +640,11 @@ fn spawn_plain_low_il_sync(
             )
         }
     };
-    // Close the daemon's write ends; the child holds its inherited copies.
+    // Close the daemon's write ends + null stdin; the child holds its inherited copies.
     unsafe {
         CloseHandle(stdout_write);
         CloseHandle(stderr_write);
+        CloseHandle(null_stdin);
     }
     win32_ctx(ok, "CreateProcess(plain diag)")?;
 
@@ -775,6 +783,39 @@ fn create_appcontainer_pipe(package_sid: PSID) -> Result<(HANDLE, HANDLE), Windo
     let ok = unsafe { CreatePipe(&mut read, &mut write, &sa, 0) };
     win32_ctx(ok, "CreatePipe")?;
     Ok((read, write))
+}
+
+/// Create an inheritable read handle to the null device (`NUL`) for the child's stdin. A REAL null
+/// handle — NOT `INVALID_HANDLE_VALUE`: under `STARTF_USESTDHANDLES`, an `INVALID_HANDLE_VALUE`
+/// stdin can abort console-app CRT initialization (the child then exits 1 with no output, which is
+/// exactly the symptom seen for whoami/curl/cmd). The handle is inheritable so the child gets a
+/// copy via `bInheritHandles`; the daemon closes its own copy after `CreateProcess`.
+fn create_null_stdin() -> Result<HANDLE, WindowsSandboxError> {
+    let nul = wide("NUL");
+    let sa = SECURITY_ATTRIBUTES {
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+        bInheritHandle: 1,
+        lpSecurityDescriptor: std::ptr::null_mut(),
+    };
+    // SAFETY: `NUL` is NUL-terminated UTF-16; `sa` is a valid pointer; the null device always exists.
+    let h = unsafe {
+        CreateFileW(
+            nul.as_ptr(),
+            FILE_GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            &sa,
+            OPEN_EXISTING,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if h == INVALID_HANDLE_VALUE {
+        return Err(WindowsSandboxError::WindowsApi(format!(
+            "CreateFileW(NUL stdin) failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    Ok(h)
 }
 
 /// Build a well-known SID into a stack buffer; returns (buffer, pointer). The buffer must outlive
