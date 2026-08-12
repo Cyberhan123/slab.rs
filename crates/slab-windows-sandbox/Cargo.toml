@@ -37,9 +37,6 @@ windows-sys = { workspace = true, features = [
     "Win32_System_JobObjects",
     "Win32_System_Pipes",
     "Win32_System_Rpc",
-    # DIAGNOSTIC (temporary): needed only by `dump_process_context` (window-station/desktop name
-    # read) to root-cause why the elevated daemon's children abort during CRT init. Remove with it.
-    "Win32_System_StationsAndDesktops",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
     "Win32_System_WindowsProgramming",

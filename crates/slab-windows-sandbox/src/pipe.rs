@@ -244,12 +244,6 @@ mod tests {
             workspace_root: Some(PathBuf::from(r"C:\ws")),
             network_blocked: false,
             use_conpty: false,
-            diagnostic_plain_spawn: false,
-            diagnostic_no_low_il_token: false,
-            diagnostic_new_console: false,
-            diagnostic_bare_spawn: false,
-            diagnostic_std_spawn: false,
-            diagnostic_dump_context: false,
         }
     }
 
@@ -358,12 +352,6 @@ mod tests {
             workspace_root: None,
             network_blocked: false,
             use_conpty: false,
-            diagnostic_plain_spawn: false,
-            diagnostic_no_low_il_token: false,
-            diagnostic_new_console: false,
-            diagnostic_bare_spawn: false,
-            diagnostic_std_spawn: false,
-            diagnostic_dump_context: false,
         };
         let sb = SpawnRequest { env: env_b, ..sa.clone() };
         let ta = spawn_tag(&key, "t", &sa).unwrap();

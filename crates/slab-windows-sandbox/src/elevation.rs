@@ -242,13 +242,12 @@ pub fn launch_daemon_direct(
     si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
     let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
 
-    // CREATE_NO_WINDOW: the daemon runs windowless (no console flash on every spawn), matching how
-    // codex's elevated helper runs. The `CREATE_NEW_CONSOLE` experiment (commit 833f3794) tested
-    // whether a console-less daemon was why its children aborted during CRT init — it was NOT: even
-    // WITH a console, `cmd /c exit 42` spawned via `std` inside the daemon returned exit 1 (the
-    // os_diagnostic_std_spawn probe, 2026-08-11). So the daemon-can't-spawn-children failure is NOT a
-    // console-presence issue; it is something else about the daemon's process context. See the
-    // elevated-spawn-debug handoff (`~/.claude/plans/slab-elevated-spawn-debug-handoff.md`).
+    // CREATE_NO_WINDOW: the daemon runs windowless (no console flash per spawn), matching how codex's
+    // elevated helper runs. The daemon-can-spawn-children question turned out to be unrelated to
+    // console presence: the real spawn failure was that the AppContainer profile was never registered
+    // + `CreateProcessAsUserW(LowIntegrityToken)` hit ERROR_PRIVILEGE_NOT_HELD (both masked by the
+    // per-connection `provisioned` gate, bug 1). The daemon now spawns AppContainer children via
+    // `CreateProcessW` + `SECURITY_CAPABILITIES` after registering the profile at provision time.
     let ok = unsafe {
         CreateProcessW(
             program.as_ptr(),

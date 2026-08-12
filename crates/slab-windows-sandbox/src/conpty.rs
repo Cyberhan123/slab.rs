@@ -1,4 +1,4 @@
-//! ConPTY (Windows pseudoconsole) spawn path for the elevated Low-IL AppContainer child (S6a).
+//! ConPTY (Windows pseudoconsole) spawn path for the elevated AppContainer child (S6a).
 //!
 //! The elevated shell today runs over piped stdio (one anonymous pipe per stream). That works for
 //! one-shot `bash -lc "<cmd>"` captures, but the child sees a pipe — not a terminal — so ANSI
@@ -21,15 +21,14 @@
 //! `Stdout` (no separate stderr). Interactive stdin is not driven in S6a (the shell tool is
 //! one-shot); the input write-end is closed right after spawn so the child sees stdin EOF.
 //!
-//! ⚠ **Unvalidated combination:** spawning an AppContainer (Low-IL) child under a pseudoconsole is
-//! not a documented Win32 scenario. ConPTY internally spawns a non-AppContainer `conhost` that hosts
-//! the PTY; the AppContainer child attaches via a console ALPC port that may not be reachable across
-//! the AppContainer silo. If attachment fails the child typically hangs or emits no output — a
-//! functionality gap, NOT a security hole (the path stays fail-closed). This combination MUST be
-//! empirically validated on the target Windows build (the gated `os_conpty_restricted_child_echo_
-//! roundtrip` test under `SLAB_SANDBOX_ELEVATED=1`) before it is relied on; if it does not work,
-//! drop the AppContainer overlay on the ConPTY path (spawn under the bare Low-IL token) or document
-//! the version requirement.
+//! ⚠ **Validated limitation (2026-08-12):** spawning an AppContainer child under a pseudoconsole is
+//! NOT supported on Windows 11. ConPTY hosts the pseudoconsole in a non-AppContainer `conhost`; the
+//! AppContainer child attaches via a console ALPC port that is not reachable across the AppContainer
+//! silo, so the child exits 1 with no output. This is a functionality gap, NOT a security hole — the
+//! path stays fail-closed (the AppContainer overlay is kept rather than silently degrading to an
+//! unisolated token). The PIPED AppContainer path is the supported OS-enforced isolation mechanism;
+//! ConPTY remains opt-in for terminal fidelity on the non-elevated path. If a future Windows build
+//! supports the combination, re-enable the gated `os_conpty_restricted_child_echo_roundtrip` test.
 
 #![cfg(target_os = "windows")]
 
@@ -41,16 +40,17 @@ use windows_sys::Win32::Security::{PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILIT
 use windows_sys::Win32::System::Console::{COORD, ClosePseudoConsole, CreatePseudoConsole, HPCON};
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
+    CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
     DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, InitializeProcThreadAttributeList,
     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
     PROCESS_INFORMATION, ResumeThread, STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute,
 };
 
-use crate::daemon::{SpawnedChild, build_command_line, build_unicode_env, wide};
+use crate::daemon::{
+    SpawnedChild, build_command_line, build_unicode_env, resolve_program_wide, wide,
+};
 use crate::error::{WindowsSandboxError, win32_ctx};
 use crate::job::JobHandle;
-use crate::token::LowIntegrityToken;
 
 /// RAII teardown for the pseudoconsole + its four pipe handles + the proc-thread attribute list.
 /// Created immediately after `CreatePseudoConsole` succeeds. On ANY error between there and the
@@ -58,7 +58,7 @@ use crate::token::LowIntegrityToken;
 /// the `hInput`/`hOutput` handles it consumed). On the success path the live handles are read out
 /// and `disarmed = true`, so `Drop` is a no-op and the consumed handles transfer to [`SpawnedChild`]
 /// (the daemon's exit-watcher closes them later). This closes the handle-leak window flagged in the
-/// S6a review (previously five `?` points between `CreatePseudoConsole` and `CreateProcessAsUserW`
+/// S6a review (previously five `?` points between `CreatePseudoConsole` and `CreateProcessW`
 /// leaked the PTY + pipes + attribute list).
 struct ConptyCleanup {
     disarmed: bool,
@@ -99,15 +99,16 @@ impl Drop for ConptyCleanup {
     }
 }
 
-/// Spawn the Low-IL AppContainer child under a pseudoconsole. Returns the same [`SpawnedChild`]
-/// shape as the piped path so the daemon's pump/exit machinery is shared: the PTY output stream is
-/// pumped as `Stdout`, and the PTY is torn down by the daemon's exit-watcher after the child exits.
+/// Spawn the AppContainer child under a pseudoconsole. Returns the same [`SpawnedChild`] shape as the
+/// piped path so the daemon's pump/exit machinery is shared: the PTY output stream is pumped as
+/// `Stdout`, and the PTY is torn down by the daemon's exit-watcher after the child exits. Same
+/// AppContainer model as the piped path (package SID via `SECURITY_CAPABILITIES`, daemon token, full
+/// `lpApplicationName`) — no Low-IL token / `CreateProcessAsUserW` (admin cannot assign a primary
+/// token).
 pub(crate) fn spawn_low_il_child_conpty_sync(
     spawn: &crate::request::SpawnRequest,
     package_sid: PSID,
 ) -> Result<SpawnedChild, WindowsSandboxError> {
-    let token = LowIntegrityToken::new()?;
-
     // Two daemon-owned anonymous pipes form the PTY's input/output channels. The child never opens
     // these — it attaches to the pseudoconsole — so they need no AppContainer package-SID grant and
     // are non-inheritable.
@@ -208,15 +209,18 @@ pub(crate) fn spawn_low_il_child_conpty_sync(
     startup_ex.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
     startup_ex.lpAttributeList = attr_list;
 
+    // AppContainer children cannot search PATH, so resolve argv[0] to a full path for
+    // lpApplicationName (NULL would fail with ERROR_FILE_NOT_FOUND under AppContainer).
+    let app_name =
+        resolve_program_wide(spawn.argv.first().ok_or(WindowsSandboxError::EmptyCommand)?);
     let mut cmd_line = wide(&build_command_line(&spawn.argv));
     let cwd = spawn.cwd.as_ref().map(|p| wide(&p.to_string_lossy()));
     let (env_block, env_flags) = build_unicode_env(&spawn.env);
 
     let mut pi: PROCESS_INFORMATION = unsafe { zeroed() };
     let ok = unsafe {
-        CreateProcessAsUserW(
-            token.raw(),
-            std::ptr::null(),
+        CreateProcessW(
+            app_name.as_ptr(),
             cmd_line.as_mut_ptr(),
             std::ptr::null(),
             std::ptr::null(),
@@ -248,7 +252,7 @@ pub(crate) fn spawn_low_il_child_conpty_sync(
     // `?`-free explicit return lets `cleanup` (still armed) tear down hpc + the consumed handles.
     if ok == 0 {
         return Err(WindowsSandboxError::WindowsApi(format!(
-            "CreateProcessAsUserW(conpty) failed: {}",
+            "CreateProcessW(conpty) failed: {}",
             std::io::Error::last_os_error()
         )));
     }

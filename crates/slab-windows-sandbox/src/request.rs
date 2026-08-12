@@ -58,44 +58,6 @@ pub struct SpawnRequest {
     /// `windows_use_conpty` config knob. Covered by the Spawn frame HMAC (it is a field of `spawn`).
     #[serde(default)]
     pub use_conpty: bool,
-    /// DIAGNOSTIC ONLY (temporary): spawn with the Low-IL token but NO AppContainer identity, NO
-    /// `CREATE_NO_WINDOW`, and a plain STARTUPINFO. Used to isolate why AppContainer children die on
-    /// init — if a binary runs here but not under SECURITY_CAPABILITIES, the AppContainer identity
-    /// (or CREATE_NO_WINDOW) is the culprit; if it still dies, the Low-IL token itself is unusable.
-    /// Not wired to any production config surface.
-    #[serde(default)]
-    pub diagnostic_plain_spawn: bool,
-    /// DIAGNOSTIC ONLY (temporary): when set WITH `diagnostic_plain_spawn`, spawn via `CreateProcessW`
-    /// (the daemon's own token) instead of `CreateProcessAsUserW(LowIntegrityToken)` — i.e. drop the
-    /// Low-IL restriction entirely. If a binary runs here, the LowIntegrityToken is the init-failure
-    /// cause. Not wired to any production config surface.
-    #[serde(default)]
-    pub diagnostic_no_low_il_token: bool,
-    /// DIAGNOSTIC ONLY (temporary): when set, add `CREATE_NEW_CONSOLE` to the creation flags (give the
-    /// child its own console instead of inheriting the daemon's none). Tests whether the no-console
-    /// condition aborts console-app init. Not wired to any production config surface.
-    #[serde(default)]
-    pub diagnostic_new_console: bool,
-    /// DIAGNOSTIC ONLY (temporary): when set, spawn via a BARE `CreateProcessW` — no token, no pipes
-    /// inherited (bInheritHandles=FALSE), no Job assignment, default STARTUPINFO. The child is
-    /// headless. Used with `cmd /c exit 42` to test whether the daemon can spawn a runnable child AT
-    /// ALL: exit 42 ⇒ yes (so the pipes/Job/token/STARTUPINFO setup is the init-failure cause); exit
-    /// 1 ⇒ the daemon context itself cannot run children. Not wired to any production config surface.
-    #[serde(default)]
-    pub diagnostic_bare_spawn: bool,
-    /// DIAGNOSTIC ONLY (temporary): when set, spawn via `std::process::Command` (exactly what the
-    /// control experiment uses in the TEST process) instead of raw CreateProcessW. If this runs in
-    /// the daemon but raw CreateProcessW does not, the raw call has a bug; if it also fails, the
-    /// daemon process itself cannot spawn children. Not wired to any production config surface.
-    #[serde(default)]
-    pub diagnostic_std_spawn: bool,
-    /// DIAGNOSTIC ONLY (temporary): when set, the daemon writes a snapshot of its own process
-    /// context (Job membership + limits, window-station/desktop, console presence, token integrity)
-    /// to `daemon-context.json` next to the marker, BEFORE the spawn. The orchestrator/test reads it
-    /// (and compares against the test process's snapshot, taken via [`crate::dump_process_context`])
-    /// to find why the daemon's children abort during CRT init. Not wired to any production surface.
-    #[serde(default)]
-    pub diagnostic_dump_context: bool,
 }
 
 /// Result of the non-elevated spawn path: a local `tokio::process::Child` plus a tree-kill

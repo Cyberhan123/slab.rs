@@ -7,7 +7,9 @@
 //! Pure `userenv` SID math: it needs NO elevation, so it is unit-testable from a plain `cargo test`.
 
 use windows_sys::Win32::Foundation::LocalFree;
-use windows_sys::Win32::Security::Isolation::DeriveAppContainerSidFromAppContainerName;
+use windows_sys::Win32::Security::Isolation::{
+    CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
+};
 use windows_sys::Win32::Security::{CopySid, GetLengthSid, PSID};
 
 use crate::error::WindowsSandboxError;
@@ -70,6 +72,45 @@ impl PackageSid {
     /// The raw package-SID pointer. Valid for as long as `self` lives.
     pub(crate) fn as_psid(&self) -> PSID {
         self.buf.0.as_ptr() as PSID
+    }
+}
+
+/// Register (create) the AppContainer profile for `name`. REQUIRED before a process can spawn under
+/// the package SID via `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`: [`PackageSid::from_fingerprint`]
+/// only DERIVES the SID — the profile (which the loader checks at spawn time) must exist, or
+/// `CreateProcessW` fails with `ERROR_FILE_NOT_FOUND`. Idempotent: `S_OK` and `ERROR_ALREADY_EXISTS`
+/// (`0x800700b7`) both indicate a usable profile. The caller-derived SID (from the same name) is
+/// identical to the registered profile's SID, so no SID is handed back here.
+pub(crate) fn register_appcontainer_profile(name: &str) -> Result<(), WindowsSandboxError> {
+    let name_w: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut sid_out: PSID = std::ptr::null_mut();
+    // SAFETY: `name_w` is NUL-terminated UTF-16; no capabilities; `sid_out` is a valid out-pointer.
+    // Display name + description reuse the name (both must be non-NULL).
+    let hr = unsafe {
+        CreateAppContainerProfile(
+            name_w.as_ptr(),
+            name_w.as_ptr(),
+            name_w.as_ptr(),
+            std::ptr::null(),
+            0,
+            &mut sid_out,
+        )
+    };
+    // Free the profile-allocated SID (we re-derive the identical SID at spawn via PackageSid).
+    if !sid_out.is_null() {
+        // SAFETY: userenv-allocated SID; freed via LocalFree (same allocator as
+        // DeriveAppContainerSidFromAppContainerName, which appcontainer.rs frees the same way).
+        unsafe {
+            LocalFree(sid_out);
+        }
+    }
+    if hr == 0 || (hr as u32) == 0x8007_00b7 {
+        Ok(())
+    } else {
+        Err(WindowsSandboxError::WindowsApi(format!(
+            "CreateAppContainerProfile({name}) failed: HRESULT 0x{:08x}",
+            hr as u32
+        )))
     }
 }
 
