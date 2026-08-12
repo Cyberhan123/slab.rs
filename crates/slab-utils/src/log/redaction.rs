@@ -1,3 +1,8 @@
+//! Secret redaction for log output.
+//!
+//! Shared by `slab-server` and `slab-runtime` file appenders (and the sandbox
+//! audit writer) so secrets are masked consistently before they hit disk.
+
 use regex::{Captures, Regex};
 use std::sync::LazyLock;
 
@@ -14,7 +19,9 @@ static KEY_VALUE_SECRET: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-pub(crate) fn redact_log_text(input: &str) -> String {
+/// Mask common secret shapes (Bearer tokens, `sk-…`, `secret://…`, and
+/// `token|api_key|secret|password = …` value assignments) in `input`.
+pub fn redact_log_text(input: &str) -> String {
     let redacted = BEARER_SECRET.replace_all(input, "${1}<redacted>");
     let redacted = OPENAI_SECRET.replace_all(&redacted, "sk-<redacted>");
     let redacted = SECRET_URI.replace_all(&redacted, "secret://<redacted>");

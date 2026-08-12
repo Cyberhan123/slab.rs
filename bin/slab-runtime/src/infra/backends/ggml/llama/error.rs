@@ -54,7 +54,6 @@ pub enum GGMLLlamaEngineError {
     },
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub(crate) enum GGMLLlamaWorkerError {
     #[error("contract error: {message}")]
@@ -65,13 +64,10 @@ pub(crate) enum GGMLLlamaWorkerError {
     Unload { message: String },
     #[error("inference failed: {message}")]
     Inference { message: String },
-    #[error("sync failed: {message}")]
-    Sync { message: String },
     #[error("internal error: {message}")]
     Internal { message: String },
 }
 
-#[allow(dead_code)]
 impl GGMLLlamaWorkerError {
     pub(crate) fn contract(message: impl Into<String>) -> Self {
         Self::Contract { message: message.into() }
@@ -87,10 +83,6 @@ impl GGMLLlamaWorkerError {
 
     pub(crate) fn inference(message: impl Into<String>) -> Self {
         Self::Inference { message: message.into() }
-    }
-
-    pub(crate) fn sync(message: impl Into<String>) -> Self {
-        Self::Sync { message: message.into() }
     }
 
     pub(crate) fn internal(message: impl Into<String>) -> Self {

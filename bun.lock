@@ -36,9 +36,12 @@
         "@tauri-apps/cli": "catalog:",
       },
     },
-    "docs": {
-      "name": "@slab/docs",
-      "version": "0.1.0",
+    "bin/slab-server/tests": {
+      "name": "@slab/slab-server-tests",
+      "version": "0.0.1",
+      "devDependencies": {
+        "vitest": "catalog:",
+      },
     },
     "models": {
       "name": "@slab/models",
@@ -1111,8 +1114,6 @@
 
     "@slab/desktop": ["@slab/desktop@workspace:packages/slab-desktop"],
 
-    "@slab/docs": ["@slab/docs@workspace:docs"],
-
     "@slab/i18n": ["@slab/i18n@workspace:packages/slab-i18n"],
 
     "@slab/models": ["@slab/models@workspace:models"],
@@ -1124,6 +1125,8 @@
     "@slab/plugin-ui": ["@slab/plugin-ui@workspace:packages/slab-plugin-ui"],
 
     "@slab/plugin-video-subtitle-translator": ["@slab/plugin-video-subtitle-translator@workspace:plugins/video-subtitle-translator"],
+
+    "@slab/slab-server-tests": ["@slab/slab-server-tests@workspace:bin/slab-server/tests"],
 
     "@slab/test-utils": ["@slab/test-utils@workspace:packages/slab-test-utils"],
 

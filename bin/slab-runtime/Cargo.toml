@@ -18,7 +18,7 @@ path = "src/main.rs"
 
 [features]
 default = ["ggml", "candle", "onnx"]
-ggml = ["dep:slab-utils", "dep:slab-subtitle", "dep:libloading"]
+ggml = ["dep:slab-subtitle", "dep:libloading"]
 candle = ["dep:slab-candle"]
 cuda = ["slab-candle/cuda"]
 metal = ["slab-candle/metal"]
@@ -37,7 +37,7 @@ slab-mtmd = { workspace = true }
 slab-whisper = { workspace = true }
 slab-parakeet = { workspace = true }
 slab-types = { workspace = true }
-slab-utils = { workspace = true, optional = true }
+slab-utils = { workspace = true }
 slab-subtitle = { workspace = true, optional = true }
 tokio = { workspace = true }
 flume = { workspace = true }
@@ -59,6 +59,7 @@ clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-log = { workspace = true }
+tracing-appender = { workspace = true }
 parity-tokio-ipc = { workspace = true }
 winapi = { workspace = true }
 

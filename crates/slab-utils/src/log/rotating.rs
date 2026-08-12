@@ -1,3 +1,10 @@
+//! Size-rotating log file appender with secret redaction.
+//!
+//! Writes append to `path`; when the file reaches `max_bytes` it is rotated to
+//! `path.log.1`, the previous `.log.1` to `.log.2`, and so on, keeping at most
+//! `max_files` files. Every byte passes through [`redact_log_text`] before it
+//! hits disk.
+
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Write},
@@ -5,22 +12,18 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::log_redaction::redact_log_text;
+use crate::log::redaction::redact_log_text;
 
-pub(crate) const DEFAULT_MAX_LOG_BYTES: u64 = 50 * 1024 * 1024;
-pub(crate) const DEFAULT_MAX_LOG_FILES: usize = 5;
+pub const DEFAULT_MAX_LOG_BYTES: u64 = 50 * 1024 * 1024;
+pub const DEFAULT_MAX_LOG_FILES: usize = 5;
 
 #[derive(Clone)]
-pub(crate) struct RedactingSizeRotatingWriter {
+pub struct RedactingSizeRotatingWriter {
     inner: Arc<Mutex<SizeRotatingLogFile>>,
 }
 
 impl RedactingSizeRotatingWriter {
-    pub(crate) fn new(
-        path: impl Into<PathBuf>,
-        max_bytes: u64,
-        max_files: usize,
-    ) -> io::Result<Self> {
+    pub fn new(path: impl Into<PathBuf>, max_bytes: u64, max_files: usize) -> io::Result<Self> {
         Ok(Self {
             inner: Arc::new(Mutex::new(SizeRotatingLogFile::new(
                 path.into(),
@@ -44,7 +47,7 @@ impl Write for RedactingSizeRotatingWriter {
     }
 }
 
-pub(crate) struct SizeRotatingLogFile {
+pub struct SizeRotatingLogFile {
     path: PathBuf,
     max_bytes: u64,
     max_files: usize,
@@ -53,7 +56,7 @@ pub(crate) struct SizeRotatingLogFile {
 }
 
 impl SizeRotatingLogFile {
-    pub(crate) fn new(path: PathBuf, max_bytes: u64, max_files: usize) -> io::Result<Self> {
+    pub fn new(path: PathBuf, max_bytes: u64, max_files: usize) -> io::Result<Self> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -69,7 +72,7 @@ impl SizeRotatingLogFile {
         })
     }
 
-    pub(crate) fn write_redacted(&mut self, mut buf: &[u8]) -> io::Result<()> {
+    pub fn write_redacted(&mut self, mut buf: &[u8]) -> io::Result<()> {
         while !buf.is_empty() {
             if self.bytes_written >= self.max_bytes {
                 self.rotate()?;
@@ -90,7 +93,7 @@ impl SizeRotatingLogFile {
         Ok(())
     }
 
-    pub(crate) fn flush(&mut self) -> io::Result<()> {
+    pub fn flush(&mut self) -> io::Result<()> {
         self.file.flush()
     }
 

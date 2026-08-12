@@ -5,7 +5,7 @@ use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    slab_utils::tracing::init_stderr_tracing("slab_mcp_server=info");
+    slab_utils::log::init_stderr_tracing("slab_mcp_server=info");
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();

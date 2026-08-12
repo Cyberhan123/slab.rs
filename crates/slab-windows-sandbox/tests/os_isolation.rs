@@ -53,9 +53,8 @@ fn make_context(dir: &std::path::Path, workspace: &std::path::Path) -> PrepareCo
     }
 }
 
-/// Wrap `prepare` so that on failure we print the daemon's captured stderr/stdout log (written by
-/// `launch_daemon_direct` next to the marker). The daemon otherwise hides its output behind
-/// `CREATE_NO_WINDOW`, leaving provisioning failures opaque.
+/// Wrap `prepare` so that on failure we print the unified sandbox audit log. The daemon otherwise
+/// hides its output behind `CREATE_NO_WINDOW`, leaving provisioning failures opaque.
 fn prepare_with_diag(
     exec: &ElevatedAclTokenExecutor,
     ctx: &PrepareContext,
@@ -63,15 +62,21 @@ fn prepare_with_diag(
     match exec.prepare(ctx) {
         Ok(()) => Ok(()),
         Err(e) => {
-            let log = ctx.marker_path.with_file_name("daemon-error.log");
+            // The daemon records failures in {app_home}/logs/slab-sandbox.log
+            // (marker_path is {app_home}/sandbox-marker.json, so its parent is app_home).
+            let log = ctx
+                .marker_path
+                .parent()
+                .map(|p| p.join("logs").join("slab-sandbox.log"))
+                .unwrap_or_else(|| ctx.marker_path.with_file_name("slab-sandbox.log"));
             match std::fs::read_to_string(&log) {
                 Ok(contents) if !contents.is_empty() => {
                     eprintln!(
-                        "=== daemon-error log ({}) ===\n{contents}=== end log ===",
+                        "=== sandbox audit log ({}) ===\n{contents}=== end log ===",
                         log.display()
                     );
                 }
-                _ => eprintln!("(no daemon-error log at {})", log.display()),
+                _ => eprintln!("(no sandbox audit log at {})", log.display()),
             }
             Err(e)
         }

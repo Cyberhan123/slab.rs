@@ -40,16 +40,33 @@ pub fn select_executor(
 ) -> Box<dyn LinuxSandboxExecutor> {
     let bwrap_available = bwrap::find_bwrap().is_some();
     let landlock_available = landlock::probe_abi_version().is_some();
-    if bwrap_available {
-        Box::new(BwrapExecutor::new(network_blocked, managed_proxy_active))
-    } else if landlock_available {
-        Box::new(LandlockFallbackExecutor::new(network_blocked, managed_proxy_active))
-    } else if allow_landlock_fallback {
-        // bwrap absent + landlock unavailable + fallback opted-in ⇒ fail-closed degraded.
-        Box::new(DegradedLandlockRequiredExecutor)
-    } else {
-        Box::new(UnsupportedExecutor)
+    let (executor, provisioned_tier): (Box<dyn LinuxSandboxExecutor>, Option<&'static str>) =
+        if bwrap_available {
+            (
+                Box::new(BwrapExecutor::new(network_blocked, managed_proxy_active)),
+                Some("BwrapSeccomp"),
+            )
+        } else if landlock_available {
+            (
+                Box::new(LandlockFallbackExecutor::new(network_blocked, managed_proxy_active)),
+                Some("BwrapLandlock"),
+            )
+        } else if allow_landlock_fallback {
+            // bwrap absent + landlock unavailable + fallback opted-in ⇒ fail-closed degraded.
+            (Box::new(DegradedLandlockRequiredExecutor), None)
+        } else {
+            (Box::new(UnsupportedExecutor), None)
+        };
+    if let Some(tier) = provisioned_tier {
+        slab_utils::log::SandboxAudit::new(
+            slab_utils::log::AuditKind::Provisioned,
+            "slab-linux-sandbox::executor",
+        )
+        .decision(slab_utils::log::AuditDecision::Allow)
+        .tier(tier)
+        .record();
     }
+    executor
 }
 
 /// Primary executor: bubblewrap FS namespace + seccomp network filter (always stacked).

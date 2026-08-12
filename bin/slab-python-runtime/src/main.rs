@@ -6,7 +6,7 @@ use slab_python_runtime::{PythonRuntime, PythonRuntimeConfig};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    slab_utils::tracing::init_stderr_tracing("info");
+    slab_utils::log::init_stderr_tracing("info");
 
     let command = RuntimeCommand::parse(std::env::args().skip(1))?;
     let (host, outbound) = JsonRpcRuntimeHost::new();

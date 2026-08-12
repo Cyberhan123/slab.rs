@@ -28,6 +28,12 @@ pub fn server_log_file() -> PathBuf {
     logs_dir().join("slab-server.log")
 }
 
+/// Sandbox audit log (`<app_home>/logs/slab-sandbox.log`). Structured JSON lines
+/// recording sandbox spawn/provision decisions for troubleshooting.
+pub fn sandbox_log_file() -> PathBuf {
+    logs_dir().join("slab-sandbox.log")
+}
+
 pub fn runtime_log_dir() -> PathBuf {
     logs_dir().join("runtime")
 }
@@ -105,6 +111,7 @@ mod tests {
             database_path(),
             logs_dir(),
             server_log_file(),
+            sandbox_log_file(),
             runtime_log_dir(),
             runtime_ipc_dir(),
             models_dir(),

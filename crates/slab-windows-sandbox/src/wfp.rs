@@ -75,8 +75,8 @@ impl WfpEngine {
     /// the removed module constants above), so each daemon owns its own objects. The filter adds +
     /// commit are the fail-closed gate. Every Fwpm step's return code is appended to a `trace`
     /// string surfaced in any error — the daemon's stdout/stderr are hidden behind
-    /// `CREATE_NO_WINDOW`, so the trace in `daemon-error.log` is the only visibility into which step
-    /// failed.
+    /// `CREATE_NO_WINDOW`, so the trace (recorded in the unified sandbox audit log) is the only
+    /// visibility into which step failed.
     pub(crate) fn register_package_block(
         &self,
         package_sid: PSID,

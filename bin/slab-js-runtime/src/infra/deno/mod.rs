@@ -411,11 +411,6 @@ pub use module_wrapper::ModuleWrapper;
 pub use runtime::{Runtime, RuntimeOptions, Undefined};
 pub use utilities::{evaluate, import, init_platform, resolve_path, validate};
 
-// Deprecated traits for backward compatibility
-#[allow(deprecated)]
-#[deprecated(since = "0.8.0", note = "Use v8::String::new() directly")]
-pub use traits::ToV8String;
-
 #[cfg(feature = "broadcast_channel")]
 #[cfg_attr(docsrs, doc(cfg(feature = "broadcast_channel")))]
 pub use ext::broadcast_channel::{

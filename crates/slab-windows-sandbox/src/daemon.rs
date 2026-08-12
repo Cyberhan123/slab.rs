@@ -135,21 +135,20 @@ pub async fn run_daemon(
         let marker_path_clone = marker_path.clone();
         let wfp_clone = wfp.clone();
         tokio::spawn(async move {
-            // Compute the error-log path before `handle_connection` consumes `marker_path_clone`.
-            let error_log = marker_path_clone.with_file_name("daemon-error.log");
             if let Err(e) =
                 handle_connection(prev, key, pipe_name_clone, marker_path_clone, wfp_clone).await
             {
                 tracing::warn!(error = %e, "daemon: connection handler failed");
-                // The daemon's stderr is hidden (CREATE_NO_WINDOW), so persist the failure reason
-                // next to the marker where the orchestrator/test can surface it. Captures BOTH the
-                // Provision HMAC-mismatch path and any ACL/WFP error.
-                let line = format!("daemon connection failed: {e}\n");
-                let _ = std::fs::OpenOptions::new()
-                    .append(true)
-                    .create(true)
-                    .open(&error_log)
-                    .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+                // The daemon's stderr is hidden (CREATE_NO_WINDOW), so record the failure in the
+                // unified sandbox audit log where the orchestrator/test can surface it. Captures
+                // both the Provision HMAC-mismatch path and any ACL/WFP error.
+                slab_utils::log::SandboxAudit::new(
+                    slab_utils::log::AuditKind::DaemonConnectionFailed,
+                    "slab-windows-sandbox::daemon",
+                )
+                .decision(slab_utils::log::AuditDecision::Deny)
+                .error(e.to_string())
+                .record();
             }
         });
     }
@@ -257,6 +256,13 @@ async fn handle_connection(
                 crate::marker::write_marker(&state.marker_path, &marker)?;
                 // Daemon-global: any later connection's Spawn sees provisioned = true.
                 state.wfp.provisioned.store(true, std::sync::atomic::Ordering::SeqCst);
+                slab_utils::log::SandboxAudit::new(
+                    slab_utils::log::AuditKind::Provisioned,
+                    "slab-windows-sandbox::daemon",
+                )
+                .decision(slab_utils::log::AuditDecision::Allow)
+                .tier("AclTokenWfp")
+                .record();
                 write_frame(&mut *writer.lock().await, &PipeFrame::ProvisionOk { marker }).await?;
             }
 
@@ -279,6 +285,13 @@ async fn handle_connection(
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, job = %job_token, "daemon: spawn failed");
+                        slab_utils::log::SandboxAudit::new(
+                            slab_utils::log::AuditKind::SpawnFailed,
+                            "slab-windows-sandbox::daemon",
+                        )
+                        .decision(slab_utils::log::AuditDecision::Deny)
+                        .error(e.to_string())
+                        .record();
                         let _ = write_frame(
                             &mut *writer.lock().await,
                             &PipeFrame::Exited { job_token, code: 1, timed_out: false },

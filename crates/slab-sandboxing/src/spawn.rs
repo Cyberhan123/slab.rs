@@ -26,8 +26,49 @@ pub async fn spawn_sandboxed(
     argv: Vec<String>,
     cwd: Option<PathBuf>,
 ) -> Result<SandboxedOutput, SandboxError> {
+    let program = argv.first().cloned().unwrap_or_default();
+    let args = if argv.len() > 1 { argv[1..].join(" ") } else { String::new() };
+    slab_utils::log::SandboxAudit::new(
+        slab_utils::log::AuditKind::Spawned,
+        "slab-sandboxing::spawn",
+    )
+    .decision(slab_utils::log::AuditDecision::Allow)
+    .program(&program)
+    .args(&args)
+    .record();
+
     let cmd = SandboxedCommand { argv, env: HashMap::new(), cwd, timeout: None, output_sink: None };
-    driver.run(cmd).await
+    match driver.run(cmd).await {
+        Ok(output) => {
+            let kind = if output.timed_out {
+                slab_utils::log::AuditKind::Killed
+            } else {
+                slab_utils::log::AuditKind::Exited
+            };
+            let decision = if output.timed_out {
+                slab_utils::log::AuditDecision::Deny
+            } else {
+                slab_utils::log::AuditDecision::Allow
+            };
+            slab_utils::log::SandboxAudit::new(kind, "slab-sandboxing::spawn")
+                .decision(decision)
+                .program(&program)
+                .exit_code(output.exit_code)
+                .record();
+            Ok(output)
+        }
+        Err(err) => {
+            slab_utils::log::SandboxAudit::new(
+                slab_utils::log::AuditKind::SpawnFailed,
+                "slab-sandboxing::spawn",
+            )
+            .decision(slab_utils::log::AuditDecision::Deny)
+            .program(&program)
+            .error(err.to_string())
+            .record();
+            Err(err)
+        }
+    }
 }
 
 /// Like [`spawn_sandboxed`], but accepts an optional driver.

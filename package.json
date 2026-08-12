@@ -72,8 +72,8 @@
     "packages/slab-test-utils",
     "plugins/*",
     "bin/slab-app",
-    "models",
-    "docs"
+    "bin/slab-server/tests",
+    "models"
   ],
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs}": "bun run lint",

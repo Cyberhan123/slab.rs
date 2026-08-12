@@ -2,7 +2,6 @@ pub(crate) use super::engine::GGMLParakeetEngineError;
 
 use thiserror::Error;
 
-#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub(crate) enum GGMLParakeetWorkerError {
     #[error("contract error: {message}")]
@@ -13,13 +12,8 @@ pub(crate) enum GGMLParakeetWorkerError {
     Unload { message: String },
     #[error("inference failed: {message}")]
     Inference { message: String },
-    #[error("sync failed: {message}")]
-    Sync { message: String },
-    #[error("internal error: {message}")]
-    Internal { message: String },
 }
 
-#[allow(dead_code)]
 impl GGMLParakeetWorkerError {
     pub(crate) fn contract(message: impl Into<String>) -> Self {
         Self::Contract { message: message.into() }
@@ -35,13 +29,5 @@ impl GGMLParakeetWorkerError {
 
     pub(crate) fn inference(message: impl Into<String>) -> Self {
         Self::Inference { message: message.into() }
-    }
-
-    pub(crate) fn sync(message: impl Into<String>) -> Self {
-        Self::Sync { message: message.into() }
-    }
-
-    pub(crate) fn internal(message: impl Into<String>) -> Self {
-        Self::Internal { message: message.into() }
     }
 }
