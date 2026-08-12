@@ -29,6 +29,10 @@ pub struct ModelPackLoadDefaults {
     pub instruction_template: Option<TemplateAssetRef>,
     pub instruction_template_source: Option<String>,
     pub diffusion: Option<DiffusionLoadOptions>,
+    /// Path to a multimodal vision projector (`mmproj` GGUF). When set on a
+    /// `GgmlLlama` pack, the engine loads the projector and the mtmd pipeline
+    /// prefills image parts; absent for text-only packs (vision silently no-ops).
+    pub mmproj_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -188,7 +192,7 @@ impl ModelPackEngineLoadSpec {
                 flash_attn: true,
                 chat_template: self.load_defaults.chat_template_source.clone(),
                 gbnf: self.load_defaults.gbnf_source.clone(),
-                mmproj_path: None,
+                mmproj_path: self.load_defaults.mmproj_path.clone(),
             }),
             RuntimeBackendId::GgmlWhisper => {
                 RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {
@@ -438,6 +442,7 @@ fn build_load_defaults(
         )
         .then(|| build_diffusion_load_defaults(preset_id, source, &options))
         .transpose()?,
+        mmproj_path: options.get("mmproj_path").and_then(as_string).map(PathBuf::from),
     })
 }
 
@@ -590,6 +595,7 @@ mod v3_tests {
     use std::io::Write;
 
     use serde_json::{Value, json};
+    use slab_types::RuntimeBackendLoadSpec;
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
@@ -615,7 +621,44 @@ mod v3_tests {
         // context_window is no longer a pack property; the bridge surfaces no
         // context_length unless the pack's load config sets one explicitly.
         assert_eq!(bridge.load_defaults.context_length, None);
+        // Text-only pack: no mmproj projector → vision silently no-ops.
+        assert_eq!(bridge.load_defaults.mmproj_path, None);
         assert_eq!(bridge.inference_defaults.get("temperature").and_then(Value::as_f64), Some(0.7));
+    }
+
+    #[test]
+    fn compiles_mmproj_path_from_load_payload() {
+        let mut entries = local_pack_entries();
+        entries[1].1 = json!({
+            "kind": "backend_config",
+            "label": "Load",
+            "scope": "load",
+            "payload": {
+                "num_workers": 2,
+                "mmproj_path": "C:/models/qwen-vl-mmproj.gguf"
+            }
+        })
+        .to_string();
+
+        let pack = ModelPack::from_bytes(&build_pack(entries)).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
+
+        // Parsed into load defaults...
+        assert_eq!(
+            bridge.load_defaults.mmproj_path.as_deref(),
+            Some(std::path::Path::new("C:/models/qwen-vl-mmproj.gguf"))
+        );
+        // ...and wired through to the GgmlLlama load config the engine consumes.
+        let RuntimeBackendLoadSpec::GgmlLlama(config) =
+            bridge.runtime_load_spec("default").expect("compile load spec")
+        else {
+            panic!("expected GgmlLlama load spec");
+        };
+        assert_eq!(
+            config.mmproj_path.as_deref(),
+            Some(std::path::Path::new("C:/models/qwen-vl-mmproj.gguf"))
+        );
     }
 
     #[test]

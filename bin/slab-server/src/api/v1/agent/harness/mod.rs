@@ -27,7 +27,7 @@ use slab_jsonrpc::notifier::Notifier;
 use slab_jsonrpc::ws::{WsFrame, serve_websocket};
 use slab_proto::harness::messages::ReasoningEffort;
 use slab_proto::harness::{ModelInfo, ReasoningEffortOption};
-use slab_types::{ConversationMessage, ConversationMessageContent};
+use slab_types::{ConversationContentPart, ConversationMessage, ConversationMessageContent};
 use tokio::sync::mpsc;
 
 mod body;
@@ -356,15 +356,139 @@ fn scan_known_skills(
     )
 }
 
+/// Render a `<skill>` block for `name` located at `path`, or `None` if the
+/// skill contents cannot be read. Shared by the text-only and structured input
+/// builders so skill expansion stays consistent.
+fn render_skill_block(name: &str, path: &std::path::Path) -> Option<String> {
+    let contents = slab_agent_context::skill_manager::read_skill_contents(path).ok()?;
+    Some(slab_agent_context::helper::render_skill_block(name, &path.to_string_lossy(), &contents))
+}
+
 fn push_skill_block(blocks: &mut Vec<String>, name: &str, path: &std::path::Path) {
-    let Ok(contents) = slab_agent_context::skill_manager::read_skill_contents(path) else {
-        return;
-    };
-    blocks.push(slab_agent_context::helper::render_skill_block(
-        name,
-        &path.to_string_lossy(),
-        &contents,
-    ));
+    if let Some(block) = render_skill_block(name, path) {
+        blocks.push(block);
+    }
+}
+
+/// Map an [`UserInput::Image`] detail hint to its wire string (`"low"` /
+/// `"high"` / `"auto"`), matching [`slab_proto::harness::user_input::ImageDetail`]'s
+/// `rename_all = "lowercase"`.
+fn image_detail_str(detail: &slab_proto::harness::user_input::ImageDetail) -> &'static str {
+    use slab_proto::harness::user_input::ImageDetail;
+    match detail {
+        ImageDetail::Low => "low",
+        ImageDetail::High => "high",
+        ImageDetail::Auto => "auto",
+    }
+}
+
+/// Extract the media type from a `data:<mediatype>;base64,…` URI, mirroring the
+/// decoding in `slab_app_core::domain::services::chat::local::decode_image_url`.
+fn mime_type_from_data_url(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("data:")?;
+    let comma = rest.find(',')?;
+    let meta = &rest[..comma];
+    meta.split(';').next().filter(|s| s.contains('/')).map(str::to_owned)
+}
+
+/// Build structured user content from harness input.
+///
+/// - `None` when there is no meaningful content (empty text and no images).
+/// - `Some(Text(joined))` when only text/skills are present — byte-identical to
+///   [`join_user_text`] today (the text-only path is preserved exactly).
+/// - `Some(Parts([...]))` when at least one image is present — text parts and
+///   image parts in the order the user supplied them, with expanded skill blocks
+///   appended after the user text. `LocalImage` paths are passed through verbatim
+///   as `image_url`; `decode_image_url` reads them from disk server-side (the
+///   Tauri path optimization — no base64 round-trip).
+fn user_content_from_input(
+    input: &[slab_proto::harness::UserInput],
+    skills: &[slab_agent_context::skill_manager::SkillRecord],
+) -> Option<ConversationMessageContent> {
+    let has_visual = input.iter().any(|item| {
+        matches!(
+            item,
+            slab_proto::harness::UserInput::Image { .. }
+                | slab_proto::harness::UserInput::LocalImage { .. }
+        )
+    });
+
+    if !has_visual {
+        let text = join_user_text(input, skills);
+        return if text.trim().is_empty() {
+            None
+        } else {
+            Some(ConversationMessageContent::Text(text))
+        };
+    }
+
+    let mut parts: Vec<ConversationContentPart> = Vec::new();
+    let mut skill_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut skill_blocks: Vec<String> = Vec::new();
+    let mut text_buf = String::new();
+
+    for item in input {
+        match item {
+            slab_proto::harness::UserInput::Text { text, .. } => {
+                text_buf.push_str(text);
+                parts.push(ConversationContentPart::Text { text: text.clone() });
+            }
+            slab_proto::harness::UserInput::Skill { name, path }
+                if skill_names.insert(name.clone()) =>
+            {
+                if let Some(block) = render_skill_block(name, path) {
+                    skill_blocks.push(block);
+                }
+            }
+            slab_proto::harness::UserInput::Image { image_url, detail } => {
+                parts.push(ConversationContentPart::Image {
+                    image_url: Some(image_url.clone()),
+                    mime_type: mime_type_from_data_url(image_url),
+                    detail: detail.as_ref().map(image_detail_str).map(str::to_owned),
+                });
+            }
+            slab_proto::harness::UserInput::LocalImage { path, detail } => {
+                parts.push(ConversationContentPart::Image {
+                    image_url: Some(path.to_string_lossy().into_owned()),
+                    mime_type: None,
+                    detail: detail.as_ref().map(image_detail_str).map(str::to_owned),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    for skill in
+        slab_agent_context::user_instruction::SkillFragment::detect_in_text(&text_buf, skills)
+    {
+        if skill_names.insert(skill.name.clone())
+            && let Some(block) = render_skill_block(&skill.name, &skill.path)
+        {
+            skill_blocks.push(block);
+        }
+    }
+
+    for block in skill_blocks {
+        parts.push(ConversationContentPart::Text { text: block });
+    }
+
+    if parts.is_empty() { None } else { Some(ConversationMessageContent::Parts(parts)) }
+}
+
+/// Build the single user [`ConversationMessage`] from harness input, or `None`
+/// when there is no meaningful content. Shared by the first-turn (`spawn`) and
+/// subsequent-turn (`send_input_message`) paths so both carry image parts.
+fn build_user_message_from_input(
+    input: &[slab_proto::harness::UserInput],
+    skills: &[slab_agent_context::skill_manager::SkillRecord],
+) -> Option<ConversationMessage> {
+    user_content_from_input(input, skills).map(|content| ConversationMessage {
+        role: "user".to_owned(),
+        content,
+        name: None,
+        tool_call_id: None,
+        tool_calls: Vec::new(),
+    })
 }
 
 /// Flatten the text of all [`slab_proto::harness::UserInput::Text`] items into a
@@ -406,18 +530,7 @@ fn messages_from_input(
     input: &[slab_proto::harness::UserInput],
     skills: &[slab_agent_context::skill_manager::SkillRecord],
 ) -> Vec<ConversationMessage> {
-    let text = join_user_text(input, skills);
-    if text.trim().is_empty() {
-        Vec::new()
-    } else {
-        vec![ConversationMessage {
-            role: "user".to_owned(),
-            content: ConversationMessageContent::Text(text),
-            name: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-        }]
-    }
+    build_user_message_from_input(input, skills).into_iter().collect()
 }
 
 #[cfg(test)]
@@ -440,6 +553,76 @@ mod tests {
         let messages = messages_from_input(&input, &[]);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, "user");
+    }
+
+    #[test]
+    fn messages_from_input_text_only_is_plain_text_content() {
+        // Text-only input must stay byte-identical: a single Text content (not Parts).
+        let input = vec![slab_proto::harness::UserInput::Text {
+            text: "describe".into(),
+            text_elements: vec![],
+        }];
+        let messages = messages_from_input(&input, &[]);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, ConversationMessageContent::Text("describe".to_owned()));
+    }
+
+    #[test]
+    fn messages_from_input_carries_image_part_as_parts() {
+        let input = vec![
+            slab_proto::harness::UserInput::Text {
+                text: "what is this".into(),
+                text_elements: vec![],
+            },
+            slab_proto::harness::UserInput::Image {
+                image_url: "data:image/png;base64,iVBORw0KG=".into(),
+                detail: Some(slab_proto::harness::user_input::ImageDetail::Auto),
+            },
+        ];
+        let messages = messages_from_input(&input, &[]);
+        assert_eq!(messages.len(), 1);
+        let ConversationMessageContent::Parts(parts) = &messages[0].content else {
+            panic!("expected Parts content for image input, got {:?}", messages[0].content);
+        };
+        assert_eq!(parts.len(), 2, "text + image part");
+        assert!(matches!(parts[0], ConversationContentPart::Text { .. }));
+        match &parts[1] {
+            ConversationContentPart::Image { image_url, mime_type, detail } => {
+                assert_eq!(image_url.as_deref(), Some("data:image/png;base64,iVBORw0KG="));
+                assert_eq!(mime_type.as_deref(), Some("image/png"));
+                assert_eq!(detail.as_deref(), Some("auto"));
+            }
+            other => panic!("expected Image part, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn messages_from_input_carries_local_image_path_verbatim() {
+        // A LocalImage path must flow through as the image_url with no base64
+        // encoding — decode_image_url reads it from disk server-side.
+        let input = vec![slab_proto::harness::UserInput::LocalImage {
+            path: std::path::PathBuf::from("/tmp/pic.png"),
+            detail: None,
+        }];
+        let messages = messages_from_input(&input, &[]);
+        assert_eq!(messages.len(), 1);
+        let ConversationMessageContent::Parts(parts) = &messages[0].content else {
+            panic!("expected Parts content for local image input");
+        };
+        match &parts[0] {
+            ConversationContentPart::Image { image_url, mime_type, detail } => {
+                assert_eq!(image_url.as_deref(), Some("/tmp/pic.png"));
+                assert!(mime_type.is_none(), "path form carries no mime_type");
+                assert!(detail.is_none());
+            }
+            other => panic!("expected Image part, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn messages_from_input_empty_is_no_message() {
+        let messages: Vec<ConversationMessage> = messages_from_input(&[], &[]);
+        assert!(messages.is_empty(), "empty input must produce no message");
     }
 
     #[test]

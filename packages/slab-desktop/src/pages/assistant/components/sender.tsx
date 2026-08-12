@@ -2,12 +2,17 @@
 
 import { useRef, useState, type SubmitEvent } from "react"
 import type { FileUIPart } from "ai"
+import { convertFileSrc } from "@tauri-apps/api/core"
+import { open } from "@tauri-apps/plugin-dialog"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupTextarea,
 } from "@slab/components/input-group"
+import { isTauri } from "@/hooks/use-tauri"
+
+import { useVoiceInput } from "../lib/use-voice-input"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +37,8 @@ import {
   Dot,
   File,
   ListChecksIcon,
+  Loader2,
+  Mic,
   PaperclipIcon,
   PlusIcon,
   ShieldCheck,
@@ -63,8 +70,41 @@ type EffortLevel = "low" | "medium" | "high"
 
 interface Attachment {
   id: string
-  file: File
+  /** Browser File (web / paste / drop) OR a native filesystem path (Tauri picker). */
+  file: File | string
+  name: string
+  mediaType: string
   previewUrl: string
+}
+
+/** Infer an image media type from a filesystem path's extension. */
+function imageMediaTypeFromPath(path: string): string {
+  const ext = path.split(/[/\\]/).pop()?.split(".").pop()?.toLowerCase() ?? ""
+  switch (ext) {
+    case "png":
+      return "image/png"
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg"
+    case "gif":
+      return "image/gif"
+    case "webp":
+      return "image/webp"
+    case "bmp":
+      return "image/bmp"
+    default:
+      return "application/octet-stream"
+  }
+}
+
+function basename(path: string): string {
+  return path.split(/[/\\]/).pop() ?? path
+}
+
+function attachmentId(seed: string): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${seed}-${Math.random().toString(36).slice(2)}`
 }
 
 export type SenderSubmitOptions = {
@@ -123,6 +163,15 @@ function Sender({
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Voice input transcribes speech into the composer via the shared
+  // whisper/parakeet backends. The hook is always called (Rules of Hooks); the
+  // button is rendered only on Tauri — the path-based transcribe endpoint and
+  // the temp-file staging are host-only, so voice input is desktop-only.
+  const voiceInput = useVoiceInput({
+    onTranscript: (text) =>
+      setValue((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")} ${text}` : text)),
+  })
+
   // The "/" command menu opens both from the toolbar button and from typing a
   // leading "/", as one unified popover above the input.
   const isSlashCommand = value.trimStart().startsWith("/")
@@ -137,12 +186,24 @@ function Sender({
     const incoming = Array.from(fileList)
     if (incoming.length === 0) return
     const next = incoming.map((file) => ({
-      id:
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
+      id: attachmentId(file.name),
       file,
+      name: file.name,
+      mediaType: file.type || "application/octet-stream",
       previewUrl: URL.createObjectURL(file),
+    }))
+    setAttachments((prev) => [...prev, ...next])
+  }
+
+  /** Tauri-only: attach native file paths from the OS dialog (no base64 round-trip). */
+  const addPaths = (paths: string[]) => {
+    if (paths.length === 0) return
+    const next = paths.map((path) => ({
+      id: attachmentId(path),
+      file: path,
+      name: basename(path),
+      mediaType: imageMediaTypeFromPath(path),
+      previewUrl: convertFileSrc(path),
     }))
     setAttachments((prev) => [...prev, ...next])
   }
@@ -150,7 +211,9 @@ function Sender({
   const removeAttachment = (id: string) => {
     setAttachments((prev) => {
       const target = prev.find((item) => item.id === id)
-      if (target) URL.revokeObjectURL(target.previewUrl)
+      // Only blob: URLs (web File previews) need revocation; Tauri asset URLs
+      // (convertFileSrc) are not object URLs.
+      if (target && target.previewUrl.startsWith("blob:")) URL.revokeObjectURL(target.previewUrl)
       return prev.filter((item) => item.id !== id)
     })
   }
@@ -171,12 +234,24 @@ function Sender({
     }
 
     const files: FileUIPart[] = await Promise.all(
-      attachments.map(async (item) => ({
-        type: "file" as const,
-        mediaType: item.file.type || "application/octet-stream",
-        filename: item.file.name,
-        url: await fileToDataUrl(item.file),
-      })),
+      attachments.map(async (item) => {
+        // Native path (Tauri picker): send the path verbatim — buildTurnInput
+        // maps it to `localImage` and the server reads the file directly.
+        if (typeof item.file === "string") {
+          return {
+            type: "file" as const,
+            mediaType: item.mediaType,
+            filename: item.name,
+            url: item.file,
+          }
+        }
+        return {
+          type: "file" as const,
+          mediaType: item.file.type || "application/octet-stream",
+          filename: item.file.name,
+          url: await fileToDataUrl(item.file),
+        }
+      }),
     )
 
     await onSubmit(
@@ -187,7 +262,9 @@ function Sender({
 
     setValue("")
     setCommandMenuOpen(false)
-    for (const item of attachments) URL.revokeObjectURL(item.previewUrl)
+    for (const item of attachments) {
+      if (item.previewUrl.startsWith("blob:")) URL.revokeObjectURL(item.previewUrl)
+    }
     setAttachments([])
   }
 
@@ -238,7 +315,7 @@ function Sender({
               className="flex items-center gap-1 rounded-md border bg-muted/40 px-2 py-1 text-xs"
             >
               <PaperclipIcon className="size-3 text-muted-foreground" />
-              <span className="max-w-40 truncate">{item.file.name}</span>
+              <span className="max-w-40 truncate">{item.name}</span>
               <Button
                 type="button"
                 variant="ghost"
@@ -289,7 +366,29 @@ function Sender({
             <DropdownMenuContent align="start" side="top" className="w-44">
               <DropdownMenuItem
                 onSelect={() => {
-                  fileInputRef.current?.click()
+                  // On Tauri the OS dialog yields native paths (no base64
+                  // round-trip); on web we fall back to the hidden file input.
+                  if (isTauri()) {
+                    void (async () => {
+                      const selected = await open({
+                        multiple: true,
+                        filters: [
+                          {
+                            name: "Images",
+                            extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"],
+                          },
+                        ],
+                      })
+                      const paths = Array.isArray(selected)
+                        ? selected
+                        : selected
+                          ? [selected]
+                          : []
+                      addPaths(paths)
+                    })()
+                  } else {
+                    fileInputRef.current?.click()
+                  }
                 }}
               >
                 <PaperclipIcon />
@@ -302,6 +401,32 @@ function Sender({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          {isTauri() ? (
+            <InputGroupButton
+              aria-label={
+                voiceInput.state === "recording"
+                  ? "Stop recording"
+                  : voiceInput.state === "transcribing"
+                    ? "Transcribing"
+                    : "Voice input"
+              }
+              type="button"
+              size="icon-sm"
+              variant={
+                voiceInput.state === "recording" ? "default" : "outline"
+              }
+              disabled={voiceInput.busy}
+              onClick={() => {
+                void voiceInput.toggle()
+              }}
+            >
+              {voiceInput.state === "transcribing" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Mic className="size-4" />
+              )}
+            </InputGroupButton>
+          ) : null}
           <DropdownMenu
             open={commandMenuOpen || isSlashCommand}
             onOpenChange={setCommandMenuOpen}

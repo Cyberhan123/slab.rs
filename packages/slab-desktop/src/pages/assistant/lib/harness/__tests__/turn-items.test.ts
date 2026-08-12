@@ -150,3 +150,35 @@ describe("harness turnItemToUiParts / toolItemFields (ex-lossy cases)", () => {
     })
   })
 })
+
+describe("harness turnItemToUiParts (multimodal image rendering)", () => {
+  it("renders an imageView artifact path as an inline image file part", () => {
+    const parts = turnItemToUiParts({
+      type: "imageView",
+      id: "iv1",
+      path: "/v1/images/generations/op-1/artifacts/0",
+    })
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({
+      type: "file",
+      mediaType: "image/png",
+      url: expect.stringMatching(/\/v1\/images\/generations\/op-1\/artifacts\/0$/),
+    })
+  })
+
+  it("renders a data-URL user image content inline", () => {
+    const messages = turnItemsToMessages([
+      {
+        type: "userMessage",
+        id: "u1",
+        content: [{ type: "image", imageUrl: "data:image/png;base64,iVBOR=", mimeType: "image/png" }],
+      },
+    ])
+    expect(messages).toHaveLength(1)
+    expect(messages[0].parts[0]).toMatchObject({
+      type: "file",
+      mediaType: "image/png",
+      url: "data:image/png;base64,iVBOR=",
+    })
+  })
+})

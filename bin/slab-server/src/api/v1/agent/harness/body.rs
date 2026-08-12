@@ -33,7 +33,7 @@ use tokio::sync::mpsc;
 use super::session::HarnessSession;
 use super::transform::Established;
 use super::{
-    join_user_text, messages_from_input, model_info_from_spec, scan_known_skills,
+    build_user_message_from_input, messages_from_input, model_info_from_spec, scan_known_skills,
     thread_from_snapshot, thread_from_snapshot_with_id, thread_from_snapshot_with_turns,
 };
 use crate::api::v1::agent::schema::AgentConfigInput;
@@ -97,8 +97,16 @@ pub(crate) async fn turn_start(
                 .await
                 .map_err(|e| e.to_string())?;
             let known_skills = scan_known_skills(session.state().workspace_root().as_deref());
-            let content = join_user_text(&params.input, &known_skills);
-            session.service().send_input(&real_id, content).await.map_err(|e| e.to_string())?;
+            // Structured input carries image parts (VLM) through to
+            // `send_input_message`; empty input is a silent no-op, mirroring the
+            // prior `join_user_text` → `send_input` text path.
+            if let Some(message) = build_user_message_from_input(&params.input, &known_skills) {
+                session
+                    .service()
+                    .send_input_message(&real_id, message)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
         }
         None => {
             // First turn materializes the slab thread (create + run).

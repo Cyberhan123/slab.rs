@@ -1,4 +1,5 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod audio_temp;
 mod diagnostics;
 mod health;
 mod paths;
@@ -44,6 +45,8 @@ pub fn run() {
             secrets::verify_secret_handle,
             health::run_first_run_health_check,
             health::bootstrap_slab_directory,
+            audio_temp::write_temp_audio,
+            audio_temp::remove_temp_audio,
         ])
         .setup(move |app| {
             let workspace_bootstrap = workspace::init(app).map_err(|error| {

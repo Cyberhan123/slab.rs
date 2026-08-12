@@ -60,6 +60,16 @@ impl HarnessService {
         self.0.send_input(thread_id, content).await
     }
 
+    /// Append a structured user message (e.g. text + image parts for VLM turns)
+    /// to an existing agent thread and run the next turn.
+    pub async fn send_input_message(
+        &self,
+        thread_id: &str,
+        message: ConversationMessage,
+    ) -> Result<(), AppCoreError> {
+        self.0.send_input_message(thread_id, message).await
+    }
+
     /// Subscribe to the harness-protocol (`EventMsg`) stream for a thread.
     ///
     /// Carries slab-agent's harness protocol surface (turn lifecycle / text /

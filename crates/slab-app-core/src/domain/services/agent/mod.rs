@@ -218,17 +218,23 @@ impl AgentCore {
         }
     }
 
-    /// Append user input to an existing agent thread and run the next turn.
+    /// Append a structured user message to an existing agent thread and run the
+    /// next turn.
     ///
     /// The conversation read + sort + max-turn + user-content append
     /// is HOISTED here (out of slab-agent). slab-agent's `resume_thread` receives
     /// the pre-built message vec + the `emit_from` anchor (index of the first
     /// new message — the M5 within-turn attribution anchor that slab-agent emits
     /// as `MessageAppended` before the turn loop).
-    pub(crate) async fn send_input(
+    ///
+    /// Unlike [`send_input`], this carries the verbatim message content — so a
+    /// `ConversationMessageContent::Parts` (e.g. text + image parts for VLM turns)
+    /// reaches the chat pipeline with structure intact, where `extract_image_parts`
+    /// can decode the images for the mtmd projector.
+    pub(crate) async fn send_input_message(
         &self,
         thread_id: &str,
-        content: String,
+        message: ConversationMessage,
     ) -> Result<(), AppCoreError> {
         let mut records = self.reader().list_thread_messages(thread_id).await?;
         records.sort_by(|left, right| {
@@ -242,19 +248,34 @@ impl AgentCore {
         let mut messages: Vec<ConversationMessage> =
             records.into_iter().map(|record| record.message).collect();
         let emit_from = messages.len();
-        messages.push(ConversationMessage {
-            role: "user".to_owned(),
-            content: ConversationMessageContent::Text(content),
-            name: None,
-            tool_call_id: None,
-            tool_calls: vec![],
-        });
+        messages.push(message);
         self.runtime
             .resume_thread(thread_id, messages, starting_turn_index, Some(emit_from))
             .await
             .map_err(AppCoreError::from)?;
         self.ensure_rollout_persistence(thread_id);
         Ok(())
+    }
+
+    /// Append plain-text user input to an existing agent thread and run the next
+    /// turn. Thin structured wrapper over [`send_input_message`] preserving the
+    /// historical text-only call sites byte-for-byte.
+    pub(crate) async fn send_input(
+        &self,
+        thread_id: &str,
+        content: String,
+    ) -> Result<(), AppCoreError> {
+        self.send_input_message(
+            thread_id,
+            ConversationMessage {
+                role: "user".to_owned(),
+                content: ConversationMessageContent::Text(content),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            },
+        )
+        .await
     }
 
     /// Restore the latest root thread for a chat session and its persisted messages.

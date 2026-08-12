@@ -16,10 +16,38 @@
 
 import type { UIMessage } from "ai"
 
+import { SERVER_BASE_URL } from "@slab/api/config"
+import { convertFileSrc } from "@tauri-apps/api/core"
+
+import { isTauri } from "@/hooks/use-tauri"
+
 import type { ReasoningText, TurnItem, UserMessageContent } from "./types"
 
 /** A single UI message part (the finalized shape `useChat` assembles). */
 type UiPart = UIMessage["parts"][number]
+
+/**
+ * Resolve an image reference carried on the wire into a URL the browser can
+ * fetch for inline rendering. Handles:
+ * - `data:` URIs and absolute `http(s)://` URLs (already fetchable).
+ * - slab-server artifact paths (`/v1/images/...`) — resolved against the
+ *   configured API base so they load in both web and Tauri.
+ * - Native filesystem paths (Tauri `localImage` / persisted user image) —
+ *   rendered via the Tauri asset protocol; `null` on web (no way to fetch).
+ */
+function resolveImageUrl(pathOrUrl: string): string | null {
+  if (!pathOrUrl) return null
+  if (pathOrUrl.startsWith("data:") || /^https?:\/\//i.test(pathOrUrl)) return pathOrUrl
+  if (pathOrUrl.startsWith("/v1/")) return `${SERVER_BASE_URL}${pathOrUrl}`
+  return isTauri() ? convertFileSrc(pathOrUrl) : null
+}
+
+/** Build an inline image UI part from a fetchable URL, or `null`. */
+function inlineImagePart(pathOrUrl: string, mimeType = "image/png"): UiPart | null {
+  const url = resolveImageUrl(pathOrUrl)
+  if (!url) return null
+  return { type: "file", mediaType: mimeType, url } as UiPart
+}
 
 /** Tool-shaped fields extracted from a finalized tool-like {@link TurnItem}. */
 export type ToolItemFields = {
@@ -110,11 +138,13 @@ export function turnItemToUiParts(item: TurnItem): UiPart[] {
         ? ([{ state: "done", text, type: "reasoning" }] as UiPart[])
         : []
     }
-    case "imageView":
-      // The wire item carries only a filesystem path; the client cannot
-      // inline-render an arbitrary path without fetching it, so surface it as
-      // an annotation rather than a broken image.
-      return [{ text: `[image: ${item.path}]`, type: "text" }] as UiPart[]
+    case "imageView": {
+      // Generated-image artifacts are served by slab-server at a `/v1/...`
+      // path; resolve it against the API base and render inline. Falls back to
+      // no part when the path cannot be fetched (e.g. bare path on web).
+      const part = inlineImagePart(item.path)
+      return part ? [part] : []
+    }
     default: {
       const fields = toolItemFields(item)
       if (!fields) return []
@@ -136,10 +166,13 @@ function userContentToParts(content: UserMessageContent): UiPart[] {
   if (content.type === "text") {
     return content.text ? ([{ text: content.text, type: "text" }] as UiPart[]) : []
   }
-  // Image content is preserved as an annotation (imageUrl/base64 cannot be
-  // inlined from the wire part alone without a fetch); better than dropping it.
-  const where = content.imageUrl ?? "(inline image)"
-  return [{ text: `[image: ${where}]`, type: "text" }] as UiPart[]
+  // Image content: prefer a ready URL, else rebuild a data URL from base64.
+  const mimeType = content.mimeType ?? "image/png"
+  const source = content.imageUrl
+    ?? (content.base64 ? `data:${mimeType};base64,${content.base64}` : undefined)
+  if (!source) return []
+  const part = inlineImagePart(source, mimeType)
+  return part ? [part] : []
 }
 
 /**

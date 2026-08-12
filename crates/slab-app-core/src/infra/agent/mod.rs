@@ -6,6 +6,7 @@ pub(crate) mod context;
 pub mod event_hub;
 pub mod exec_policy;
 pub(crate) mod hooks;
+pub(crate) mod image_tool;
 pub(crate) mod memory;
 pub(crate) mod memory_breaker;
 pub(crate) mod plan_store;

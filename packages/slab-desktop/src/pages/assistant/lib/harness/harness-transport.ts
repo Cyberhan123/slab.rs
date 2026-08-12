@@ -23,6 +23,8 @@ import {
 } from "ai"
 import { toast } from "sonner"
 
+import { isTauri } from "@/hooks/use-tauri"
+
 import type { HarnessClient } from "./harness-client"
 import {
   coerceServerNotification,
@@ -66,7 +68,14 @@ function buildTurnInput(messages: UIMessage[]): UserInput[] {
       if (part.type !== "file") continue
       const file = part as { type: "file"; mediaType?: string; url: string }
       if (!file.mediaType?.startsWith("image")) continue
-      input.push({ type: "image", imageUrl: file.url, detail: "auto" })
+      // On Tauri the picker yields a native path; send `localImage` so the
+      // server reads the file directly (no base64 round-trip). Web / paste /
+      // drop yield a `data:` URL → send `image`. Both are handled server-side.
+      if (isTauri() && !file.url.startsWith("data:")) {
+        input.push({ type: "localImage", path: file.url, detail: "auto" })
+      } else {
+        input.push({ type: "image", imageUrl: file.url, detail: "auto" })
+      }
     }
     return input
   }

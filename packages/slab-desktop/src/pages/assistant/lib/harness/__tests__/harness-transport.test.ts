@@ -50,6 +50,17 @@ function userMessage(text: string): UIMessage {
   return { id: "u1", role: "user", parts: [{ type: "text", text }] }
 }
 
+function userMessageWithImage(text: string, url: string): UIMessage {
+  return {
+    id: "u1",
+    role: "user",
+    parts: [
+      { type: "text", text },
+      { type: "file", mediaType: "image/png", url },
+    ],
+  }
+}
+
 async function collect(stream: ReadableStream<UIMessageChunk>): Promise<UIMessageChunk[]> {
   const reader = stream.getReader()
   const chunks: UIMessageChunk[] = []
@@ -99,6 +110,29 @@ describe("HarnessChatTransport", () => {
     expect(fake.threadStart).not.toHaveBeenCalled()
     expect(fake.turnStart).toHaveBeenCalledWith(
       expect.objectContaining({ threadId: "hthread-9" }),
+    )
+  })
+
+  it("maps an image file part to a harness image input (data-URL web form)", async () => {
+    const fake = makeFakeClient({ currentThreadId: "hthread-9" })
+    const transport = new HarnessChatTransport({
+      client: fake as unknown as HarnessClient,
+      model: "slab-llama",
+    })
+
+    await collect(
+      await transport.sendMessages({
+        messages: [userMessageWithImage("describe this", "data:image/png;base64,iVBOR=")],
+      }),
+    )
+
+    expect(fake.turnStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.arrayContaining([
+          expect.objectContaining({ type: "text", text: "describe this" }),
+          expect.objectContaining({ type: "image", imageUrl: "data:image/png;base64,iVBOR=" }),
+        ]),
+      }),
     )
   })
 
