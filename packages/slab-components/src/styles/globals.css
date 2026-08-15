@@ -1,6 +1,13 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @source "..";
+/* Shell roots are thin after the DDD migration; the bulk of class usage now
+   lives in workspace packages that Tailwind's automatic detection (scoped to
+   each shell's vite root) never scans. Scan them explicitly. */
+@source "../../../slab-ui/src";
+@source "../../../slab-desktop/src";
+@source "../../../slab-web/src";
+@source "../../../slab-h5/src";
 
 @custom-variant dark (&:is(.dark *));
 
