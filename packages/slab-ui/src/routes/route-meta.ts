@@ -1,25 +1,25 @@
 import type { RouteObject } from "react-router-dom";
 import type { HeaderMeta } from "@slab/ui/layouts/header";
 
-export type DesktopRouteSidebarGroup = "primary" | "footer";
+export type SlabRouteSidebarGroup = "primary" | "footer";
 
-export type DesktopRouteMeta = HeaderMeta & {
+export type SlabRouteMeta = HeaderMeta & {
   sidebar?: {
-    group: DesktopRouteSidebarGroup;
+    group: SlabRouteSidebarGroup;
     labelKey?: string;
     label?: string;
     end?: boolean;
   };
 };
 
-export type DesktopRouteObject = RouteObject & {
-  children?: DesktopRouteObject[];
-  meta?: DesktopRouteMeta;
+export type SlabRouteObject = RouteObject & {
+  children?: SlabRouteObject[];
+  meta?: SlabRouteMeta;
 };
 
-export type DesktopRouteEntry = {
+export type SlabRouteEntry = {
   path: string;
-  route: DesktopRouteObject;
+  route: SlabRouteObject;
 };
 
 function normalizeRoutePath(path: string) {
@@ -42,7 +42,7 @@ function joinRoutePath(parentPath: string, childPath: string) {
   return `${normalizedParent}/${normalizedChild}`;
 }
 
-export function getRoutePath(route: DesktopRouteObject, parentPath = "") {
+export function getRoutePath(route: SlabRouteObject, parentPath = "") {
   if (route.index) {
     return normalizeRoutePath(parentPath || "/");
   }
@@ -58,10 +58,10 @@ export function getRoutePath(route: DesktopRouteObject, parentPath = "") {
   return joinRoutePath(parentPath || "/", route.path);
 }
 
-export function getDesktopRouteEntries(
-  routes: readonly DesktopRouteObject[],
+export function getSlabRouteEntries(
+  routes: readonly SlabRouteObject[],
   parentPath = "",
-): DesktopRouteEntry[] {
+): SlabRouteEntry[] {
   return routes.flatMap((route) => {
     const path = getRoutePath(route, parentPath);
     const entries = [{ path, route }];
@@ -70,17 +70,17 @@ export function getDesktopRouteEntries(
       return entries;
     }
 
-    return [...entries, ...getDesktopRouteEntries(route.children, path)];
+    return [...entries, ...getSlabRouteEntries(route.children, path)];
   });
 }
 
 export function getHeaderMetaForPath(
   pathname: string,
   fallback: HeaderMeta,
-  routes: readonly DesktopRouteObject[],
+  routes: readonly SlabRouteObject[],
 ): HeaderMeta {
   const normalizedPathname = normalizeRoutePath(pathname);
-  const routeEntry = getDesktopRouteEntries(routes)
+  const routeEntry = getSlabRouteEntries(routes)
     .filter(({ route }) => route.meta)
     .filter(({ path }) => normalizedPathname === path || normalizedPathname.startsWith(`${path}/`))
     .toSorted((a, b) => b.path.length - a.path.length)[0];

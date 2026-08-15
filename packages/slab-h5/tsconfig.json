@@ -11,7 +11,8 @@
       "@slab/i18n": ["../slab-i18n/src/index.ts"],
       "@slab/ui": ["../slab-ui/src/index.ts"],
       "@slab/ui/*": ["../slab-ui/src/*"],
-      "@/*": ["../slab-components/src/*"]
+      "@/*": ["../slab-components/src/*"],
+      "@codingame/monaco-vscode-extensions-service-override": ["../slab-ui/src/types/monaco-vscode-extensions-service-override.d.ts"]
     },
     "types": ["node"],
     "noUnusedLocals": true,

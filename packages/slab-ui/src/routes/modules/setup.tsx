@@ -4,7 +4,7 @@ import { Spinner } from "@slab/components/spinner";
 
 import type { HeaderMeta } from "@slab/ui/layouts/header";
 import { HeaderProvider } from "@slab/ui/layouts/header-provider";
-import type { DesktopRouteObject } from "../route-meta";
+import type { SlabRouteObject } from "../route-meta";
 
 const SetupPage = lazy(() => import("@slab/ui/pages/setup"));
 
@@ -34,4 +34,4 @@ export const setupRoute = {
   path: "/setup",
   meta: setupRouteMeta,
   element: <SetupRouteElement />,
-} satisfies DesktopRouteObject;
+} satisfies SlabRouteObject;

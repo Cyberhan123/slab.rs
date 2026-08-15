@@ -7,9 +7,9 @@ import {
 import Audio from "@slab/ui/pages/audio";
 import Image from "@slab/ui/pages/image";
 import Video from "@slab/ui/pages/video";
-import type { DesktopRouteObject } from "../route-meta";
+import type { SlabRouteObject } from "../route-meta";
 
-export const mediaRoutes: DesktopRouteObject[] = [
+export const mediaRoutes: SlabRouteObject[] = [
   {
     path: "image",
     meta: {

@@ -1,26 +1,29 @@
-import { useEffect, useState } from "react";
-import { RouterProvider, createBrowserRouter } from "react-router-dom";
+import { useState } from "react";
+import { Outlet, RouterProvider, createBrowserRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 
 import { createWebPorts } from "@slab/core";
 import { queryClient } from "@slab/ui/lib/query-client";
 import { SlabProvider } from "@slab/ui/provider/slab-provider";
+// Deep paths, not the routes barrel: the barrel re-exports the desktop
+// assembly (every feature module) and would drag it into the web bundle.
+import { createSlabRoutes } from "@slab/ui/routes/create-slab-routes";
+import { lazyAssistantRoutes } from "@slab/ui/routes/modules/assistant-lazy";
 import { HealthStatus } from "./health-status";
 
 /**
  * Web shell assembly: install the web platform ports, the shared query
- * client, and the shared routes. The minimal shell mounts the assistant
- * page plus a health probe; more route modules can be added as the web
- * feature set grows.
+ * client, and the shared route modules. The minimal shell mounts the lazy
+ * assistant island (keeps monaco/workspace out of the web bundle); more route
+ * modules can be added as the web feature set grows.
  */
 export function WebApp() {
   const [router] = useState(() =>
-    createBrowserRouter([
-      {
-        path: "/",
-        element: <AssistantRoute />,
-      },
-    ]),
+    createBrowserRouter(
+      // Minimal root for now (guards land with the web App variant); the
+      // lazy assistant island keeps the heavy chunks out of the main bundle.
+      createSlabRoutes({ app: <Outlet />, rootChildren: [...lazyAssistantRoutes] }),
+    ),
   );
 
   return (
@@ -33,22 +36,4 @@ export function WebApp() {
       </QueryClientProvider>
     </SlabProvider>
   );
-}
-
-/** Dynamic island so monaco/workspace code stays out of the web bundle. */
-function AssistantRoute() {
-  const [Assistant, setAssistant] = useState<React.ComponentType | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void import("@slab/ui/pages/assistant").then((mod) => {
-      if (!cancelled) setAssistant(() => mod.default);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (!Assistant) return null;
-  return <Assistant />;
 }

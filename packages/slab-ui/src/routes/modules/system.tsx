@@ -11,7 +11,7 @@ import About from "@slab/ui/pages/about";
 import Hub from "@slab/ui/pages/hub";
 import SettingsPage from "@slab/ui/pages/settings";
 import Task from "@slab/ui/pages/task";
-import type { DesktopRouteObject } from "../route-meta";
+import type { SlabRouteObject } from "../route-meta";
 
 export const hubRoute = {
   path: "hub",
@@ -25,7 +25,7 @@ export const hubRoute = {
     },
   },
   element: <Hub />,
-} satisfies DesktopRouteObject;
+} satisfies SlabRouteObject;
 
 export const taskRoute = {
   path: "task",
@@ -39,7 +39,7 @@ export const taskRoute = {
     },
   },
   element: <Task />,
-} satisfies DesktopRouteObject;
+} satisfies SlabRouteObject;
 
 export const settingsRoute = {
   path: "settings",
@@ -53,7 +53,7 @@ export const settingsRoute = {
     },
   },
   element: <SettingsPage />,
-} satisfies DesktopRouteObject;
+} satisfies SlabRouteObject;
 
 export const aboutRoute = {
   path: "about",
@@ -63,7 +63,7 @@ export const aboutRoute = {
     icon: Info,
   },
   element: <About />,
-} satisfies DesktopRouteObject;
+} satisfies SlabRouteObject;
 
 export const themePreviewRoute = {
   path: "/theme-preview",
@@ -73,4 +73,4 @@ export const themePreviewRoute = {
     icon: Palette,
   },
   element: <ThemePreview />,
-} satisfies DesktopRouteObject;
+} satisfies SlabRouteObject;

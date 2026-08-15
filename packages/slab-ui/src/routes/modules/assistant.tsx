@@ -2,9 +2,9 @@ import { Navigate } from "react-router-dom";
 import { BotMessageSquare } from "lucide-react";
 
 import Assistant from "@slab/ui/pages/assistant";
-import type { DesktopRouteObject } from "../route-meta";
+import type { SlabRouteObject } from "../route-meta";
 
-export const assistantRoutes: DesktopRouteObject[] = [
+export const assistantRoutes: SlabRouteObject[] = [
   {
     index: true,
     meta: {

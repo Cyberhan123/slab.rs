@@ -2,7 +2,7 @@ import { lazy, Suspense } from "react";
 import { FolderKanban } from "lucide-react";
 import { Spinner } from "@slab/components/spinner";
 
-import type { DesktopRouteObject } from "../route-meta";
+import type { SlabRouteObject } from "../route-meta";
 
 const WorkspacePage = lazy(() => import("@slab/ui/pages/workspace"));
 
@@ -32,4 +32,4 @@ export const workspaceRoute = {
     },
   },
   element: <WorkspaceRouteElement />,
-} satisfies DesktopRouteObject;
+} satisfies SlabRouteObject;

@@ -6,7 +6,7 @@ import { Spinner } from "@slab/components/spinner";
 import Plugins from "@slab/ui/pages/plugins";
 import { PluginWebviewPage } from "@slab/ui/pages/plugins/components/plugin-webview-page";
 import { useRuntimePlugins } from "@slab/ui/pages/plugins/hooks/use-runtime-plugins";
-import type { DesktopRouteObject } from "../route-meta";
+import type { SlabRouteObject } from "../route-meta";
 
 function PluginContributionRoutePage() {
   const location = useLocation();
@@ -47,7 +47,7 @@ function PluginContributionRoutePage() {
   );
 }
 
-export const pluginRoutes: DesktopRouteObject[] = [
+export const pluginRoutes: SlabRouteObject[] = [
   {
     path: "plugins",
     meta: {

@@ -8,7 +8,7 @@ import { Link, useLocation } from "react-router-dom"
 import { cn } from "@slab/ui/lib/utils"
 import { WindowControls } from "@slab/ui/layouts/window-controls"
 import { useRuntimePlugins } from "@slab/ui/pages/plugins/hooks/use-runtime-plugins"
-import { getDesktopRouteEntries, type DesktopRouteObject } from "@slab/ui/routes/route-meta"
+import { getSlabRouteEntries, type SlabRouteObject } from "@slab/ui/routes/route-meta"
 import type { HeaderIcon } from "@slab/ui/layouts/header"
 
 type SidebarItem = {
@@ -28,7 +28,7 @@ const isPathActive = (pathname: string, to: string, end = false) => {
 }
 
 type AppSidebarProps = {
-  routes: readonly DesktopRouteObject[]
+  routes: readonly SlabRouteObject[]
   variant?: "default" | "chat"
 }
 
@@ -37,7 +37,7 @@ export function AppSidebar({ routes, variant = "default" }: AppSidebarProps) {
   const { pathname } = useLocation()
   const { data: runtimePlugins = [] } = useRuntimePlugins()
   const isChatVariant = variant === "chat"
-  const routeSidebarItems = getDesktopRouteEntries(routes)
+  const routeSidebarItems = getSlabRouteEntries(routes)
     .map(({ path, route }): (SidebarItem & { group: "primary" | "footer" }) | null => {
       const meta = route.meta
       const sidebar = meta?.sidebar

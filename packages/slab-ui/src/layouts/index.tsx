@@ -7,10 +7,10 @@ import Header, { DEFAULT_HEADER_META } from "@slab/ui/layouts/header"
 import { HeaderProvider } from "@slab/ui/layouts/header-provider"
 import { AppSidebar } from "@slab/ui/layouts/sidebar"
 import { getHeaderMetaForPath } from "@slab/ui/routes/route-meta"
-import type { DesktopRouteObject } from "@slab/ui/routes/route-meta"
+import type { SlabRouteObject } from "@slab/ui/routes/route-meta"
 
 type LayoutProps = {
-  routes: readonly DesktopRouteObject[]
+  routes: readonly SlabRouteObject[]
 }
 
 export default function Layout({ routes }: LayoutProps) {
