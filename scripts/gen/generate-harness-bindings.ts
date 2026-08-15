@@ -80,6 +80,9 @@ function normalizeBody(body: string): string {
     // Optional fields (all `skip_serializing_if` on the Rust side) never carry
     // null on the wire — strip the `| null` ts-rs derives from `Option`.
     .map((line) => line.replace(/((?:"[\w/]+"|\w+)\?: [^,|]+?) \| null([,}])/g, "$1$2"))
+    // ts-rs renders empty Rust structs as `Record<symbol, never>`; the wire
+    // contract for them is the permissive `{}`.
+    .map((line) => line.replace(/= Record<symbol, never>;/g, "= {};"))
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

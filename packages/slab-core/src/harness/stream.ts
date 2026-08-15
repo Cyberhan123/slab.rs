@@ -249,18 +249,16 @@ export function convertNotification(
     case HARNESS_NOTIFICATION.ACCOUNT_UPDATED:
     case HARNESS_NOTIFICATION.ACCOUNT_LOGIN_COMPLETED:
       return []
-    case HARNESS_NOTIFICATION.MODEL_LOAD_DELTA:
-    case HARNESS_NOTIFICATION.MODEL_LOAD_COMPLETED:
-      // Model load lifecycle is consumed out-of-band by the conversation controller
-      // (transient `modelLoad` state), not as AI-SDK message parts.
-      return []
     case HARNESS_NOTIFICATION.CONTEXT_COMPACTING:
     case HARNESS_NOTIFICATION.CONTEXT_COMPACTED:
       // Compaction lifecycle is consumed out-of-band by the conversation controller
       // (session-scoped `compactionMarkers` state), not as AI-SDK message parts.
       return []
     default:
-      // Exhaustiveness guard for future notification variants.
+      // Exhaustiveness guard for future notification variants. Model-load
+      // lifecycle (`model/load/*`) is not a ServerNotification variant (the
+      // server emits it standalone from the turn/start handler); it is consumed
+      // out-of-band by the conversation controller too.
       return []
   }
 }

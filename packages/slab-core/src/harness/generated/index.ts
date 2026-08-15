@@ -98,7 +98,7 @@ controlAction?: string, };
 export type CommandKind = "control" | "prompt";
 
 // ── CommandListParams ──
-export type CommandListParams = Record<symbol, never>;
+export type CommandListParams = {};
 
 // ── CommandListResult ──
 export type CommandListResult = { data: Array<CommandInfo>, };
@@ -345,7 +345,7 @@ export type ShutdownResult = { status?: string, };
 export type SkillInfo = { name: string, description: string, path: string, source: SkillSource, };
 
 // ── SkillsListParams ──
-export type SkillsListParams = Record<symbol, never>;
+export type SkillsListParams = {};
 
 // ── SkillsListResult ──
 export type SkillsListResult = { data: Array<SkillInfo>, };

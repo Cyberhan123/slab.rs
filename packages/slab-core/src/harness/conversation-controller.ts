@@ -808,7 +808,9 @@ export class ConversationController {
         reason: command.reason,
         category: command.category,
         allowedScopes: command.allowedScopes,
-        planSnapshot: command.planSnapshot,
+        // The wire carries the raw serialized `slab_agent::Plan` (snake_case
+        // fields); narrow it for the rich plan card.
+        planSnapshot: command.planSnapshot as Plan | undefined,
         status: "pending",
       })
     } else {

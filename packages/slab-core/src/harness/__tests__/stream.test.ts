@@ -157,7 +157,7 @@ describe("harness stream convertNotification", () => {
     const chunks = convertNotification(
       {
         method: "item/commandExecution/requestApproval",
-        params: { threadId: THREAD, turnId: TURN, itemId: "c3", command: "rm -rf", cwd: "/" },
+        params: { threadId: THREAD, turnId: TURN, itemId: "c3", command: "rm -rf", cwd: "/", allowedScopes: [] },
       },
       state,
     )

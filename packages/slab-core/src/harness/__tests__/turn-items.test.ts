@@ -171,7 +171,9 @@ describe("harness turnItemToUiParts (multimodal image rendering)", () => {
       {
         type: "userMessage",
         id: "u1",
-        content: [{ type: "image", imageUrl: "data:image/png;base64,iVBOR=", mimeType: "image/png" }],
+        content: [
+          { type: "image", image_url: "data:image/png;base64,iVBOR=", mime_type: "image/png" },
+        ],
       },
     ])
     expect(messages).toHaveLength(1)

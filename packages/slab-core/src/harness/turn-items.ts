@@ -167,8 +167,10 @@ function userContentToParts(content: UserMessageContent): UiPart[] {
     return content.text ? ([{ text: content.text, type: "text" }] as UiPart[]) : []
   }
   // Image content: prefer a ready URL, else rebuild a data URL from base64.
-  const mimeType = content.mimeType ?? "image/png"
-  const source = content.imageUrl
+  // Note: the wire fields are snake_case (`image_url`/`mime_type`) — the Rust
+  // enum variant carries no serde renames for its fields.
+  const mimeType = content.mime_type ?? "image/png"
+  const source = content.image_url
     ?? (content.base64 ? `data:${mimeType};base64,${content.base64}` : undefined)
   if (!source) return []
   const part = inlineImagePart(source, mimeType)
