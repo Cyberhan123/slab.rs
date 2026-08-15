@@ -1,18 +1,19 @@
 /**
- * Minimal in-test `WebSocket` stand-in. The real `openai` SDK Responses WS
- * transport wraps a native `WebSocket` via `BrowserWebSocket`; tests stub the
- * global with this fake so they can drive the handshake + frames deterministically
- * (no network, no real server).
+ * Minimal in-test `WebSocket` stand-in for the harness JSON-RPC client, so
+ * tests can drive the handshake + frames deterministically (no network, no
+ * real server). Core tests inject it via the `HarnessClient` constructor's
+ * `WebSocketCtor` option; ui tests stub the global via
+ * `vi.stubGlobal("WebSocket", FakeWebSocket)`.
  *
- * Mode `fail` (default): fires `error` + `close` on the next tick → exercises the
- * SSE-fallback path. Mode `manual`: the test drives `simOpen` / `simMessage` /
- * `simClose` / `simError` on `FakeWebSocket.last`.
+ * Mode `fail` (default): fires `error` + `close` on the next tick → exercises
+ * the failed-dial path. Mode `manual`: the test drives `simOpen` /
+ * `simMessage` / `simClose` / `simError` on `FakeWebSocket.last`.
  */
 
 type DOMHandler = (event: { data?: unknown; code?: number; reason?: string; message?: string; error?: { message?: string } }) => void
 
 export class FakeWebSocket {
-    /** Most recently constructed instance (the transport dials one per turn). */
+    /** Most recently constructed instance (the client dials one per open()). */
     static last: FakeWebSocket | undefined
     /** `fail` = auto-fail the handshake; `manual` = test drives the frames. */
     static mode: "fail" | "manual" = "fail"
@@ -26,7 +27,7 @@ export class FakeWebSocket {
     readonly protocols: string | string[] | undefined
     readyState = 0 // CONNECTING
     binaryType = ""
-    /** Raw frames the transport sent over the socket. */
+    /** Raw frames the client sent over the socket. */
     sent: string[] = []
 
     private readonly handlers = new Map<string, Set<DOMHandler>>()
@@ -36,7 +37,7 @@ export class FakeWebSocket {
         this.protocols = protocols
         FakeWebSocket.last = this
         if (FakeWebSocket.mode === "fail") {
-            // Mimic a failed handshake (no server) so the transport degrades to SSE.
+            // Mimic a failed handshake (no server listening).
             setTimeout(() => {
                 this.dispatchEvent("error", { message: "connection refused" })
                 this.dispatchEvent("close", { code: 1006, reason: "" })

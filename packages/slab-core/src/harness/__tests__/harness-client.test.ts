@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
-import { FakeWebSocket } from "./fake-websocket"
+import { FakeWebSocket } from "../testing/fake-websocket"
 import { HarnessClient } from "../harness-client"
 import { HARNESS_METHOD } from "../types"
 

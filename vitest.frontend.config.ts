@@ -26,6 +26,7 @@ export default defineConfig({
         "packages/slab-plugin-ui/src/index.ts",
         "packages/slab-plugin-cli/src/index.ts",
         "packages/slab-ui/src/components/error-boundary.tsx",
+        "packages/slab-core/src/harness/testing/**",
       ],
       thresholds: {
         lines: 74,

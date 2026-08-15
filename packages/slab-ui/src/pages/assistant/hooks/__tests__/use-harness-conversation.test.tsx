@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { renderHook } from "vitest-browser-react"
 
 import type { Thread } from "@slab/core/harness"
-import { FakeWebSocket } from "../../lib/__tests__/fake-websocket"
+import { FakeWebSocket } from "@slab/core/harness/testing/fake-websocket"
 import {
   MAX_RESTORE_ATTEMPTS,
   RESTORE_BACKOFF_MS,
