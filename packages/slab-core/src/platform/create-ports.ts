@@ -1,3 +1,4 @@
+import { h5FileDialog } from "../infra/h5/file-dialog-adapter"
 import { tauriFileDialog } from "../infra/tauri/file-dialog-adapter"
 import { tauriImageSrc } from "../infra/tauri/image-src-adapter"
 import { tauriMediaFile } from "../infra/tauri/media-file-adapter"
@@ -63,14 +64,16 @@ export function createWebPorts(options?: {
 }
 
 /**
- * Platform capability set for the mobile H5 shell. Currently identical to the
- * web set; mobile-specific overrides (e.g. capture-backed file picking) land
- * here.
+ * Platform capability set for the mobile H5 shell: the web set with an
+ * input-backed file dialog (the mobile browser's own picker/camera flow).
  */
 export function createH5Ports(options?: {
   notifications?: NotificationPort
 }): SlabPorts {
-  return createWebPorts(options)
+  return {
+    ...createWebPorts(options),
+    fileDialog: h5FileDialog,
+  }
 }
 
 // Re-export the adapters shells need for the module-level seams.
