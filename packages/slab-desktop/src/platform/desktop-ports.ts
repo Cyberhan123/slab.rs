@@ -15,7 +15,7 @@ import type { NotificationPort } from "@slab/core"
  *
  * Wires the module-level seams in `@slab/core` (image resolution + error
  * notification) once at app startup and exposes the full port set for the
- * React DI context (installed by `SlabProvider` in Phase 2).
+ * React DI context (installed by `SlabProvider` in the shell's `main.tsx`).
  */
 const sonnerNotifier: NotificationPort = {
   error(message, options) {
