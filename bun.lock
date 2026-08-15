@@ -264,6 +264,28 @@
         "vitest": "catalog:",
       },
     },
+    "packages/slab-h5": {
+      "name": "@slab/h5",
+      "version": "0.1.0",
+      "dependencies": {
+        "@slab/api": "workspace:*",
+        "@slab/components": "workspace:*",
+        "@slab/core": "workspace:*",
+        "@slab/i18n": "workspace:*",
+        "@slab/ui": "workspace:*",
+        "@tanstack/react-query": "catalog:",
+        "react": "catalog:",
+        "react-dom": "catalog:",
+        "react-router-dom": "catalog:",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "catalog:",
+        "@types/node": "catalog:",
+        "@vitejs/plugin-react": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+      },
+    },
     "packages/slab-i18n": {
       "name": "@slab/i18n",
       "version": "0.1.0",
@@ -474,6 +496,28 @@
       "peerDependencies": {
         "react": "catalog:react-peer",
         "react-dom": "catalog:react-peer",
+      },
+    },
+    "packages/slab-web": {
+      "name": "@slab/web",
+      "version": "0.1.0",
+      "dependencies": {
+        "@slab/api": "workspace:*",
+        "@slab/components": "workspace:*",
+        "@slab/core": "workspace:*",
+        "@slab/i18n": "workspace:*",
+        "@slab/ui": "workspace:*",
+        "@tanstack/react-query": "catalog:",
+        "react": "catalog:",
+        "react-dom": "catalog:",
+        "react-router-dom": "catalog:",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "catalog:",
+        "@types/node": "catalog:",
+        "@vitejs/plugin-react": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
       },
     },
     "packages/vitest-rust-reporter": {
@@ -1274,6 +1318,8 @@
 
     "@slab/desktop": ["@slab/desktop@workspace:packages/slab-desktop"],
 
+    "@slab/h5": ["@slab/h5@workspace:packages/slab-h5"],
+
     "@slab/i18n": ["@slab/i18n@workspace:packages/slab-i18n"],
 
     "@slab/models": ["@slab/models@workspace:models"],
@@ -1293,6 +1339,8 @@
     "@slab/ui": ["@slab/ui@workspace:packages/slab-ui"],
 
     "@slab/vitest-rust-reporter": ["@slab/vitest-rust-reporter@workspace:packages/vitest-rust-reporter"],
+
+    "@slab/web": ["@slab/web@workspace:packages/slab-web"],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 

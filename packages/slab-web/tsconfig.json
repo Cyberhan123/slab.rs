@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@slab/api": ["../api/src/index.ts"],
+      "@slab/api/*": ["../api/src/*"],
+      "@slab/components": ["../slab-components/src/index.ts"],
+      "@slab/components/*": ["../slab-components/src/*"],
+      "@slab/core": ["../slab-core/src/index.ts"],
+      "@slab/core/*": ["../slab-core/src/*"],
+      "@slab/i18n": ["../slab-i18n/src/index.ts"],
+      "@slab/ui": ["../slab-ui/src/index.ts"],
+      "@slab/ui/*": ["../slab-ui/src/*"],
+      "@/*": ["../slab-components/src/*"]
+    },
+    "types": ["node"],
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"]
+}
