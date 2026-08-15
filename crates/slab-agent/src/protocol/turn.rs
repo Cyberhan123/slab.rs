@@ -2,12 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
 
 use super::item::TurnItem;
 
 /// Structured turn failure descriptor (mirrors the `Turn.error` shape).
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TurnError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
@@ -17,8 +19,9 @@ pub struct TurnError {
     pub additional_details: Option<Value>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct Turn {
     pub id: String,
     #[serde(default)]

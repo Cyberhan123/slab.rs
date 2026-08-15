@@ -2,26 +2,30 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::harness::messages::ReasoningEffort;
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ModelListParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_providers: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ModelListResult {
     pub data: Vec<ModelInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ModelInfo {
     pub id: String,
     pub model: String,
@@ -32,8 +36,9 @@ pub struct ModelInfo {
     pub is_default: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ReasoningEffortOption {
     pub reasoning_effort: ReasoningEffort,
     pub description: String,

@@ -2,6 +2,7 @@
 //! the popup persistence scope, and the global baseline.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// The engine's verdict for a tool invocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,8 +45,9 @@ impl PermissionMode {
 }
 
 /// Persistence scope chosen by the user when approving a prompt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum ApprovalScope {
     /// Allow this run only; do not persist a rule.
     RunOnce,

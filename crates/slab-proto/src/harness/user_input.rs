@@ -4,12 +4,14 @@ use std::path::PathBuf;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// A single piece of user input within a [`crate::harness::operation::UserSubmissionOp`]
 /// turn.
 #[non_exhaustive]
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[ts(export)]
 pub enum UserInput {
     /// Free-form text. `text_elements` marks byte ranges within `text` that
     /// carry rich markers (e.g. image placeholders) without mutating the text.
@@ -56,7 +58,8 @@ impl UserInput {
 }
 
 /// A byte range within a UTF-8 text buffer.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[ts(export)]
 pub struct ByteRange {
     /// Start byte offset (inclusive).
     pub start: usize,
@@ -71,7 +74,8 @@ impl From<std::ops::Range<usize>> for ByteRange {
 }
 
 /// A span within [`UserInput::Text`] marking a rich element.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[ts(export)]
 pub struct TextElement {
     /// Byte range in the parent text buffer.
     pub byte_range: ByteRange,
@@ -87,8 +91,9 @@ impl TextElement {
 }
 
 /// Resolution hint for an image input, mirroring the OpenAI image detail enum.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum ImageDetail {
     Low,
     High,

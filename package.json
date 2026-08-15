@@ -29,6 +29,7 @@
     "build:windows-installer": "bun run build:sidecars:release && bun ./scripts/cargo/with-env.ts bun run --cwd bin/slab-app tauri build --bundles nsis --config src-tauri/tauri.windows.release.conf.json",
     "dev:desktop": "bun run --cwd packages/slab-desktop dev",
     "gen:api": "bun ./scripts/cargo/run.ts build -p slab-server -p slab-runtime -p slab-js-runtime -p slab-python-runtime && bun ./scripts/gen/generate-openapi.ts",
+    "gen:harness": "bun ./scripts/gen/generate-harness-bindings.ts",
     "gen:schemas": "cargo run -p slab-model-pack --bin generate_manifest_schema && cargo run -p slab-config --bin generate_settings_document_schema",
     "gen:plugin-packs": "bun ./scripts/plugins/generate-plugin-packs.ts",
     "gen:model-packs": "bun ./scripts/models/pack-models.ts",

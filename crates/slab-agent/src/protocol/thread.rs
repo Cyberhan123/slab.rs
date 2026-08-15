@@ -1,24 +1,28 @@
 //! Per-thread aggregate.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use super::turn::Turn;
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct GitInfo {
     pub branch: String,
     pub sha: String,
     pub is_dirty: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct Thread {
     pub id: String,
     pub preview: String,
     pub model_provider: String,
     /// Unix epoch milliseconds.
+    #[ts(type = "number")]
     pub created_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,

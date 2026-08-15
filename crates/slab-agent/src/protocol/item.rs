@@ -2,14 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
 
 /// One item within a [`super::turn::Turn`].
 ///
 /// Discriminated by `type`. Each variant accepts both the camelCase and
 /// PascalCase spellings (e.g. `agentMessage` / `AgentMessage`) to match the
 /// public TS contract.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[ts(export)]
 pub enum TurnItem {
     UserMessage {
         id: String,
@@ -37,8 +39,10 @@ pub enum TurnItem {
         #[serde(default, rename = "aggregatedOutput", skip_serializing_if = "Option::is_none")]
         aggregated_output: Option<String>,
         #[serde(default, rename = "exitCode", skip_serializing_if = "Option::is_none")]
+        #[ts(type = "number")]
         exit_code: Option<i64>,
         #[serde(default, rename = "durationMs", skip_serializing_if = "Option::is_none")]
+        #[ts(type = "number")]
         duration_ms: Option<u64>,
     },
     #[serde(alias = "FileChange")]
@@ -59,6 +63,7 @@ pub enum TurnItem {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<Value>,
         #[serde(default, rename = "durationMs", skip_serializing_if = "Option::is_none")]
+        #[ts(type = "number")]
         duration_ms: Option<u64>,
     },
     #[serde(alias = "WebSearch")]
@@ -100,8 +105,9 @@ impl TurnItem {
 }
 
 /// A content part of a [`TurnItem::UserMessage`].
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[ts(export)]
 pub enum UserMessageContent {
     Text {
         text: String,
@@ -118,8 +124,9 @@ pub enum UserMessageContent {
 }
 
 /// Reasoning text — accepted as a single string or an array of strings.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(untagged)]
+#[ts(export)]
 pub enum ReasoningText {
     Many(Vec<String>),
     One(String),

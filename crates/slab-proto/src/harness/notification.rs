@@ -9,6 +9,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
 
 // Notification param payloads are owned by `slab_agent::protocol`; imported
 // here (not re-exported) so the `ServerNotification` union variants below can
@@ -23,8 +24,9 @@ use slab_agent::protocol::{
 
 // ---- error / account ----
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ErrorParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
@@ -38,14 +40,16 @@ pub struct ErrorParams {
     pub data: Option<Value>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct AccountUpdatedParams {
     pub account: Account,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct AccountLoginCompletedParams {
     pub login_id: String,
     pub success: bool,
@@ -53,8 +57,9 @@ pub struct AccountLoginCompletedParams {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct Account {
     pub id: String,
     pub email: String,
@@ -73,8 +78,9 @@ pub struct Account {
 // that does not exist).
 
 /// Coarse phase of an in-progress model load streamed via `model/load/delta`.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum ModelLoadPhase {
     /// Weights are being downloaded into the local cache.
     Downloading,
@@ -82,8 +88,9 @@ pub enum ModelLoadPhase {
     Loading,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ModelLoadDeltaParams {
     /// Harness thread id the load is associated with (matches `turn/start`'s
     /// `thread_id`). Required: the client routes notifications by `threadId`.
@@ -95,22 +102,26 @@ pub struct ModelLoadDeltaParams {
     pub model_id: Option<String>,
     pub phase: ModelLoadPhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number")]
     pub downloaded_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number")]
     pub total_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ModelLoadError {
     pub code: String,
     pub message: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ModelLoadCompletedParams {
     /// Harness thread id the load is associated with.
     pub thread_id: String,
@@ -128,8 +139,9 @@ pub struct ModelLoadCompletedParams {
 }
 
 /// Union of every server → client notification, discriminated by `method`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(TS, Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "method", content = "params")]
+#[ts(export)]
 pub enum ServerNotification {
     #[serde(rename = "thread/started")]
     ThreadStarted(ThreadStartedParams),

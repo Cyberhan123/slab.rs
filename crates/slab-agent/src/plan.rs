@@ -7,10 +7,12 @@
 //! crate) can reference them without a reverse dependency.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Lifecycle status of a single plan step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum PlanStatus {
     #[default]
     Pending,
@@ -31,7 +33,8 @@ impl PlanStatus {
 }
 
 /// A single step in a plan.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(TS, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[ts(export)]
 pub struct PlanItem {
     /// What to do for this step.
     pub step: String,
@@ -48,7 +51,8 @@ pub struct PlanItem {
 }
 
 /// Aggregate step counts by status.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(TS, Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[ts(export)]
 pub struct PlanCounts {
     pub pending: usize,
     pub in_progress: usize,
@@ -60,7 +64,8 @@ pub struct PlanCounts {
 ///
 /// Produced by normalizing the `plan` / `update_plan` tool arguments. The
 /// `plan_id` is generated on first creation; the store keys plans by thread id.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(TS, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[ts(export)]
 pub struct Plan {
     /// Stable identifier (generated when the `plan` tool creates the plan).
     pub plan_id: String,

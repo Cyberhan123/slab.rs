@@ -10,6 +10,7 @@
 //! `#[serde(rename_all = "snake_case")]`, same variants).
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use super::item::TurnItem;
 use super::thread::Thread;
@@ -18,21 +19,24 @@ use slab_types::ConversationMessage;
 
 // ---- lifecycle ----
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadStartedParams {
     pub thread: Thread,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TurnStartedParams {
     pub thread_id: String,
     pub turn: Turn,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TurnCompletedParams {
     pub thread_id: String,
     pub turn: Turn,
@@ -47,8 +51,9 @@ pub struct TurnCompletedParams {
 /// `prompt_tokens` reflects the full input context of the turn (including any
 /// kv-cache-reused prefix reported as `cached_tokens`); `completion_tokens` is
 /// the number of tokens generated.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TurnUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
@@ -73,8 +78,9 @@ impl From<crate::port::LlmUsage> for TurnUsage {
 /// threshold gate passes, before the summarization LLM call. The client shows an
 /// in-progress "compacting context" indicator. Carries no `turn_id` so it
 /// bypasses the client transport's turn-replay guard.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ContextCompactingParams {
     pub thread_id: String,
 }
@@ -83,8 +89,9 @@ pub struct ContextCompactingParams {
 /// (with token/removed counts populated) or `"skipped"` when a started
 /// compaction did not shrink the set — the client clears its in-progress
 /// indicator in either case (no dangling "compacting" marker).
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ContextCompactedParams {
     pub thread_id: String,
     /// `"compacted"` (default when absent) or `"skipped"`.
@@ -149,16 +156,18 @@ pub struct TurnStateChangedParams {
 
 // ---- items ----
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ItemStartedParams {
     pub item: TurnItem,
     pub thread_id: String,
     pub turn_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ItemCompletedParams {
     pub item: TurnItem,
     pub thread_id: String,
@@ -167,8 +176,9 @@ pub struct ItemCompletedParams {
 
 // ---- deltas ----
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct AgentMessageDeltaParams {
     pub thread_id: String,
     pub turn_id: String,
@@ -176,8 +186,9 @@ pub struct AgentMessageDeltaParams {
     pub delta: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ReasoningTextDeltaParams {
     pub thread_id: String,
     pub turn_id: String,
@@ -186,8 +197,9 @@ pub struct ReasoningTextDeltaParams {
     pub delta: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ReasoningSummaryTextDeltaParams {
     pub thread_id: String,
     pub turn_id: String,
@@ -197,8 +209,9 @@ pub struct ReasoningSummaryTextDeltaParams {
     pub delta: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct CommandExecutionOutputDeltaParams {
     pub thread_id: String,
     pub turn_id: String,
@@ -206,8 +219,9 @@ pub struct CommandExecutionOutputDeltaParams {
     pub delta: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct FileChangeOutputDeltaParams {
     pub thread_id: String,
     pub turn_id: String,
@@ -217,8 +231,9 @@ pub struct FileChangeOutputDeltaParams {
 
 // ---- approvals ----
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct CommandExecutionRequestApprovalParams {
     pub thread_id: String,
     pub turn_id: String,
@@ -242,8 +257,9 @@ pub struct CommandExecutionRequestApprovalParams {
     pub plan_snapshot: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct FileChangeRequestApprovalParams {
     pub thread_id: String,
     pub turn_id: String,
@@ -253,8 +269,9 @@ pub struct FileChangeRequestApprovalParams {
     pub allowed_scopes: Vec<slab_exec_policy::ApprovalScope>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct FileChangeApprovalChange {
     pub path: String,
     /// Change kind, e.g. `add` / `edit` / `delete`.

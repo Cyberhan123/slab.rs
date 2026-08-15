@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
 
 use crate::harness::user_input::UserInput;
 
@@ -19,8 +20,9 @@ use slab_agent::protocol::{Thread, Turn};
 // ============ Reasoning effort ============
 
 /// Reasoning effort selector.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum ReasoningEffort {
     Off,
     Low,
@@ -31,7 +33,8 @@ pub enum ReasoningEffort {
 
 // ============ Policies ============
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[ts(export)]
 pub enum ApprovalPolicy {
     #[serde(rename = "never")]
     Never,
@@ -43,7 +46,8 @@ pub enum ApprovalPolicy {
     Untrusted,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[ts(export)]
 pub enum SandboxMode {
     #[serde(rename = "read-only")]
     ReadOnly,
@@ -53,8 +57,9 @@ pub enum SandboxMode {
     DangerFullAccess,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum NetworkAccess {
     Restricted,
     Enabled,
@@ -62,8 +67,9 @@ pub enum NetworkAccess {
 
 /// Per-session permission mode (flows via `ThreadStartParams`/`TurnStartParams`).
 /// Mirrors `slab_exec_policy::PermissionMode`.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Default)]
+#[derive(TS, Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum PermissionMode {
     #[default]
     RequestApproval,
@@ -74,8 +80,9 @@ pub enum PermissionMode {
 
 /// Persistence scope chosen by the user when approving a prompt. Mirrors
 /// `slab_exec_policy::ApprovalScope`.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum ApprovalScope {
     RunOnce,
     AlwaysInWorkspace,
@@ -85,8 +92,9 @@ pub enum ApprovalScope {
 
 /// Operation category for an approval prompt. Mirrors
 /// `slab_exec_policy::OperationCategory`.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum OperationCategory {
     Shell,
     FileEdit,
@@ -95,8 +103,9 @@ pub enum OperationCategory {
 }
 
 /// Sandbox policy — a `type`-discriminated union mirroring the TS contract.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[ts(export)]
 pub enum SandboxPolicy {
     DangerFullAccess,
     ReadOnly,
@@ -129,14 +138,16 @@ impl Default for SandboxPolicy {
 
 // ============ Initialize ============
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct InitializeParams {
     pub client_info: ClientInfo,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ClientInfo {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -144,8 +155,9 @@ pub struct ClientInfo {
     pub version: String,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct InitializeResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_info: Option<ServerInfo>,
@@ -155,15 +167,17 @@ pub struct InitializeResult {
     pub capabilities: Option<ServerCapabilities>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ServerInfo {
     pub name: String,
     pub version: String,
 }
 
 /// Advertised server capabilities (extensible).
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[ts(export)]
 pub struct ServerCapabilities {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub experimental: Option<Value>,
@@ -174,8 +188,9 @@ pub struct ServerCapabilities {
 
 // ============ thread/start ============
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadStartParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -206,8 +221,9 @@ pub struct ThreadStartParams {
     pub config: Option<Value>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadStartResult {
     pub thread: Thread,
     pub model: String,
@@ -221,8 +237,9 @@ pub struct ThreadStartResult {
 
 // ============ thread/resume ============
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadResumeParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
@@ -230,16 +247,18 @@ pub struct ThreadResumeParams {
     pub path: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadResumeResult {
     pub thread: Thread,
 }
 
 // ============ thread/fork ============
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadForkParams {
     pub thread_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -248,23 +267,26 @@ pub struct ThreadForkParams {
     pub sandbox_override: Option<SandboxMode>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadForkResult {
     pub thread: Thread,
 }
 
 // ============ thread/rollback ============
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadRollbackParams {
     pub thread_id: String,
     pub to_turn_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadRollbackResult {
     pub thread: Thread,
 }
@@ -274,8 +296,9 @@ pub struct ThreadRollbackResult {
 /// Manually compact a thread's persisted history: summarize older turns into a
 /// single recap (with a trailing-window trim fallback) and keep the recent
 /// window verbatim. Refuses while the thread is running.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadCompactStartParams {
     pub thread_id: String,
     /// Optional override of the summarization model; defaults to the thread's
@@ -284,8 +307,9 @@ pub struct ThreadCompactStartParams {
     pub model_override: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadCompactStartResult {
     pub thread: Thread,
     /// Number of persisted messages removed by the compaction.
@@ -296,22 +320,25 @@ pub struct ThreadCompactStartResult {
 
 // ============ thread/archive ============
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadArchiveParams {
     pub thread_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadArchiveResult {
     pub thread: Thread,
 }
 
 // ============ thread/list ============
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadListParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
@@ -321,8 +348,9 @@ pub struct ThreadListParams {
     pub model_providers: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ThreadListResult {
     pub data: Vec<Thread>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -332,8 +360,9 @@ pub struct ThreadListResult {
 // ============ skills/list ============
 
 /// Where a skill was discovered (workspace `.agents/skills` vs global app-home).
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum SkillSource {
     #[default]
     Workspace,
@@ -341,8 +370,9 @@ pub enum SkillSource {
 }
 
 /// A discoverable skill surfaced by `skills/list`.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct SkillInfo {
     pub name: String,
     #[serde(default)]
@@ -351,12 +381,14 @@ pub struct SkillInfo {
     pub source: SkillSource,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct SkillsListParams {}
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct SkillsListResult {
     pub data: Vec<SkillInfo>,
 }
@@ -364,8 +396,9 @@ pub struct SkillsListResult {
 // ============ command/list ============
 
 /// How a user-facing `/`-command dispatches on the client.
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum CommandKind {
     #[default]
     /// Intercepts submission and runs a host action; never reaches the model.
@@ -375,8 +408,9 @@ pub enum CommandKind {
 }
 
 /// Where a command was declared.
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(TS, Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum CommandSource {
     #[default]
     Builtin,
@@ -384,8 +418,9 @@ pub enum CommandSource {
 }
 
 /// A user-facing `/`-command surfaced by `command/list`.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct CommandInfo {
     /// Trigger name, without the leading `/`.
     pub name: String,
@@ -401,20 +436,23 @@ pub struct CommandInfo {
     pub control_action: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct CommandListParams {}
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct CommandListResult {
     pub data: Vec<CommandInfo>,
 }
 
 // ============ turn/start ============
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TurnStartParams {
     pub thread_id: String,
     pub input: Vec<UserInput>,
@@ -440,23 +478,26 @@ pub struct TurnStartParams {
     pub output_schema: Option<Value>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TurnStartResult {
     pub turn: Turn,
 }
 
 // ============ turn/interrupt ============
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TurnInterruptParams {
     pub thread_id: String,
     pub turn_id: String,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TurnInterruptResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
@@ -464,8 +505,9 @@ pub struct TurnInterruptResult {
 
 // ============ approval/resolve ============
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ApprovalResolveParams {
     pub thread_id: String,
     /// The pending item / tool-call id awaiting approval.
@@ -477,8 +519,9 @@ pub struct ApprovalResolveParams {
     pub scope: Option<ApprovalScope>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ApprovalResolveResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered: Option<bool>,
@@ -488,14 +531,16 @@ pub struct ApprovalResolveResult {
 
 // ============ shutdown ============
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ShutdownParams {
     pub thread_id: String,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct ShutdownResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
@@ -503,8 +548,9 @@ pub struct ShutdownResult {
 
 // ============ workspace/migrate ============
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct WorkspaceMigrateParams {
     /// Target workspace root. When omitted the server resolves the root from
     /// its own configuration. This is the canonical workspace-migration method:
@@ -515,8 +561,9 @@ pub struct WorkspaceMigrateParams {
     pub workspace_root: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct WorkspaceMigrateResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,

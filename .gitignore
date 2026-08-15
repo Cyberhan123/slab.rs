@@ -60,3 +60,5 @@ ide-demo/
 vcpkg_installed/
 
 llama-cpp-rs-main/
+# ts-rs per-type bindings (intermediate artifacts of bun run gen:harness)
+crates/*/bindings/

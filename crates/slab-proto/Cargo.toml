@@ -34,3 +34,4 @@ strum = { workspace = true }
 # envelope (`ServerNotification`, method constants, request/response DTOs) stays
 # defined here and references the slab-agent semantic types via this edge.
 slab-agent = { workspace = true }
+ts-rs = { workspace = true, features = ["serde-json-impl", "no-serde-warnings"] }

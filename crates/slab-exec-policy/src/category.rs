@@ -3,13 +3,15 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Coarse category of a tool operation, used to route it through the unified
 /// permission engine. A shell command that edits files or reaches the network
 /// is still categorized as [`OperationCategory::Shell`] — policy does not
 /// introspect what a shell command does; the sandbox handles execution safety.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum OperationCategory {
     Shell,
     FileEdit,
