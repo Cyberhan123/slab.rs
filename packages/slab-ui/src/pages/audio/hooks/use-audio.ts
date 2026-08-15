@@ -5,7 +5,7 @@ import { useTranslation } from '@slab/i18n';
 
 import useFile, { type SelectedFile } from '@slab/ui/hooks/use-file';
 import { useHeader } from '@slab/ui/hooks/use-header';
-import useIsTauri from '@slab/ui/hooks/use-tauri';
+import { useSlab } from '@slab/ui/provider/slab-provider';
 import api from '@slab/api';
 import { modelSupportsCapability } from '@slab/ui/hooks/use-ai-model';
 import {
@@ -42,7 +42,7 @@ import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } fro
 
 export function useAudio() {
   const { t } = useTranslation();
-  const isTauri = useIsTauri();
+  const isTauri = useSlab().ports.platformInfo.desktop;
 
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [preparingStage, setPreparingStage] = useState<PreparingStage>(null);

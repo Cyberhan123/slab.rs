@@ -12,18 +12,18 @@ import {
 import { Button } from '@slab/components/button';
 import { Trans, useTranslation } from '@slab/i18n';
 import useDesktopPlatform from '@slab/ui/hooks/use-desktop-platform';
-import useIsTauri from '@slab/ui/hooks/use-tauri';
 import { cn } from '@slab/ui/lib/utils';
 import Header from '@slab/ui/layouts/header';
 import { WindowControls } from '@slab/ui/layouts/window-controls';
+import { useSlab } from '@slab/ui/provider/slab-provider';
 
 import { SETUP_ACTIVE_TONE, SETUP_CTA_GRADIENT } from '../const';
 import type { SetupViewModel } from '../hooks/use-setup';
 
 function SetupScaffold({ children }: { children: ReactNode }) {
   const platform = useDesktopPlatform();
-  const isTauri = useIsTauri();
-  const showMacSidebar = isTauri && platform === 'macos';
+  const isDesktop = useSlab().ports.platformInfo.desktop;
+  const showMacSidebar = isDesktop && platform === 'macos';
 
   return (
     <div className="h-screen overflow-hidden bg-app-canvas">

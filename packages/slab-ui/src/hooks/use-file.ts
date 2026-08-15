@@ -1,7 +1,6 @@
 import { useCallback, type ChangeEvent } from 'react';
 
 import { useSlab } from '../provider/slab-provider';
-import useIsTauri from './use-tauri';
 
 export type SelectedFile = {
     name?: string;
@@ -14,12 +13,12 @@ const MEDIA_FILTERS = [
 ];
 
 export default function useFile() {
-    const isTauri = useIsTauri();
     const { ports } = useSlab();
+    const isDesktop = ports.platformInfo.desktop;
 
     const handleFile = useCallback(
         async (e?: ChangeEvent<HTMLInputElement>): Promise<SelectedFile | null> => {
-            if (isTauri) {
+            if (isDesktop) {
                 // Tauri mode: open the native file dialog via the injected port.
                 const picked = await ports.fileDialog.pickFile({
                     multiple: false,
@@ -38,7 +37,7 @@ export default function useFile() {
             }
             return { file, name: file.name };
         },
-        [isTauri, ports.fileDialog],
+        [isDesktop, ports.fileDialog],
     );
 
     return { handleFile };

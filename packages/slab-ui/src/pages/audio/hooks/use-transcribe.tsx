@@ -1,6 +1,6 @@
-import useIsTauri from "@slab/ui/hooks/use-tauri";
 import api from "@slab/api";
 import { useTranslation } from "@slab/i18n";
+import { useSlab } from "@slab/ui/provider/slab-provider";
 
 import { buildTranscriptionBody } from "../lib/transcribe-body";
 
@@ -43,7 +43,7 @@ export type TranscribeOptions = {
 
 const useTranscribe = () => {
     const { t } = useTranslation();
-    const isTauri = useIsTauri();
+    const isTauri = useSlab().ports.platformInfo.desktop;
     const { isPending, isError, error, mutateAsync } = api.useMutation('post', '/v1/audio/transcriptions', {
         meta: {
             skipGlobalErrorToast: true,

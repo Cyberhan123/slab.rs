@@ -9,7 +9,6 @@ import {
   InputGroupTextarea,
 } from "@slab/components/input-group"
 import { useSlab } from "@slab/ui/provider/slab-provider"
-import useIsTauri from "@slab/ui/hooks/use-tauri"
 
 import { useVoiceInput } from "../lib/use-voice-input"
 import {
@@ -155,7 +154,7 @@ function Sender({
 }: SenderProps) {
   const { t } = useTranslation()
   const { ports } = useSlab()
-  const isTauri = useIsTauri()
+  const isTauri = ports.platformInfo.desktop
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [thinkingEnabled, setThinkingEnabled] = useState(false)

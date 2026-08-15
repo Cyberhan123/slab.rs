@@ -6,7 +6,7 @@ import { Button } from "@slab/components/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@slab/components/popover"
 import { FolderOpen } from "lucide-react"
 
-import { isTauri } from "@slab/ui/hooks/use-tauri"
+import { useSlab } from "@slab/ui/provider/slab-provider"
 
 type OpenWorkspaceButtonProps = {
   /** Native folder dialog path (Tauri shell). */
@@ -38,7 +38,7 @@ export function OpenWorkspaceButton({
   const [fallbackOpen, setFallbackOpen] = useState(false)
   const [pathInput, setPathInput] = useState("")
   const trimmedPath = pathInput.trim()
-  const tauri = isTauri()
+  const tauri = useSlab().ports.platformInfo.desktop
 
   const submitPath = async () => {
     if (!trimmedPath) return

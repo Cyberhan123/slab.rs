@@ -5,7 +5,7 @@ import { AlertCircle, Loader2 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 
-import { isTauri } from '@slab/ui/hooks/use-tauri';
+import { useSlab } from '@slab/ui/provider/slab-provider';
 import {
   getPluginHost,
   type PluginViewBounds,
@@ -31,7 +31,7 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
   const [observeHostResize, hostRect] = useResizeObserver<HTMLDivElement>();
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
-  const isDesktopTauri = isTauri();
+  const isDesktopTauri = useSlab().ports.platformInfo.desktop;
   const browserMissingUrlError =
     !isDesktopTauri && !plugin.uiUrl ? 'Plugin is missing a browser UI URL.' : null;
   const visibleError = error ?? browserMissingUrlError;

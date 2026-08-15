@@ -5,7 +5,6 @@ import { useTranslation } from "@slab/i18n"
 
 import { Button } from "@slab/components/button"
 import useDesktopPlatform, { type DesktopPlatform } from "@slab/ui/hooks/use-desktop-platform"
-import useIsTauri from "@slab/ui/hooks/use-tauri"
 import { useSlab } from "@slab/ui/provider/slab-provider"
 import { cn } from "@slab/ui/lib/utils"
 
@@ -220,11 +219,11 @@ function getWindowControlsConfig(platform: DesktopPlatform) {
 export function WindowControls({
   placement = "header",
 }: WindowControlsProps) {
-  const isTauri = useIsTauri()
+  const isDesktop = useSlab().ports.platformInfo.desktop
   const platform = useDesktopPlatform()
   const config = getWindowControlsConfig(platform)
 
-  if (!isTauri || config.placement !== placement) {
+  if (!isDesktop || config.placement !== placement) {
     return null
   }
 

@@ -1,4 +1,5 @@
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Settings } from 'lucide-react';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
@@ -6,6 +7,8 @@ import { render } from 'vitest-browser-react';
 import type { HeaderHistoryConfig, HeaderSearchConfig, HeaderSelectConfig } from '@slab/ui/layouts/header';
 import Header from '@slab/ui/layouts/header';
 import { HeaderProvider } from '@slab/ui/layouts/header-provider';
+import { SlabProvider } from '@slab/ui/provider/slab-provider';
+import { createTestSlabPorts } from '@slab/ui/provider/test-ports';
 import { useHeader } from '../use-header';
 
 const onSelectChange = vi.fn<(value: string) => void>();
@@ -82,6 +85,19 @@ const HeaderRenderProbe = memo(function HeaderRenderProbe({
   return <span data-testid="header-render-probe">{history?.title ?? 'none'}</span>;
 });
 
+// The real <Header /> renders WindowControls, which reads the platform info
+// port — mount it inside a SlabProvider like every shell does.
+function withSlabPorts(children: ReactNode) {
+  const queryClient = new QueryClient();
+  return (
+    <QueryClientProvider client={queryClient}>
+      <SlabProvider deps={{ ports: createTestSlabPorts(), queryClient }}>
+        {children}
+      </SlabProvider>
+    </QueryClientProvider>
+  );
+}
+
 describe('useHeader', () => {
   it('reads route-owned header metadata from the provider default meta', async () => {
     const defaultMeta = {
@@ -145,10 +161,12 @@ describe('useHeader', () => {
     onHistoryClick.mockClear();
 
     const screen = await render(
-      <HeaderProvider>
-        <HeaderRegistration active />
-        <Header />
-      </HeaderProvider>,
+      withSlabPorts(
+        <HeaderProvider>
+          <HeaderRegistration active />
+          <Header />
+        </HeaderProvider>,
+      ),
     );
 
     const historyButton = screen.getByTestId('header-history-control');
@@ -174,10 +192,12 @@ describe('useHeader', () => {
     }
 
     const screen = await render(
-      <HeaderProvider>
-        <DisabledHistoryRegistration />
-        <Header />
-      </HeaderProvider>,
+      withSlabPorts(
+        <HeaderProvider>
+          <DisabledHistoryRegistration />
+          <Header />
+        </HeaderProvider>,
+      ),
     );
 
     const historyButton = screen.getByTestId('header-history-control');
@@ -192,19 +212,23 @@ describe('useHeader', () => {
 
   it('removes the history button after registration cleanup', async () => {
     const screen = await render(
-      <HeaderProvider>
-        <HeaderRegistration active />
-        <Header />
-      </HeaderProvider>,
+      withSlabPorts(
+        <HeaderProvider>
+          <HeaderRegistration active />
+          <Header />
+        </HeaderProvider>,
+      ),
     );
 
     await expect.element(screen.getByTestId('header-history-control')).toBeInTheDocument();
 
     await screen.rerender(
-      <HeaderProvider>
-        <HeaderRegistration active={false} />
-        <Header />
-      </HeaderProvider>,
+      withSlabPorts(
+        <HeaderProvider>
+          <HeaderRegistration active={false} />
+          <Header />
+        </HeaderProvider>,
+      ),
     );
 
     await expect.element(screen.getByTestId('header-history-control')).not.toBeInTheDocument();

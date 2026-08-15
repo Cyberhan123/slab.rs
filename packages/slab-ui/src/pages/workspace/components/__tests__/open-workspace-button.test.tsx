@@ -3,22 +3,30 @@ import { render } from "vitest-browser-react"
 import { userEvent } from "vitest/browser"
 
 
-import { isTauri } from "@slab/ui/hooks/use-tauri"
-
 import { OpenWorkspaceButton } from "../open-workspace-button"
+
+const { useSlabMock } = vi.hoisted(() => ({
+  useSlabMock: vi.fn<() => unknown>(),
+}))
 
 vi.mock("@slab/i18n", async () => {
   const { setupSlabI18nMock } = await import("@slab/test-utils/mocks")
   return setupSlabI18nMock()
 })
 
-vi.mock("@slab/ui/hooks/use-tauri", () => ({
-  isTauri: vi.fn(),
+vi.mock("@slab/ui/provider/slab-provider", () => ({
+  useSlab: useSlabMock,
 }))
+
+function setPlatformDesktop(desktop: boolean) {
+  useSlabMock.mockReturnValue({
+    ports: { platformInfo: { desktop, mobile: false } },
+  })
+}
 
 describe("OpenWorkspaceButton", () => {
   it("renders only the folder button in Tauri and opens the native dialog", async () => {
-    vi.mocked(isTauri).mockReturnValue(true)
+    setPlatformDesktop(true)
     const onOpenFolder = vi.fn()
     const screen = await render(
       <OpenWorkspaceButton onOpenFolder={onOpenFolder} onOpenWorkspacePath={vi.fn()} />,
@@ -33,7 +41,7 @@ describe("OpenWorkspaceButton", () => {
   })
 
   it("reveals the path popover on click in the browser and opens the typed path", async () => {
-    vi.mocked(isTauri).mockReturnValue(false)
+    setPlatformDesktop(false)
     const onOpenWorkspacePath = vi.fn<(rootPath: string) => Promise<void>>()
     const screen = await render(
       <OpenWorkspaceButton onOpenFolder={vi.fn()} onOpenWorkspacePath={onOpenWorkspacePath} />,

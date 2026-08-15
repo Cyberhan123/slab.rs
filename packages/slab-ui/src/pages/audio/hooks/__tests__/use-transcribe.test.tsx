@@ -1,15 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from 'vitest-browser-react';
 
-const { useIsTauriMock, mutateAsyncMock, useMutationMock } = vi.hoisted(() => ({
-  useIsTauriMock: vi.fn<() => boolean>(),
+const { useSlabMock, mutateAsyncMock, useMutationMock } = vi.hoisted(() => ({
+  useSlabMock: vi.fn<() => unknown>(),
   mutateAsyncMock: vi.fn<(payload: unknown) => Promise<unknown>>(),
   useMutationMock: vi.fn<() => unknown>(),
 }));
 
-vi.mock('@slab/ui/hooks/use-tauri', () => ({ default: useIsTauriMock }));
+vi.mock('@slab/ui/provider/slab-provider', () => ({ useSlab: useSlabMock }));
 vi.mock('@slab/api', () => ({ default: { useMutation: useMutationMock } }));
 vi.mock('@slab/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+
+function setPlatformDesktop(desktop: boolean) {
+  useSlabMock.mockReturnValue({
+    ports: { platformInfo: { desktop, mobile: false } },
+  });
+}
 
 import useTranscribe from '../use-transcribe';
 
@@ -26,7 +32,7 @@ function installMutation(overrides: Partial<{ isPending: boolean; isError: boole
 describe('useTranscribe', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useIsTauriMock.mockReturnValue(true);
+    setPlatformDesktop(true);
     mutateAsyncMock.mockResolvedValue({ operation_id: 'op-1' });
     installMutation();
   });
@@ -63,7 +69,7 @@ describe('useTranscribe', () => {
   });
 
   it('rejects submissions outside the desktop host', async () => {
-    useIsTauriMock.mockReturnValue(false);
+    setPlatformDesktop(false);
     const { result, act } = await renderHook(() => useTranscribe());
 
     let thrown: unknown = null;

@@ -9,16 +9,18 @@ import { Toaster } from '@slab/components/sonner';
 import { TooltipProvider } from '@slab/components/tooltip';
 import { HeaderProvider } from '@slab/ui/layouts/header-provider';
 import { SlabProvider } from '@slab/ui/provider/slab-provider';
-import { createTestSlabPorts } from '@slab/ui/provider/test-ports';
+import { createTestSlabPorts, type TestSlabPortsOverrides } from '@slab/ui/provider/test-ports';
 
 type DesktopSceneOptions = {
   route?: string;
   router?: Parameters<typeof RouterProvider>[0]['router'];
+  /** Port overrides threaded into {@link createTestSlabPorts} (e.g. platformInfo). */
+  portsOverrides?: TestSlabPortsOverrides;
 };
 
 export async function renderDesktopScene(
   ui: ReactNode,
-  { route = '/setup', router }: DesktopSceneOptions = {},
+  { route = '/setup', router, portsOverrides }: DesktopSceneOptions = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -38,7 +40,7 @@ export async function renderDesktopScene(
         className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
       >
         <QueryClientProvider client={queryClient}>
-          <SlabProvider deps={{ ports: createTestSlabPorts(), queryClient }}>
+          <SlabProvider deps={{ ports: createTestSlabPorts(portsOverrides), queryClient }}>
             <TooltipProvider>
               <HeaderProvider>
                 <RouterProvider router={router} />
@@ -62,7 +64,7 @@ export async function renderDesktopScene(
             className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
           >
             <QueryClientProvider client={queryClient}>
-              <SlabProvider deps={{ ports: createTestSlabPorts(), queryClient }}>
+              <SlabProvider deps={{ ports: createTestSlabPorts(portsOverrides), queryClient }}>
                 <TooltipProvider>
                   <HeaderProvider>
                     {ui}
