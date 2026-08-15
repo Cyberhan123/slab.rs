@@ -51,6 +51,10 @@ export const desktopVitestResolve = {
       replacement: path.resolve(uiSourcePath, "index.ts"),
     },
     {
+      find: "@slab/plugin-sdk",
+      replacement: path.resolve(__dirname, "../slab-plugin-sdk/src/index.ts"),
+    },
+    {
       find: "@slab/i18n",
       replacement: path.resolve(__dirname, "../slab-i18n/src/index.ts"),
     },
@@ -63,8 +67,10 @@ export const desktopVitestResolve = {
       replacement: path.resolve(testUtilsSourcePath, "index.ts"),
     },
     {
-      find: "@",
-      replacement: path.resolve(__dirname, "./src"),
+      // `@` belongs to @slab/components sources (they import `@/lib/utils`);
+      // desktop's own files use relative or @slab/* specifiers.
+      find: /^@\/(.+)$/,
+      replacement: path.resolve(__dirname, "../slab-components/src").replace(/\\/g, "/") + "/$1",
     },
   ],
 };

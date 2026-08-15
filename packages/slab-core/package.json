@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@slab/api": "workspace:*",
+    "@slab/plugin-sdk": "workspace:*",
     "@tauri-apps/api": "catalog:",
     "@tauri-apps/plugin-dialog": "catalog:",
     "ai": "catalog:"

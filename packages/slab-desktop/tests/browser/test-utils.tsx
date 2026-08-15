@@ -7,7 +7,9 @@ import { render } from 'vitest-browser-react';
 
 import { Toaster } from '@slab/components/sonner';
 import { TooltipProvider } from '@slab/components/tooltip';
-import { HeaderProvider } from '@/layouts/header-provider';
+import { HeaderProvider } from '@slab/ui/layouts/header-provider';
+import { SlabProvider } from '@slab/ui/provider/slab-provider';
+import { createTestSlabPorts } from '@slab/ui/provider/test-ports';
 
 type DesktopSceneOptions = {
   route?: string;
@@ -36,12 +38,14 @@ export async function renderDesktopScene(
         className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
       >
         <QueryClientProvider client={queryClient}>
-          <TooltipProvider>
-            <HeaderProvider>
-              <RouterProvider router={router} />
-              <Toaster />
-            </HeaderProvider>
-          </TooltipProvider>
+          <SlabProvider deps={{ ports: createTestSlabPorts(), queryClient }}>
+            <TooltipProvider>
+              <HeaderProvider>
+                <RouterProvider router={router} />
+                <Toaster />
+              </HeaderProvider>
+            </TooltipProvider>
+          </SlabProvider>
         </QueryClientProvider>
       </main>,
     );
@@ -58,12 +62,14 @@ export async function renderDesktopScene(
             className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
           >
             <QueryClientProvider client={queryClient}>
-              <TooltipProvider>
-                <HeaderProvider>
-                  {ui}
-                  <Toaster />
-                </HeaderProvider>
-              </TooltipProvider>
+              <SlabProvider deps={{ ports: createTestSlabPorts(), queryClient }}>
+                <TooltipProvider>
+                  <HeaderProvider>
+                    {ui}
+                    <Toaster />
+                  </HeaderProvider>
+                </TooltipProvider>
+              </SlabProvider>
             </QueryClientProvider>
           </main>
         ),

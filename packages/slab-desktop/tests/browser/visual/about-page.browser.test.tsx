@@ -1,7 +1,7 @@
 import { page } from 'vitest/browser';
 import { describe, expect, it } from 'vitest';
 
-import AboutPage from '@/pages/about';
+import AboutPage from '@slab/ui/pages/about';
 import { renderDesktopScene } from '../test-utils';
 
 describe('AboutPage browser visual regression', () => {

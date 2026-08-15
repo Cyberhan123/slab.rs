@@ -1,7 +1,7 @@
 import { page } from "vitest/browser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import PluginsPage from "@/pages/plugins";
+import PluginsPage from "@slab/ui/pages/plugins";
 import type { components } from "@slab/api/v1";
 import { expectDesktopSceneAccessible, renderDesktopScene } from "../test-utils";
 
@@ -23,11 +23,11 @@ const {
   mockUseQuery: vi.fn<(...args: unknown[]) => unknown>(),
 }));
 
-vi.mock("@/hooks/use-tauri", () => ({
+vi.mock("@slab/ui/hooks/use-tauri", () => ({
   isTauri: mockIsTauri,
 }));
 
-vi.mock("@/hooks/use-header", () => ({
+vi.mock("@slab/ui/hooks/use-header", () => ({
   useHeader: vi.fn<() => unknown>(() => ({
     meta: { title: "Plugins", subtitle: "Plugins", icon: vi.fn(), contextLabel: null },
     search: null,
@@ -49,7 +49,7 @@ vi.mock("@slab/api", async () => {
   });
 });
 
-vi.mock("@/lib/plugin-host-bridge", () => ({
+vi.mock("@slab/core/infra/tauri/plugin-host-bridge", () => ({
   pluginRuntimeList: vi.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
   pluginCall: vi.fn<() => Promise<{ outputText: string; outputBase64: string }>>().mockResolvedValue({
     outputText: "{}",

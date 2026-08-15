@@ -3,13 +3,13 @@ import { Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { NodeRendererProps } from 'react-arborist';
 
-import Layout from '@/layouts';
-import { WorkspaceTreeRow } from '@/pages/workspace/components/workspace-tree-row';
-import type { WorkspaceTreeNode } from '@/pages/workspace/lib/workspace-page-utils';
-import { staticDesktopRoutes } from '@/routes';
+import Layout from '@slab/ui/layouts';
+import { WorkspaceTreeRow } from '@slab/ui/pages/workspace/components/workspace-tree-row';
+import type { WorkspaceTreeNode } from '@slab/ui/pages/workspace/lib/workspace-page-utils';
+import { staticDesktopRoutes } from '@slab/ui/routes';
 import { renderDesktopScene } from '../test-utils';
 
-vi.mock('@/pages/plugins/hooks/use-runtime-plugins', () => ({
+vi.mock('@slab/ui/pages/plugins/hooks/use-runtime-plugins', () => ({
   RUNTIME_PLUGINS_QUERY_KEY: ['plugin-runtime-list'],
   useRuntimePlugins: vi.fn<() => unknown>(() => ({
     data: [],

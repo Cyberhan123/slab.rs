@@ -1,9 +1,9 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import AudioPage from '@/pages/audio';
-import ImagePage from '@/pages/image';
-import VideoPage from '@/pages/video';
+import AudioPage from '@slab/ui/pages/audio';
+import ImagePage from '@slab/ui/pages/image';
+import VideoPage from '@slab/ui/pages/video';
 import { renderDesktopScene } from '../test-utils';
 
 const {
@@ -34,7 +34,7 @@ const {
   mockVideoSubmit: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
 }));
 
-vi.mock('@/pages/image/hooks/use-image-generation', async () => {
+vi.mock('@slab/ui/pages/image/hooks/use-image-generation', async () => {
   const React = await import('react');
 
   return {
@@ -130,7 +130,7 @@ vi.mock('@/pages/image/hooks/use-image-generation', async () => {
   };
 });
 
-vi.mock('@/pages/video/hooks/use-video-generation', async () => {
+vi.mock('@slab/ui/pages/video/hooks/use-video-generation', async () => {
   const React = await import('react');
 
   return {
@@ -224,7 +224,7 @@ vi.mock('@/pages/video/hooks/use-video-generation', async () => {
   };
 });
 
-vi.mock('@/pages/audio/hooks/use-audio', () => ({
+vi.mock('@slab/ui/pages/audio/hooks/use-audio', () => ({
   useAudio: vi.fn<() => unknown>(() => ({
     bundledVadLabel: 'Bundled VAD',
     canStartTranscription: true,

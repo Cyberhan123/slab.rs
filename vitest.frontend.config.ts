@@ -20,10 +20,12 @@ export default defineConfig({
         "packages/vitest-rust-reporter/**",
         "packages/slab-test-utils/**",
         "packages/slab-desktop/src/main.tsx",
+        "packages/slab-ui/src/main.tsx",
+        "packages/slab-ui/src/app/**",
         "packages/slab-components/src/index.ts",
         "packages/slab-plugin-ui/src/index.ts",
         "packages/slab-plugin-cli/src/index.ts",
-        "packages/slab-desktop/src/components/error-boundary.tsx",
+        "packages/slab-ui/src/components/error-boundary.tsx",
       ],
       thresholds: {
         lines: 74,

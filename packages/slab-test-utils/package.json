@@ -15,6 +15,7 @@
     "test": "echo skip"
   },
   "devDependencies": {
+    "@slab/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "react-router-dom": "catalog:",
     "sonner": "catalog:",

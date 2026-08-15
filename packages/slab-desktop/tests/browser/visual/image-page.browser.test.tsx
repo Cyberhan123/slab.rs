@@ -1,19 +1,19 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import ImagePage from '@/pages/image';
-import type { GeneratedImage } from '@/pages/image/const';
+import ImagePage from '@slab/ui/pages/image';
+import type { GeneratedImage } from '@slab/ui/pages/image/const';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseImageGeneration } = vi.hoisted(() => ({
   mockUseImageGeneration: vi.fn<() => unknown>(),
 }));
 
-vi.mock('@/pages/image/hooks/use-image-generation', () => ({
+vi.mock('@slab/ui/pages/image/hooks/use-image-generation', () => ({
   useImageGeneration: mockUseImageGeneration,
 }));
 
-vi.mock('@/pages/image/hooks/use-image-generation-controls', () => ({
+vi.mock('@slab/ui/pages/image/hooks/use-image-generation-controls', () => ({
   useImageGenerationControls: vi.fn<() => unknown>(() => ({
     activeDimensionPreset: '1:1',
     advancedOpen: false,
@@ -51,7 +51,7 @@ vi.mock('@/pages/image/hooks/use-image-generation-controls', () => ({
   })),
 }));
 
-vi.mock('@/pages/image/hooks/use-image-model-preparation', () => ({
+vi.mock('@slab/ui/pages/image/hooks/use-image-model-preparation', () => ({
   useImageModelPreparation: vi.fn<() => unknown>(() => ({
     catalogLoading: false,
     isPreparingModel: false,
@@ -64,7 +64,7 @@ vi.mock('@/pages/image/hooks/use-image-model-preparation', () => ({
   })),
 }));
 
-vi.mock('@/hooks/use-header', () => ({
+vi.mock('@slab/ui/hooks/use-header', () => ({
   useHeader: vi.fn<() => unknown>(() => ({
     meta: { title: 'Image', subtitle: 'Image', icon: vi.fn(), contextLabel: null },
     search: null,

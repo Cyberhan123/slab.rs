@@ -2,6 +2,7 @@ import react from "@vitejs/plugin-react";
 import { playwright } from "@vitest/browser-playwright";
 import { defineProject, mergeConfig } from "vitest/config";
 
+import { uiVitestResolve } from "./vitest.shared";
 import { vitestBase } from "../../vitest.base";
 
 // Dedicated screenshot/visual-regression project (mirrors
@@ -29,5 +30,6 @@ export default defineProject(
         instances: [{ browser: "chromium" }],
       },
     },
+    resolve: uiVitestResolve,
   }),
 );

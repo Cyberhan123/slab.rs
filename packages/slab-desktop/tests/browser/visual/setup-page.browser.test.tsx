@@ -1,8 +1,8 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import SetupPage from '@/pages/setup';
-import type { SetupViewModel } from '@/pages/setup/hooks/use-setup';
+import SetupPage from '@slab/ui/pages/setup';
+import type { SetupViewModel } from '@slab/ui/pages/setup/hooks/use-setup';
 
 import { renderDesktopScene } from '../test-utils';
 
@@ -16,17 +16,17 @@ const {
   mockUseSetup: vi.fn<() => SetupViewModel>(),
 }));
 
-vi.mock('@/hooks/use-desktop-platform', () => ({
+vi.mock('@slab/ui/hooks/use-desktop-platform', () => ({
   default: mockUseDesktopPlatform,
   getDesktopPlatform: mockUseDesktopPlatform,
 }));
 
-vi.mock('@/hooks/use-tauri', () => ({
+vi.mock('@slab/ui/hooks/use-tauri', () => ({
   default: mockUseIsTauri,
   isTauri: mockUseIsTauri,
 }));
 
-vi.mock('@/pages/setup/hooks/use-setup', () => ({
+vi.mock('@slab/ui/pages/setup/hooks/use-setup', () => ({
   useSetup: mockUseSetup,
 }));
 

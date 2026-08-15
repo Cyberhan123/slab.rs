@@ -15,4 +15,7 @@ export const webFileDialog: FileDialogPort = {
     // nothing to pick proactively.
     return null
   },
+  async pickFiles(): Promise<PickedFile[]> {
+    return []
+  },
 }

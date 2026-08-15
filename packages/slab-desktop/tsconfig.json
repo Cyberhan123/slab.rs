@@ -2,29 +2,60 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "@/*": ["./src/*"],
-      "@slab/api": ["../api/src/index.ts"],
-      "@slab/api/*": ["../api/src/*"],
-      "@slab/components": ["../slab-components/src/index.ts"],
-      "@slab/components/*": ["../slab-components/src/*"],
-      "@slab/core": ["../slab-core/src/index.ts"],
-      "@slab/core/*": ["../slab-core/src/*"],
-      "@slab/i18n": ["../slab-i18n/src/index.ts"],
-      "@slab/ui": ["../slab-ui/src/index.ts"],
-      "@slab/ui/*": ["../slab-ui/src/*"],
-      "@slab/plugin-sdk": ["../slab-plugin-sdk/src/index.ts"],
-      "@slab/test-utils": ["../slab-test-utils/src/index.ts"],
-      "@slab/test-utils/*": ["../slab-test-utils/src/*"],
+      "@/*": [
+        "../slab-components/src/*"
+      ],
+      "@slab/api": [
+        "../api/src/index.ts"
+      ],
+      "@slab/api/*": [
+        "../api/src/*"
+      ],
+      "@slab/components": [
+        "../slab-components/src/index.ts"
+      ],
+      "@slab/components/*": [
+        "../slab-components/src/*"
+      ],
+      "@slab/core": [
+        "../slab-core/src/index.ts"
+      ],
+      "@slab/core/*": [
+        "../slab-core/src/*"
+      ],
+      "@slab/i18n": [
+        "../slab-i18n/src/index.ts"
+      ],
+      "@slab/ui": [
+        "../slab-ui/src/index.ts"
+      ],
+      "@slab/ui/*": [
+        "../slab-ui/src/*"
+      ],
+      "@slab/plugin-sdk": [
+        "../slab-plugin-sdk/src/index.ts"
+      ],
+      "@slab/test-utils": [
+        "../slab-test-utils/src/index.ts"
+      ],
+      "@slab/test-utils/*": [
+        "../slab-test-utils/src/*"
+      ],
       "@codingame/monaco-vscode-extensions-service-override": [
-        "./src/types/monaco-vscode-extensions-service-override.d.ts"
+        "../slab-ui/src/types/monaco-vscode-extensions-service-override.d.ts"
       ]
     },
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src","tests"],
+  "include": [
+    "src",
+    "tests"
+  ],
   "references": [
     {
       "path": "./tsconfig.node.json"

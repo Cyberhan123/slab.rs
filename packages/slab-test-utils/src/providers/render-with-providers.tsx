@@ -3,11 +3,16 @@ import { render } from 'vitest-browser-react';
 import { type ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 
+import { SlabProvider } from '@slab/ui/provider/slab-provider';
+import { createTestSlabPorts, type TestSlabPortsOverrides } from '@slab/ui/provider/test-ports';
+
 export interface RenderWithProvidersOptions {
   /** Override the default no-retry QueryClient (queries + mutations). */
   queryClient?: QueryClient;
   /** Wrap the tree in a MemoryRouter. `true` for default routes, or pass initial entries. */
   router?: boolean | string[];
+  /** Override specific test ports (file dialogs, image resolution, …). */
+  slabPorts?: TestSlabPortsOverrides;
 }
 
 export type RenderWithProvidersResult = Awaited<ReturnType<typeof render>> & {
@@ -15,8 +20,9 @@ export type RenderWithProvidersResult = Awaited<ReturnType<typeof render>> & {
 };
 
 /**
- * Render a React element wrapped in the providers slab-desktop components
- * commonly need: a `QueryClientProvider` (default client disables query +
+ * Render a React element wrapped in the providers slab UI components
+ * commonly need: a `SlabProvider` (injected platform ports, browser defaults
+ * unless overridden), a `QueryClientProvider` (default client disables query +
  * mutation retries, matching `tests/browser/test-utils.tsx`) and an optional
  * `MemoryRouter`.
  *
@@ -35,7 +41,11 @@ export async function renderWithProviders(
     new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
-  let tree: ReactElement = <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>;
+  let tree: ReactElement = (
+    <SlabProvider deps={{ ports: createTestSlabPorts(opts.slabPorts), queryClient }}>
+      <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+    </SlabProvider>
+  );
   if (opts.router) {
     const initialEntries = Array.isArray(opts.router) ? opts.router : undefined;
     tree = <MemoryRouter initialEntries={initialEntries}>{tree}</MemoryRouter>;

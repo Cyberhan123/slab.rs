@@ -1,0 +1,36 @@
+import type { ReactNode } from 'react';
+import { cn } from '@slab/ui/lib/utils';
+
+type ToolbarIconButtonProps = {
+  icon: (props: { className?: string }) => ReactNode;
+  label: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+};
+
+export function ToolbarIconButton({
+  icon: Icon,
+  label,
+  active = false,
+  disabled = false,
+  onClick,
+}: ToolbarIconButtonProps) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'flex size-10 items-center justify-center rounded-2xl text-muted-foreground transition',
+        active && 'bg-[var(--shell-card)] text-[color:var(--brand-teal)] shadow-elevation-2',
+        !active && 'hover:bg-glass-bg-strong hover:text-foreground',
+        disabled && 'cursor-not-allowed opacity-35 hover:bg-transparent hover:text-muted-foreground',
+      )}
+    >
+      <Icon className="h-[18px] w-[18px]" />
+    </button>
+  );
+}

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import AssistantPage from '@/pages/assistant';
+import AssistantPage from '@slab/ui/pages/assistant';
 import { renderDesktopScene } from '../test-utils';
 
 /**
@@ -64,7 +64,7 @@ vi.mock('@ai-sdk/react', () => ({
   })),
 }));
 
-vi.mock('@/pages/assistant/hooks/use-harness-conversation', () => ({
+vi.mock('@slab/ui/pages/assistant/hooks/use-harness-conversation', () => ({
   useHarnessConversation: vi.fn(() => mocks.harnessConversation),
 }));
 
@@ -81,7 +81,7 @@ vi.mock('sonner', () => ({
   Toaster: () => null,
 }));
 
-vi.mock('@/hooks/use-ai-model', () => ({
+vi.mock('@slab/ui/hooks/use-ai-model', () => ({
   useAiModel: vi.fn(() => ({
     ensureDownloaded: vi.fn().mockResolvedValue({ downloadedNow: false }),
     ensureLoaded: vi.fn().mockResolvedValue({ runtimeStatus: null }),
@@ -94,7 +94,7 @@ vi.mock('@/hooks/use-ai-model', () => ({
   })),
 }));
 
-vi.mock('@/pages/assistant/hooks/use-assistant-sessions', () => ({
+vi.mock('@slab/ui/pages/assistant/hooks/use-assistant-sessions', () => ({
   useAssistantSessions: vi.fn(() => ({
     conversationList: [{ group: 'Workspace', key: 'session-a', label: 'Session A' }],
     createSession: vi.fn().mockResolvedValue({ id: 'session-new' }),
@@ -109,7 +109,7 @@ vi.mock('@/pages/assistant/hooks/use-assistant-sessions', () => ({
   })),
 }));
 
-vi.mock('@/pages/assistant/components/message-list', () => ({
+vi.mock('@slab/ui/pages/assistant/components/message-list', () => ({
   default: ({ messages }: { messages: UIMessage[] }) => (
     <div data-testid="assistant-message-list">
       {messages.map((message) => (

@@ -1,15 +1,15 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import HubPage from '@/pages/hub';
-import type { ModelItem } from '@/pages/hub/hooks/use-hub-model-catalog';
+import HubPage from '@slab/ui/pages/hub';
+import type { ModelItem } from '@slab/ui/pages/hub/hooks/use-hub-model-catalog';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseHubModelCatalog } = vi.hoisted(() => ({
   mockUseHubModelCatalog: vi.fn<() => unknown>(),
 }));
 
-vi.mock('@/pages/hub/hooks/use-hub-model-catalog', () => ({
+vi.mock('@slab/ui/pages/hub/hooks/use-hub-model-catalog', () => ({
   useHubModelCatalog: mockUseHubModelCatalog,
   CATEGORY_OPTIONS: ['all', 'language', 'vision', 'audio', 'coding', 'embedding'] as const,
   STATUS_OPTIONS: ['all', 'ready', 'downloading', 'not_downloaded', 'error'] as const,

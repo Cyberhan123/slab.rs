@@ -43,12 +43,22 @@ export interface PickedFile {
 export interface FileDialogPort {
   pickFolder(options?: { title?: string }): Promise<string | null>
   pickFile(options?: PickFileOptions): Promise<PickedFile | null>
+  /** Multi-select variant; yields an empty array when nothing was picked. */
+  pickFiles(options?: PickFileOptions): Promise<PickedFile[]>
 }
 
 /** Reading local media referenced by native paths. */
 export interface MediaFilePort {
   /** Read a local file (native path) as a Blob. */
   readFile(path: string): Promise<Blob>
+  /**
+   * Stage recorded audio bytes as a host-side temp file and return its native
+   * path (the transcription endpoint is path-only). Desktop shells only; web
+   * implementations reject.
+   */
+  writeTempAudio(bytes: Uint8Array, extension: string): Promise<string>
+  /** Best-effort removal of a staged temp audio file. */
+  removeTempAudio(path: string): Promise<void>
 }
 
 /**

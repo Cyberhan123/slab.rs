@@ -17,15 +17,20 @@ export const tauriFileDialog: FileDialogPort = {
   },
 
   async pickFile(options): Promise<PickedFile | null> {
-    if (!isTauri()) return null
+    const picked = await this.pickFiles({ ...options, multiple: false })
+    return picked[0] ?? null
+  },
+
+  async pickFiles(options): Promise<PickedFile[]> {
+    if (!isTauri()) return []
     const { open } = await import("@tauri-apps/plugin-dialog")
     const selected = await open({
-      multiple: options?.multiple ?? false,
+      multiple: options?.multiple ?? true,
       filters: options?.filters,
     })
-    if (selected === null) return null
-    const first = Array.isArray(selected) ? selected[0] : selected
-    if (typeof first !== "string") return null
-    return { path: first, name: first.split(/[/\\]/).pop() ?? first }
+    const list = Array.isArray(selected) ? selected : selected === null ? [] : [selected]
+    return list
+      .filter((entry): entry is string => typeof entry === "string")
+      .map((path) => ({ path, name: path.split(/[/\\]/).pop() ?? path }))
   },
 }

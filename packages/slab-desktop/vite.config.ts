@@ -149,8 +149,10 @@ export default defineConfig(async () => ({
         replacement: path.resolve(__dirname, "../slab-ui/src/index.ts"),
       },
       {
-        find: "@",
-        replacement: path.resolve(__dirname, "./src"),
+        // `@` belongs to @slab/components sources (they import `@/lib/utils`);
+        // desktop's own files use relative or @slab/* specifiers.
+        find: /^@\/(.+)$/,
+        replacement: path.resolve(__dirname, "../slab-components/src").replace(/\\/g, "/") + "/$1",
       },
       {
         find: "vscode",

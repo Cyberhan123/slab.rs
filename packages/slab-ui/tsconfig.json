@@ -2,21 +2,57 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "@slab/api": ["../api/src/index.ts"],
-      "@slab/api/*": ["../api/src/*"],
-      "@slab/components": ["../slab-components/src/index.ts"],
-      "@slab/components/*": ["../slab-components/src/*"],
-      "@slab/core": ["../slab-core/src/index.ts"],
-      "@slab/core/*": ["../slab-core/src/*"],
-      "@slab/i18n": ["../slab-i18n/src/index.ts"],
-      "@slab/plugin-sdk": ["../slab-plugin-sdk/src/index.ts"],
-      "@slab/test-utils": ["../slab-test-utils/src/index.ts"],
-      "@slab/test-utils/*": ["../slab-test-utils/src/*"]
+      "@slab/api": [
+        "../api/src/index.ts"
+      ],
+      "@slab/api/*": [
+        "../api/src/*"
+      ],
+      "@slab/components": [
+        "../slab-components/src/index.ts"
+      ],
+      "@slab/components/*": [
+        "../slab-components/src/*"
+      ],
+      "@slab/core": [
+        "../slab-core/src/index.ts"
+      ],
+      "@slab/core/*": [
+        "../slab-core/src/*"
+      ],
+      "@slab/i18n": [
+        "../slab-i18n/src/index.ts"
+      ],
+      "@slab/plugin-sdk": [
+        "../slab-plugin-sdk/src/index.ts"
+      ],
+      "@slab/test-utils": [
+        "../slab-test-utils/src/index.ts"
+      ],
+      "@slab/test-utils/*": [
+        "../slab-test-utils/src/*"
+      ],
+      "@slab/ui": [
+        "./src/index.ts"
+      ],
+      "@slab/ui/*": [
+        "./src/*"
+      ],
+      "@codingame/monaco-vscode-extensions-service-override": [
+        "./src/types/monaco-vscode-extensions-service-override.d.ts"
+      ],
+      "@/*": [
+        "../slab-components/src/*"
+      ]
     },
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

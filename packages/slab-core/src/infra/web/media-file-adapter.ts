@@ -18,4 +18,10 @@ export const webMediaFile: MediaFilePort = {
     }
     return response.blob()
   },
+
+  async writeTempAudio() {
+    throw new Error("temp audio staging is only available in Tauri mode")
+  },
+
+  async removeTempAudio() {},
 }

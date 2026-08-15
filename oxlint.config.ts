@@ -28,7 +28,7 @@ export default defineConfig({
     "packages/api/src/v1.d.ts",
     "packages/slab-plugin-sdk/browser/**",
     // Reference-only UI samples — never imported or shipped, not product code.
-    "packages/slab-desktop/src/pages/assistant/components/message/example-full-message/**",
+    "packages/slab-ui/src/pages/assistant/components/message/example-full-message/**",
   ],
   settings: {
     react: {

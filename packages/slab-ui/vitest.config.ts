@@ -2,6 +2,7 @@ import react from "@vitejs/plugin-react";
 import { playwright } from "@vitest/browser-playwright";
 import { defineProject, mergeConfig } from "vitest/config";
 
+import { uiVitestResolve } from "./vitest.shared";
 import { vitestBase } from "../../vitest.base";
 
 // Browser-mode unit tests (mirrors packages/slab-desktop/vitest.config.ts):
@@ -22,12 +23,12 @@ export default defineProject(
       browser: {
         enabled: true,
         headless: true,
-        api: { port: 64117 },
         provider: playwright({
           actionTimeout: browserActionTimeoutMs,
         }),
         instances: [{ browser: "chromium" }],
       },
     },
+    resolve: uiVitestResolve,
   }),
 );

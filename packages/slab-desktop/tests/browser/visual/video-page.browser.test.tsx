@@ -1,18 +1,18 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import VideoPage from '@/pages/video';
+import VideoPage from '@slab/ui/pages/video';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseVideoGeneration } = vi.hoisted(() => ({
   mockUseVideoGeneration: vi.fn<() => unknown>(),
 }));
 
-vi.mock('@/pages/video/hooks/use-video-generation', () => ({
+vi.mock('@slab/ui/pages/video/hooks/use-video-generation', () => ({
   useVideoGeneration: mockUseVideoGeneration,
 }));
 
-vi.mock('@/hooks/use-header', () => ({
+vi.mock('@slab/ui/hooks/use-header', () => ({
   useHeader: vi.fn<() => unknown>(() => ({
     meta: { title: 'Video', subtitle: 'Video', icon: vi.fn(), contextLabel: null },
     search: null,

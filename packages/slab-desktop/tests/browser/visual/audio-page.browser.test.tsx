@@ -1,19 +1,19 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import AudioPage from '@/pages/audio';
-import type { SelectedFile } from '@/hooks/use-file';
+import AudioPage from '@slab/ui/pages/audio';
+import type { SelectedFile } from '@slab/ui/hooks/use-file';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseAudio } = vi.hoisted(() => ({
   mockUseAudio: vi.fn<() => unknown>(),
 }));
 
-vi.mock('@/pages/audio/hooks/use-audio', () => ({
+vi.mock('@slab/ui/pages/audio/hooks/use-audio', () => ({
   useAudio: mockUseAudio,
 }));
 
-vi.mock('@/hooks/use-header', () => ({
+vi.mock('@slab/ui/hooks/use-header', () => ({
   useHeader: vi.fn<() => unknown>(() => ({
     meta: { title: 'Audio', subtitle: 'Audio', icon: vi.fn(), contextLabel: null },
     search: null,

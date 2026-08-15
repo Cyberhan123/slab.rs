@@ -2,11 +2,11 @@ import { page, userEvent } from 'vitest/browser';
 import { describe, expect, it, vi } from 'vitest';
 import { createMemoryRouter, Route, Routes } from 'react-router-dom';
 
-import Layout from '@/layouts';
-import { staticDesktopRoutes } from '@/routes';
+import Layout from '@slab/ui/layouts';
+import { staticDesktopRoutes } from '@slab/ui/routes';
 import { renderDesktopScene } from '../test-utils';
 
-vi.mock('@/pages/plugins/hooks/use-runtime-plugins', () => ({
+vi.mock('@slab/ui/pages/plugins/hooks/use-runtime-plugins', () => ({
   RUNTIME_PLUGINS_QUERY_KEY: ['plugin-runtime-list'],
   useRuntimePlugins: vi.fn<() => unknown>(() => ({
     data: [],

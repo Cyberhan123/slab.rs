@@ -2,8 +2,8 @@ import { createMemoryRouter } from 'react-router-dom';
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createDesktopRoutes } from '@/routes';
-import type { SettingsDocumentResponse } from '@/pages/settings/types';
+import { createDesktopRoutes } from '@slab/ui/routes';
+import type { SettingsDocumentResponse } from '@slab/ui/pages/settings/types';
 import { renderDesktopScene } from '../test-utils';
 
 const {
