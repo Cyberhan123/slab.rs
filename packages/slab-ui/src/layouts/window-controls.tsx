@@ -1,4 +1,3 @@
-import { getCurrentWindow } from "@tauri-apps/api/window"
 import { Minus, Plus, Square, X } from "lucide-react"
 import { toast } from "sonner"
 import { getErrorMessage } from "@slab/api"
@@ -7,6 +6,7 @@ import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
 import useDesktopPlatform, { type DesktopPlatform } from "@slab/ui/hooks/use-desktop-platform"
 import useIsTauri from "@slab/ui/hooks/use-tauri"
+import { useSlab } from "@slab/ui/provider/slab-provider"
 import { cn } from "@slab/ui/lib/utils"
 
 type WindowControlAction = "minimize" | "toggleMaximize" | "close"
@@ -90,19 +90,21 @@ function getWindowControlErrorMessage(error: unknown, t: Translate) {
   return message
 }
 
-async function runWindowAction(action: WindowControlAction, t: Translate) {
+async function runWindowAction(
+  action: WindowControlAction,
+  t: Translate,
+  windowChrome: { minimize(): Promise<void>; toggleMaximize(): Promise<void>; close(): Promise<void> },
+) {
   try {
-    const appWindow = getCurrentWindow()
-
     switch (action) {
       case "minimize":
-        await appWindow.minimize()
+        await windowChrome.minimize()
         break
       case "toggleMaximize":
-        await appWindow.toggleMaximize()
+        await windowChrome.toggleMaximize()
         break
       case "close":
-        await appWindow.close()
+        await windowChrome.close()
         break
     }
   } catch (error) {
@@ -114,6 +116,7 @@ async function runWindowAction(action: WindowControlAction, t: Translate) {
 
 function MacWindowControls({ placement }: { placement: WindowControlsPlacement }) {
   const { t } = useTranslation()
+  const { ports } = useSlab()
 
   return (
     <div
@@ -136,7 +139,7 @@ function MacWindowControls({ placement }: { placement: WindowControlsPlacement }
             title={label}
             className={`group flex size-3 items-center justify-center rounded-full border transition-transform hover:scale-105 ${toneClassName}`}
             onClick={() => {
-              void runWindowAction(action, t)
+              void runWindowAction(action, t, ports.windowChrome)
             }}
           >
             <Icon className="size-2.5 opacity-0 transition-opacity group-hover:opacity-85" strokeWidth={2.6} />
@@ -149,6 +152,7 @@ function MacWindowControls({ placement }: { placement: WindowControlsPlacement }
 
 function DesktopWindowControls() {
   const { t } = useTranslation()
+  const { ports } = useSlab()
   const minimizeLabel = getWindowControlLabel("minimize", t)
   const toggleMaximizeLabel = getWindowControlLabel("toggleMaximize", t)
   const closeLabel = getWindowControlLabel("close", t)
@@ -168,7 +172,7 @@ function DesktopWindowControls() {
         title={minimizeLabel}
         className="size-7 rounded-[10px] text-[color:var(--shell-rail-label)] hover:bg-glass-bg-strong hover:text-[color:var(--shell-title)]"
         onClick={() => {
-          void runWindowAction("minimize", t)
+          void runWindowAction("minimize", t, ports.windowChrome)
         }}
       >
         <Minus className="size-4" />
@@ -182,7 +186,7 @@ function DesktopWindowControls() {
         title={toggleMaximizeLabel}
         className="size-7 rounded-[10px] text-[color:var(--shell-rail-label)] hover:bg-glass-bg-strong hover:text-[color:var(--shell-title)]"
         onClick={() => {
-          void runWindowAction("toggleMaximize", t)
+          void runWindowAction("toggleMaximize", t, ports.windowChrome)
         }}
       >
         <Square className="size-[13px]" />
@@ -196,7 +200,7 @@ function DesktopWindowControls() {
         title={closeLabel}
         className="size-7 rounded-[10px] text-[color:var(--shell-rail-label)] hover:bg-destructive/12 hover:text-destructive"
         onClick={() => {
-          void runWindowAction("close", t)
+          void runWindowAction("close", t, ports.windowChrome)
         }}
       >
         <X className="size-4" />

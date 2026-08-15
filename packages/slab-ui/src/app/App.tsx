@@ -14,9 +14,9 @@ import { TooltipProvider } from "@slab/components/tooltip";
 import api from "@slab/api";
 import { queryClient } from "@slab/ui/lib/query-client";
 import {
-  pluginSetThemeSnapshot,
+  getPluginHost,
   readPluginThemeSnapshot,
-} from "@slab/core/infra/tauri/plugin-host-bridge";
+} from "@slab/core/platform/plugin-host";
 import {
   WORKSPACE_STATE_QUERY_KEY,
   workspaceState,
@@ -126,7 +126,7 @@ function PluginThemeSync() {
   const publishTheme = useCallback(() => {
     window.cancelAnimationFrame(animationFrameRef.current);
     animationFrameRef.current = window.requestAnimationFrame(() => {
-      void pluginSetThemeSnapshot(readPluginThemeSnapshot()).catch((error) => {
+      void getPluginHost().setThemeSnapshot(readPluginThemeSnapshot()).catch((error) => {
         console.warn("failed to publish plugin theme snapshot", error);
       });
     });

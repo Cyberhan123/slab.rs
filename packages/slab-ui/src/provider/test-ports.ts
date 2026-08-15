@@ -46,6 +46,14 @@ export function createTestSlabPorts(
       desktop: false,
       mobile: false,
     },
+    windowChrome: {
+      async minimize() {},
+      async toggleMaximize() {},
+      async close() {},
+      isAvailable() {
+        return false
+      },
+    },
     ...overrides,
   }
 }

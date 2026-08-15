@@ -12,7 +12,7 @@ const { useAiModelMock, toastMock } = vi.hoisted(() => ({
 
 vi.mock("@slab/ui/hooks/use-ai-model", () => ({ useAiModel: useAiModelMock }))
 vi.mock("sonner", () => ({ toast: toastMock }))
-vi.mock("@slab/i18n", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock("@slab/i18n", () => ({ default: { t: (key: string) => key }, useTranslation: () => ({ t: (key: string) => key }) }))
 vi.mock("../../lib/assistant-request-errors", () => ({
   getAssistantErrorDescription: (error: unknown, fallback: string) =>
     error instanceof Error ? error.message : fallback,

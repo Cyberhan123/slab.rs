@@ -1,10 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import {
-  SLAB_THEME_TOKENS,
-  type SlabThemeSnapshot,
-  type SlabThemeTokenName,
-} from "@slab/plugin-sdk";
+import type { SlabThemeSnapshot } from "@slab/plugin-sdk";
+
+import type { PluginHostPort } from "../../platform/plugin-host";
 import { isTauri } from "../../platform/detect";
 
 export type PluginInfo = {
@@ -228,29 +226,6 @@ export async function pluginPickFile(): Promise<PluginPickFileResponse> {
   return invoke<PluginPickFileResponse>("plugin_pick_file");
 }
 
-export function readPluginThemeSnapshot(
-  targetDocument: Document = document,
-): PluginThemeSnapshot {
-  const root = targetDocument.documentElement;
-  const computed = targetDocument.defaultView?.getComputedStyle(root);
-  const tokens: Partial<Record<SlabThemeTokenName, string>> = {};
-
-  if (computed) {
-    for (const token of SLAB_THEME_TOKENS) {
-      const value = computed.getPropertyValue(`--${token}`).trim();
-      if (value) {
-        tokens[token] = value;
-      }
-    }
-  }
-
-  return {
-    mode: root.classList.contains("dark") ? "dark" : "light",
-    tokens,
-    updatedAt: Date.now(),
-  };
-}
-
 export async function pluginSetThemeSnapshot(
   snapshot: PluginThemeSnapshot,
 ): Promise<void> {
@@ -277,3 +252,16 @@ export async function pluginOnEvent(
   });
 }
 
+
+/** Tauri-backed {@link PluginHostPort}; degrades to web behavior outside Tauri. */
+export const tauriPluginHost: PluginHostPort = {
+  runtimeList: pluginRuntimeList,
+  mountView: pluginMountView,
+  updateViewBounds: pluginUpdateViewBounds,
+  unmountView: pluginUnmountView,
+  call: pluginCall,
+  pickFile: pluginPickFile,
+  setThemeSnapshot: pluginSetThemeSnapshot,
+  themeSnapshot: pluginThemeSnapshot,
+  onEvent: pluginOnEvent,
+};

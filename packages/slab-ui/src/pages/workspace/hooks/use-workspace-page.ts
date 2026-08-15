@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom"
 import { useTranslation } from "@slab/i18n"
 import { toast } from "sonner"
 
-import { pickFolder } from "@slab/ui/lib/pick-folder"
 import {
   workspaceClose,
   workspaceGitCommit,
@@ -39,6 +38,7 @@ import {
   getWorkspaceThemeMode,
   type WorkspaceThemeMode,
 } from "../lib/monaco-theme"
+import { useSlab } from "@slab/ui/provider/slab-provider"
 import { upsertFileTab } from "../lib/workspace-page-utils"
 import {
   fileNameFromPath,
@@ -58,6 +58,7 @@ const MAX_WORKSPACE_PREVIEW_BYTES = 1024 * 1024
 
 export function useWorkspacePage() {
   const { t } = useTranslation()
+  const { ports } = useSlab()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [selectedFile, setSelectedFile] = useState<WorkspaceFileContent | null>(null)
@@ -234,11 +235,11 @@ export function useWorkspacePage() {
   )
 
   const handleOpenFolder = useCallback(async () => {
-    const selected = await pickFolder()
+    const selected = await ports.fileDialog.pickFolder()
     if (typeof selected === "string") {
       await openWorkspacePath(selected)
     }
-  }, [openWorkspacePath])
+  }, [openWorkspacePath, ports.fileDialog])
 
   const handleCloseWorkspace = useCallback(async () => {
     try {

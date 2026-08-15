@@ -95,4 +95,5 @@ export type SlabPorts = {
   imageSrc: ImageSrcPort
   notifications: NotificationPort
   platformInfo: SlabPlatformInfo
+  windowChrome: WindowChromePort
 }

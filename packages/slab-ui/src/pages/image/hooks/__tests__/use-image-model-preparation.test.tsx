@@ -8,7 +8,7 @@ const { useAiModelMock, toastMock } = vi.hoisted(() => ({
 
 vi.mock('@slab/ui/hooks/use-ai-model', () => ({ useAiModel: useAiModelMock }));
 vi.mock('sonner', () => ({ toast: toastMock }));
-vi.mock('@slab/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('@slab/i18n', () => ({ default: { t: (key: string) => key }, useTranslation: () => ({ t: (key: string) => key }) }));
 
 import type { AiModel, EnsureDownloadedResult, EnsureLoadedResult, UseAiModelResult } from '@slab/ui/hooks/use-ai-model';
 import { useImageModelPreparation } from '../use-image-model-preparation';

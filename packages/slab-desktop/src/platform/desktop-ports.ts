@@ -4,8 +4,10 @@ import {
   createTauriPorts,
   setImageSrcPort,
   setNotifier,
+  setPluginHost,
   tauriImageSrc,
 } from "@slab/core"
+import { tauriPluginHost } from "@slab/core/infra/tauri/plugin-host-bridge"
 import type { NotificationPort } from "@slab/core"
 
 /**
@@ -31,6 +33,7 @@ export function assembleDesktopPlatform() {
   assembled = true
   setImageSrcPort(tauriImageSrc)
   setNotifier(sonnerNotifier)
+  setPluginHost(tauriPluginHost)
 }
 
 export function createDesktopPorts() {

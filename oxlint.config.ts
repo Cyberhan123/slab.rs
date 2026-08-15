@@ -47,6 +47,82 @@ export default defineConfig({
   },
   overrides: [
     {
+      // DDD boundary: @slab/core must stay pure — no view layer, no UI state
+      // libraries, no concrete ui imports.
+      files: ["packages/slab-core/src/**/*.ts", "packages/slab-core/src/**/*.tsx"],
+      rules: {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            paths: [
+              "react",
+              "react-dom",
+              "react-dom/client",
+              "sonner",
+              "@slab/ui",
+              "@slab/components",
+              "@tanstack/react-query",
+              "zustand",
+            ],
+            patterns: [
+              {
+                group: ["react/*", "@slab/ui/*", "@slab/components/*"],
+                message: "@slab/core must not import view-layer modules.",
+              },
+              {
+                group: ["@slab/core/infra/*"],
+                message:
+                  "@slab/core platform seams (src/platform/*) must not reach into concrete infra adapters; shells install them instead.",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      // @slab/core/src/infra/tauri is the ONLY place allowed to touch Tauri.
+      files: ["packages/slab-core/src/infra/tauri/**/*.ts"],
+      rules: {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            paths: [
+              "react",
+              "react-dom",
+              "sonner",
+              "@slab/ui",
+              "@slab/components",
+            ],
+            patterns: [
+              {
+                group: ["react/*", "@slab/ui/*", "@slab/components/*"],
+                message: "infra adapters must stay view-free.",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      // DDD boundary: @slab/ui consumes ports/seams, never concrete adapters,
+      // and never Tauri directly.
+      files: ["packages/slab-ui/src/**/*.ts", "packages/slab-ui/src/**/*.tsx"],
+      rules: {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            patterns: [
+              {
+                group: ["@tauri-apps/*", "@slab/core/infra/*"],
+                message:
+                  "@slab/ui must use the injected ports (@slab/core platform seams / SlabProvider), not concrete infra adapters.",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
       files: [
         "packages/slab-desktop/**/*.test.ts",
         "packages/slab-desktop/**/*.test.tsx",

@@ -409,8 +409,6 @@
         "@streamdown/mermaid": "catalog:",
         "@tanstack/react-query": "catalog:",
         "@tanstack/react-virtual": "catalog:",
-        "@tauri-apps/api": "catalog:",
-        "@tauri-apps/plugin-dialog": "catalog:",
         "@types/markdown-it": "catalog:",
         "@xterm/addon-fit": "catalog:",
         "@xterm/addon-unicode11": "catalog:",

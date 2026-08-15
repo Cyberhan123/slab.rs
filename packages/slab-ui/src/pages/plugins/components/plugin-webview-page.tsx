@@ -7,11 +7,9 @@ import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 
 import { isTauri } from '@slab/ui/hooks/use-tauri';
 import {
-  pluginMountView,
-  pluginUnmountView,
-  pluginUpdateViewBounds,
+  getPluginHost,
   type PluginViewBounds,
-} from '@slab/core/infra/tauri/plugin-host-bridge';
+} from '@slab/core/platform/plugin-host';
 import type { PluginRecord } from '../utils';
 
 type PluginWebviewPageProps = {
@@ -51,7 +49,7 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
     const host = hostRef.current;
     if (!host) return;
     const bounds = rectToBounds(host.getBoundingClientRect());
-    await pluginUpdateViewBounds({ pluginId: plugin.id, bounds });
+    await getPluginHost().updateViewBounds({ pluginId: plugin.id, bounds });
   }, [isDesktopTauri, plugin.id]);
 
   useWindowEvent('resize', () => {
@@ -72,7 +70,7 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
     const mount = async () => {
       try {
         const bounds = rectToBounds(host.getBoundingClientRect());
-        await pluginMountView({ pluginId: plugin.id, bounds });
+        await getPluginHost().mountView({ pluginId: plugin.id, bounds });
         if (!cancelled) {
           setMounted(true);
           setError(null);
@@ -88,7 +86,7 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
 
     return () => {
       cancelled = true;
-      void pluginUnmountView({ pluginId: plugin.id });
+      void getPluginHost().unmountView({ pluginId: plugin.id });
     };
   }, [isDesktopTauri, plugin.id]);
 
