@@ -5,6 +5,8 @@
  * - {@link HarnessClient}: persistent JSON-RPC WS client (initialize, request
  *   correlation, notification dispatch).
  * - {@link HarnessChatTransport}: `ChatTransport<UIMessage>` driving live turns.
+ * - {@link ConversationController}: framework-free conversation state machine
+ *   (restore, approvals, compaction, plan mode) exposed as an external store.
  * - {@link turnItemsToMessages}: restore resumed `TurnItem`s into `UIMessage[]`.
  * - {@link convertNotification}: harness notification → `UIMessageChunk[]`.
  */
@@ -15,6 +17,25 @@ export type {
 } from "./harness-transport"
 export { HarnessChatTransport } from "./harness-transport"
 export { turnItemsToMessages } from "./turn-items"
+export { buildTurnInput } from "./turn-input"
+export {
+  ConversationController,
+  MAX_RESTORE_ATTEMPTS,
+  RESTORE_BACKOFF_MS,
+  buildUserMessageTurnIndex,
+} from "./conversation-controller"
+export type {
+  ActionError,
+  ApprovalRequest,
+  ApprovalStatus,
+  CompactionMarker,
+  CompactionMode,
+  CompactionPhase,
+  ConversationControllerOptions,
+  ConversationState,
+  ModelLoadState,
+  TurnSendOptions,
+} from "./conversation-controller"
 export {
   coerceServerNotification,
   convertNotification,

@@ -22,7 +22,6 @@ import {
   createUIMessageStream,
 } from "ai"
 
-import { getImageSrcPort } from "../platform/image-src"
 import { getNotifier } from "../platform/notifications"
 
 import type { HarnessClient } from "./harness-client"
@@ -32,6 +31,7 @@ import {
   createStreamState,
   isTerminalNotification,
 } from "./stream"
+import { buildTurnInput } from "./turn-input"
 import type {
   JsonRpcNotification,
   PermissionMode,
@@ -45,41 +45,6 @@ export interface HarnessChatTransportOptions {
   client: HarnessClient
   /** Model id sent on `turn/start` (defaults to "slab-llama"). */
   model?: string
-}
-
-/**
- * Build the new turn's `input` from the latest user message: its text plus any
- * image attachments (AI-SDK `file` parts with an image media type), mapped to
- * harness `UserInput` variants. Non-image files are ignored here (no harness
- * upload path yet).
- */
-function buildTurnInput(messages: UIMessage[]): UserInput[] {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i]
-    if (message.role !== "user") continue
-    const input: UserInput[] = []
-    const text = message.parts
-      .filter((part): part is { type: "text"; text: string } => part.type === "text")
-      .map((part) => part.text)
-      .join("")
-      .trim()
-    if (text) input.push({ type: "text", text, textElements: [] })
-    for (const part of message.parts) {
-      if (part.type !== "file") continue
-      const file = part as { type: "file"; mediaType?: string; url: string }
-      if (!file.mediaType?.startsWith("image")) continue
-      // On Tauri the picker yields a native path; send `localImage` so the
-      // server reads the file directly (no base64 round-trip). Web / paste /
-      // drop yield a `data:` URL → send `image`. Both are handled server-side.
-      if (getImageSrcPort().canResolveLocalPaths() && !file.url.startsWith("data:")) {
-        input.push({ type: "localImage", path: file.url, detail: "auto" })
-      } else {
-        input.push({ type: "image", imageUrl: file.url, detail: "auto" })
-      }
-    }
-    return input
-  }
-  return []
 }
 
 /** Read the reasoning-effort selector carried via `sendMessage({ metadata })`. */
