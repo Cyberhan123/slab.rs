@@ -1,189 +1,37 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { SlabThemeSnapshot } from "@slab/plugin-sdk";
 
-import type { PluginHostPort } from "../../platform/plugin-host";
 import { isTauri } from "../../platform/detect";
+import type {
+  PluginCallRequest,
+  PluginCallResponse,
+  PluginEventPayload,
+  PluginHostPort,
+  PluginInfo,
+  PluginMountViewRequest,
+  PluginMountViewResponse,
+  PluginPickFileResponse,
+  PluginThemeSnapshot,
+  PluginViewBounds,
+} from "../../platform/plugin-host";
 
-export type PluginInfo = {
-  id: string;
-  name: string;
-  version: string;
-  valid: boolean;
-  error?: string | null;
-  manifestVersion: number;
-  compatibility: PluginCompatibility;
-  uiEntry?: string | null;
-  hasWasm?: boolean;
-  networkMode: "blocked" | "allowlist" | string;
-  allowHosts: string[];
-  contributions: PluginContributions;
-  permissions: PluginPermissions;
-};
-
-export type PluginCompatibility = {
-  slab?: string | null;
-  pluginApi?: string | null;
-};
-
-export type PluginContributions = {
-  routes: PluginRouteContribution[];
-  sidebar: PluginSidebarContribution[];
-  commands: PluginCommandContribution[];
-  settings: PluginSettingsContribution[];
-  agentCapabilities: PluginAgentCapabilityContribution[];
-  agentHooks: PluginAgentHookContribution[];
-  languageServers: PluginLanguageServerContribution[];
-};
-
-export type PluginRouteContribution = {
-  id: string;
-  path: string;
-  title?: string | null;
-  titleKey?: string | null;
-  entry?: string | null;
-};
-
-export type PluginSidebarContribution = {
-  id: string;
-  label?: string | null;
-  labelKey?: string | null;
-  route?: string | null;
-  command?: string | null;
-  icon?: string | null;
-};
-
-export type PluginCommandContribution = {
-  id: string;
-  label?: string | null;
-  labelKey?: string | null;
-  action?: string | null;
-  route?: string | null;
-};
-
-export type PluginSettingsContribution = {
-  id: string;
-  title?: string | null;
-  titleKey?: string | null;
-  schema: string;
-};
-
-export type PluginAgentCapabilityContribution = {
-  id: string;
-  kind: "tool" | "workflow" | string;
-  description?: string | null;
-  descriptionKey?: string | null;
-  inputSchema?: string | null;
-  outputSchema?: string | null;
-  effects: string[];
-  transport: {
-    type: "pluginCall" | string;
-    function: string;
-  };
-  exposeAsMcpTool: boolean;
-};
-
-export type PluginAgentHookContribution = {
-  id: string;
-  description?: string | null;
-  descriptionKey?: string | null;
-  events: Array<
-    | "on_agent_start"
-    | "on_llm_start"
-    | "on_llm_end"
-    | "on_tool_start"
-    | "on_tool_end"
-    | "on_agent_end"
-    | string
-  >;
-  transport: {
-    runtime: "javascript" | "python" | string;
-    function: string;
-  };
-};
-
-export type PluginLanguageServerContribution = {
-  id: string;
-  languages: string[];
-  transport:
-    | {
-        type: "stdio";
-        command: string;
-        args?: string[];
-        env?: Record<string, string>;
-      }
-    | {
-        type: "webSocket";
-        url: string;
-      }
-    | {
-        /** npm package bundled inside the plugin directory. The runtime resolves
-         *  the command from the plugin's node_modules/.bin/ before falling back
-         *  to the system PATH, so no global installation is required. */
-        type: "nodePackage";
-        package: string;
-        command?: string;
-        args?: string[];
-        env?: Record<string, string>;
-      };
-};
-
-export type PluginPermissions = {
-  network: {
-    mode: "blocked" | "allowlist" | string;
-    allowHosts: string[];
-  };
-  ui: string[];
-  agent: string[];
-  lsp: string[];
-  slabApi: string[];
-  files: {
-    read: string[];
-    write: string[];
-  };
-};
-
-export type PluginViewBounds = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-export type PluginMountViewRequest = {
-  pluginId: string;
-  bounds: PluginViewBounds;
-};
-
-export type PluginMountViewResponse = {
-  pluginId: string;
-  webviewLabel: string;
-  url: string;
-};
-
-export type PluginCallRequest = {
-  pluginId: string;
-  function: string;
-  input?: string;
-};
-
-export type PluginCallResponse = {
-  outputText: string;
-  outputBase64: string;
-};
-
-export type PluginPickFileResponse = {
-  path: string | null;
-};
-
-export type PluginEventPayload = {
-  pluginId: string;
-  topic: string;
-  data: unknown;
-  ts: number;
-};
-
-export type PluginThemeSnapshot = SlabThemeSnapshot;
+// The DTO types live with the platform seam (`platform/plugin-host.ts`); this
+// bridge only implements the Tauri transport. Re-exported for any existing
+// deep-path consumers.
+export type {
+  PluginCallRequest,
+  PluginCallResponse,
+  PluginCompatibility,
+  PluginContributions,
+  PluginEventPayload,
+  PluginInfo,
+  PluginMountViewRequest,
+  PluginMountViewResponse,
+  PluginPermissions,
+  PluginPickFileResponse,
+  PluginThemeSnapshot,
+  PluginViewBounds,
+} from "../../platform/plugin-host";
 
 export async function pluginRuntimeList(): Promise<PluginInfo[]> {
   if (!isTauri()) return [];

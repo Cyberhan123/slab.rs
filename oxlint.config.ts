@@ -80,6 +80,30 @@ export default defineConfig({
       },
     },
     {
+      // Platform seams must stay adapter-free; only the create-ports assembly
+      // factory (and the shells) may wire concrete infra adapters in.
+      files: [
+        "packages/slab-core/src/platform/detect.ts",
+        "packages/slab-core/src/platform/image-src.ts",
+        "packages/slab-core/src/platform/notifications.ts",
+        "packages/slab-core/src/platform/plugin-host.ts",
+      ],
+      rules: {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            patterns: [
+              {
+                group: ["../infra/*", "../../infra/*"],
+                message:
+                  "platform seams must not import concrete infra adapters (only create-ports.ts assembles them).",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
       // @slab/core/src/infra/tauri is the ONLY place allowed to touch Tauri.
       files: ["packages/slab-core/src/infra/tauri/**/*.ts"],
       rules: {
