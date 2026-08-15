@@ -13,12 +13,12 @@ import {
   getAudioTranscription,
   type AudioTranscriptionTask,
   type GenerationProgress,
-} from '@/lib/media-task-api';
-import { getErrorDescription } from '@/lib/error-description';
+} from '@slab/core/media/task-api';
+import { getErrorDescription } from '@slab/core/api/error-description';
 import {
   useModelConfigDocumentQuery,
   type ModelConfigDocumentResponse,
-} from '@/lib/model-config';
+} from '@slab/core/models/config';
 import { useAudioUiStore } from '@/store/useAudioUiStore';
 import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
 import { MODEL_DOWNLOAD_POLL_INTERVAL_MS } from '@/pages/task/utils';

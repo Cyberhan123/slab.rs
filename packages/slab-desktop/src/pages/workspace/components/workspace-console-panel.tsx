@@ -15,7 +15,7 @@ import { getErrorMessage } from "@slab/api"
 import {
   workspaceTerminalSession,
   type WorkspaceTerminalShell,
-} from "@/lib/workspace-bridge"
+} from "@slab/core/workspace/bridge"
 import { cn } from "@/lib/utils"
 
 type WorkspaceConsolePanelProps = {

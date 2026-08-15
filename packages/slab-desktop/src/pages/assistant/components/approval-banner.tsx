@@ -14,7 +14,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 
-import type { ApprovalScope } from "../lib/harness"
+import type { ApprovalScope } from "@slab/core/harness"
 import type { ApprovalRequest } from "../hooks/use-harness-conversation"
 import { PlanCardBody } from "./message/message-tool-plan-part"
 

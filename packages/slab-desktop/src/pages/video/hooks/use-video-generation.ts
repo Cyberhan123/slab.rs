@@ -16,7 +16,7 @@ import {
   resolveMediaUrl,
   type GenerationProgress,
   type VideoGenerationTask,
-} from '@/lib/media-task-api';
+} from '@slab/core/media/task-api';
 import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
 import { useWorkspaceHandoffStore } from '@/store/useWorkspaceHandoffStore';
 import { HEADER_SELECT_KEYS } from '@/layouts/header';

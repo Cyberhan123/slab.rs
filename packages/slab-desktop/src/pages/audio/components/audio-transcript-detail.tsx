@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 
 import { Button } from '@slab/components/button';
 import { useTranslation } from '@slab/i18n';
-import type { AudioTranscriptionTask } from '@/lib/media-task-api';
+import type { AudioTranscriptionTask } from '@slab/core/media/task-api';
 import {
   getTranscriptSegments,
   getTranscriptText,

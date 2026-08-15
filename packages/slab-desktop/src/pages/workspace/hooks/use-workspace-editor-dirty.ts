@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-import type { WorkspaceFileContent } from "@/lib/workspace-bridge"
+import type { WorkspaceFileContent } from "@slab/core/workspace/bridge"
 
 type UseWorkspaceEditorDirtyOptions = {
   workspaceRoot: string | null

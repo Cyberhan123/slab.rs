@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-react"
 
-import { workspaceSearchFiles, type RecentWorkspace, type WorkspaceFileContent } from "@/lib/workspace-bridge"
+import { workspaceSearchFiles, type RecentWorkspace, type WorkspaceFileContent } from "@slab/core/workspace/bridge"
 import type {
   WorkspaceExplorerPanel,
   WorkspaceFileTab,

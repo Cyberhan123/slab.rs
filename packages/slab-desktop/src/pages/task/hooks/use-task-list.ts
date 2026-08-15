@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
 import api from '@slab/api';
-import { getErrorDescription } from '@/lib/error-description';
+import { getErrorDescription } from '@slab/core/api/error-description';
 import { TASK_LIST_POLL_INTERVAL_MS, type Task, type TaskResult } from '../const';
 import { isMediaTaskType } from '../utils';
 import {

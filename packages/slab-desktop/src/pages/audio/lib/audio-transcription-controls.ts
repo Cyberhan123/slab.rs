@@ -1,7 +1,7 @@
 import {
   getModelConfigFieldValue,
   type ModelConfigDocumentResponse,
-} from '@/lib/model-config';
+} from '@slab/core/models/config';
 
 type UnknownRecord = Record<string, unknown>;
 

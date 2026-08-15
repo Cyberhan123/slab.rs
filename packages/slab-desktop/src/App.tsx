@@ -20,7 +20,7 @@ import {
 import {
   WORKSPACE_STATE_QUERY_KEY,
   workspaceState,
-} from "@/lib/workspace-bridge";
+} from "@slab/core/workspace/bridge";
 import { RUNTIME_PLUGINS_QUERY_KEY } from "@/pages/plugins/hooks/use-runtime-plugins";
 import { isPluginRunning } from "@/pages/plugins/utils";
 import { GUARDRAIL_PMIDS, useGuardrailFlag } from "@/lib/guardrail-flags";

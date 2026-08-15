@@ -1,4 +1,4 @@
-import type { ModelConfigDocumentResponse } from '@/lib/model-config';
+import type { ModelConfigDocumentResponse } from '@slab/core/models/config';
 
 export type BundledVadArtifact = {
   id: string;

@@ -1,7 +1,7 @@
 import { renderHook } from "vitest-browser-react"
 import { beforeAll, describe, expect, it, vi } from "vitest"
 
-import type { WorkspaceFileContent } from "@/lib/workspace-bridge"
+import type { WorkspaceFileContent } from "@slab/core/workspace/bridge"
 
 const makeFile = (content: string): WorkspaceFileContent =>
   ({ content } as unknown as WorkspaceFileContent)

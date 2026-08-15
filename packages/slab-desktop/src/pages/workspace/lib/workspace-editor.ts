@@ -5,7 +5,7 @@ import type {
   IResourceDiffEditorInput,
   IUntypedEditorInput,
 } from "@codingame/monaco-vscode-api/vscode/vs/workbench/common/editor"
-import type { WorkspaceGitDiff } from "@/lib/workspace-bridge"
+import type { WorkspaceGitDiff } from "@slab/core/workspace/bridge"
 import type { WorkspaceEditorSettings } from "@/store/useWorkspaceUiStore"
 import { lspLanguageForFile } from "./workspace-page-utils"
 import {

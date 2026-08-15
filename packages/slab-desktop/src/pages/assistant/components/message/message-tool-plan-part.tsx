@@ -10,7 +10,7 @@ import {
 } from "lucide-react"
 import type { ReactNode } from "react"
 
-import type { Plan, PlanStatus } from "@/pages/assistant/lib/harness/types"
+import type { Plan, PlanStatus } from "@slab/core/harness/types"
 import { useMessageInteraction } from "../message-interaction-context"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"

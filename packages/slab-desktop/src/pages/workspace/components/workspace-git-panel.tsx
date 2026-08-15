@@ -7,7 +7,7 @@ import {
   type WorkspaceGitFileStatus,
   type WorkspaceGitStatus,
   type WorkspaceGitStatusEntry,
-} from "@/lib/workspace-bridge"
+} from "@slab/core/workspace/bridge"
 import { cn } from "@/lib/utils"
 import { useWorkspaceConfirmDialog } from "../hooks/use-workspace-confirm"
 

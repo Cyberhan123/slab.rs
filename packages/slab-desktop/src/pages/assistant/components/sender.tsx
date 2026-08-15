@@ -53,7 +53,7 @@ import type {
   CommandInfo,
   PermissionMode,
   ReasoningEffort,
-} from "../lib/harness"
+} from "@slab/core/harness"
 import type { ApprovalRequest } from "../hooks/use-harness-conversation"
 import { resolveCommandDispatch } from "../lib/assistant-commands"
 import { ApprovalCard } from "./approval-banner"

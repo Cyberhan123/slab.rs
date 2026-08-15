@@ -8,7 +8,7 @@ vi.mock('@/store/ui-state-storage', () => ({
     removeItem: () => Promise.resolve(),
   }),
 }));
-vi.mock('@/lib/model-config', () => ({
+vi.mock('@slab/core/models/config', () => ({
   useModelConfigDocumentQuery: vi.fn<() => unknown>(() => ({ data: undefined, error: null })),
   getModelConfigFieldValue: () => undefined,
 }));

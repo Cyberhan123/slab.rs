@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import type { WorkspaceFileEntry } from "@/lib/workspace-bridge"
+import type { WorkspaceFileEntry } from "@slab/core/workspace/bridge"
 import {
   workspaceVscodeDirtyCloseTarget,
   supportsWorkspaceLsp,

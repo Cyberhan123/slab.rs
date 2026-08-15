@@ -25,7 +25,7 @@ import {
   type WorkspaceGitStatus,
   type WorkspaceGitStatusEntry,
   type WorkspaceTextSearchLineMatch,
-} from "@/lib/workspace-bridge"
+} from "@slab/core/workspace/bridge"
 import {
   emptyWorkspaceUiSnapshot,
   useWorkspaceUiStore,

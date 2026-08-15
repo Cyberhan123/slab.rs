@@ -15,7 +15,7 @@ const searchFilesMock = vi.hoisted(() => ({
 
 vi.mock("@slab/i18n", () => setupSlabI18nMock())
 
-vi.mock("@/lib/workspace-bridge", () => ({
+vi.mock("@slab/core/workspace/bridge", () => ({
   workspaceSearchFiles: searchFilesMock.searchFiles,
 }))
 

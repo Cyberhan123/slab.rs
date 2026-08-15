@@ -35,7 +35,7 @@ import {
 } from '@slab/components/collapsible';
 import { SplitWorkbench } from '@slab/components/workspace';
 import { GenerationProgressView } from '@/components/generation-progress';
-import type { GenerationProgress, ImageGenerationTask } from '@/lib/media-task-api';
+import type { GenerationProgress, ImageGenerationTask } from '@slab/core/media/task-api';
 import { cn } from '@/lib/utils';
 import {
   DIMENSION_PRESETS,

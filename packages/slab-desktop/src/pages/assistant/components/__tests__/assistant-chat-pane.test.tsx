@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render } from "vitest-browser-react"
 
 import { AssistantChatPane } from "../assistant-chat-pane"
-import type { HarnessChatTransport } from "../../lib/harness"
+import type { HarnessChatTransport } from "@slab/core/harness"
 import type { ApprovalStatus } from "../../hooks/use-harness-conversation"
 
 // Mutable stand-in for the `useChat` return so each test can set messages/status.

@@ -21,7 +21,7 @@ vi.mock('@slab/i18n', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
   translateServerField: (_i18n: unknown, _field: string, fallback: string) => fallback,
 }));
-vi.mock('@/lib/error-description', () => ({ getErrorDescription: () => 'error' }));
+vi.mock('@slab/core/api/error-description', () => ({ getErrorDescription: () => 'error' }));
 
 import type { Task } from '../../const';
 import { useTaskList } from '../use-task-list';

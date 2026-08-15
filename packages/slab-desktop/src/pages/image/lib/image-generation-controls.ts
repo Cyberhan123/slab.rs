@@ -1,7 +1,7 @@
 import {
   getModelConfigFieldValue,
   type ModelConfigDocumentResponse,
-} from '@/lib/model-config';
+} from '@slab/core/models/config';
 import { DEFAULT_GENERATION_SIZE, SAMPLE_METHODS, SCHEDULERS } from '../const';
 
 export type ImageGenerationMode = 'txt2img' | 'img2img';

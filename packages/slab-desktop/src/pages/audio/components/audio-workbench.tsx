@@ -8,7 +8,7 @@ import { useTranslation } from '@slab/i18n';
 import { FileAudio2, History, Loader2, RotateCcw } from 'lucide-react';
 import type { SelectedFile } from '@/hooks/use-file';
 import type { AiModel } from '@/hooks/use-ai-model';
-import type { AudioTranscriptionTask, GenerationProgress } from '@/lib/media-task-api';
+import type { AudioTranscriptionTask, GenerationProgress } from '@slab/core/media/task-api';
 import { GenerationProgressView } from '@/components/generation-progress';
 import type { PreparingStage } from '../const';
 import { VadSettings } from './vad-settings';

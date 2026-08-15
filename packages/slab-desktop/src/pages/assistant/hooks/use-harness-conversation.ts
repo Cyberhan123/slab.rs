@@ -38,7 +38,7 @@ import {
   type Thread,
   type TurnCompletedParams,
   type TurnUsage,
-} from "../lib/harness"
+} from "@slab/core/harness"
 
 /** A pending human-approval request surfaced from the harness (commands / file changes / plans). */
 export type ApprovalRequest = {

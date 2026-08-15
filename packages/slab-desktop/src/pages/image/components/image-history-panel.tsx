@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@slab/components/dialog';
-import { resolveMediaUrl, type ImageGenerationTask } from '@/lib/media-task-api';
+import { resolveMediaUrl, type ImageGenerationTask } from '@slab/core/media/task-api';
 
 type ImageHistoryPanelProps = {
   handleDownload: (src: string, index: number) => void;

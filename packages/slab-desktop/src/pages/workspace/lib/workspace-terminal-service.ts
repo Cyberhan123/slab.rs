@@ -6,7 +6,7 @@ import {
 } from "@codingame/monaco-vscode-terminal-service-override"
 import * as vscode from "vscode"
 
-import { workspaceTerminalSession } from "@/lib/workspace-bridge"
+import { workspaceTerminalSession } from "@slab/core/workspace/bridge"
 
 let nextTerminalProcessId = 1
 

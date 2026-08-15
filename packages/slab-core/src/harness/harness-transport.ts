@@ -21,9 +21,9 @@ import {
   type UIMessageChunk,
   createUIMessageStream,
 } from "ai"
-import { toast } from "sonner"
 
-import { isTauri } from "@/hooks/use-tauri"
+import { getImageSrcPort } from "../platform/image-src"
+import { getNotifier } from "../platform/notifications"
 
 import type { HarnessClient } from "./harness-client"
 import {
@@ -71,7 +71,7 @@ function buildTurnInput(messages: UIMessage[]): UserInput[] {
       // On Tauri the picker yields a native path; send `localImage` so the
       // server reads the file directly (no base64 round-trip). Web / paste /
       // drop yield a `data:` URL → send `image`. Both are handled server-side.
-      if (isTauri() && !file.url.startsWith("data:")) {
+      if (getImageSrcPort().canResolveLocalPaths() && !file.url.startsWith("data:")) {
         input.push({ type: "localImage", path: file.url, detail: "auto" })
       } else {
         input.push({ type: "image", imageUrl: file.url, detail: "auto" })
@@ -213,7 +213,7 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
               const message = error instanceof Error ? error.message : "turn failed"
               // Surface a failed turn (e.g. model-load failure) visibly instead
               // of a silent empty bubble — the part stream has no error slot.
-              toast.error(message)
+              getNotifier().error(message)
               writer.write({ errorText: message, type: "error" })
               writer.write({ finishReason: "error", type: "finish" })
               done()

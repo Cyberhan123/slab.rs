@@ -17,10 +17,8 @@
 import type { UIMessage } from "ai"
 
 import { SERVER_BASE_URL } from "@slab/api/config"
-import { convertFileSrc } from "@tauri-apps/api/core"
 
-import { isTauri } from "@/hooks/use-tauri"
-
+import { getImageSrcPort } from "../platform/image-src"
 import type { ReasoningText, TurnItem, UserMessageContent } from "./types"
 
 /** A single UI message part (the finalized shape `useChat` assembles). */
@@ -33,13 +31,15 @@ type UiPart = UIMessage["parts"][number]
  * - slab-server artifact paths (`/v1/images/...`) — resolved against the
  *   configured API base so they load in both web and Tauri.
  * - Native filesystem paths (Tauri `localImage` / persisted user image) —
- *   rendered via the Tauri asset protocol; `null` on web (no way to fetch).
+ *   rendered via the injected `ImageSrcPort` (Tauri asset protocol on desktop,
+ *   `null` on web where local paths cannot be fetched).
  */
 function resolveImageUrl(pathOrUrl: string): string | null {
   if (!pathOrUrl) return null
   if (pathOrUrl.startsWith("data:") || /^https?:\/\//i.test(pathOrUrl)) return pathOrUrl
   if (pathOrUrl.startsWith("/v1/")) return `${SERVER_BASE_URL}${pathOrUrl}`
-  return isTauri() ? convertFileSrc(pathOrUrl) : null
+  const imageSrc = getImageSrcPort()
+  return imageSrc.canResolveLocalPaths() ? imageSrc.resolve(pathOrUrl) : null
 }
 
 /** Build an inline image UI part from a fetchable URL, or `null`. */

@@ -2,7 +2,7 @@ import { Loader2 } from 'lucide-react';
 
 import { Progress } from '@slab/components/progress';
 import { cn } from '@/lib/utils';
-import type { GenerationProgress } from '@/lib/media-task-api';
+import type { GenerationProgress } from '@slab/core/media/task-api';
 
 type GenerationProgressProps = {
   progress: GenerationProgress | null;

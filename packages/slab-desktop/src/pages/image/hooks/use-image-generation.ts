@@ -14,7 +14,7 @@ import {
   resolveMediaUrl,
   type GenerationProgress,
   type ImageGenerationTask,
-} from '@/lib/media-task-api';
+} from '@slab/core/media/task-api';
 import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
 import {
   DEFAULT_GENERATION_SIZE,

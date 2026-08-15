@@ -23,12 +23,12 @@ import {
   workspaceStatPath,
   workspaceWatch,
   workspaceWriteFile,
-} from "@/lib/workspace-bridge"
+} from "@slab/core/workspace/bridge"
 import type {
   WorkspaceDirectoryResponse,
   WorkspaceFileContent,
   WorkspaceWatchEvent,
-} from "@/lib/workspace-bridge"
+} from "@slab/core/workspace/bridge"
 import {
   workspaceLspFileUri,
   workspaceLspModelPath,

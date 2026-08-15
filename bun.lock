@@ -106,6 +106,22 @@
         "react-dom": "catalog:react-peer",
       },
     },
+    "packages/slab-core": {
+      "name": "@slab/core",
+      "version": "0.1.0",
+      "dependencies": {
+        "@slab/api": "workspace:*",
+        "@tauri-apps/api": "catalog:",
+        "@tauri-apps/plugin-dialog": "catalog:",
+        "ai": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/slab-desktop": {
       "name": "@slab/desktop",
       "version": "0.1.0",
@@ -171,8 +187,10 @@
         "@shikijs/monaco": "catalog:",
         "@slab/api": "workspace:*",
         "@slab/components": "workspace:*",
+        "@slab/core": "workspace:*",
         "@slab/i18n": "workspace:*",
         "@slab/plugin-sdk": "workspace:*",
+        "@slab/ui": "workspace:*",
         "@streamdown/cjk": "catalog:",
         "@streamdown/code": "catalog:",
         "@streamdown/math": "catalog:",
@@ -310,6 +328,40 @@
         "@tanstack/react-query": "catalog:",
         "react-router-dom": "catalog:",
         "sonner": "catalog:",
+        "vitest": "catalog:",
+        "vitest-browser-react": "catalog:",
+      },
+      "peerDependencies": {
+        "react": "catalog:react-peer",
+        "react-dom": "catalog:react-peer",
+      },
+    },
+    "packages/slab-ui": {
+      "name": "@slab/ui",
+      "version": "0.1.0",
+      "dependencies": {
+        "@slab/api": "workspace:*",
+        "@slab/components": "workspace:*",
+        "@slab/core": "workspace:*",
+        "@slab/i18n": "workspace:*",
+        "@slab/plugin-sdk": "workspace:*",
+        "@tanstack/react-query": "catalog:",
+        "lucide-react": "catalog:",
+        "react": "catalog:",
+        "react-dom": "catalog:",
+        "react-router-dom": "catalog:",
+        "sonner": "catalog:",
+        "zod": "catalog:",
+        "zustand": "catalog:",
+      },
+      "devDependencies": {
+        "@slab/test-utils": "workspace:*",
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "@vitejs/plugin-react": "catalog:",
+        "@vitest/browser": "catalog:",
+        "@vitest/browser-playwright": "catalog:",
+        "typescript": "catalog:",
         "vitest": "catalog:",
         "vitest-browser-react": "catalog:",
       },
@@ -1112,6 +1164,8 @@
 
     "@slab/components": ["@slab/components@workspace:packages/slab-components"],
 
+    "@slab/core": ["@slab/core@workspace:packages/slab-core"],
+
     "@slab/desktop": ["@slab/desktop@workspace:packages/slab-desktop"],
 
     "@slab/i18n": ["@slab/i18n@workspace:packages/slab-i18n"],
@@ -1129,6 +1183,8 @@
     "@slab/slab-server-tests": ["@slab/slab-server-tests@workspace:bin/slab-server/tests"],
 
     "@slab/test-utils": ["@slab/test-utils@workspace:packages/slab-test-utils"],
+
+    "@slab/ui": ["@slab/ui@workspace:packages/slab-ui"],
 
     "@slab/vitest-rust-reporter": ["@slab/vitest-rust-reporter@workspace:packages/vitest-rust-reporter"],
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ModelConfigDocumentResponse } from '@/lib/model-config';
+import type { ModelConfigDocumentResponse } from '@slab/core/models/config';
 import { DEFAULT_GENERATION_SIZE } from '../../const';
 import {
   areImageGenerationControlsEqual,

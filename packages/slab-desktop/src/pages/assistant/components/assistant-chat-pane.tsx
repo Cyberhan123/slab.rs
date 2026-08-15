@@ -36,7 +36,7 @@ import type {
     CommandInfo,
     HarnessChatTransport,
     TurnUsage,
-} from "../lib/harness"
+} from "@slab/core/harness"
 
 export type AssistantChatPaneProps = {
     disabled: boolean

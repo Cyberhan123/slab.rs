@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { apiClient } from "@slab/api"
 import { toast } from "sonner"
 
-import { getAudioTranscription } from "@/lib/media-task-api"
+import { getAudioTranscription } from "@slab/core/media/task-api"
 
 import { useMicRecorder } from "./use-mic-recorder"
 

@@ -35,7 +35,7 @@ import {
   resolveMediaUrl,
   type GenerationProgress,
   type VideoGenerationTask,
-} from '@/lib/media-task-api';
+} from '@slab/core/media/task-api';
 import { GenerationProgressView } from '@/components/generation-progress';
 import { cn } from '@/lib/utils';
 import { FRAME_OPTIONS, FPS_OPTIONS, SAMPLE_METHODS, SCHEDULERS } from '../const';

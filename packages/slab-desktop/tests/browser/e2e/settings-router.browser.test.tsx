@@ -81,7 +81,7 @@ vi.mock('@slab/api', async () => {
   });
 });
 
-vi.mock('@/lib/workspace-bridge', () => ({
+vi.mock('@slab/core/workspace/bridge', () => ({
   WORKSPACE_STATE_QUERY_KEY: ['workspace-state'],
   workspaceState: () => Promise.resolve({ config: null, current: null, recent: [] }),
 }));

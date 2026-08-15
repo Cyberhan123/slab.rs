@@ -9,7 +9,7 @@ import {
   listImageGenerations,
   listVideoGenerations,
   resolveMediaUrl,
-} from '../media-task-api';
+} from './task-api';
 
 // Hoisted mock handles so the factory can reference them without tripping the
 // real openapi-fetch generic signatures. media-task-api consumes the named

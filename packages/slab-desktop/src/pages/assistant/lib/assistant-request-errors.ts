@@ -5,7 +5,7 @@ import {
 } from '@slab/api'
 import { translateServerField, type ServerI18nPayload } from '@slab/i18n'
 
-import { getErrorDescription } from '@/lib/error-description'
+import { getErrorDescription } from '@slab/core/api/error-description'
 
 import { extractChunkPayload } from './assistant-message-utils'
 import {

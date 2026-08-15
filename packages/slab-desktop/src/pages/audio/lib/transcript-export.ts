@@ -1,5 +1,5 @@
 import type { components } from '@slab/api/v1';
-import type { AudioTranscriptionTask } from '@/lib/media-task-api';
+import type { AudioTranscriptionTask } from '@slab/core/media/task-api';
 
 export type TranscriptSegment = components['schemas']['TimedTextSegmentResponse'];
 

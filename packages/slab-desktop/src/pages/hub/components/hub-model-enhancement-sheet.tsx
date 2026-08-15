@@ -43,7 +43,7 @@ import {
   getModelConfigField,
   useModelConfigDocumentQuery,
   useUpdateModelConfigSelectionMutation,
-} from '@/lib/model-config';
+} from '@slab/core/models/config';
 
 // Whitelisted config-field paths the user may override after import. Must match
 // the server-side whitelist in `validate_load_overrides` / the editable set in

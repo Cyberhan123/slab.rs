@@ -106,17 +106,57 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
-  // Path alias configuration
+  // Path alias configuration. Array form (exact entries before their package
+  // root) so extensionless deep imports like `@slab/core/harness` resolve to
+  // workspace sources without a package build step. Mirrors vitest.shared.ts.
   resolve: {
     dedupe: ["@tanstack/react-query", "monaco-editor", "vscode"],
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-      "@slab/api/config": path.resolve(__dirname, "../api/src/config.ts"),
-      "@slab/api/errors": path.resolve(__dirname, "../api/src/errors.ts"),
-      "@slab/api/v1": path.resolve(__dirname, "../api/src/v1.d.ts"),
-      "@slab/api": path.resolve(__dirname, "../api/src/index.ts"),
-      vscode: path.resolve(__dirname, "./node_modules/vscode"),
-    },
+    alias: [
+      {
+        find: "@slab/components/globals.css",
+        replacement: path.resolve(__dirname, "../slab-components/src/styles/globals.css"),
+      },
+      {
+        find: /^@slab\/components\/(.+)$/,
+        replacement: path.resolve(__dirname, "../slab-components/src").replace(/\\/g, "/") + "/$1",
+      },
+      {
+        find: "@slab/components",
+        replacement: path.resolve(__dirname, "../slab-components/src/index.ts"),
+      },
+      {
+        find: /^@slab\/api\/(.+)$/,
+        replacement: path.resolve(__dirname, "../api/src").replace(/\\/g, "/") + "/$1",
+      },
+      {
+        find: "@slab/api",
+        replacement: path.resolve(__dirname, "../api/src/index.ts"),
+      },
+      {
+        find: /^@slab\/core\/(.+)$/,
+        replacement: path.resolve(__dirname, "../slab-core/src").replace(/\\/g, "/") + "/$1",
+      },
+      {
+        find: "@slab/core",
+        replacement: path.resolve(__dirname, "../slab-core/src/index.ts"),
+      },
+      {
+        find: /^@slab\/ui\/(.+)$/,
+        replacement: path.resolve(__dirname, "../slab-ui/src").replace(/\\/g, "/") + "/$1",
+      },
+      {
+        find: "@slab/ui",
+        replacement: path.resolve(__dirname, "../slab-ui/src/index.ts"),
+      },
+      {
+        find: "@",
+        replacement: path.resolve(__dirname, "./src"),
+      },
+      {
+        find: "vscode",
+        replacement: path.resolve(__dirname, "./node_modules/vscode"),
+      },
+    ],
   },
   test: {
     typecheck: {

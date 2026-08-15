@@ -33,7 +33,7 @@ import type {
   WorkspaceFileEntry,
   WorkspacePathMetadata,
   WorkspaceWatchEvent,
-} from "@/lib/workspace-bridge"
+} from "@slab/core/workspace/bridge"
 
 const WORKSPACE_ROOT = "C:\\test\\repo"
 

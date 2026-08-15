@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getErrorDescription } from '../error-description';
+import { getErrorDescription } from './error-description';
 
 describe('error description', () => {
   it('uses Error messages before fallback text', () => {

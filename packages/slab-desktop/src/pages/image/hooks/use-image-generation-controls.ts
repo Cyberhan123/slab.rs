@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { useModelConfigDocumentQuery } from '@/lib/model-config';
+import { useModelConfigDocumentQuery } from '@slab/core/models/config';
 import { useImageUiStore } from '@/store/useImageUiStore';
 import { DEFAULT_GENERATION_SIZE, DIMENSION_PRESETS } from '../const';
 import {

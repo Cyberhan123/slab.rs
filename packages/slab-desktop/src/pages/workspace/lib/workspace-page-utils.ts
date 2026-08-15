@@ -1,4 +1,4 @@
-import type { WorkspaceFileEntry } from "@/lib/workspace-bridge"
+import type { WorkspaceFileEntry } from "@slab/core/workspace/bridge"
 import type { WorkspaceFileTab } from "@/store/useWorkspaceUiStore"
 import { uniq } from "lodash-es"
 

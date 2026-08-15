@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { render } from "vitest-browser-react"
 
 import Sender from "../sender"
-import type { CommandInfo } from "../../lib/harness"
+import type { CommandInfo } from "@slab/core/harness"
 
 /** Mirror of the server-side `command/list` snapshot: the three built-ins. */
 const COMMANDS: CommandInfo[] = [

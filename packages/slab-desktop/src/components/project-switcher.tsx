@@ -4,7 +4,7 @@ import { ChevronDown, Folder } from "lucide-react"
 import { toast } from "sonner"
 
 import { useTranslation } from "@slab/i18n"
-import { WORKSPACE_STATE_QUERY_KEY, workspaceOpen } from "@/lib/workspace-bridge"
+import { WORKSPACE_STATE_QUERY_KEY, workspaceOpen } from "@slab/core/workspace/bridge"
 import { useWorkspaceUiStore } from "@/store/useWorkspaceUiStore"
 
 type RecentWorkspaceView = {

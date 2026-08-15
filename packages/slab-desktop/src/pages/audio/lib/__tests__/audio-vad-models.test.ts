@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ModelConfigDocumentResponse } from '@/lib/model-config';
+import type { ModelConfigDocumentResponse } from '@slab/core/models/config';
 import { findBundledVadArtifact, type BundledVadArtifact } from '../audio-vad-models';
 
 function artifact(id: string): BundledVadArtifact {

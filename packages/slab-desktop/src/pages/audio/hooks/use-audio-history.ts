@@ -8,7 +8,7 @@ import {
   getAudioTranscription,
   listAudioTranscriptions,
   type AudioTranscriptionTask,
-} from '@/lib/media-task-api';
+} from '@slab/core/media/task-api';
 
 export function useAudioHistory() {
   const { t } = useTranslation();
