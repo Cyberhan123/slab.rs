@@ -27,14 +27,12 @@ import { useWorkspaceConfirmDialog } from "@slab/ui/pages/workspace/hooks/use-wo
 import { useGreeting } from "../hooks/use-greeting"
 import type {
     ApprovalRequest,
-    ApprovalStatus,
-    CompactionMarker,
-    ModelLoadState,
-} from "../hooks/use-harness-conversation"
-import type {
     ApprovalScope,
+    ApprovalStatus,
     CommandInfo,
+    CompactionMarker,
     HarnessChatTransport,
+    ModelLoadState,
     TurnUsage,
 } from "@slab/core/harness"
 

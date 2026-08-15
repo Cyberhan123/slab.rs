@@ -3,7 +3,7 @@ import { render } from "vitest-browser-react"
 import type { ReactNode } from "react"
 
 import { ApprovalCard } from "../approval-banner"
-import type { ApprovalRequest } from "../../hooks/use-harness-conversation"
+import type { ApprovalRequest } from "@slab/core/harness"
 
 vi.mock("@slab/i18n", () => ({
   useTranslation: () => ({ t: (key: string) => key }),

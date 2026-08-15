@@ -615,7 +615,7 @@ export interface ErrorParams {
  * `turn/start` handler. Carries `threadId` (required: the client routes by it)
  * and deliberately NO numeric `turnId` (the transport's replay guard drops any
  * notification whose `turnId` parses `<= threshold`). Handled out-of-band by the
- * conversation hook, NOT turned into AI-SDK message parts.
+ * conversation controller, NOT turned into AI-SDK message parts.
  */
 export type ModelLoadPhase = "downloading" | "loading"
 
@@ -646,7 +646,7 @@ export interface ModelLoadCompletedParams {
 
 /**
  * `context/compacting` — an auto-compaction summarization has begun (after the
- * policy threshold gate passed). Handled out-of-band by the conversation hook to
+ * policy threshold gate passed). Handled out-of-band by the conversation controller to
  * show an in-progress "compacting context" indicator (NOT an AI-SDK message part).
  */
 export interface ContextCompactingParams {

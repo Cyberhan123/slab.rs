@@ -15,7 +15,7 @@ import {
 import { useState } from "react"
 
 import type { ApprovalScope } from "@slab/core/harness"
-import type { ApprovalRequest } from "../hooks/use-harness-conversation"
+import type { ApprovalRequest } from "@slab/core/harness"
 import { PlanCardBody } from "./message/message-tool-plan-part"
 
 const changeTypeVariant: Record<string, "default" | "secondary" | "destructive"> = {

@@ -52,7 +52,7 @@ import type {
   PermissionMode,
   ReasoningEffort,
 } from "@slab/core/harness"
-import type { ApprovalRequest } from "../hooks/use-harness-conversation"
+import type { ApprovalRequest } from "@slab/core/harness"
 import { resolveCommandDispatch } from "../lib/assistant-commands"
 import { ApprovalCard } from "./approval-banner"
 

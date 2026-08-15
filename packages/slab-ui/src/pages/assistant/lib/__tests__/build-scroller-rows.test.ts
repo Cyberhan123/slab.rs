@@ -6,7 +6,7 @@ import {
   formatMarkerDate,
   type ScrollerRow,
 } from '../build-scroller-rows'
-import type { CompactionMarker, ModelLoadState } from '@slab/ui/pages/assistant/hooks/use-harness-conversation'
+import type { CompactionMarker, ModelLoadState } from '@slab/core/harness'
 
 const msg = (id: string) => ({ id, role: 'assistant' })
 

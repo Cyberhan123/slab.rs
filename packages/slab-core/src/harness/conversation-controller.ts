@@ -458,13 +458,17 @@ export class ConversationController {
   }
 
   /** Toggle plan mode. Resolving a plan approval clears it atomically. */
-  setPlanMode(enabled: boolean): void {
+  readonly setPlanMode = (enabled: boolean): void => {
     this.planMode = enabled
     this.commit()
   }
 
   /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
-  async resolveApproval(itemId: string, approved: boolean, scope: ApprovalScope): Promise<void> {
+  readonly resolveApproval = async (
+    itemId: string,
+    approved: boolean,
+    scope: ApprovalScope,
+  ): Promise<void> => {
     const entry = this.approvals.get(itemId)
     if (!entry) return
     // Optimistically mark resolved so the banner/card update immediately.
@@ -499,7 +503,7 @@ export class ConversationController {
   }
 
   /** Manually compact the current (or given) thread via `thread/compact/start`. */
-  async compactThread(threadId?: string): Promise<void> {
+  readonly compactThread = async (threadId?: string): Promise<void> => {
     const tid = threadId ?? this.client.currentThreadId
     if (!tid) {
       this.actionError = { kind: "compact", message: "no active thread" }
@@ -546,7 +550,7 @@ export class ConversationController {
   }
 
   /** Fork the current (or given) thread via `thread/fork`, then switch to the child. */
-  async forkThread(threadId?: string): Promise<void> {
+  readonly forkThread = async (threadId?: string): Promise<void> => {
     const tid = threadId ?? this.client.currentThreadId
     if (!tid) {
       this.actionError = { kind: "fork", message: "no active thread" }
@@ -589,7 +593,7 @@ export class ConversationController {
    * Retract `turnIndex` and every later turn via `thread/rollback` (turn 0 is
    * a no-op).
    */
-  async rollbackFromTurn(turnIndex: number): Promise<void> {
+  readonly rollbackFromTurn = async (turnIndex: number): Promise<void> => {
     const tid = this.client.currentThreadId
     // turnIndex is the first turn to remove (the user message being retracted
     // and everything after it). Turn 0 cannot be retracted this way.

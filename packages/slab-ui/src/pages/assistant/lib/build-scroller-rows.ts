@@ -1,4 +1,4 @@
-import type { CompactionMarker, ModelLoadState } from "@slab/ui/pages/assistant/hooks/use-harness-conversation"
+import type { CompactionMarker, ModelLoadState } from "@slab/core/harness"
 import type { TMessage } from "@slab/ui/pages/assistant/components/message/message-item"
 
 export const HISTORY_MARKER_ID = "__history_marker__" as const

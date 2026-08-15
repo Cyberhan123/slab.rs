@@ -11,7 +11,7 @@
  * by `tool-output-available` (result) or `tool-output-error` (failure). The
  * approval-request notifications also emit `tool-input-available` so the card
  * shows the pending command/changes; approval status is tracked out-of-band by
- * the conversation hook. `tool-input-delta` is intentionally avoided — it
+ * the conversation controller. `tool-input-delta` is intentionally avoided — it
  * requires a preceding `tool-input-start` we never emit.
  *
  * Terminal detection: a failed turn emits an `error` notification with NO
@@ -251,12 +251,12 @@ export function convertNotification(
       return []
     case HARNESS_NOTIFICATION.MODEL_LOAD_DELTA:
     case HARNESS_NOTIFICATION.MODEL_LOAD_COMPLETED:
-      // Model load lifecycle is consumed out-of-band by the conversation hook
+      // Model load lifecycle is consumed out-of-band by the conversation controller
       // (transient `modelLoad` state), not as AI-SDK message parts.
       return []
     case HARNESS_NOTIFICATION.CONTEXT_COMPACTING:
     case HARNESS_NOTIFICATION.CONTEXT_COMPACTED:
-      // Compaction lifecycle is consumed out-of-band by the conversation hook
+      // Compaction lifecycle is consumed out-of-band by the conversation controller
       // (session-scoped `compactionMarkers` state), not as AI-SDK message parts.
       return []
     default:

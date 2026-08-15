@@ -5,7 +5,7 @@ import { render } from "vitest-browser-react"
 
 import { AssistantChatPane } from "../assistant-chat-pane"
 import type { HarnessChatTransport } from "@slab/core/harness"
-import type { ApprovalStatus } from "../../hooks/use-harness-conversation"
+import type { ApprovalStatus } from "@slab/core/harness"
 
 // Mutable stand-in for the `useChat` return so each test can set messages/status.
 const chatState = vi.hoisted(() => ({

@@ -10,7 +10,7 @@ import {
   SESSION_LOAD_MARKER_ID,
   type ScrollerRowOf,
 } from "@slab/ui/pages/assistant/lib/build-scroller-rows"
-import type { CompactionMarker } from "@slab/ui/pages/assistant/hooks/use-harness-conversation"
+import type { CompactionMarker } from "@slab/core/harness"
 
 vi.mock("@slab/i18n", async () => {
   const { setupSlabI18nMock } = await import("@slab/test-utils/mocks")

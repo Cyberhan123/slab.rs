@@ -7,7 +7,7 @@ import {
     MessageScrollerViewport,
 } from "@slab/components/message-scroller"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import type { CompactionMarker, ModelLoadState } from "@slab/ui/pages/assistant/hooks/use-harness-conversation"
+import type { CompactionMarker, ModelLoadState } from "@slab/core/harness"
 import { buildScrollerRows, type ScrollerRow } from "@slab/ui/pages/assistant/lib/build-scroller-rows"
 import type { TMessage } from "@slab/ui/pages/assistant/components/message/message-item"
 import { rowComponents, type ScrollerRowExtraProps } from "./row-components"
