@@ -89,7 +89,7 @@ export default function Task() {
                 <div
                   // eslint-disable-next-line react/no-array-index-key
                   key={`${index}-${barHeight}`}
-                  className="flex-1 rounded-t-[2px] bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,transparent)]"
+                  className="flex-1 rounded-t-[2px] bg-primary/10"
                   style={{ height: `${clamp(barHeight * 48, 10, Number.POSITIVE_INFINITY)}px` }}
                 />
               ))}
@@ -106,12 +106,12 @@ export default function Task() {
             }
             noteTone="muted"
             icon={Timer}
-            className="border border-[var(--brand-teal)]/8"
+            className="border border-primary/8"
           >
             <div className="mt-5">
               <div className="h-1.5 overflow-hidden rounded-full bg-border/50">
                 <div
-                  className="h-full rounded-full bg-[var(--brand-gold)]"
+                  className="h-full rounded-full bg-brand-gold"
                   style={{ width: `${clamp(activeShare, activeTaskCount > 0 ? 8 : 0, Number.POSITIVE_INFINITY)}%` }}
                 />
               </div>
@@ -173,10 +173,10 @@ export default function Task() {
             description={t('pages.task.states.emptyDescription')}
           />
         ) : (
-          <section className="overflow-hidden rounded-[20px] border border-border/40 bg-[var(--surface-1)]">
+          <section className="overflow-hidden rounded-[20px] border border-border/40 bg-card">
             <Table className="min-w-[820px] xl:min-w-[980px]" variant="default">
-              <TableHeader className="[&_tr]:border-b-0 [&_tr]:bg-[var(--surface-soft)]">
-                <TableRow className="hover:bg-[var(--surface-soft)]">
+              <TableHeader className="[&_tr]:border-b-0 [&_tr]:bg-secondary">
+                <TableRow className="hover:bg-secondary">
                   <TableHead className="h-[45px] px-6 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.task.table.headers.taskId')}
                   </TableHead>
@@ -204,10 +204,10 @@ export default function Task() {
                     <TableRow
                       key={task.id}
                       data-testid={`task-row-${task.id}`}
-                      className="border-b border-border/50 hover:bg-[var(--surface-soft)]"
+                      className="border-b border-border/50 hover:bg-secondary"
                     >
                       <TableCell
-                        className="px-6 py-6 font-mono text-sm font-medium text-[color:var(--brand-teal)]"
+                        className="px-6 py-6 font-mono text-sm font-medium text-primary"
                         title={task.id}
                       >
                         {formatTaskId(task.id)}
@@ -256,7 +256,7 @@ export default function Task() {
               </TableBody>
             </Table>
 
-            <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border/10 bg-[var(--surface-soft)] px-6 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border/10 bg-secondary px-6 py-4">
               <p className="text-caption font-medium uppercase tracking-eyebrow text-muted-foreground">
                 {paginationLabel}
               </p>

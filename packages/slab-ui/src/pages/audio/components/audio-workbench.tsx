@@ -198,7 +198,7 @@ export function AudioWorkbench({
     <div className="h-full w-full overflow-y-auto">
       <div className="mx-auto grid w-full max-w-[1120px] gap-8 pb-8 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_392px]">
         <div className="space-y-6">
-          <SoftPanel className="space-y-5 rounded-3xl border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
+          <SoftPanel className="space-y-5 rounded-3xl border border-border/60 bg-secondary px-7 py-6">
             <div>
               <p className="text-label font-semibold uppercase tracking-eyebrow text-muted-foreground">
                 {t('pages.audio.workbench.setupTitle')}
@@ -294,7 +294,7 @@ export function AudioWorkbench({
               setDecodeTdrzEnable={setDecodeTdrzEnable}
             />
           </SoftPanel>
-          <SoftPanel className="space-y-5 rounded-3xl border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
+          <SoftPanel className="space-y-5 rounded-3xl border border-border/60 bg-secondary px-7 py-6">
             <div>
               <p className="text-label font-semibold uppercase tracking-eyebrow text-muted-foreground">
                 {t('pages.audio.workbench.sourceTitle')}
@@ -302,7 +302,7 @@ export function AudioWorkbench({
             </div>
 
             <div className="rounded-2xl border border-dashed border-border/50 bg-glass-bg px-6 py-8 text-center">
-              <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-glass-bg-strong text-[color:var(--brand-teal)]">
+              <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-glass-bg-strong text-primary">
                 <FileAudio2 className="size-6" />
               </div>
               <h3 className="mt-5 text-lg font-semibold tracking-tight text-foreground">
@@ -316,7 +316,7 @@ export function AudioWorkbench({
                   type="button"
                   variant="pill"
                   size="pill"
-                  className="rounded-[14px] bg-[var(--shell-card)]"
+                  className="rounded-[14px] bg-card"
                   onClick={() => {
                     if (isTauri) {
                       void handleTauriFileSelect();
@@ -332,7 +332,7 @@ export function AudioWorkbench({
                     : t('pages.audio.workbench.browseFiles')}
                 </Button>
                 {file ? (
-                  <span className="max-w-full rounded-full border border-[var(--shell-card)]/70 bg-glass-bg-strong px-4 py-2 text-xs font-medium text-muted-foreground">
+                  <span className="max-w-full rounded-full border border-card/70 bg-glass-bg-strong px-4 py-2 text-xs font-medium text-muted-foreground">
                     {file.name}
                   </span>
                 ) : null}
@@ -351,7 +351,7 @@ export function AudioWorkbench({
             </div>
 
             {file ? (
-              <div className="rounded-[20px] border border-[var(--shell-card)]/70 bg-glass-bg px-4 py-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
+              <div className="rounded-[20px] border border-card/70 bg-glass-bg px-4 py-4 glass-highlight-top">
                 <p className="text-label font-semibold uppercase tracking-eyebrow text-muted-foreground">
                   {t('pages.audio.workbench.selectedFileTitle')}
                 </p>
@@ -376,13 +376,13 @@ export function AudioWorkbench({
               >
                 <p className="pt-1 text-sm text-muted-foreground">{item.label}</p>
                 {item.chip ? (
-                  <span className="max-w-[220px] rounded-md bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,var(--background))] px-2.5 py-1 text-right text-xs font-semibold text-[color:var(--brand-teal)]">
+                  <span className="max-w-[220px] rounded-md bg-primary/10 px-2.5 py-1 text-right text-xs font-semibold text-primary">
                     {item.value}
                   </span>
                 ) : (
                   <p
                     className={`max-w-[220px] text-right text-sm font-semibold leading-6 ${
-                      item.accent ? 'text-[color:var(--brand-teal)]' : 'text-foreground'
+                      item.accent ? 'text-primary' : 'text-foreground'
                     }`}
                   >
                     {item.value}
@@ -413,7 +413,7 @@ export function AudioWorkbench({
           </p>
 
           {isBusy || taskId || file ? (
-            <div className="mt-6 rounded-[22px] bg-[var(--surface-soft)] p-4">
+            <div className="mt-6 rounded-[22px] bg-secondary p-4">
               {isTranscriptionRunning ? (
                 <div className="space-y-3">
                   <GenerationProgressView
@@ -442,7 +442,7 @@ export function AudioWorkbench({
                 </div>
               ) : isBusy ? (
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex size-10 items-center justify-center rounded-full bg-[var(--shell-card)] text-[color:var(--brand-teal)]">
+                  <div className="mt-0.5 flex size-10 items-center justify-center rounded-full bg-card text-primary">
                     <Loader2 className="size-5 animate-spin" />
                   </div>
                   <div className="space-y-1">
@@ -457,7 +457,7 @@ export function AudioWorkbench({
                         : t('pages.audio.workbench.busy.creatingDescription')}
                     </p>
                     {taskId ? (
-                      <p className="text-xs font-medium text-[color:var(--brand-teal)]">
+                      <p className="text-xs font-medium text-primary">
                         {t('pages.audio.workbench.taskIdLabel', { id: taskId })}
                       </p>
                     ) : null}
@@ -504,7 +504,7 @@ export function AudioWorkbench({
             </div>
           ) : null}
 
-          <div className="mt-6 rounded-[22px] bg-[var(--surface-soft)] p-4">
+          <div className="mt-6 rounded-[22px] bg-secondary p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
@@ -526,7 +526,7 @@ export function AudioWorkbench({
                   key={task.task_id}
                   type="button"
                   data-testid={`audio-history-item-${task.task_id}`}
-                  className="w-full rounded-[18px] border border-border/50 bg-[var(--shell-card)] px-4 py-3 text-left transition hover:border-[var(--brand-teal)]/50"
+                  className="w-full rounded-[18px] border border-border/50 bg-card px-4 py-3 text-left transition hover:border-primary/50"
                   onClick={() => void openHistoryDetail(task.task_id)}
                 >
                   <p className="line-clamp-2 text-sm font-semibold text-foreground">
@@ -535,7 +535,7 @@ export function AudioWorkbench({
                       task.source_path}
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
-                    <span className="rounded-full bg-[var(--surface-soft)] px-2 py-0.5">
+                    <span className="rounded-full bg-secondary px-2 py-0.5">
                       {task.status}
                     </span>
                     <span>{formatHistoryTime(task.created_at)}</span>
@@ -543,7 +543,7 @@ export function AudioWorkbench({
                 </button>
               ))}
               {!historyLoading && history.length === 0 ? (
-                <p className="rounded-[18px] border border-dashed border-border/60 bg-[var(--shell-card)] px-4 py-5 text-sm text-muted-foreground">
+                <p className="rounded-[18px] border border-dashed border-border/60 bg-card px-4 py-5 text-sm text-muted-foreground">
                   {t('pages.audio.history.empty')}
                 </p>
               ) : null}

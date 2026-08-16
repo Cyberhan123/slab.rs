@@ -28,21 +28,21 @@
     --input: oklch(91.41% 0.0042 236.5);
     --ring: var(--primary);
     --radius: 0.95rem;
-    --app-canvas: var(--background);
-    --surface-1: oklch(100% 0 0);
-    --surface-2: oklch(99.06% 0.0017 247.84);
-    --surface-soft: oklch(96.62% 0.0034 247.86);
-    --surface-selected: oklch(93.74% 0.0076 241.67);
-    --surface-input: var(--input);
-    --brand-teal: var(--primary);
-    --brand-teal-foreground: var(--primary-foreground);
+
+    /* Bespoke tokens — no shadcn equivalent; keep in sync with
+       packages/slab-components/src/styles/globals.css. */
     --brand-gold: oklch(48.72% 0.1056 69.9);
     --success: oklch(59.6% 0.1274 163.23);
     --success-foreground: oklch(98.19% 0.0181 155.83);
-    --status-success-bg: color-mix(in oklab, var(--success) 40%, var(--background));
-    --status-info-bg: color-mix(in oklab, var(--brand-teal) 16%, var(--background));
-    --status-danger-bg: color-mix(in oklab, var(--destructive) 15%, var(--background));
-    --status-neutral-bg: color-mix(in oklab, var(--foreground) 6%, var(--background));
+    --elevation-1: 0 1px 2px oklch(0% 0 0 / 0.05);
+    --elevation-2: 0 18px 44px -30px color-mix(in oklab, var(--foreground) 28%, transparent);
+    --elevation-3: 0 32px 80px -48px color-mix(in oklab, var(--foreground) 40%, transparent);
+    --glass-bg: color-mix(in oklab, var(--card) 62%, transparent);
+    --glass-bg-strong: color-mix(in oklab, var(--card) 80%, transparent);
+    --glass-border: color-mix(in oklab, var(--card) 32%, transparent);
+    --glass-blur: 14px;
+    --glass-highlight: inset 0 1px 0 color-mix(in oklab, var(--card) 55%, transparent);
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .dark {
@@ -66,21 +66,27 @@
     --border: oklch(33.2% 0.0244 236.68);
     --input: oklch(26.92% 0.0189 232.21);
     --ring: var(--primary);
-    --app-canvas: var(--background);
-    --surface-1: var(--card);
-    --surface-2: oklch(24.5% 0.015 226.78);
-    --surface-soft: var(--secondary);
-    --surface-selected: oklch(31.59% 0.0235 233.53);
-    --surface-input: var(--input);
-    --brand-teal: var(--primary);
-    --brand-teal-foreground: var(--primary-foreground);
+
     --brand-gold: oklch(84.08% 0.102 76.23);
     --success: oklch(77.29% 0.1535 163.22);
     --success-foreground: oklch(22.27% 0.0394 169.04);
-    --status-success-bg: color-mix(in oklab, var(--success) 24%, var(--surface-2));
-    --status-info-bg: color-mix(in oklab, var(--brand-teal) 18%, var(--surface-2));
-    --status-danger-bg: color-mix(in oklab, var(--destructive) 20%, var(--surface-2));
-    --status-neutral-bg: color-mix(in oklab, var(--foreground) 10%, var(--surface-2));
+    --elevation-1: 0 1px 2px oklch(0% 0 0 / 0.34);
+  }
+}
+
+/* Keyframes must stay inside @theme so they are emitted only when used. */
+@theme {
+  --animate-soft-in: slab-soft-in 180ms var(--ease-out-expo) both;
+  @keyframes slab-soft-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }
 
@@ -106,25 +112,28 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-app-canvas: var(--app-canvas);
-  --color-surface-1: var(--surface-1);
-  --color-surface-2: var(--surface-2);
-  --color-surface-soft: var(--surface-soft);
-  --color-surface-selected: var(--surface-selected);
-  --color-surface-input: var(--surface-input);
-  --color-brand-teal: var(--brand-teal);
-  --color-brand-teal-foreground: var(--brand-teal-foreground);
   --color-brand-gold: var(--brand-gold);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
-  --color-status-success-bg: var(--status-success-bg);
-  --color-status-info-bg: var(--status-info-bg);
-  --color-status-danger-bg: var(--status-danger-bg);
-  --color-status-neutral-bg: var(--status-neutral-bg);
+  --color-glass-bg: var(--glass-bg);
+  --color-glass-bg-strong: var(--glass-bg-strong);
+  --color-glass-border: var(--glass-border);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+  --text-micro: 10px;
+  --text-caption: 11px;
+  --text-label: 12px;
+  --text-body: 13px;
+  --tracking-display: -0.05em;
+  --tracking-eyebrow: 0.16em;
+  --shadow-elevation-1: var(--elevation-1);
+  --shadow-elevation-2: var(--elevation-2);
+  --shadow-elevation-3: var(--elevation-3);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @layer base {
@@ -142,38 +151,68 @@
     @apply bg-background text-foreground font-sans antialiased;
     margin: 0;
     background:
-      radial-gradient(circle at top left, color-mix(in oklab, var(--brand-teal) 10%, transparent), transparent 30%),
+      radial-gradient(circle at top left, color-mix(in oklab, var(--primary) 10%, transparent), transparent 30%),
       radial-gradient(circle at bottom right, color-mix(in oklab, var(--brand-gold) 14%, transparent), transparent 32%),
-      var(--app-canvas);
+      var(--background);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
-@layer components {
-  .workspace-surface {
-    background: var(--surface-1);
-    border: 1px solid color-mix(in oklab, var(--border) 90%, var(--background) 10%);
-    box-shadow: 0 20px 56px -42px color-mix(in oklab, var(--foreground) 32%, transparent);
-  }
+/* Composite utilities mirrored from slab-components globals.css so the
+   re-exported primitives (workspace, state-surface, ...) render correctly
+   in plugin webviews. */
+@utility glass-surface {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight), var(--elevation-2);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
 
-  .workspace-soft-panel {
-    background: var(--surface-soft);
-    border: 1px solid color-mix(in oklab, var(--border) 86%, var(--background) 14%);
-    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent);
-  }
+@utility focus-ring {
+  outline: none;
 
-  .workspace-halo {
-    position: relative;
-    overflow: hidden;
-    isolation: isolate;
+  &:focus-visible {
+    border-color: transparent;
+    box-shadow:
+      0 0 0 2px var(--background),
+      0 0 0 4px color-mix(in oklab, var(--primary) 55%, transparent);
   }
+}
 
-  .workspace-halo::before {
+@utility workspace-surface {
+  background: var(--card);
+  border: 1px solid color-mix(in oklab, var(--border) 90%, var(--background) 10%);
+}
+
+@utility workspace-soft-panel {
+  background: var(--secondary);
+  border: 1px solid color-mix(in oklab, var(--border) 86%, var(--background) 14%);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+@utility workspace-halo {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+
+  &::before {
     content: "";
     position: absolute;
     inset: 0;
     z-index: -1;
     background:
-      radial-gradient(circle at top right, color-mix(in oklab, var(--brand-teal) 16%, transparent), transparent 38%),
+      radial-gradient(circle at top right, color-mix(in oklab, var(--primary) 16%, transparent), transparent 38%),
       radial-gradient(circle at bottom left, color-mix(in oklab, var(--brand-gold) 18%, transparent), transparent 34%);
     opacity: 0.85;
   }

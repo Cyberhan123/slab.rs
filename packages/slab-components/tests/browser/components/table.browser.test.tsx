@@ -14,7 +14,7 @@ import { renderComponentScene } from "../test-utils"
 
 function TableGallery() {
   return (
-    <div data-testid="table-gallery" className="rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="table-gallery" className="rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Table data-testid="table">
         <TableCaption>A list of your recent invoices</TableCaption>
         <TableHeader>

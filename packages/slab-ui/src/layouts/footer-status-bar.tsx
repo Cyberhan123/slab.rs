@@ -32,10 +32,10 @@ type FooterMetricProps = {
 function FooterMetric({ label, value, title, className }: FooterMetricProps) {
   return (
     <div className={cn("flex min-w-0 items-center gap-2", className)} title={title ?? value}>
-      <span className="shrink-0 text-micro font-bold uppercase tracking-tight text-[color:var(--shell-footer-label)]">
+      <span className="shrink-0 text-micro font-bold uppercase tracking-tight text-muted-foreground">
         {label}
       </span>
-      <span className="truncate text-micro font-bold uppercase tracking-tight text-[color:var(--shell-footer-value)]">
+      <span className="truncate text-micro font-bold uppercase tracking-tight text-primary">
         {value}
       </span>
     </div>
@@ -107,7 +107,7 @@ export default function FooterStatusBar({ variant = "default" }: FooterStatusBar
 
   return (
     <footer
-      className="shell-footer-bar flex h-[var(--shell-footer-height)] items-center justify-between px-4 sm:px-6"
+      className="hairline-t flex h-shell-footer items-center justify-between bg-sidebar px-4 sm:px-6"
     >
       <div className="flex min-w-0 items-center gap-4 overflow-hidden sm:gap-6">
         <FooterMetric
@@ -129,14 +129,14 @@ export default function FooterStatusBar({ variant = "default" }: FooterStatusBar
       </div>
 
       <div className="ml-4 flex shrink-0 items-center gap-3">
-        {/* <span className="hidden text-micro font-bold uppercase tracking-eyebrow text-[color:var(--shell-footer-label)] lg:block">
+        {/* <span className="hidden text-micro font-bold uppercase tracking-eyebrow text-muted-foreground lg:block">
           {telemetryLabel}
         </span> */}
         <div
           aria-hidden="true"
           className={cn(
-            "flex size-5 items-center justify-center text-[color:var(--shell-footer-label)]",
-            summary.available && !isLoading && "text-[color:var(--shell-footer-value)]"
+            "flex size-5 items-center justify-center text-muted-foreground",
+            summary.available && !isLoading && "text-primary"
           )}
         >
           <Bell className="size-3.5" />

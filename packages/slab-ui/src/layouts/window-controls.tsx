@@ -120,7 +120,7 @@ function MacWindowControls({ placement }: { placement: WindowControlsPlacement }
   return (
     <div
       className={cn(
-        "shell-window-controls flex items-center gap-2",
+        "[app-region:no-drag] flex items-center gap-2",
         placement === "sidebar" ? "w-full justify-center px-3" : "pr-2"
       )}
       data-tauri-drag-region="false"
@@ -158,7 +158,7 @@ function DesktopWindowControls() {
 
   return (
     <div
-      className="shell-window-controls mr-2 flex items-center gap-1"
+      className="[app-region:no-drag] mr-2 flex items-center gap-1"
       data-tauri-drag-region="false"
       role="toolbar"
       aria-label={t("layouts.header.windowControls.toolbar")}
@@ -169,7 +169,7 @@ function DesktopWindowControls() {
         size="icon-sm"
         aria-label={minimizeLabel}
         title={minimizeLabel}
-        className="size-7 rounded-[10px] text-[color:var(--shell-rail-label)] hover:bg-glass-bg-strong hover:text-[color:var(--shell-title)]"
+        className="size-7 rounded-[10px] text-muted-foreground hover:bg-glass-bg-strong hover:text-foreground"
         onClick={() => {
           void runWindowAction("minimize", t, ports.windowChrome)
         }}
@@ -183,7 +183,7 @@ function DesktopWindowControls() {
         size="icon-sm"
         aria-label={toggleMaximizeLabel}
         title={toggleMaximizeLabel}
-        className="size-7 rounded-[10px] text-[color:var(--shell-rail-label)] hover:bg-glass-bg-strong hover:text-[color:var(--shell-title)]"
+        className="size-7 rounded-[10px] text-muted-foreground hover:bg-glass-bg-strong hover:text-foreground"
         onClick={() => {
           void runWindowAction("toggleMaximize", t, ports.windowChrome)
         }}
@@ -197,7 +197,7 @@ function DesktopWindowControls() {
         size="icon-sm"
         aria-label={closeLabel}
         title={closeLabel}
-        className="size-7 rounded-[10px] text-[color:var(--shell-rail-label)] hover:bg-destructive/12 hover:text-destructive"
+        className="size-7 rounded-[10px] text-muted-foreground hover:bg-destructive/12 hover:text-destructive"
         onClick={() => {
           void runWindowAction("close", t, ports.windowChrome)
         }}

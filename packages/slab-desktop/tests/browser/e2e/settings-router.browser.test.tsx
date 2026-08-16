@@ -147,7 +147,7 @@ describe('settings router integration', () => {
     await renderDesktopScene(null, { router });
 
     await expect.element(page.getByRole('heading', { name: 'Runtime' })).toBeVisible();
-    expect(document.querySelector('header.shell-topbar')).not.toBeNull();
+    expect(document.querySelector('header[data-slot="shell-topbar"]')).not.toBeNull();
     await expect.element(page.getByTestId('sidebar-link-settings')).toHaveAttribute(
       'aria-current',
       'page',

@@ -5,7 +5,7 @@ import { Ban, CheckCircle2, Inbox, Loader2, TriangleAlert } from "lucide-react"
 import { cn } from "./lib/utils"
 
 const stateSurfaceVariants = cva(
-  "glass-surface soft-in flex flex-col items-center justify-center gap-5 px-6 py-12 text-center text-balance",
+  "glass-surface animate-soft-in flex flex-col items-center justify-center gap-5 px-6 py-12 text-center text-balance",
   {
     variants: {
       size: {

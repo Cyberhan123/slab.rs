@@ -274,11 +274,11 @@ export function HubModelEnhancementSheet({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="right"
-          className="flex w-full max-w-[780px] flex-col gap-0 overflow-hidden border-l border-border/60 bg-[color:color-mix(in_oklab,var(--background)_92%,var(--surface-1))] p-0"
+          className="flex w-full max-w-[780px] flex-col gap-0 overflow-hidden border-l border-border/60 bg-[color:color-mix(in_oklab,var(--background)_92%,var(--card))] p-0"
         >
           <SheetHeader className="shrink-0 border-b border-border/60 px-6 py-5 pr-14">
             <div className="flex items-start gap-3">
-              <div className="flex size-11 items-center justify-center rounded-2xl bg-[var(--surface-soft)] text-[color:var(--brand-teal)]">
+              <div className="flex size-11 items-center justify-center rounded-2xl bg-secondary text-primary">
                 <Settings2 className="size-5" />
               </div>
               <div className="space-y-1">
@@ -451,7 +451,7 @@ function ReadOnlyBlock({ label, value }: { label: string; value: string }) {
       <Label className="text-xs font-semibold uppercase tracking-eyebrow text-muted-foreground">
         {label}
       </Label>
-      <div className="rounded-[14px] border border-border/60 bg-[var(--surface-soft)] px-4 py-3 text-sm font-medium text-foreground">
+      <div className="rounded-[14px] border border-border/60 bg-secondary px-4 py-3 text-sm font-medium text-foreground">
         {value}
       </div>
     </div>
@@ -517,7 +517,7 @@ function FieldCard({
               </Badge>
             ) : null}
             {isEdited ? (
-              <Badge variant="outline" className="rounded-full text-[color:var(--brand-teal)]">
+              <Badge variant="outline" className="rounded-full text-primary">
                 {t('pages.hub.sheet.blocks.edited')}
               </Badge>
             ) : null}
@@ -555,7 +555,7 @@ function renderEditableControl(
   switch (field.value_type) {
     case 'boolean':
       return (
-        <div className="flex items-center gap-3 rounded-[14px] border border-border/60 bg-[var(--surface-soft)] px-4 py-3">
+        <div className="flex items-center gap-3 rounded-[14px] border border-border/60 bg-secondary px-4 py-3">
           <Switch checked={Boolean(value)} onCheckedChange={(checked) => onChange(checked)} />
           <span className="text-sm font-medium text-foreground">
             {value
@@ -619,7 +619,7 @@ function renderFieldValue(
 
   if (field.value_type === 'boolean') {
     return (
-      <div className="rounded-[14px] border border-border/60 bg-[var(--surface-soft)] px-4 py-3 text-sm font-medium text-foreground">
+      <div className="rounded-[14px] border border-border/60 bg-secondary px-4 py-3 text-sm font-medium text-foreground">
         {value
           ? t('pages.hub.sheet.blocks.enabled')
           : t('pages.hub.sheet.blocks.disabled')}
@@ -629,14 +629,14 @@ function renderFieldValue(
 
   if (field.value_type === 'json' || typeof value === 'object') {
     return (
-      <pre className="overflow-x-auto rounded-[14px] border border-border/60 bg-[var(--surface-soft)] px-4 py-3 text-xs leading-6 text-foreground">
+      <pre className="overflow-x-auto rounded-[14px] border border-border/60 bg-secondary px-4 py-3 text-xs leading-6 text-foreground">
         {JSON.stringify(value, null, 2)}
       </pre>
     );
   }
 
   return (
-    <div className="rounded-[14px] border border-border/60 bg-[var(--surface-soft)] px-4 py-3 text-sm font-medium text-foreground">
+    <div className="rounded-[14px] border border-border/60 bg-secondary px-4 py-3 text-sm font-medium text-foreground">
       {String(value)}
     </div>
   );

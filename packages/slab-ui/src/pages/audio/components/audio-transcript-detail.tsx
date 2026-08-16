@@ -70,21 +70,21 @@ export function AudioTranscriptDetail({ isTauri, task }: AudioTranscriptDetailPr
             src={sourceUrl}
             controls
             aria-label={t('pages.audio.history.actions.playbackAria')}
-            className="w-full rounded-[18px] border border-border/60 bg-[var(--surface-soft)] px-3 py-2"
+            className="w-full rounded-[18px] border border-border/60 bg-secondary px-3 py-2"
           />
         ) : null}
 
-        <div className="max-h-[68vh] overflow-y-auto rounded-[22px] bg-[var(--surface-soft)] p-4">
+        <div className="max-h-[68vh] overflow-y-auto rounded-[22px] bg-secondary p-4">
           {segments.length > 0 ? (
             <div className="space-y-2">
               {segments.map((segment) => (
                 <div
                   key={getSegmentKey(segment)}
-                  className="grid gap-3 rounded-[16px] border border-border/50 bg-[var(--shell-card)] px-3 py-3 sm:grid-cols-[112px_minmax(0,1fr)]"
+                  className="grid gap-3 rounded-[16px] border border-border/50 bg-card px-3 py-3 sm:grid-cols-[112px_minmax(0,1fr)]"
                 >
                   <button
                     type="button"
-                    className="text-left font-mono text-xs font-semibold text-[color:var(--brand-teal)] transition hover:text-foreground"
+                    className="text-left font-mono text-xs font-semibold text-primary transition hover:text-foreground"
                     onClick={() => seekToSegment(segment)}
                     aria-label={t('pages.audio.history.actions.seekAria', {
                       time: formatSegmentRange(segment),
@@ -106,7 +106,7 @@ export function AudioTranscriptDetail({ isTauri, task }: AudioTranscriptDetailPr
         </div>
       </div>
 
-      <div className="space-y-4 rounded-[22px] bg-[var(--surface-soft)] p-4">
+      <div className="space-y-4 rounded-[22px] bg-secondary p-4">
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" onClick={() => void copyTranscript()}>
             <Copy className="size-3.5" />

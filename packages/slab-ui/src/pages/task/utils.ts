@@ -171,43 +171,43 @@ export function getStatusTone(status: string, t: Translate) {
     case 'succeeded':
       return {
         label: t('pages.task.status.succeeded'),
-        className: 'bg-[var(--status-success-bg)] text-[color:var(--success)]',
-        dotClassName: 'bg-[var(--success)]',
+        className: 'bg-success/40 text-success dark:bg-success/25',
+        dotClassName: 'bg-success',
       };
     case 'running':
       return {
         label: t('pages.task.status.running'),
-        className: 'bg-[var(--status-info-bg)] text-primary',
+        className: 'bg-primary/15 text-primary dark:bg-primary/20',
         dotClassName: 'bg-primary',
       };
     case 'failed':
       return {
         label: t('pages.task.status.failed'),
-        className: 'bg-[var(--status-danger-bg)] text-destructive',
+        className: 'bg-destructive/15 text-destructive dark:bg-destructive/20',
         dotClassName: 'bg-destructive',
       };
     case 'pending':
       return {
         label: t('pages.task.status.pending'),
-        className: 'bg-[var(--status-neutral-bg)] text-muted-foreground',
+        className: 'bg-foreground/5 text-muted-foreground dark:bg-foreground/10',
         dotClassName: 'bg-muted-foreground',
       };
     case 'cancelled':
       return {
         label: t('pages.task.status.cancelled'),
-        className: 'bg-[var(--status-neutral-bg)] text-muted-foreground',
+        className: 'bg-foreground/5 text-muted-foreground dark:bg-foreground/10',
         dotClassName: 'bg-muted-foreground',
       };
     case 'interrupted':
       return {
         label: t('pages.task.status.interrupted'),
-        className: 'bg-[var(--status-neutral-bg)] text-muted-foreground',
+        className: 'bg-foreground/5 text-muted-foreground dark:bg-foreground/10',
         dotClassName: 'bg-muted-foreground',
       };
     default:
       return {
         label: status,
-        className: 'bg-[var(--status-neutral-bg)] text-muted-foreground',
+        className: 'bg-foreground/5 text-muted-foreground dark:bg-foreground/10',
         dotClassName: 'bg-muted-foreground',
       };
   }
@@ -220,7 +220,7 @@ export function getTaskTypeMeta(taskType: string, t: Translate) {
     return {
       label: t('pages.task.taskType.transcription'),
       icon: Mic,
-      iconBg: 'bg-[var(--status-info-bg)]',
+      iconBg: 'bg-primary/15 dark:bg-primary/20',
       iconColor: 'text-primary',
     };
   }
@@ -229,8 +229,8 @@ export function getTaskTypeMeta(taskType: string, t: Translate) {
     return {
       label: t('pages.task.taskType.imageGeneration'),
       icon: Image,
-      iconBg: 'bg-[var(--surface-soft)]',
-      iconColor: 'text-[color:var(--accent-foreground)]',
+      iconBg: 'bg-secondary',
+      iconColor: 'text-accent-foreground',
     };
   }
 
@@ -238,8 +238,8 @@ export function getTaskTypeMeta(taskType: string, t: Translate) {
     return {
       label: t('pages.task.taskType.videoGeneration'),
       icon: Film,
-      iconBg: 'bg-[var(--surface-soft)]',
-      iconColor: 'text-[color:var(--brand-teal)]',
+      iconBg: 'bg-secondary',
+      iconColor: 'text-primary',
     };
   }
 
@@ -247,7 +247,7 @@ export function getTaskTypeMeta(taskType: string, t: Translate) {
     return {
       label: t('pages.task.taskType.modelDownload'),
       icon: Download,
-      iconBg: 'bg-[var(--surface-soft)]',
+      iconBg: 'bg-secondary',
       iconColor: 'text-muted-foreground',
     };
   }
@@ -258,7 +258,7 @@ export function getTaskTypeMeta(taskType: string, t: Translate) {
       .replaceAll('_', ' ')
       .replace(/\b\w/g, (character) => character.toUpperCase()),
     icon: ListChecks,
-    iconBg: 'bg-[var(--surface-soft)]',
+    iconBg: 'bg-secondary',
     iconColor: 'text-muted-foreground',
   };
 }

@@ -82,7 +82,7 @@ export function OpenWorkspaceButton({
           <input
             value={pathInput}
             onChange={(event) => setPathInput(event.target.value)}
-            className="focus-ring h-10 min-w-0 flex-1 rounded-lg border border-border/60 bg-background px-3 text-sm transition duration-[var(--dur-180)] ease-out-expo focus:border-[var(--brand-teal)]"
+            className="focus-ring h-10 min-w-0 flex-1 rounded-lg border border-border/60 bg-background px-3 text-sm transition duration-180 ease-out-expo focus:border-primary"
             placeholder={t("pages.workspace.actions.pathPlaceholder")}
             aria-label={t("pages.workspace.actions.pathPlaceholder")}
             data-testid="workspace-path-input"

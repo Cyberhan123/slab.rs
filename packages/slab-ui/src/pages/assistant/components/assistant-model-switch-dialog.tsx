@@ -72,7 +72,7 @@ export function AssistantModelSwitchDialog({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
+          <div className="rounded-2xl border border-border/70 bg-card px-4 py-3">
             <p className="text-sm font-medium text-foreground">
               {t("pages.assistant.dialog.keepTitle")}
             </p>
@@ -80,7 +80,7 @@ export function AssistantModelSwitchDialog({
               {t("pages.assistant.dialog.keepDescription")}
             </p>
           </div>
-          <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
+          <div className="rounded-2xl border border-border/70 bg-card px-4 py-3">
             <p className="text-sm font-medium text-foreground">
               {t("pages.assistant.dialog.createTitle")}
             </p>

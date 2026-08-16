@@ -60,7 +60,7 @@ export function TaskDetailDialog({
         <Button
           variant="quiet"
           size="sm"
-          className="h-auto rounded-xl px-2 py-1 text-sm font-semibold text-[color:var(--brand-teal)] hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_6%,transparent)] hover:text-[color:var(--brand-teal)]"
+          className="h-auto rounded-xl px-2 py-1 text-sm font-semibold text-primary hover:bg-primary/5 hover:text-primary"
           onClick={() => {
             onOpen(task.id);
           }}
@@ -157,7 +157,7 @@ export function TaskDetailDialog({
                       </Button>
                     </div>
                   ) : (
-                    <pre className="overflow-x-auto rounded-xl bg-[var(--surface-1)] p-3 text-xs">
+                    <pre className="overflow-x-auto rounded-xl bg-card p-3 text-xs">
                       {JSON.stringify(taskResult, null, 2)}
                     </pre>
                   )}

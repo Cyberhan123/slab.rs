@@ -79,21 +79,10 @@ export const SLAB_THEME_TOKENS = [
   "input",
   "ring",
   "radius",
-  "app-canvas",
-  "surface-1",
-  "surface-2",
-  "surface-soft",
-  "surface-selected",
-  "surface-input",
-  "brand-teal",
-  "brand-teal-foreground",
+  "sidebar",
   "brand-gold",
   "success",
   "success-foreground",
-  "status-success-bg",
-  "status-info-bg",
-  "status-danger-bg",
-  "status-neutral-bg",
 ] as const;
 
 export type SlabThemeTokenName = (typeof SLAB_THEME_TOKENS)[number];

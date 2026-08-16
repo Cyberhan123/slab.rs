@@ -39,7 +39,7 @@ export function WorkspaceEditorStatusBar({
   const infoCount = problems.length - errorCount - warningCount
 
   return (
-    <div className="flex h-7 shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-[var(--surface-1)] px-3 text-caption text-muted-foreground">
+    <div className="flex h-7 shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-card px-3 text-caption text-muted-foreground">
       <div className="flex min-w-0 items-center gap-2">
         <Popover>
           <PopoverTrigger asChild>
@@ -69,7 +69,7 @@ export function WorkspaceEditorStatusBar({
                   <button
                     key={`${problem.resource.toString()}:${problem.startLineNumber}:${problem.startColumn}:${problem.message}`}
                     type="button"
-                    className="grid w-full grid-cols-[1rem_minmax(0,1fr)] gap-2 px-3 py-2 text-left text-xs transition hover:bg-[var(--surface-selected)]"
+                    className="grid w-full grid-cols-[1rem_minmax(0,1fr)] gap-2 px-3 py-2 text-left text-xs transition hover:bg-accent"
                     onClick={() => onRevealProblem(problem)}
                   >
                     <ProblemIcon problem={problem} />

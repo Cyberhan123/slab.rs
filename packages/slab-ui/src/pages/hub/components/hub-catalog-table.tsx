@@ -144,13 +144,19 @@ function HubModelCard({
   return (
     <article
       data-testid={`hub-model-card-${model.id}`}
-      className="group relative overflow-hidden rounded-3xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_92%,var(--background))] p-6"
+      className="group relative overflow-hidden rounded-3xl border border-border/40 bg-card/95 p-6"
     >
-      <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_top_right,color-mix(in_oklab,var(--brand-teal)_9%,transparent),transparent_34%),radial-gradient(circle_at_bottom_left,color-mix(in_oklab,var(--brand-gold)_12%,transparent),transparent_30%)]" />
+      <div
+        className="absolute inset-0 opacity-70"
+        style={{
+          background:
+            'radial-gradient(circle at top right, color-mix(in oklab, var(--primary) 9%, transparent), transparent 34%), radial-gradient(circle at bottom left, color-mix(in oklab, var(--brand-gold) 12%, transparent), transparent 30%)',
+        }}
+      />
 
       <div className="relative flex h-full flex-col gap-6">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex size-14 items-center justify-center rounded-[18px] bg-[var(--surface-soft)] text-[color:var(--brand-teal)]">
+          <div className="flex size-14 items-center justify-center rounded-[18px] bg-secondary text-primary">
             <Icon className="size-6" />
           </div>
 
@@ -159,7 +165,7 @@ function HubModelCard({
             {runtimeStateLabel ? (
               <Badge
                 variant="chip"
-                className="bg-[var(--surface-1)] px-3 py-1 text-micro font-bold uppercase tracking-eyebrow text-muted-foreground"
+                className="bg-card px-3 py-1 text-micro font-bold uppercase tracking-eyebrow text-muted-foreground"
               >
                 {runtimeStateLabel}
               </Badge>
@@ -193,7 +199,7 @@ function HubModelCard({
               <Button
                 variant="quiet"
                 size="icon-sm"
-                className="size-10 rounded-full border border-border/70 bg-glass-bg-strong text-destructive hover:bg-[var(--shell-card)] hover:text-destructive"
+                className="size-10 rounded-full border border-border/70 bg-glass-bg-strong text-destructive hover:bg-card hover:text-destructive"
                 onClick={() => onDeleteClick(model)}
                 disabled={deletePending || model.pending}
                 aria-label={t('pages.hub.catalog.actions.deleteAria', { model: model.display_name })}
@@ -205,26 +211,26 @@ function HubModelCard({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
+            <Badge variant="chip" className="bg-card px-3 py-1 text-muted-foreground">
               {backendLabel}
             </Badge>
-            <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
+            <Badge variant="chip" className="bg-card px-3 py-1 text-muted-foreground">
               {formatKind(model.kind, t)}
             </Badge>
             {model.is_vad_model ? (
-              <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
+              <Badge variant="chip" className="bg-card px-3 py-1 text-muted-foreground">
                 {t('pages.hub.catalog.vad')}
               </Badge>
             ) : null}
             {model.filename ? (
               <Badge
                 variant="chip"
-                className="bg-[var(--surface-1)] px-3 py-1 font-mono text-muted-foreground"
+                className="bg-card px-3 py-1 font-mono text-muted-foreground"
               >
                 {shortFileName(model.filename)}
               </Badge>
             ) : null}
-            <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
+            <Badge variant="chip" className="bg-card px-3 py-1 text-muted-foreground">
               {t('pages.hub.catalog.size', {
                 value: formatBytesOrUnknown(model.size_bytes, t('pages.hub.catalog.unknownSize')),
               })}
@@ -232,7 +238,7 @@ function HubModelCard({
             <Badge
               variant="chip"
               className={cn(
-                'bg-[var(--surface-1)] px-3 py-1 text-muted-foreground',
+                'bg-card px-3 py-1 text-muted-foreground',
                 model.vram_risk === 'high' && 'text-destructive',
               )}
             >
@@ -352,7 +358,7 @@ function HubModelCard({
                     <Progress
                       value={downloadProgressValue ?? 0}
                       className={cn(
-                        'h-2 bg-[var(--surface-soft)]',
+                        'h-2 bg-secondary',
                         downloadProgressValue === null && 'animate-pulse'
                       )}
                     />
@@ -380,7 +386,7 @@ function HubModelCard({
                 })}
               </span>
               {model.pending ? (
-                <span className="font-semibold text-[color:var(--brand-teal)]">
+                <span className="font-semibold text-primary">
                   {t('pages.hub.catalog.downloadRunning')}
                 </span>
               ) : null}

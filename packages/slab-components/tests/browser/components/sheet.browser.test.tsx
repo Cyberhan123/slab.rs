@@ -14,7 +14,7 @@ import { renderComponentScene } from "../test-utils"
 
 function SheetGallery() {
   return (
-    <div data-testid="sheet-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="sheet-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Sheet>
         <SheetTrigger asChild>
           <Button data-testid="sheet-trigger">Open Sheet</Button>

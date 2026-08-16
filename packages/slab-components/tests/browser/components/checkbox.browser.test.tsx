@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function CheckboxGallery() {
   return (
-    <div data-testid="checkbox-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="checkbox-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Checkbox defaultChecked data-testid="checkbox" />
       <Checkbox />
       <Checkbox disabled />

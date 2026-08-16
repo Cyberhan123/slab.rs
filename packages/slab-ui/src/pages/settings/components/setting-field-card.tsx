@@ -94,7 +94,7 @@ export function SettingFieldCard({
       id={`setting-${property.pmid}`}
       data-testid={`settings-field-${property.pmid}`}
       className={cn(
-        'rounded-[16px] border border-border/60 bg-[var(--shell-card)] p-5',
+        'rounded-[16px] border border-border/60 bg-card p-5',
         errorState && 'border-destructive/70 bg-destructive/5',
       )}
     >
@@ -150,7 +150,7 @@ export function SettingFieldCard({
                 id={property.pmid}
                 variant="soft"
                 data-testid={`settings-input-${property.pmid}`}
-                className="h-[42px] w-full rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
+                className="h-[42px] w-full rounded-[12px] border-border/70 bg-secondary px-4 text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               >
                 <SelectValue placeholder={t('pages.settings.field.selectOption')} />
               </SelectTrigger>
@@ -179,7 +179,7 @@ export function SettingFieldCard({
                   ? t('pages.settings.field.numberPlaceholder')
                   : t('pages.settings.field.integerPlaceholder')
               }
-              className="h-[42px] rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
+              className="h-[42px] rounded-[12px] border-border/70 bg-secondary px-4 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               aria-invalid={Boolean(errorState)}
             />
           ) : property.pmid === 'providers.registry' && structuredSchema ? (
@@ -211,7 +211,7 @@ export function SettingFieldCard({
                   ? t('pages.settings.field.jsonPlaceholder')
                   : t('pages.settings.field.valuePlaceholder')
               }
-              className="min-h-40 rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 py-3 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
+              className="min-h-40 rounded-[12px] border-border/70 bg-secondary px-4 py-3 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               aria-invalid={Boolean(errorState)}
             />
           ) : (
@@ -223,7 +223,7 @@ export function SettingFieldCard({
               value={textValue}
               onChange={(event) => onChange(property, event.target.value)}
               placeholder={t('pages.settings.field.valuePlaceholder')}
-              className="h-[42px] rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
+              className="h-[42px] rounded-[12px] border-border/70 bg-secondary px-4 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               aria-invalid={Boolean(errorState)}
             />
           )}

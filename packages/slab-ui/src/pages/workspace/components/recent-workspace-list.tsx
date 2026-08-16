@@ -27,7 +27,7 @@ export function RecentWorkspaceList({
               key={workspace.rootPath}
               data-root-path={workspace.rootPath}
               data-testid="recent-workspace-row"
-              className="flex min-w-0 items-center justify-between gap-3 rounded-[12px] bg-[var(--surface-1)] px-3 py-3"
+              className="flex min-w-0 items-center justify-between gap-3 rounded-[12px] bg-card px-3 py-3"
             >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{workspace.name}</p>

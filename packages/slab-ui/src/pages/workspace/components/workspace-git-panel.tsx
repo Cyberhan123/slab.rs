@@ -82,7 +82,7 @@ export function WorkspaceGitPanel({
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <form
-        className="rounded-[12px] border border-border/50 bg-[var(--surface-1)] px-3 py-3"
+        className="rounded-[12px] border border-border/50 bg-card px-3 py-3"
         onSubmit={(event) => {
           event.preventDefault()
           const message = commitMessage.trim()
@@ -94,7 +94,7 @@ export function WorkspaceGitPanel({
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
-            <GitBranch className="size-4 shrink-0 text-[color:var(--brand-teal)]" />
+            <GitBranch className="size-4 shrink-0 text-primary" />
             <span className="truncate text-sm font-semibold">
               {gitStatus.branch ?? t("pages.workspace.git.detached")}
             </span>
@@ -140,7 +140,7 @@ export function WorkspaceGitPanel({
         <input
           value={commitMessage}
           onChange={(event) => setCommitMessage(event.target.value)}
-          className="mt-3 h-8 w-full rounded-[8px] border border-border/60 bg-background px-2 text-xs outline-none transition focus:border-[var(--brand-teal)]"
+          className="mt-3 h-8 w-full rounded-[8px] border border-border/60 bg-background px-2 text-xs outline-none transition focus:border-primary"
           placeholder={t("pages.workspace.git.commitPlaceholder")}
           aria-label={t("pages.workspace.git.commitPlaceholder")}
           disabled={operationPending || !hasChanges}
@@ -159,7 +159,7 @@ export function WorkspaceGitPanel({
         </div>
       </form>
 
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-[12px] bg-[var(--surface-1)] py-1">
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-[12px] bg-card py-1">
         {gitStatus.entries.length > 0 ? (
           <div className="space-y-3 px-1">
             <GitEntryGroup
@@ -232,8 +232,8 @@ function GitEntryGroup({
           <div
             key={`${entry.status}:${entry.staged}:${entry.path}`}
             className={cn(
-              "group flex min-w-0 items-center gap-1 rounded-[8px] px-2 py-1.5 text-sm transition hover:bg-[var(--surface-selected)]",
-              selected && "bg-[var(--surface-selected)]",
+              "group flex min-w-0 items-center gap-1 rounded-[8px] px-2 py-1.5 text-sm transition hover:bg-accent",
+              selected && "bg-accent",
             )}
           >
             <button

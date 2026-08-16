@@ -76,25 +76,25 @@ export function pluginSearchText(plugin: PluginRecord) {
 export function toneSurfaceClassName(tone: PluginTone) {
   switch (tone) {
     case 'teal':
-      return 'bg-[color-mix(in_oklab,var(--brand-teal)_12%,var(--shell-card))]';
+      return 'bg-primary/10';
     case 'gold':
-      return 'bg-[color-mix(in_oklab,var(--brand-gold)_12%,var(--shell-card))]';
+      return 'bg-brand-gold/10';
     case 'blue':
-      return 'bg-[color-mix(in_oklab,var(--chart-2)_10%,var(--shell-card))]';
+      return 'bg-chart-2/10';
     case 'slate':
     default:
-      return 'bg-[color-mix(in_oklab,var(--shell-rail-label)_12%,var(--shell-card))]';
+      return 'bg-muted-foreground/10';
   }
 }
 
 export function toneTextClassName(tone: PluginTone) {
   switch (tone) {
     case 'teal':
-      return 'text-[color:var(--brand-teal)]';
+      return 'text-primary';
     case 'gold':
-      return 'text-[color:var(--brand-gold)]';
+      return 'text-brand-gold';
     case 'blue':
-      return 'text-[color:var(--chart-2)]';
+      return 'text-chart-2';
     case 'slate':
     default:
       return 'text-muted-foreground';

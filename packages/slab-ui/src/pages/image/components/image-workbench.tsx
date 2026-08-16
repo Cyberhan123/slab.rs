@@ -185,14 +185,14 @@ export function ImageWorkbench({
   );
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] lg:overflow-hidden">
+    <div className="h-full w-full overflow-y-auto bg-card lg:overflow-hidden">
       <div className="mx-auto flex min-h-full max-w-[1248px] flex-col px-4 py-4 sm:px-6 lg:h-full lg:min-h-0">
         <SplitWorkbench
           className="h-full min-h-0 gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:gap-0 xl:grid-cols-[320px_minmax(0,1fr)]"
           sidebarClassName="space-y-0"
           mainClassName="min-h-full lg:min-h-0"
           sidebar={
-            <aside className="flex h-full min-h-[520px] flex-col rounded-3xl border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 lg:min-h-0 lg:overflow-hidden">
+            <aside className="flex h-full min-h-[520px] flex-col rounded-3xl border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--secondary)_96%,transparent),color-mix(in_oklab,var(--card)_96%,transparent))] p-6 lg:min-h-0 lg:overflow-hidden">
               <div className="flex h-full min-h-0 flex-col">
                 <div className="space-y-6 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-2">
                   <div className="space-y-4">
@@ -210,13 +210,13 @@ export function ImageWorkbench({
                       <TabsList className="grid h-auto w-full grid-cols-2 rounded-[16px] bg-transparent p-1">
                         <TabsTrigger
                           value="txt2img"
-                          className="h-11 rounded-[16px] border border-transparent text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-[var(--shell-card)] data-[state=active]:text-foreground"
+                          className="h-11 rounded-[16px] border border-transparent text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-card data-[state=active]:text-foreground"
                         >
                           {t('pages.image.options.mode.txt2img')}
                         </TabsTrigger>
                         <TabsTrigger
                           value="img2img"
-                          className="h-11 rounded-[16px] border border-transparent text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-[var(--shell-card)] data-[state=active]:text-foreground"
+                          className="h-11 rounded-[16px] border border-transparent text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-card data-[state=active]:text-foreground"
                         >
                           {t('pages.image.options.mode.img2img')}
                         </TabsTrigger>
@@ -231,7 +231,7 @@ export function ImageWorkbench({
                           </Label>
                           <button
                             type="button"
-                            className="group flex w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/50 bg-[var(--shell-card)] px-4 py-4 text-center transition hover:border-[var(--brand-teal)]/70 hover:bg-[var(--surface-soft)]"
+                            className="group flex w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/50 bg-card px-4 py-4 text-center transition hover:border-primary/70 hover:bg-secondary"
                             onClick={() => initImageInputRef.current?.click()}
                           >
                             {initImageDataUri ? (
@@ -245,7 +245,7 @@ export function ImageWorkbench({
                                   type="button"
                                   variant="pill"
                                   size="icon-sm"
-                                  className="absolute top-2 right-2 border-[var(--shell-card)]/80 bg-glass-bg-strong shadow-sm"
+                                  className="absolute top-2 right-2 border-card/80 bg-glass-bg-strong shadow-sm"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     setInitImageDataUri(null);
@@ -257,7 +257,7 @@ export function ImageWorkbench({
                               </div>
                             ) : (
                               <>
-                                <div className="flex size-12 items-center justify-center rounded-[14px] bg-[var(--surface-soft)] text-muted-foreground transition group-hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,transparent)] group-hover:text-[color:var(--brand-teal)]">
+                                <div className="flex size-12 items-center justify-center rounded-[14px] bg-secondary text-muted-foreground transition group-hover:bg-primary/10 group-hover:text-primary">
                                   <ImageIcon className="size-5" />
                                 </div>
                                 <div className="space-y-1">
@@ -318,7 +318,7 @@ export function ImageWorkbench({
                       <Label className={SIDEBAR_LABEL_CLASSNAME}>
                         {t('pages.image.workbench.dimensions.label')}
                       </Label>
-                      <span className="rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_15%,transparent)] px-2 py-1 font-mono text-micro leading-none text-[color:var(--brand-teal)]">
+                      <span className="rounded-full bg-primary/15 px-2 py-1 font-mono text-micro leading-none text-primary">
                         {parsedWidth} x {parsedHeight}
                       </span>
                     </div>
@@ -332,9 +332,9 @@ export function ImageWorkbench({
                             type="button"
                             aria-pressed={isActive}
                             className={cn(
-                              'flex h-10 items-center justify-center rounded-xl border bg-[var(--shell-card)] px-3 text-caption font-medium text-foreground transition',
+                              'flex h-10 items-center justify-center rounded-xl border bg-card px-3 text-caption font-medium text-foreground transition',
                               isActive
-                                ? 'border-[var(--brand-teal)]/60'
+                                ? 'border-primary/60'
                                 : 'border-border/60 hover:border-border/50',
                             )}
                             onClick={() => handleDimensionPreset(preset.width, preset.height)}
@@ -357,7 +357,7 @@ export function ImageWorkbench({
                       <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="rounded-[16px] border-border/70 bg-[var(--shell-card)] shadow-elevation-3">
+                      <SelectContent className="rounded-[16px] border-border/70 bg-card shadow-elevation-3">
                         {[1, 2, 4].map((count) => (
                           <SelectItem key={count} value={String(count)}>
                             {t('pages.image.workbench.imageCount.option', { count })}
@@ -493,7 +493,7 @@ export function ImageWorkbench({
                           <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent className="rounded-[16px] border-border/70 bg-[var(--shell-card)] shadow-elevation-3">
+                          <SelectContent className="rounded-[16px] border-border/70 bg-card shadow-elevation-3">
                             {sampleMethodOptions.map((method) => (
                               <SelectItem key={method.value} value={method.value}>
                                 {method.label}
@@ -511,7 +511,7 @@ export function ImageWorkbench({
                           <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent className="rounded-[16px] border-border/70 bg-[var(--shell-card)] shadow-elevation-3">
+                          <SelectContent className="rounded-[16px] border-border/70 bg-card shadow-elevation-3">
                             {schedulerOptions.map((schedulerItem) => (
                               <SelectItem
                                 key={schedulerItem.value}
@@ -555,7 +555,7 @@ export function ImageWorkbench({
 
                   <div className="mt-auto shrink-0 pt-8 lg:pt-6">
                     <Button
-                      className="h-14 w-full rounded-xl bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-base font-semibold text-[color:var(--brand-teal-foreground)] shadow-elevation-1 hover:brightness-[1.03]"
+                      className="h-14 w-full rounded-xl bg-linear-to-br from-primary to-primary/85 text-base font-semibold text-primary-foreground shadow-elevation-1 hover:brightness-[1.03]"
                       onClick={handleSubmit}
                       disabled={isBusy || !prompt.trim() || !selectedModelId}
                       data-testid="image-generate-button"
@@ -613,16 +613,16 @@ export function ImageWorkbench({
             </aside>
           }
           main={
-            <section className="flex h-full min-h-[520px] flex-col rounded-3xl border border-border/60 bg-[var(--shell-card)] lg:min-h-0 lg:overflow-hidden lg:rounded-none lg:border-0">
+            <section className="flex h-full min-h-[520px] flex-col rounded-3xl border border-border/60 bg-card lg:min-h-0 lg:overflow-hidden lg:rounded-none lg:border-0">
               <div className="min-h-0 flex-1">
                 {images.length === 0 ? (
                 <div className="flex h-full min-h-[360px] items-center justify-center px-6 py-12 xl:min-h-[560px]">
                   <div className="flex max-w-[448px] flex-col items-center gap-6 text-center">
                     <div className="relative flex items-center justify-center">
-                      <div className="flex size-32 items-center justify-center rounded-full bg-[var(--surface-soft)] text-muted-foreground/60">
+                      <div className="flex size-32 items-center justify-center rounded-full bg-secondary text-muted-foreground/60">
                         <ImageIcon className="size-14 stroke-[1.5]" />
                       </div>
-                      <div className="absolute -right-2 -bottom-2 flex size-12 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-[color:var(--brand-teal-foreground)] shadow-elevation-1">
+                      <div className="absolute -right-2 -bottom-2 flex size-12 items-center justify-center rounded-[14px] bg-linear-to-br from-primary to-primary/85 text-primary-foreground shadow-elevation-1">
                         {isGenerating ? (
                           <Loader2 className="size-5 animate-spin" />
                         ) : (
@@ -643,7 +643,7 @@ export function ImageWorkbench({
                       </p>
                     </div>
                     {isGenerating ? (
-                      <div className="rounded-full bg-[var(--surface-soft)] px-3 py-1 text-sm text-muted-foreground">
+                      <div className="rounded-full bg-secondary px-3 py-1 text-sm text-muted-foreground">
                         {t('pages.image.workbench.emptyState.taskRunning')}
                       </div>
                     ) : (
@@ -685,7 +685,7 @@ export function ImageWorkbench({
                           {t('pages.image.workbench.gallery.description')}
                         </p>
                       </div>
-                      <span className="rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_15%,transparent)] px-3 py-1 text-sm font-medium text-[color:var(--brand-teal)]">
+                      <span className="rounded-full bg-primary/15 px-3 py-1 text-sm font-medium text-primary">
                         {t('pages.image.workbench.gallery.count', { count: images.length })}
                       </span>
                     </div>
@@ -695,9 +695,9 @@ export function ImageWorkbench({
                       {images.map((image, index) => (
                         <figure
                           key={image.id}
-                          className="group overflow-hidden rounded-2xl border border-border/60 bg-[var(--surface-soft)]"
+                          className="group overflow-hidden rounded-2xl border border-border/60 bg-secondary"
                         >
-                          <div className="relative overflow-hidden bg-[var(--shell-card)]">
+                          <div className="relative overflow-hidden bg-card">
                             <img
                               src={image.src}
                               alt={image.prompt}
@@ -709,7 +709,7 @@ export function ImageWorkbench({
                               <Button
                                 variant="pill"
                                 size="icon-sm"
-                                className="border-[var(--shell-card)]/80 bg-glass-bg-strong shadow-sm backdrop-blur"
+                                className="border-card/80 bg-glass-bg-strong shadow-sm backdrop-blur"
                                 onClick={() => setZoomedImage(image.src)}
                                 aria-label={t('pages.image.workbench.gallery.zoomAria')}
                               >
@@ -718,7 +718,7 @@ export function ImageWorkbench({
                               <Button
                                 variant="pill"
                                 size="icon-sm"
-                                className="border-[var(--shell-card)]/80 bg-glass-bg-strong shadow-sm backdrop-blur"
+                                className="border-card/80 bg-glass-bg-strong shadow-sm backdrop-blur"
                                 onClick={() => handleDownload(image.src, index)}
                                 aria-label={t('pages.image.workbench.gallery.downloadAria')}
                               >
@@ -726,7 +726,7 @@ export function ImageWorkbench({
                               </Button>
                             </div>
                           </div>
-                          <figcaption className="space-y-3 border-t border-border/48 bg-[var(--shell-card)] px-4 py-4">
+                          <figcaption className="space-y-3 border-t border-border/48 bg-card px-4 py-4">
                             <p className="line-clamp-2 text-sm leading-6 text-foreground/80">
                               {image.prompt}
                             </p>
@@ -734,7 +734,7 @@ export function ImageWorkbench({
                               <Badge variant="chip">
                                 {t(`pages.image.options.mode.${image.mode}`)}
                               </Badge>
-                              <span className="rounded-full bg-[var(--surface-soft)] px-2.5 py-1">
+                              <span className="rounded-full bg-secondary px-2.5 py-1">
                                 {image.width} x {image.height}
                               </span>
                             </div>

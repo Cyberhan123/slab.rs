@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function BadgeGallery() {
   return (
-    <div data-testid="badge-gallery" className="flex flex-wrap items-center gap-3 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="badge-gallery" className="flex flex-wrap items-center gap-3 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Badge variant="default" data-testid="badge">Default</Badge>
       <Badge variant="secondary">Secondary</Badge>
       <Badge variant="destructive">Destructive</Badge>

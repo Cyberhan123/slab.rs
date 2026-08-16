@@ -291,7 +291,7 @@ export function WorkspaceWorkbench({
           <SoftPanel className="flex h-full min-h-0 flex-col gap-3 overflow-hidden rounded-2xl px-3 py-3">
             <div className="flex items-center justify-between gap-3 px-1">
               <div className="flex items-center gap-2 text-sm font-semibold">
-                <FolderKanban className="size-4 text-[color:var(--brand-teal)]" />
+                <FolderKanban className="size-4 text-primary" />
                 {t("pages.workspace.explorer.title")}
               </div>
               {(explorerPanel === "search" && textSearchFetching) ||
@@ -300,12 +300,12 @@ export function WorkspaceWorkbench({
               ) : null}
             </div>
 
-            <div className="grid grid-cols-3 gap-1 rounded-full bg-[var(--surface-1)] p-1">
+            <div className="grid grid-cols-3 gap-1 rounded-full bg-card p-1">
               <button
                 type="button"
                 className={cn(
                   "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
-                  "focus-ring duration-[var(--dur-180)] ease-out-expo",
+                  "focus-ring duration-180 ease-out-expo",
                   explorerPanel === "files" && "bg-background text-foreground shadow-sm",
                 )}
                 onClick={() => handleSelectExplorerPanel("files")}
@@ -317,7 +317,7 @@ export function WorkspaceWorkbench({
                 type="button"
                 className={cn(
                   "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
-                  "focus-ring duration-[var(--dur-180)] ease-out-expo",
+                  "focus-ring duration-180 ease-out-expo",
                   explorerPanel === "search" && "bg-background text-foreground shadow-sm",
                 )}
                 onClick={() => handleSelectExplorerPanel("search")}
@@ -329,7 +329,7 @@ export function WorkspaceWorkbench({
                 type="button"
                 className={cn(
                   "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
-                  "focus-ring duration-[var(--dur-180)] ease-out-expo",
+                  "focus-ring duration-180 ease-out-expo",
                   explorerPanel === "git" && "bg-background text-foreground shadow-sm",
                 )}
                 onClick={() => handleSelectExplorerPanel("git")}
@@ -340,7 +340,7 @@ export function WorkspaceWorkbench({
             </div>
 
             {explorerPanel === "files" ? (
-              <div className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
+              <div className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-card">
                 <WorkspaceVscodePart
                   part="explorer"
                   themeMode={editorThemeMode}
@@ -383,7 +383,7 @@ export function WorkspaceWorkbench({
           <button
             type="button"
             aria-label="Resize file explorer"
-            className="focus-ring absolute bottom-3 right-[-10px] top-3 z-10 hidden w-5 cursor-col-resize items-center justify-center rounded-full text-muted-foreground/70 transition duration-[var(--dur-180)] ease-out-expo hover:bg-muted/70 hover:text-foreground lg:flex"
+            className="focus-ring absolute bottom-3 right-[-10px] top-3 z-10 hidden w-5 cursor-col-resize items-center justify-center rounded-full text-muted-foreground/70 transition duration-180 ease-out-expo hover:bg-muted/70 hover:text-foreground lg:flex"
             ref={explorerResize.ref}
           >
             <span className="h-12 w-1 rounded-full bg-current" />

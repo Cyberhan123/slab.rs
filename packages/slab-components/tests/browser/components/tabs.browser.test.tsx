@@ -9,7 +9,7 @@ function TabsShowcase() {
   return (
     <div
       data-testid="tabs-showcase"
-      className="w-full max-w-3xl rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm"
+      className="w-full max-w-3xl rounded-[28px] border border-border/60 bg-card p-6 shadow-sm"
     >
       <Tabs defaultValue="overview">
         <TabsList variant="line" aria-label="Model workspace sections">

@@ -45,7 +45,7 @@ export function GenerationProgressView({
       data-testid={testId}
     >
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_12%,transparent)] text-[color:var(--brand-teal)]">
+        <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
           <Loader2 className="size-4 animate-spin" />
         </div>
         <div className="min-w-0 flex-1 space-y-1">
@@ -62,7 +62,7 @@ export function GenerationProgressView({
         </div>
       </div>
 
-      <Progress value={percent} className="h-2 bg-[var(--surface-soft)]" />
+      <Progress value={percent} className="h-2 bg-secondary" />
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-caption font-medium text-muted-foreground">
         <span>

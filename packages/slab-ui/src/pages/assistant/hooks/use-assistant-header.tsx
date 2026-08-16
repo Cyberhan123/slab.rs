@@ -95,7 +95,7 @@ export function useAssistantHeader({
         title={newSessionLabel}
         type="button"
         variant="quiet"
-        className="size-8 shrink-0 rounded-full text-[color:var(--shell-rail-label)] hover:bg-glass-bg-strong hover:text-[color:var(--shell-title)]"
+        className="size-8 shrink-0 rounded-full text-muted-foreground hover:bg-glass-bg-strong hover:text-foreground"
       >
         <MessageCirclePlus data-icon="inline-start" />
       </Button>

@@ -106,7 +106,7 @@ describe('desktop shell navigation e2e', () => {
     await page.getByTestId('sidebar-link-settings').click();
 
     await expect.element(page.getByText('Page crashed')).toBeVisible();
-    expect(document.querySelector('header.shell-topbar')).not.toBeNull();
+    expect(document.querySelector('header[data-slot="shell-topbar"]')).not.toBeNull();
     await expect.element(page.getByTestId('sidebar-link-settings')).toBeVisible();
 
     const details = document.querySelector<HTMLDetailsElement>('details');

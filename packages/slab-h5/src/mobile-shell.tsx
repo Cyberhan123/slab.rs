@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 export function MobileShell({ children }: { children: ReactNode }) {
   return (
     <div
-      className="flex min-h-[100dvh] flex-col bg-app-canvas text-foreground"
+      className="flex min-h-[100dvh] flex-col bg-background text-foreground"
       style={{
         paddingTop: "env(safe-area-inset-top)",
         paddingBottom: "env(safe-area-inset-bottom)",

@@ -16,7 +16,7 @@ import { renderComponentScene } from "../test-utils"
 
 function AlertDialogGallery() {
   return (
-    <div data-testid="alert-dialog-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="alert-dialog-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button variant="destructive">Delete Account</Button>

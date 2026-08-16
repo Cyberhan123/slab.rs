@@ -53,7 +53,7 @@ export function AssistantSessionSheet({
       <SheetContent
         side="right"
         data-testid="assistant-session-sheet"
-        className="w-full overflow-hidden border-l border-border/60 bg-[var(--surface-1)] p-0 sm:max-w-xl"
+        className="w-full overflow-hidden border-l border-border/60 bg-card p-0 sm:max-w-xl"
       >
         <SheetHeader className="shrink-0 border-b border-border/60 px-6 py-5 pr-14">
           <div className="space-y-1">
@@ -76,7 +76,7 @@ export function AssistantSessionSheet({
                   data-testid={`assistant-session-row-${conversation.key}`}
                   className={cn(
                     "workspace-soft-panel flex items-center gap-3 rounded-2xl px-4 py-3",
-                    isCurrent && "border-[color:var(--brand-teal)] bg-[color:color-mix(in_oklab,var(--brand-teal)_8%,var(--surface-soft))]"
+                    isCurrent && "border-primary bg-primary/10"
                   )}
                 >
                   <button

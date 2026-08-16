@@ -11,7 +11,7 @@ import { renderComponentScene } from "../test-utils"
 
 function AvatarGallery() {
   return (
-    <div data-testid="avatar-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="avatar-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Avatar size="sm" data-testid="avatar">
         <AvatarFallback>SM</AvatarFallback>
       </Avatar>

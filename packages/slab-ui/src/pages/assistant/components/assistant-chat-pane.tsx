@@ -162,7 +162,7 @@ export function AssistantChatPane({
 
     return (
         <MessageScrollerProvider defaultScrollPosition="last-anchor">
-            <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--shell-card)]">
+            <div className="relative flex min-h-0 flex-1 flex-col bg-card">
                 <Card className="h-full w-full gap-0 border-none shadow-none">
                     <CardContent className="flex-1 overflow-hidden p-0">
                         <div className="flex h-full flex-col">

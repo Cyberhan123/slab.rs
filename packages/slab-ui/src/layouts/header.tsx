@@ -118,9 +118,9 @@ function HeaderSelect({ select }: { select: HeaderSelectConfig }) {
         size="sm"
         variant="default"
         title={selectedOption?.label ?? placeholder}
-        className="shell-context hidden h-8 max-w-[18rem] shrink-0 border-border/30 bg-glass-bg-strong pl-3 pr-2.5 text-label font-semibold text-foreground/70 lg:flex"
+        className="[app-region:no-drag] hidden h-8 max-w-[18rem] shrink-0 border-border/30 bg-glass-bg-strong pl-3 pr-2.5 text-label font-semibold text-foreground/70 lg:flex"
       >
-        <span className="size-2 shrink-0 rounded-full bg-[var(--brand-gold)]" />
+        <span className="size-2 shrink-0 rounded-full bg-brand-gold" />
         <SelectValue placeholder={placeholder} className="max-w-[11rem] truncate" />
       </SelectTrigger>
       <SelectContent variant="default" position="popper" align="start" className="max-h-80 min-w-[18rem]">
@@ -169,24 +169,25 @@ export default function Header() {
 
   return (
     <header
+      data-slot="shell-topbar"
       className={cn(
-        "shell-topbar text-body flex h-[var(--shell-topbar-height)] items-center justify-between gap-4 pl-5 md:pl-8"
+        "[app-region:drag] text-body flex h-shell-topbar items-center justify-between gap-4 bg-linear-to-b from-card/30 to-transparent bg-background/50 pl-5 backdrop-blur-[10px] hairline-b md:pl-8 dark:bg-background/80"
       )}
       data-tauri-drag-region="true"
     >
       <div className="flex min-w-0 items-center gap-3 md:gap-4">
-        <h2 className="shrink-0 text-lg font-extrabold tracking-display text-[color:var(--shell-title)]">
+        <h2 className="shrink-0 text-lg font-extrabold tracking-display text-foreground">
           {title}
         </h2>
         <span aria-hidden="true" className="hairline-v hidden h-4 w-px shrink-0 sm:block" />
-        <p className="hidden max-w-[28rem] min-w-0 truncate text-body font-medium leading-5 text-[color:var(--shell-subtitle)] xl:max-w-[34rem] sm:block">
+        <p className="hidden max-w-[28rem] min-w-0 truncate text-body font-medium leading-5 text-primary xl:max-w-[34rem] sm:block">
           {subtitle}
         </p>
         {select ? (
           <HeaderSelect select={select} />
         ) : contextLabel ? (
-          <div className="shell-context hidden h-8 shrink-0 items-center gap-2 rounded-full border border-border/30 bg-glass-bg-strong pl-3 pr-2.5 text-label font-semibold text-foreground/70 lg:inline-flex">
-            <span className="size-2 rounded-full bg-[var(--brand-gold)]" />
+          <div className="[app-region:no-drag] hidden h-8 shrink-0 items-center gap-2 rounded-full border border-border/30 bg-glass-bg-strong pl-3 pr-2.5 text-label font-semibold text-foreground/70 lg:inline-flex">
+            <span className="size-2 rounded-full bg-brand-gold" />
             <span className="max-w-[11rem] truncate">{contextLabel}</span>
           </div>
         ) : null}
@@ -196,7 +197,7 @@ export default function Header() {
       <div className="ml-auto flex min-w-0 items-center gap-3 md:gap-4">
         {search ? (
           <>
-            <div className="shell-search hidden h-8 min-w-[12rem] flex-1 items-center gap-2.5 rounded-full px-3.5 text-label text-[color:var(--shell-search-foreground)] md:flex lg:w-64">
+            <div className="[app-region:no-drag] hidden h-8 min-w-[12rem] flex-1 items-center gap-2.5 rounded-full border border-card/30 bg-input/40 px-3.5 text-label text-muted-foreground md:flex lg:w-64 dark:bg-input">
               <Search className="size-3.5 shrink-0" />
               <Input
                 type="search"
@@ -205,7 +206,7 @@ export default function Header() {
                 placeholder={searchPlaceholder}
                 aria-label={searchAriaLabel}
                 disabled={search.disabled}
-                className="h-full border-0 bg-transparent p-0 text-label text-[color:var(--shell-search-foreground)] shadow-none outline-none placeholder:text-[color:var(--shell-search-foreground)]/70 focus-visible:border-transparent focus-visible:ring-0"
+                className="h-full border-0 bg-transparent p-0 text-label text-muted-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus-visible:border-transparent focus-visible:ring-0"
               />
             </div>
             <span aria-hidden="true" className="hairline-v hidden h-4 w-px shrink-0 md:block" />
@@ -222,7 +223,7 @@ export default function Header() {
               title={history.title ?? historyLabel}
               type="button"
               variant="quiet"
-              className="size-8 shrink-0 rounded-full text-[color:var(--shell-rail-label)] hover:bg-glass-bg-strong hover:text-[color:var(--shell-title)]"
+              className="size-8 shrink-0 rounded-full text-muted-foreground hover:bg-glass-bg-strong hover:text-foreground"
             >
               <History data-icon="inline-start" />
             </Button>

@@ -20,13 +20,13 @@ export function PluginPermissionsCard() {
 
   return (
     <section
-      className="scroll-mt-8 rounded-[20px] border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-soft)_70%,transparent)] p-6 md:p-8"
+      className="scroll-mt-8 rounded-[20px] border border-border/40 bg-[color:color-mix(in_oklab,var(--secondary)_70%,transparent)] p-6 md:p-8"
       data-testid="plugin-permissions-card"
     >
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="size-5 text-[color:var(--brand-teal)]" />
+            <ShieldCheck className="size-5 text-primary" />
             <h2 className="text-lg font-bold tracking-tight text-foreground">
               {t("pages.plugins.permissions.management.title")}
             </h2>

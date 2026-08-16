@@ -16,13 +16,13 @@ function Card({
       className={cn(
         "flex flex-col gap-6 rounded-xl border bg-card py-6 text-card-foreground shadow-sm",
         variant === "metric" &&
-          "border-border/60 bg-[var(--surface-1)] shadow-[var(--shell-elevation)]",
+          "border-border/60 bg-card shadow-elevation-1",
         variant === "panel" &&
-          "border-border/60 bg-[var(--shell-card)] shadow-[var(--shell-elevation)]",
+          "border-border/60 bg-card shadow-elevation-1",
         variant === "soft" &&
-          "border-border/60 bg-[var(--surface-soft)] shadow-none",
+          "border-border/60 bg-secondary shadow-none",
         variant === "surface" &&
-          "border-border/60 bg-[var(--surface-1)] shadow-sm",
+          "border-border/60 bg-card shadow-sm",
         className
       )}
       {...props}

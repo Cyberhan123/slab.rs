@@ -62,7 +62,7 @@ export function VadSettings({
 }: VadSettingsProps) {
   const { t } = useTranslation();
   return (
-    <div className="rounded-[22px] border border-[var(--shell-card)]/70 bg-glass-bg p-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
+    <div className="rounded-[22px] border border-card/70 bg-glass-bg p-4 glass-highlight-top">
       <div className="flex items-start justify-between gap-5">
         <div className="space-y-1">
           <Label htmlFor="enable-vad" className="text-base font-semibold text-foreground">
@@ -94,7 +94,7 @@ export function VadSettings({
               <SelectTrigger
                 variant="soft"
                 size="pill"
-                className="w-full justify-between border-border/70 bg-[var(--shell-card)] shadow-none"
+                className="w-full justify-between border-border/70 bg-card shadow-none"
               >
                 <SelectValue
                   placeholder={
@@ -152,7 +152,7 @@ export function VadSettings({
                 onChange={(e) => setVadThreshold(e.target.value)}
                 placeholder={t('pages.audio.vad.placeholders.threshold')}
                 disabled={isBusy}
-                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-card shadow-none"
               />
             </div>
             <div className="space-y-1.5">
@@ -169,7 +169,7 @@ export function VadSettings({
                 onChange={(e) => setVadMinSpeechDurationMs(e.target.value)}
                 placeholder={t('pages.audio.vad.placeholders.minSpeech')}
                 disabled={isBusy}
-                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-card shadow-none"
               />
             </div>
             <div className="space-y-1.5">
@@ -186,7 +186,7 @@ export function VadSettings({
                 onChange={(e) => setVadMinSilenceDurationMs(e.target.value)}
                 placeholder={t('pages.audio.vad.placeholders.minSilence')}
                 disabled={isBusy}
-                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-card shadow-none"
               />
             </div>
             <div className="space-y-1.5">
@@ -203,7 +203,7 @@ export function VadSettings({
                 onChange={(e) => setVadMaxSpeechDurationS(e.target.value)}
                 placeholder={t('pages.audio.vad.placeholders.maxSpeech')}
                 disabled={isBusy}
-                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-card shadow-none"
               />
             </div>
             <div className="space-y-1.5">
@@ -220,7 +220,7 @@ export function VadSettings({
                 onChange={(e) => setVadSpeechPadMs(e.target.value)}
                 placeholder={t('pages.audio.vad.placeholders.speechPad')}
                 disabled={isBusy}
-                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-card shadow-none"
               />
             </div>
             <div className="space-y-1.5">
@@ -237,7 +237,7 @@ export function VadSettings({
                 onChange={(e) => setVadSamplesOverlap(e.target.value)}
                 placeholder={t('pages.audio.vad.placeholders.samplesOverlap')}
                 disabled={isBusy}
-                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-card shadow-none"
               />
             </div>
           </div>

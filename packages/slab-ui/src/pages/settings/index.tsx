@@ -187,8 +187,8 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-[var(--shell-card)] lg:flex-row">
-      <aside className="w-full shrink-0 border-b border-border/50 bg-[color:color-mix(in_oklab,var(--surface-soft)_80%,transparent)] lg:w-[256px] lg:border-r lg:border-b-0">
+    <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-card lg:flex-row">
+      <aside className="w-full shrink-0 border-b border-border/50 bg-[color:color-mix(in_oklab,var(--secondary)_80%,transparent)] lg:w-[256px] lg:border-r lg:border-b-0">
           <SettingsNavigation
             activeSectionId={activeSection?.id ?? null}
           sections={visibleSections}
@@ -324,7 +324,7 @@ export default function SettingsPage() {
                     <section
                       key={subsection.id}
                       id={subsectionAnchorId(activeSection.id, subsection.id)}
-                      className="scroll-mt-8 rounded-[20px] border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-soft)_70%,transparent)] p-6 md:p-8"
+                      className="scroll-mt-8 rounded-[20px] border border-border/40 bg-[color:color-mix(in_oklab,var(--secondary)_70%,transparent)] p-6 md:p-8"
                     >
                       {shouldCollapseSubsectionHeading(activeSection, subsection) ? (
                         subsectionDescription ? (

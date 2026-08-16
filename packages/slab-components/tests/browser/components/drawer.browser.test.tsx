@@ -15,7 +15,7 @@ import { renderComponentScene } from "../test-utils"
 
 function DrawerGallery() {
   return (
-    <div data-testid="drawer-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="drawer-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Drawer>
         <DrawerTrigger asChild>
           <Button data-testid="drawer-trigger">Open Drawer</Button>

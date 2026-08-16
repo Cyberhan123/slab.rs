@@ -4,6 +4,8 @@ import { extname, join, relative } from "node:path"
 const ROOTS = [
   "packages/slab-components/src",
   "packages/slab-desktop/src",
+  "packages/slab-ui/src",
+  "packages/slab-plugin-ui/src",
 ]
 
 const GLOBALS_PATH = "packages/slab-components/src/styles/globals.css"
@@ -34,21 +36,29 @@ const RULES = [
     pattern: /tracking-\[[^\]]+\]/g,
     max: 0,
   },
+  {
+    // Tailwind arbitrary values must reference theme tokens as utilities
+    // (bg-card), not var() brackets. Radix/Shiki runtime vars and the
+    // explorer's component-local layout var are exempt.
+    name: "arbitrary var() utilities",
+    pattern: /-\[(?:color:)?var\(--(?!radix-|shiki-|workspace-explorer-width)/g,
+    max: 0,
+  },
 ] as const
 
 const RAW_HEX_PATTERN = /#[0-9A-Fa-f]{3,8}\b/g
 
 const RAW_HEX_ALLOWLIST = [
   // Native macOS window stoplight colors.
-  /^packages\/slab-desktop\/src\/layouts\/window-controls\.tsx$/,
+  /^packages\/slab-ui\/src\/layouts\/window-controls\.tsx$/,
   // Third-party chart SVG selectors target literal generated strokes.
   /^packages\/slab-components\/src\/chart\.tsx$/,
   // Xterm requires literal ANSI palette values.
-  /^packages\/slab-desktop\/src\/pages\/workspace\/components\/workspace-console-panel\.tsx$/,
+  /^packages\/slab-ui\/src\/pages\/workspace\/components\/workspace-console-panel\.tsx$/,
   // Monaco needs literal fallback colors when CSS variable resolution is unavailable.
-  /^packages\/slab-desktop\/src\/pages\/workspace\/lib\/monaco-theme\.tsx?$/,
+  /^packages\/slab-ui\/src\/pages\/workspace\/lib\/monaco-theme\.tsx?$/,
   // Test fixture asserts the human-facing hash prefix, not a color.
-  /^packages\/slab-desktop\/src\/pages\/task\/__tests__\/utils\.test\.tsx?$/,
+  /^packages\/slab-ui\/src\/pages\/task\/__tests__\/utils\.test\.tsx?$/,
 ]
 
 async function main() {

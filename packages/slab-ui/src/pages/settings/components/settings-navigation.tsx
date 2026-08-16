@@ -64,14 +64,14 @@ export function SettingsNavigation({
               className={cn(
                 'flex w-full items-center gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors',
                 isActiveSection
-                  ? 'bg-[var(--shell-card)] text-[color:var(--brand-teal)]'
+                  ? 'bg-card text-primary'
                   : 'text-muted-foreground hover:bg-glass-bg-strong hover:text-foreground',
               )}
             >
               <span
                 className={cn(
                   'flex size-8 shrink-0 items-center justify-center rounded-[12px]',
-                  isActiveSection ? 'bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,transparent)] text-[color:var(--brand-teal)]' : 'bg-transparent text-muted-foreground/70',
+                  isActiveSection ? 'bg-primary/10 text-primary' : 'bg-transparent text-muted-foreground/70',
                 )}
               >
                 <SectionIcon className="size-4" />
@@ -81,7 +81,7 @@ export function SettingsNavigation({
                 <span
                   className={cn(
                     'block truncate text-sm',
-                    isActiveSection ? 'font-semibold text-[color:var(--brand-teal)]' : 'font-medium',
+                    isActiveSection ? 'font-semibold text-primary' : 'font-medium',
                   )}
                 >
                   {translateServerField(section.i18n, 'title', section.title, t)}
@@ -91,7 +91,7 @@ export function SettingsNavigation({
               {isActiveSection ? (
                 <Badge
                   variant="counter"
-                  className="rounded-full border-[var(--shell-card)]/80 bg-[var(--surface-soft)] px-2 py-0.5 text-micro font-bold text-muted-foreground shadow-none"
+                  className="rounded-full border-card/80 bg-secondary px-2 py-0.5 text-micro font-bold text-muted-foreground shadow-none"
                 >
                   {countSectionProperties(section)}
                 </Badge>

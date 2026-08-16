@@ -158,7 +158,7 @@ export function WorkspaceConsolePanel({ onClose, themeMode, workspaceRoot }: Wor
       <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-border/60 px-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex shrink-0 items-center gap-2 text-sm font-semibold">
-            <Terminal className="size-4 text-[color:var(--brand-teal)]" />
+            <Terminal className="size-4 text-primary" />
             {t("pages.workspace.console.title")}
           </div>
           <div className="flex min-w-0 items-center gap-1 overflow-x-auto" role="tablist">
@@ -170,8 +170,8 @@ export function WorkspaceConsolePanel({ onClose, themeMode, workspaceRoot }: Wor
                 <div
                   key={session.id}
                   className={cn(
-                    "flex h-6 shrink-0 items-center gap-1 rounded-full pl-2 pr-1 text-caption font-medium text-muted-foreground transition hover:bg-[var(--surface-selected)] hover:text-foreground",
-                    active && "bg-[var(--surface-selected)] text-foreground",
+                    "flex h-6 shrink-0 items-center gap-1 rounded-full pl-2 pr-1 text-caption font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground",
+                    active && "bg-accent text-foreground",
                   )}
                 >
                   <button
@@ -245,7 +245,7 @@ export function WorkspaceConsolePanel({ onClose, themeMode, workspaceRoot }: Wor
         </div>
       </div>
 
-      <div className="relative min-h-0 flex-1 bg-[var(--surface-1)]">
+      <div className="relative min-h-0 flex-1 bg-card">
         {sessions.length > 0 ? (
           sessions.map((session) => (
             <TerminalSessionPane

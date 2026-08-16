@@ -33,7 +33,7 @@ export function WebApp() {
   return (
     <SlabProvider deps={{ ports: createWebPorts(), queryClient }}>
       <QueryClientProvider client={queryClient}>
-        <div className="min-h-screen bg-app-canvas px-6 py-8 text-foreground">
+        <div className="min-h-screen bg-background px-6 py-8 text-foreground">
           <HealthStatus />
           <RouterProvider router={router} />
         </div>

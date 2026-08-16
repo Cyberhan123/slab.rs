@@ -14,10 +14,10 @@ export function PluginStatusBadge({ status, busy }: { status: PluginStatusKey; b
       className={cn(
         'rounded-full px-2 py-0.5 text-micro font-bold uppercase leading-[15px] tracking-eyebrow',
         running
-          ? 'bg-[color-mix(in_oklab,var(--brand-teal)_20%,var(--shell-card))] text-[color:var(--brand-teal)]'
+          ? 'bg-primary/20 text-primary'
           : invalid
-            ? 'bg-[var(--status-danger-bg)] text-destructive'
-            : 'bg-[var(--surface-soft)] text-muted-foreground',
+            ? 'bg-destructive/15 text-destructive dark:bg-destructive/20'
+            : 'bg-secondary text-muted-foreground',
       )}
     >
       {t(`pages.plugins.status.${normalizedStatus}`)}

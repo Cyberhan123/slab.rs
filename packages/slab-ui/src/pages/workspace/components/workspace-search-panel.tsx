@@ -47,7 +47,7 @@ export function WorkspaceSearchPanel({
         <input
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          className="h-8 w-full rounded-[8px] border border-border/50 bg-[var(--surface-1)] pl-8 pr-8 text-xs outline-none transition focus:border-[var(--brand-teal)]"
+          className="h-8 w-full rounded-[8px] border border-border/50 bg-card pl-8 pr-8 text-xs outline-none transition focus:border-primary"
           placeholder={t("pages.workspace.search.placeholder")}
           aria-label={t("pages.workspace.search.placeholder")}
         />
@@ -65,7 +65,7 @@ export function WorkspaceSearchPanel({
         ) : null}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-[12px] bg-[var(--surface-1)] py-1">
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-[12px] bg-card py-1">
         {hasQuery ? (
           hasResults ? (
             <>
@@ -79,8 +79,8 @@ export function WorkspaceSearchPanel({
                       key={entry.relativePath}
                       type="button"
                       className={cn(
-                        "flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-sm transition hover:bg-[var(--surface-selected)]",
-                        activeFilePath === entry.relativePath && "bg-[var(--surface-selected)] text-[color:var(--brand-teal)]",
+                        "flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-sm transition hover:bg-accent",
+                        activeFilePath === entry.relativePath && "bg-accent text-primary",
                       )}
                       title={entry.relativePath}
                       onClick={() => {
@@ -111,7 +111,7 @@ export function WorkspaceSearchPanel({
                       <div
                         className={cn(
                           "flex min-w-0 items-center gap-2 px-3 py-1 text-xs font-medium",
-                          activeFilePath === result.relativePath && "text-[color:var(--brand-teal)]",
+                          activeFilePath === result.relativePath && "text-primary",
                         )}
                         title={result.relativePath}
                       >
@@ -126,7 +126,7 @@ export function WorkspaceSearchPanel({
                           <button
                             key={`${result.relativePath}:${match.lineNumber}:${match.matchStart}`}
                             type="button"
-                            className="grid w-full grid-cols-[3rem_minmax(0,1fr)] gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-[var(--surface-selected)]"
+                            className="grid w-full grid-cols-[3rem_minmax(0,1fr)] gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-accent"
                             onClick={() => {
                               void onOpenMatch(result.relativePath, match)
                             }}
@@ -170,7 +170,7 @@ function HighlightedLine({ match }: { match: WorkspaceTextSearchLineMatch }) {
   return (
     <>
       {before}
-      <mark className="rounded-[3px] bg-[color:color-mix(in_oklab,var(--brand-teal)_20%,transparent)] px-0.5 text-[color:var(--brand-teal)]">
+      <mark className="rounded-[3px] bg-primary/20 px-0.5 text-primary">
         {selected}
       </mark>
       {after}

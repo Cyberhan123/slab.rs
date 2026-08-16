@@ -14,7 +14,7 @@ import { renderComponentScene } from "../test-utils"
 
 function DropdownMenuGallery() {
   return (
-    <div data-testid="dropdown-menu-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="dropdown-menu-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button data-testid="dropdown-menu-trigger">Open Menu</Button>

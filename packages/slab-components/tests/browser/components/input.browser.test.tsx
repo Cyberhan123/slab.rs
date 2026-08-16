@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function InputGallery() {
   return (
-    <div data-testid="input-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="input-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Input placeholder="Default input" variant="default" />
       <Input placeholder="Soft input" variant="soft" />
       <Input placeholder="Shell input" variant="shell" />

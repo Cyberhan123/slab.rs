@@ -17,7 +17,7 @@ describe('PaginationButton', () => {
   it('applies the active styling when active', async () => {
     const screen = await render(<PaginationButton active>1</PaginationButton>);
 
-    expect(screen.getByRole('button', { name: '1' }).element()?.className).toContain('bg-[var(--brand-teal)]');
+    expect(screen.getByRole('button', { name: '1' }).element()?.className).toContain('bg-primary');
   });
 
   it('forwards the disabled attribute', async () => {

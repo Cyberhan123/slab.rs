@@ -15,13 +15,13 @@ const buttonVariants = cva(
         counter:
           "rounded-full border border-border/60 bg-muted px-2 text-xs text-muted-foreground hover:bg-muted",
         cta:
-          "bg-[var(--brand-teal)] text-[color:var(--brand-teal-foreground)] hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_90%,black)]",
+          "bg-primary text-primary-foreground hover:bg-primary/90",
         destructive:
           "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40",
         outline:
           "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         pill:
-          "rounded-full bg-[var(--surface-soft)] text-foreground shadow-xs hover:bg-accent hover:text-accent-foreground",
+          "rounded-full bg-secondary text-foreground shadow-xs hover:bg-accent hover:text-accent-foreground",
         quiet:
           "bg-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground",
         secondary:

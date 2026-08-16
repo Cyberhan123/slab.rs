@@ -37,7 +37,7 @@ export async function renderDesktopScene(
       <main
         aria-label="Slab desktop scene"
         data-testid="desktop-browser-scene"
-        className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
+        className="min-h-screen bg-background px-6 py-8 text-foreground"
       >
         <QueryClientProvider client={queryClient}>
           <SlabProvider deps={{ ports: createTestSlabPorts(portsOverrides), queryClient }}>
@@ -61,7 +61,7 @@ export async function renderDesktopScene(
           <main
             aria-label="Slab desktop scene"
             data-testid="desktop-browser-scene"
-            className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
+            className="min-h-screen bg-background px-6 py-8 text-foreground"
           >
             <QueryClientProvider client={queryClient}>
               <SlabProvider deps={{ ports: createTestSlabPorts(portsOverrides), queryClient }}>

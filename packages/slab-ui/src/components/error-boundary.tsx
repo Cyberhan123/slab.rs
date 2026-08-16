@@ -81,7 +81,7 @@ function GlobalErrorFallback({ error, retry }: ErrorBoundaryFallbackProps) {
   const { t } = useTranslation();
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-app-canvas p-4 text-foreground">
+    <div className="flex min-h-screen items-center justify-center bg-background p-4 text-foreground">
       <ErrorCard
         action={
           <Button onClick={retry} className="w-full">

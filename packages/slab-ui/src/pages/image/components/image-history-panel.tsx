@@ -54,7 +54,7 @@ export function ImageHistoryPanel({
 
   return (
     <>
-      <div className="border-t border-border/60 bg-[var(--surface-soft)] px-5 py-4 xl:px-8">
+      <div className="border-t border-border/60 bg-secondary px-5 py-4 xl:px-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-caption font-bold uppercase tracking-eyebrow text-muted-foreground">
@@ -79,10 +79,10 @@ export function ImageHistoryPanel({
                 key={task.task_id}
                 type="button"
                 data-testid={`image-history-item-${task.task_id}`}
-                className="group flex gap-3 rounded-[18px] border border-border/50 bg-[var(--shell-card)] p-3 text-left transition hover:border-[var(--brand-teal)]/50"
+                className="group flex gap-3 rounded-[18px] border border-border/50 bg-card p-3 text-left transition hover:border-primary/50"
                 onClick={() => void openHistoryDetail(task.task_id)}
               >
-                <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-[var(--surface-soft)] text-muted-foreground">
+                <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-secondary text-muted-foreground">
                   {previewUrl ? (
                     <img src={previewUrl} alt={task.prompt} className="h-full w-full object-cover" />
                   ) : (
@@ -94,7 +94,7 @@ export function ImageHistoryPanel({
                     {task.prompt}
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
-                    <span className="rounded-full bg-[var(--surface-soft)] px-2 py-0.5">
+                    <span className="rounded-full bg-secondary px-2 py-0.5">
                       {task.status}
                     </span>
                     <span>{formatHistoryTime(task.created_at)}</span>
@@ -104,7 +104,7 @@ export function ImageHistoryPanel({
             );
           })}
           {!historyLoading && history.length === 0 ? (
-            <div className="rounded-[18px] border border-dashed border-border/60 bg-[var(--shell-card)] px-4 py-5 text-sm text-muted-foreground md:col-span-2 xl:col-span-3">
+            <div className="rounded-[18px] border border-dashed border-border/60 bg-card px-4 py-5 text-sm text-muted-foreground md:col-span-2 xl:col-span-3">
               {t('pages.image.history.empty')}
             </div>
           ) : null}
@@ -146,10 +146,10 @@ export function ImageHistoryPanel({
                   {selectedHistoryImages.map((src, index) => (
                     <figure
                       key={src}
-                      className="overflow-hidden rounded-[22px] border border-border/60 bg-[var(--surface-soft)]"
+                      className="overflow-hidden rounded-[22px] border border-border/60 bg-secondary"
                     >
                       <img src={src} alt={selectedHistoryTask.prompt} className="w-full object-cover" />
-                      <figcaption className="flex justify-end border-t border-border/50 bg-[var(--shell-card)] px-3 py-2">
+                      <figcaption className="flex justify-end border-t border-border/50 bg-card px-3 py-2">
                         <Button variant="pill" size="sm" onClick={() => handleDownload(src, index)}>
                           <Download className="h-3.5 w-3.5" />
                           {t('pages.image.workbench.gallery.downloadAria')}
@@ -158,7 +158,7 @@ export function ImageHistoryPanel({
                     </figure>
                   ))}
                 </div>
-                <div className="space-y-4 rounded-[22px] bg-[var(--surface-soft)] p-4">
+                <div className="space-y-4 rounded-[22px] bg-secondary p-4">
                   <div>
                     <p className="text-caption font-bold uppercase tracking-eyebrow text-muted-foreground">
                       {t('pages.image.workbench.prompt.label')}

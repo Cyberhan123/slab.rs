@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function SeparatorGallery() {
   return (
-    <div data-testid="separator-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="separator-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <div className="space-y-2">
         <p>Content above horizontal separator</p>
         <Separator orientation="horizontal" data-testid="separator" />

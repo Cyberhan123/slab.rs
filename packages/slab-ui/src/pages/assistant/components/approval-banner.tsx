@@ -119,7 +119,7 @@ export function ApprovalCard({
                   <code className="font-mono">{change.path}</code>
                 </div>
                 {change.diff ? (
-                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-caption text-muted-foreground">
                     {change.diff}
                   </pre>
                 ) : null}
