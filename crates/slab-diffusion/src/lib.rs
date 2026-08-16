@@ -163,7 +163,10 @@ impl Diffusion {
     }
 
     pub fn backend_list_size(&self) -> Result<usize, DiffusionError> {
-        let size = unsafe { self.lib.backend_list_size() };
+        // Upstream replaced `backend_list_size` with `sd_list_devices(buf, len)`,
+        // which returns the number of bytes required for the device listing.
+        // Querying with a null buffer yields that size.
+        let size = unsafe { self.lib.sd_list_devices(std::ptr::null_mut(), 0) };
         if size == 0 {
             return Err(DiffusionError::BackendListUnavailable);
         }

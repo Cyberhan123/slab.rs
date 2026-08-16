@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function ScrollAreaGallery() {
   return (
-    <div data-testid="scroll-area-gallery" className="rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="scroll-area-gallery" className="rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <ScrollArea className="h-48 w-80 rounded-md border">
         <div className="p-4">
           <p className="mb-4">Scrollable content area with custom scrollbar styling.</p>

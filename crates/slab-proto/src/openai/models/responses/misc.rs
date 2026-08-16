@@ -3,17 +3,25 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseError {
-    #[serde(rename = "code")]
-    pub code: models::ResponseErrorCode,
+    /// A machine-readable error code (e.g. `server_error`, `insufficient_quota`).
+    /// Held as a free-form string so provider-specific codes round-trip verbatim.
+    #[serde(rename = "code", default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     /// A human-readable description of the error.
     #[serde(rename = "message")]
     pub message: String,
+    /// The error parameter, if any.
+    #[serde(rename = "param", default, skip_serializing_if = "Option::is_none")]
+    pub param: Option<String>,
+    /// The error type, if any (e.g. `insufficient_quota`, `server_error`).
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
 }
 
 impl ResponseError {
     /// An error object returned when the model fails to generate a Response.
-    pub fn new(code: models::ResponseErrorCode, message: String) -> ResponseError {
-        ResponseError { code, message }
+    pub fn new(code: String, message: String) -> ResponseError {
+        ResponseError { code: Some(code), message, param: None, r#type: None }
     }
 }
 
@@ -121,9 +129,9 @@ pub enum ResponseOutputTextType {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ResponseOutputTextAnnotationsInner {
-    #[serde(rename = "FileAnnotation")]
+    #[serde(rename = "file")]
     FileAnnotation(Box<models::FileAnnotation>),
-    #[serde(rename = "UrlAnnotation")]
+    #[serde(rename = "url")]
     UrlAnnotation(Box<models::UrlAnnotation>),
 }
 
@@ -176,6 +184,8 @@ pub enum Reason {
     MaxOutputTokens,
     #[serde(rename = "content_filter")]
     ContentFilter,
+    #[serde(rename = "tool_calls")]
+    ToolCalls,
 }
 
 #[derive(

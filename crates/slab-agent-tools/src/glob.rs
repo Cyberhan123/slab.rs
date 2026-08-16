@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 
-use crate::{args::string_arg, sensitive_path::approval_for_values};
+use crate::args::string_arg;
 
 const DEFAULT_MAX_RESULTS: usize = 200;
 const HARD_MAX_RESULTS: usize = 1000;
@@ -68,13 +68,12 @@ impl ToolHandler for FileGlobTool {
         })
     }
 
-    fn approval_request(&self, arguments: &Value) -> Option<ToolApprovalRequest> {
-        approval_for_values(
-            "file_glob",
-            &[
-                ("path", arguments.get("path").and_then(Value::as_str)),
-                ("pattern", arguments.get("pattern").and_then(Value::as_str)),
-            ],
+    fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
+        let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+        let pattern = arguments.get("pattern").and_then(Value::as_str).unwrap_or("");
+        Some(
+            slab_agent::OperationDescriptor::read_only(format!("{path}/{pattern}"))
+                .with_workspace(self.workspace_root.clone()),
         )
     }
 
@@ -202,12 +201,14 @@ mod tests {
     }
 
     #[test]
-    fn file_glob_requires_approval_for_sensitive_path_or_pattern() {
+    fn file_glob_describes_read_only_operation() {
         let tool = FileGlobTool::new(Some(PathBuf::from(".")));
 
-        assert!(tool.approval_request(&json!({"path": "~/.ssh", "pattern": "*"})).is_some());
-        assert!(tool.approval_request(&json!({"path": ".", "pattern": "*.pem"})).is_some());
-        assert!(tool.approval_request(&json!({"path": "src", "pattern": "*.rs"})).is_none());
+        let desc = tool
+            .describe_operation(&json!({"path": "src", "pattern": "*.rs"}))
+            .expect("descriptor");
+        assert_eq!(desc.category, slab_agent::OperationCategory::ReadOnly);
+        assert_eq!(desc.subject, "src/*.rs");
     }
 
     #[tokio::test]

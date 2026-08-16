@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function TextareaGallery() {
   return (
-    <div data-testid="textarea-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="textarea-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Textarea placeholder="Default textarea" variant="default" />
       <Textarea placeholder="Soft textarea" variant="soft" />
       <Textarea placeholder="Shell textarea" variant="shell" />

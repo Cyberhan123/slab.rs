@@ -28,6 +28,12 @@ pub fn server_log_file() -> PathBuf {
     logs_dir().join("slab-server.log")
 }
 
+/// Sandbox audit log (`<app_home>/logs/slab-sandbox.log`). Structured JSON lines
+/// recording sandbox spawn/provision decisions for troubleshooting.
+pub fn sandbox_log_file() -> PathBuf {
+    logs_dir().join("slab-sandbox.log")
+}
+
 pub fn runtime_log_dir() -> PathBuf {
     logs_dir().join("runtime")
 }
@@ -44,6 +50,17 @@ pub fn sessions_dir() -> PathBuf {
     app_home_dir().join("sessions")
 }
 
+/// Global skills directory (`<app_home>/skills`). Mirror of the workspace
+/// `.agents/skills` tree, scanned by `slab-agent-context`.
+pub fn skills_dir() -> PathBuf {
+    app_home_dir().join("skills")
+}
+
+/// Global `AGENTS.md` path (`<app_home>/AGENTS.md`).
+pub fn agents_md_path() -> PathBuf {
+    app_home_dir().join("AGENTS.md")
+}
+
 pub fn plugins_dir() -> PathBuf {
     app_home_dir().join("plugins")
 }
@@ -54,6 +71,13 @@ pub fn rules_dir() -> PathBuf {
 
 pub fn outputs_dir() -> PathBuf {
     app_home_dir().join("outputs")
+}
+
+/// Durable plans directory (`<app_home>/plans`). Plans authored in plan mode
+/// (the plan agent's `plan` / `update_plan` tools) are persisted here as JSON
+/// so they survive process restarts.
+pub fn plans_dir() -> PathBuf {
+    app_home_dir().join("plans")
 }
 
 #[cfg(test)]
@@ -87,13 +111,17 @@ mod tests {
             database_path(),
             logs_dir(),
             server_log_file(),
+            sandbox_log_file(),
             runtime_log_dir(),
             runtime_ipc_dir(),
             models_dir(),
             sessions_dir(),
+            skills_dir(),
+            agents_md_path(),
             plugins_dir(),
             rules_dir(),
             outputs_dir(),
+            plans_dir(),
         ] {
             assert!(
                 path.starts_with(&home),

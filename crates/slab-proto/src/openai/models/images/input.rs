@@ -3,9 +3,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputImageContent {
-    /// The type of the input item. Always `input_image`.
-    #[serde(rename = "type")]
-    pub r#type: InputImageContentType,
     /// The detail level of the image to be sent to the model. One of `high`, `low`, `auto`, or `original`. Defaults to `auto`.
     #[serde(rename = "detail")]
     pub detail: models::ImageDetail,
@@ -29,25 +26,13 @@ pub struct InputImageContent {
 
 impl InputImageContent {
     /// An image input to the model. Learn about [image inputs](/docs/guides/vision).
-    pub fn new(r#type: InputImageContentType, detail: models::ImageDetail) -> InputImageContent {
-        InputImageContent { r#type, detail, image_url: None, file_id: None }
+    pub fn new(detail: models::ImageDetail) -> InputImageContent {
+        InputImageContent { detail, image_url: None, file_id: None }
     }
-}
-/// The type of the input item. Always `input_image`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum InputImageContentType {
-    #[serde(rename = "input_image")]
-    #[default]
-    InputImage,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputImageContentParamAutoParam {
-    /// The type of the input item. Always `input_image`.
-    #[serde(rename = "type")]
-    pub r#type: InputImageContentParamType,
     /// The URL of the image to be sent to the model. A fully qualified URL or base64 encoded image in a data URL.
     #[serde(
         rename = "image_url",
@@ -76,18 +61,9 @@ pub struct InputImageContentParamAutoParam {
 
 impl InputImageContentParamAutoParam {
     /// An image input to the model. Learn about [image inputs](/docs/guides/vision)
-    pub fn new(r#type: InputImageContentParamType) -> InputImageContentParamAutoParam {
-        InputImageContentParamAutoParam { r#type, image_url: None, file_id: None, detail: None }
+    pub fn new() -> InputImageContentParamAutoParam {
+        InputImageContentParamAutoParam { image_url: None, file_id: None, detail: None }
     }
-}
-/// The type of the input item. Always `input_image`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum InputImageContentParamType {
-    #[serde(rename = "input_image")]
-    #[default]
-    InputImage,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]

@@ -1,19 +1,22 @@
 //! Git tools backed by `slab-git`.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 use slab_git::GitRepository;
+use slab_sandboxing::SandboxDriver;
 
 pub struct GitStatusTool {
     workspace_root: PathBuf,
+    sandbox_driver: Option<Arc<dyn SandboxDriver>>,
 }
 
 impl GitStatusTool {
-    pub fn new(workspace_root: PathBuf) -> Self {
-        Self { workspace_root }
+    pub fn new(workspace_root: PathBuf, sandbox_driver: Option<Arc<dyn SandboxDriver>>) -> Self {
+        Self { workspace_root, sandbox_driver }
     }
 }
 
@@ -36,18 +39,23 @@ impl ToolHandler for GitStatusTool {
         _ctx: &ToolContext,
         _arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let status = GitRepository::new(&self.workspace_root).status().map_err(to_tool_error)?;
+        let status =
+            GitRepository::new_with_driver(&self.workspace_root, self.sandbox_driver.clone())
+                .status()
+                .await
+                .map_err(to_tool_error)?;
         Ok(json_output(&status)?)
     }
 }
 
 pub struct GitDiffTool {
     workspace_root: PathBuf,
+    sandbox_driver: Option<Arc<dyn SandboxDriver>>,
 }
 
 impl GitDiffTool {
-    pub fn new(workspace_root: PathBuf) -> Self {
-        Self { workspace_root }
+    pub fn new(workspace_root: PathBuf, sandbox_driver: Option<Arc<dyn SandboxDriver>>) -> Self {
+        Self { workspace_root, sandbox_driver }
     }
 }
 
@@ -86,18 +94,22 @@ impl ToolHandler for GitDiffTool {
         let path = arguments.get("path").and_then(Value::as_str);
         let staged = arguments.get("staged").and_then(Value::as_bool).unwrap_or(false);
         let diff =
-            GitRepository::new(&self.workspace_root).diff(path, staged).map_err(to_tool_error)?;
+            GitRepository::new_with_driver(&self.workspace_root, self.sandbox_driver.clone())
+                .diff(path, staged)
+                .await
+                .map_err(to_tool_error)?;
         Ok(json_output(&diff)?)
     }
 }
 
 pub struct GitCommitTool {
     workspace_root: PathBuf,
+    sandbox_driver: Option<Arc<dyn SandboxDriver>>,
 }
 
 impl GitCommitTool {
-    pub fn new(workspace_root: PathBuf) -> Self {
-        Self { workspace_root }
+    pub fn new(workspace_root: PathBuf, sandbox_driver: Option<Arc<dyn SandboxDriver>>) -> Self {
+        Self { workspace_root, sandbox_driver }
     }
 }
 
@@ -124,9 +136,16 @@ impl ToolHandler for GitCommitTool {
         })
     }
 
-    fn approval_request(&self, arguments: &Value) -> Option<ToolApprovalRequest> {
+    fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
         let message = arguments.get("message").and_then(Value::as_str)?;
-        Some(ToolApprovalRequest { command: format!("git add --all && git commit -m {message:?}") })
+        Some(
+            slab_agent::OperationDescriptor::file_edit(format!("git_commit: {message}"))
+                .with_workspace(Some(self.workspace_root.clone())),
+        )
+    }
+
+    fn category(&self) -> slab_agent::OperationCategory {
+        slab_agent::OperationCategory::FileEdit
     }
 
     async fn execute(
@@ -139,7 +158,10 @@ impl ToolHandler for GitCommitTool {
             .and_then(Value::as_str)
             .ok_or_else(|| AgentError::ToolExecution("missing 'message' argument".into()))?;
         let result =
-            GitRepository::new(&self.workspace_root).commit_all(message).map_err(to_tool_error)?;
+            GitRepository::new_with_driver(&self.workspace_root, self.sandbox_driver.clone())
+                .commit_all(message)
+                .await
+                .map_err(to_tool_error)?;
         Ok(json_output(&result)?)
     }
 }
@@ -175,20 +197,20 @@ mod tests {
     }
 
     #[test]
-    fn git_commit_approval_quotes_message_for_shell_display() {
-        let tool = GitCommitTool::new(PathBuf::from("."));
+    fn git_commit_describes_file_edit_operation() {
+        let tool = GitCommitTool::new(PathBuf::from("."), None);
 
-        let request = tool
-            .approval_request(&json!({"message": "fix \"quoted\" path"}))
-            .expect("approval request");
+        let desc =
+            tool.describe_operation(&json!({"message": "fix quoted path"})).expect("descriptor");
 
-        assert_eq!(request.command, "git add --all && git commit -m \"fix \\\"quoted\\\" path\"");
-        assert!(tool.approval_request(&json!({"message": false})).is_none());
+        assert_eq!(desc.category, slab_agent::OperationCategory::FileEdit);
+        assert_eq!(desc.subject, "git_commit: fix quoted path");
+        assert!(tool.describe_operation(&json!({"message": false})).is_none());
     }
 
     #[tokio::test]
     async fn git_commit_requires_message_before_touching_repository() {
-        let tool = GitCommitTool::new(PathBuf::from("missing-workspace"));
+        let tool = GitCommitTool::new(PathBuf::from("missing-workspace"), None);
 
         let error = tool.execute(&ctx(), &json!({})).await.expect_err("missing message");
 
@@ -198,7 +220,7 @@ mod tests {
     #[tokio::test]
     async fn git_diff_rejects_escape_and_git_internal_paths() {
         let root = temp_root("diff_paths");
-        let tool = GitDiffTool::new(root.clone());
+        let tool = GitDiffTool::new(root.clone(), None);
 
         let escape = tool
             .execute(&ctx(), &json!({"path": "../outside.txt"}))
@@ -218,7 +240,7 @@ mod tests {
     #[tokio::test]
     async fn git_status_tool_returns_json_for_non_repository() {
         let root = temp_root("status_non_repo");
-        let tool = GitStatusTool::new(root.clone());
+        let tool = GitStatusTool::new(root.clone(), None);
 
         let output = tool.execute(&ctx(), &json!({})).await.expect("status output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
@@ -238,7 +260,7 @@ mod tests {
             return;
         }
         fs::write(root.join("note.txt"), "hello\n").expect("write untracked file");
-        let tool = GitDiffTool::new(root.clone());
+        let tool = GitDiffTool::new(root.clone(), None);
 
         let output = tool
             .execute(&ctx(), &json!({"path": "note.txt", "staged": false}))

@@ -27,12 +27,12 @@ use crate::api::v1::workspace::schema::{
     WorkspaceFileKind, WorkspaceFileSearchView, WorkspaceGitCommitCommand, WorkspaceGitDiffCommand,
     WorkspaceGitDiffView, WorkspaceGitFileStatus, WorkspaceGitOperationView,
     WorkspaceGitPathCommand, WorkspaceGitStatusEntry, WorkspaceGitStatusSummary,
-    WorkspaceGitStatusView, WorkspaceInfoResponse, WorkspaceOpenCommand, WorkspacePathMetadata,
-    WorkspacePathView, WorkspacePluginConfig, WorkspacePluginPreferenceUpdate,
-    WorkspaceRenamePathCommand, WorkspaceStateResponse, WorkspaceTextSearchFileMatch,
-    WorkspaceTextSearchLineMatch, WorkspaceTextSearchView, WorkspaceWatchEntryKind,
-    WorkspaceWatchEvent, WorkspaceWatchEventType, WorkspaceWriteFileCommand,
-    WorkspaceWriteFileView,
+    WorkspaceGitStatusView, WorkspaceInfoResponse, WorkspaceMigrationSummary, WorkspaceOpenCommand,
+    WorkspacePathMetadata, WorkspacePathView, WorkspacePluginConfig,
+    WorkspacePluginPreferenceUpdate, WorkspaceRenamePathCommand, WorkspaceStateResponse,
+    WorkspaceTextSearchFileMatch, WorkspaceTextSearchLineMatch, WorkspaceTextSearchView,
+    WorkspaceWatchEntryKind, WorkspaceWatchEvent, WorkspaceWatchEventType,
+    WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };
 use crate::api::validation::ValidatedJson;
 use crate::error::ServerError;
@@ -86,6 +86,7 @@ struct WorkspaceSearchQuery {
     ),
     components(schemas(
         WorkspaceStateResponse,
+        WorkspaceMigrationSummary,
         WorkspaceInfoResponse,
         RecentWorkspaceResponse,
         WorkspaceConfigResponse,
@@ -186,10 +187,35 @@ async fn open_workspace(
     State(state): State<Arc<AppState>>,
     ValidatedJson(command): ValidatedJson<WorkspaceOpenCommand>,
 ) -> Result<Json<WorkspaceStateResponse>, ServerError> {
-    let root = canonical_workspace_root(PathBuf::from(command.root_path))?;
-    WorkspaceService::ensure_workspace_settings(&root)?;
-    state.set_workspace_root(Some(root.clone())).map_err(ServerError::Internal)?;
-    Ok(Json(workspace_state_response_for_root(state.as_ref(), &root)?))
+    let new_root = canonical_workspace_root(PathBuf::from(command.root_path))?;
+
+    // Folded workspace migration (was POST /v1/agents/migrate): only when
+    // switching away from a *different* active workspace — interrupt every
+    // agent thread and write a project-scoped snapshot of the originating
+    // workspace so a future restore only resumes its threads. Any failure
+    // aborts before the switch (callers must not assume the switch applied).
+    let migrated = match state.workspace_root() {
+        Some(old_root) if !same_workspace(&old_root, &new_root) => {
+            let snapshot_dir = PathBuf::from(&state.context.config.session_state_dir);
+            let outcome = state
+                .services
+                .harness
+                .prepare_workspace_migration(&old_root, &snapshot_dir)
+                .await?;
+            Some(WorkspaceMigrationSummary {
+                project_id: outcome.project_id,
+                suspended_count: outcome.suspended_count as u32,
+            })
+        }
+        _ => None, // first open, or reopening the same workspace
+    };
+
+    WorkspaceService::ensure_workspace_settings(&new_root)?;
+    state.set_workspace_root(Some(new_root.clone())).map_err(ServerError::Internal)?;
+
+    let mut response = workspace_state_response_for_root(state.as_ref(), &new_root)?;
+    response.migrated = migrated;
+    Ok(Json(response))
 }
 
 #[utoipa::path(
@@ -463,7 +489,7 @@ async fn git_status(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<WorkspaceGitStatusView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_status(root)?.into()))
+    Ok(Json(WorkspaceService::git_status(root).await?.into()))
 }
 
 #[utoipa::path(
@@ -481,7 +507,7 @@ async fn git_stage(
     ValidatedJson(command): ValidatedJson<WorkspaceGitPathCommand>,
 ) -> Result<Json<WorkspaceGitOperationView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_stage(root, &command.path)?.into()))
+    Ok(Json(WorkspaceService::git_stage(root, &command.path).await?.into()))
 }
 
 #[utoipa::path(
@@ -499,7 +525,7 @@ async fn git_unstage(
     ValidatedJson(command): ValidatedJson<WorkspaceGitPathCommand>,
 ) -> Result<Json<WorkspaceGitOperationView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_unstage(root, &command.path)?.into()))
+    Ok(Json(WorkspaceService::git_unstage(root, &command.path).await?.into()))
 }
 
 #[utoipa::path(
@@ -517,7 +543,7 @@ async fn git_discard(
     ValidatedJson(command): ValidatedJson<WorkspaceGitPathCommand>,
 ) -> Result<Json<WorkspaceGitOperationView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_discard(root, &command.path)?.into()))
+    Ok(Json(WorkspaceService::git_discard(root, &command.path).await?.into()))
 }
 
 #[utoipa::path(
@@ -535,7 +561,7 @@ async fn git_commit(
     ValidatedJson(command): ValidatedJson<WorkspaceGitCommitCommand>,
 ) -> Result<Json<WorkspaceGitOperationView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_commit(root, &command.message)?.into()))
+    Ok(Json(WorkspaceService::git_commit(root, &command.message).await?.into()))
 }
 
 #[utoipa::path(
@@ -553,7 +579,7 @@ async fn git_diff(
     ValidatedJson(command): ValidatedJson<WorkspaceGitDiffCommand>,
 ) -> Result<Json<WorkspaceGitDiffView>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
-    Ok(Json(WorkspaceService::git_diff(root, &command.path, command.staged)?.into()))
+    Ok(Json(WorkspaceService::git_diff(root, &command.path, command.staged).await?.into()))
 }
 
 #[utoipa::path(
@@ -747,6 +773,16 @@ fn canonical_workspace_root(root: PathBuf) -> Result<PathBuf, ServerError> {
     Ok(canonical)
 }
 
+/// Compare two workspace roots, canonicalizing first so the same directory
+/// reached via different path spellings (case, separators, Windows verbatim
+/// prefixes) counts as equal — reopening the active workspace must be a no-op.
+fn same_workspace(a: &Path, b: &Path) -> bool {
+    let canonical = |path: &Path| {
+        canonicalize_existing_preserving_symlinks(path).unwrap_or_else(|_| path.to_path_buf())
+    };
+    canonical(a) == canonical(b)
+}
+
 fn workspace_info(state: &AppState, root: &Path) -> WorkspaceInfoResponse {
     let config = &state.context.config;
     let workspace_settings_path = root.join(".slab").join("settings.json");
@@ -790,7 +826,7 @@ fn workspace_state_response(
     current: Option<WorkspaceInfoResponse>,
     config: Option<WorkspaceConfigResponse>,
 ) -> WorkspaceStateResponse {
-    WorkspaceStateResponse { current, recent: Vec::new(), config }
+    WorkspaceStateResponse { current, recent: Vec::new(), config, migrated: None }
 }
 
 fn path_string(path: &Path) -> String {
@@ -1095,5 +1131,71 @@ mod route_tests {
 
         assert_eq!(response.status, StatusCode::OK);
         assert_eq!(response.body["config"]["plugins"], serde_json::json!({}));
+    }
+
+    #[tokio::test]
+    async fn workspace_open_without_active_workspace_skips_migration() {
+        // No workspace is active, so opening one must not run the folded
+        // migration (interrupt_all + snapshot) — `migrated` is absent and no
+        // snapshot file is written.
+        let new_root = tempfile::tempdir().expect("new workspace root");
+        let server = TestServer::new().await;
+
+        let response = server
+            .post_json("/v1/workspace/open", serde_json::json!({ "rootPath": new_root.path() }))
+            .await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert!(
+            response.body.get("migrated").is_none(),
+            "no migration expected on first open, got migrated={}",
+            response.body["migrated"]
+        );
+        let snapshot_dir = std::path::PathBuf::from(&server.state.context.config.session_state_dir);
+        assert!(
+            !snapshot_has_migration_file(&snapshot_dir),
+            "no snapshot expected when no workspace was active"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_open_with_differing_root_runs_migration_and_writes_snapshot() {
+        // Switching away from a different active workspace runs the folded
+        // migration: agent threads are interrupted and a project-scoped
+        // `migration-*.json` snapshot is written under the session state dir.
+        let old_root = tempfile::tempdir().expect("old workspace root");
+        let new_root = tempfile::tempdir().expect("new workspace root");
+        let server = TestServer::new_with(TestServerOptions {
+            workspace_root: Some(old_root.path().to_path_buf()),
+            ..Default::default()
+        })
+        .await;
+
+        let response = server
+            .post_json("/v1/workspace/open", serde_json::json!({ "rootPath": new_root.path() }))
+            .await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        let migrated =
+            response.body["migrated"].as_object().expect("migration summary present on switch");
+        assert!(migrated["projectId"].is_string(), "projectId should be a string: {migrated:?}");
+        assert_eq!(migrated["suspendedCount"], 0, "no live agent threads in TestServer");
+
+        let snapshot_dir = std::path::PathBuf::from(&server.state.context.config.session_state_dir);
+        assert!(
+            snapshot_has_migration_file(&snapshot_dir),
+            "a migration-*.json snapshot should have been written"
+        );
+    }
+
+    /// True if `dir` contains a `migration-*.json` session snapshot.
+    fn snapshot_has_migration_file(dir: &std::path::Path) -> bool {
+        fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .any(|entry| entry.file_name().to_string_lossy().starts_with("migration-"))
+            })
+            .unwrap_or(false)
     }
 }

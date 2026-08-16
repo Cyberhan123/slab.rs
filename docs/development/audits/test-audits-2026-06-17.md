@@ -260,8 +260,8 @@
 - 剩余：`onRehydrateStorage` error path 与真实 persisted storage 的集成级行为仍可补，但 store 自身核心状态更新已不再裸奔。
 
 **G22. [High → Low, 已补当前 hooks 直接测试] `src/hooks/`（6 hooks, 324 LOC）核心状态 hooks 与薄包装 hooks 均已有直接覆盖**
-- `use-global-header-meta.ts`(154)、`use-persisted-header-select.ts`(73)、`use-file.ts`(41)、`use-desktop-platform.ts`(34)、`use-tauri.ts`(13)、`use-mobile.ts`(9)。
-- 当前已新增 `packages/slab-desktop/src/hooks/__tests__/use-persisted-header-select.test.ts`，覆盖 hydration 后 fallback、stale persisted value、disabled-option clearing、setter→store；已新增 `use-global-header-meta.test.tsx`，通过真实 `GlobalHeaderProvider` 覆盖 page meta/control/search 的注册、更新与清理。
+- `use-header.ts`（含 header context hooks 与 persisted header select）、`use-file.ts`(41)、`use-desktop-platform.ts`(34)、`use-tauri.ts`(13)、`use-mobile.ts`(9)。
+- 当前已新增 `packages/slab-desktop/src/hooks/__tests__/use-persisted-header-select.test.ts`，覆盖 hydration 后 fallback、stale persisted value、disabled-option clearing、setter→store；已新增 `use-header.test.tsx`，通过真实 `HeaderProvider` 覆盖 page meta/control/search 的注册、更新与清理。
 - 当前已新增 `use-file.test.ts`、`use-desktop-platform.test.ts`、`use-tauri.test.ts`、`use-mobile.test.ts`，覆盖 web/Tauri 文件选择、platform/userAgent 分支、Tauri internals 检测、mobile breakpoint 与 effect-time 初值契约。
 - 剩余：本项按当前 hook surface 已收口；若后续这些 hooks 承载更多环境分支，应继续 co-located 补测试。
 

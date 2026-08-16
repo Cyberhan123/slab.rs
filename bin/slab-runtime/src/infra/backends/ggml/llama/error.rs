@@ -33,6 +33,9 @@ pub enum GGMLLlamaEngineError {
         source: LlamaError,
     },
 
+    #[error("Failed to load multimodal projector from: {mmproj_path}: {message}")]
+    MultimodalLoad { mmproj_path: String, message: String },
+
     #[error("Session key '{key}' is already active")]
     SessionKeyBusy { key: String },
 
@@ -41,9 +44,16 @@ pub enum GGMLLlamaEngineError {
 
     #[error("Inference stream error: {message}")]
     InferenceStreamError { message: String },
+
+    #[error("Failed to quantize {input_path} -> {output_path}")]
+    Quantize {
+        input_path: String,
+        output_path: String,
+        #[source]
+        source: LlamaError,
+    },
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub(crate) enum GGMLLlamaWorkerError {
     #[error("contract error: {message}")]
@@ -54,13 +64,10 @@ pub(crate) enum GGMLLlamaWorkerError {
     Unload { message: String },
     #[error("inference failed: {message}")]
     Inference { message: String },
-    #[error("sync failed: {message}")]
-    Sync { message: String },
     #[error("internal error: {message}")]
     Internal { message: String },
 }
 
-#[allow(dead_code)]
 impl GGMLLlamaWorkerError {
     pub(crate) fn contract(message: impl Into<String>) -> Self {
         Self::Contract { message: message.into() }
@@ -76,10 +83,6 @@ impl GGMLLlamaWorkerError {
 
     pub(crate) fn inference(message: impl Into<String>) -> Self {
         Self::Inference { message: message.into() }
-    }
-
-    pub(crate) fn sync(message: impl Into<String>) -> Self {
-        Self::Sync { message: message.into() }
     }
 
     pub(crate) fn internal(message: impl Into<String>) -> Self {

@@ -7,18 +7,17 @@ use std::sync::{
 use std::time::Duration;
 
 use futures::FutureExt;
-use serde::Serialize;
 use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{Mutex, Semaphore, mpsc, oneshot};
 use tokio::task::JoinSet;
 
 use crate::{
-    IncomingMessage, application_error_response, id_key, notification, parse_message, request,
-    success_response,
+    APPLICATION_ERROR, JSONRPC_VERSION, JSONRPCError, JSONRPCErrorError, JSONRPCMessage,
+    JSONRPCNotification, JSONRPCRequest, JSONRPCResponse, RequestId, W3cTraceContext,
 };
 
-type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>;
+type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<std::result::Result<Value, String>>>>>;
 
 #[derive(Debug, Clone)]
 pub struct HostConfig {
@@ -40,7 +39,21 @@ impl Default for HostConfig {
 /// request limits, and response envelope formatting to [`JsonRpcRuntimeHost`].
 #[async_trait::async_trait]
 pub trait RequestHandler: Send + Sync + 'static {
-    async fn handle_request(&self, method: String, params: Value) -> Result<Value, String>;
+    async fn handle_request(
+        &self,
+        method: String,
+        params: Value,
+    ) -> std::result::Result<Value, String>;
+}
+
+/// Handles inbound JSON-RPC notifications (no response expected).
+///
+/// The line-based [`serve_reader`] drops inbound notifications because the host
+/// there is the initiator. The WebSocket server ([`crate::ws::serve_websocket`])
+/// accepts client→server notifications and routes them here.
+#[async_trait::async_trait]
+pub trait NotificationHandler: Send + Sync + 'static {
+    async fn handle_notification(&self, method: String, params: Value);
 }
 
 #[derive(Clone)]
@@ -69,9 +82,19 @@ impl JsonRpcRuntimeHost {
         )
     }
 
-    pub async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
-        let id = Value::String(format!("host-{}", self.next_id.fetch_add(1, Ordering::Relaxed)));
-        let key = id_key(&id);
+    pub async fn request(&self, method: &str, params: Value) -> std::result::Result<Value, String> {
+        self.request_with_trace(method, params, None).await
+    }
+
+    pub async fn request_with_trace(
+        &self,
+        method: &str,
+        params: Value,
+        trace: Option<W3cTraceContext>,
+    ) -> std::result::Result<Value, String> {
+        let id =
+            RequestId::String(format!("host-{}", self.next_id.fetch_add(1, Ordering::Relaxed)));
+        let key = id.to_string();
         let (tx, rx) = oneshot::channel();
 
         {
@@ -85,7 +108,13 @@ impl JsonRpcRuntimeHost {
             pending.insert(key.clone(), tx);
         }
 
-        if let Err(error) = self.send_serialized(&request(id, method, params)) {
+        let request = JSONRPCMessage::Request(JSONRPCRequest {
+            id,
+            method: method.to_owned(),
+            params: Some(params),
+            trace,
+        });
+        if let Err(error) = self.send_serialized(&request) {
             self.pending.lock().await.remove(&key);
             return Err(error);
         }
@@ -103,35 +132,42 @@ impl JsonRpcRuntimeHost {
         }
     }
 
-    pub async fn resolve_response(&self, response: IncomingMessage) {
-        let Some(id) = response.id.as_ref().map(id_key) else {
-            return;
-        };
-        let sender = self.pending.lock().await.remove(&id);
+    pub async fn resolve_response(
+        &self,
+        id: RequestId,
+        result: std::result::Result<Value, JSONRPCErrorError>,
+    ) {
+        let sender = self.pending.lock().await.remove(&id.to_string());
         if let Some(sender) = sender {
-            let result = if let Some(error) = response.error {
-                Err(error.message)
-            } else {
-                Ok(response.result.unwrap_or(Value::Null))
+            let result = match result {
+                Ok(result) => Ok(result),
+                Err(error) => Err(error.message),
             };
             let _ = sender.send(result);
         }
     }
 
-    pub fn send_response(&self, id: Value, result: Result<Value, String>) {
+    pub fn send_response(&self, id: RequestId, result: std::result::Result<Value, String>) {
         let response = match result {
-            Ok(result) => success_response(id, result),
-            Err(message) => application_error_response(id, message),
+            Ok(result) => JSONRPCMessage::Response(JSONRPCResponse { id, result }),
+            Err(message) => JSONRPCMessage::Error(JSONRPCError {
+                error: JSONRPCErrorError { code: APPLICATION_ERROR, data: None, message },
+                id,
+            }),
         };
         let _ = self.send_serialized(&response);
     }
 
     pub fn send_notification(&self, method: &str, params: Value) {
-        let _ = self.send_serialized(&notification(method, params));
+        let notification = JSONRPCMessage::Notification(JSONRPCNotification {
+            method: method.to_owned(),
+            params: Some(params),
+        });
+        let _ = self.send_serialized(&notification);
     }
 
-    fn send_serialized<T: Serialize>(&self, value: &T) -> Result<(), String> {
-        let line = serde_json::to_string(value)
+    fn send_serialized(&self, message: &JSONRPCMessage) -> std::result::Result<(), String> {
+        let line = serialize_wire_message(message)
             .map_err(|error| format!("failed to serialize json-rpc message: {error}"))?;
         self.outbound.send(line).map_err(|_| "json-rpc outbound receiver is closed".to_owned())
     }
@@ -172,48 +208,54 @@ where
     let mut tasks = JoinSet::new();
     while let Some(line) = lines.next_line().await? {
         drain_finished_tasks(&mut tasks);
-        let incoming = match parse_message(&line) {
-            Ok(incoming) => incoming,
-            Err(error) => {
+        let message = match parse_wire_message(&line) {
+            Ok(message) => message,
+            Err(ParseWireMessageError::InvalidJson(error)) => {
                 host.send_response(
-                    Value::Null,
+                    fallback_error_id(),
                     Err(format!("invalid json-rpc payload from host: {error}")),
                 );
                 continue;
             }
-        };
-
-        if incoming.method.is_none() {
-            host.resolve_response(incoming).await;
-            continue;
-        }
-
-        let method = incoming.method.clone().unwrap_or_default();
-        let id = incoming.id.clone();
-        if !incoming.has_valid_version() {
-            if let Some(id) = id {
-                host.send_response(id, Err("jsonrpc must be `2.0`".to_owned()));
+            Err(ParseWireMessageError::InvalidVersion(message)) => {
+                if let Some(id) = message.id {
+                    host.send_response(id, Err("jsonrpc must be `2.0`".to_owned()));
+                }
+                continue;
             }
-            continue;
-        }
+        };
 
-        let Some(id) = id else {
-            continue;
-        };
-        let Ok(permit) = Arc::clone(&semaphore).try_acquire_owned() else {
-            host.send_response(id, Err("runtime request concurrency limit exceeded".to_owned()));
-            continue;
-        };
-        let host = Arc::clone(&host);
-        let handler = Arc::clone(&handler);
-        tasks.spawn(async move {
-            let _permit = permit;
-            let result = AssertUnwindSafe(handler.handle_request(method, incoming.params))
-                .catch_unwind()
-                .await
-                .unwrap_or_else(|_| Err("runtime request handler panicked".to_owned()));
-            host.send_response(id, result);
-        });
+        match message {
+            JSONRPCMessage::Request(request) => {
+                let Ok(permit) = Arc::clone(&semaphore).try_acquire_owned() else {
+                    host.send_response(
+                        request.id,
+                        Err("runtime request concurrency limit exceeded".to_owned()),
+                    );
+                    continue;
+                };
+                let host = Arc::clone(&host);
+                let handler = Arc::clone(&handler);
+                tasks.spawn(async move {
+                    let _permit = permit;
+                    let result = AssertUnwindSafe(
+                        handler
+                            .handle_request(request.method, request.params.unwrap_or(Value::Null)),
+                    )
+                    .catch_unwind()
+                    .await
+                    .unwrap_or_else(|_| Err("runtime request handler panicked".to_owned()));
+                    host.send_response(request.id, result);
+                });
+            }
+            JSONRPCMessage::Notification(_) => {}
+            JSONRPCMessage::Response(response) => {
+                host.resolve_response(response.id, Ok(response.result)).await;
+            }
+            JSONRPCMessage::Error(error) => {
+                host.resolve_response(error.id, Err(error.error)).await;
+            }
+        }
     }
 
     while let Some(result) = tasks.join_next().await {
@@ -250,6 +292,56 @@ fn drain_finished_tasks(tasks: &mut JoinSet<()>) {
     }
 }
 
+#[derive(Debug)]
+pub struct InvalidVersionMessage {
+    pub id: Option<RequestId>,
+}
+
+#[derive(Debug)]
+pub enum ParseWireMessageError {
+    InvalidJson(serde_json::Error),
+    InvalidVersion(InvalidVersionMessage),
+}
+
+/// Parse a single JSON-RPC wire message, verifying the `jsonrpc: "2.0"`
+/// envelope and stripping it before typed decode.
+pub fn parse_wire_message(
+    line: &str,
+) -> std::result::Result<JSONRPCMessage, ParseWireMessageError> {
+    let mut value =
+        serde_json::from_str::<Value>(line).map_err(ParseWireMessageError::InvalidJson)?;
+    if value.get("jsonrpc").and_then(Value::as_str) != Some(JSONRPC_VERSION) {
+        return Err(ParseWireMessageError::InvalidVersion(InvalidVersionMessage {
+            id: parse_wire_id(&value),
+        }));
+    }
+    if let Value::Object(object) = &mut value {
+        object.remove("jsonrpc");
+    }
+    serde_json::from_value::<JSONRPCMessage>(value).map_err(ParseWireMessageError::InvalidJson)
+}
+
+/// Extract a [`RequestId`] from an otherwise-invalid payload so an error
+/// response can echo the caller's id.
+pub fn parse_wire_id(value: &Value) -> Option<RequestId> {
+    value.get("id").cloned().and_then(|id| serde_json::from_value(id).ok())
+}
+
+/// Serialize a typed JSON-RPC message and re-inject the `jsonrpc: "2.0"` field.
+pub fn serialize_wire_message(message: &JSONRPCMessage) -> serde_json::Result<String> {
+    let mut value = serde_json::to_value(message)?;
+    if let Value::Object(object) = &mut value {
+        object.insert("jsonrpc".to_owned(), Value::String(JSONRPC_VERSION.to_owned()));
+    }
+    serde_json::to_string(&value)
+}
+
+/// The request id used when a payload cannot be parsed well enough to recover
+/// the caller's id.
+pub fn fallback_error_id() -> RequestId {
+    RequestId::String("parse-error".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use std::io;
@@ -263,6 +355,8 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
     use tokio::sync::{Mutex, mpsc};
 
+    use crate::{JSONRPCErrorError, RequestId, W3cTraceContext};
+
     use super::{
         HostConfig, JsonRpcRuntimeHost, RequestHandler, drain_outbound, serve_io, serve_reader,
     };
@@ -274,7 +368,11 @@ mod tests {
 
     #[async_trait::async_trait]
     impl RequestHandler for EchoHandler {
-        async fn handle_request(&self, method: String, params: Value) -> Result<Value, String> {
+        async fn handle_request(
+            &self,
+            method: String,
+            params: Value,
+        ) -> std::result::Result<Value, String> {
             self.seen.lock().await.push(method.clone());
             match method.as_str() {
                 "echo" => Ok(params),
@@ -315,6 +413,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn outbound_request_uses_typed_envelope_and_injects_trace() {
+        let config = HostConfig { request_timeout: Duration::from_secs(5), ..test_config() };
+        let (host, mut outbound) = JsonRpcRuntimeHost::with_config(config);
+        let pending_host = host.clone();
+        let request = tokio::spawn(async move {
+            pending_host
+                .request_with_trace(
+                    "trace.call",
+                    json!({"ok": true}),
+                    Some(W3cTraceContext {
+                        traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+                            .to_owned(),
+                        tracestate: Some("vendor=value".to_owned()),
+                    }),
+                )
+                .await
+        });
+
+        let message = recv_json(&mut outbound).await;
+        let id = serde_json::from_value::<RequestId>(message["id"].clone()).expect("request id");
+        assert_eq!(message["jsonrpc"], "2.0");
+        assert_eq!(message["id"], "host-1");
+        assert_eq!(message["method"], "trace.call");
+        assert_eq!(message["params"], json!({"ok": true}));
+        assert_eq!(
+            message["trace"]["traceparent"],
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        );
+        assert_eq!(message["trace"]["tracestate"], "vendor=value");
+
+        host.resolve_response(id, Ok(json!({"done": true}))).await;
+        assert_eq!(request.await.expect("join").expect("response"), json!({"done": true}));
+    }
+
+    #[tokio::test]
     async fn pending_cap_rejects_new_request() {
         let config = HostConfig { request_timeout: Duration::from_secs(5), ..test_config() };
         let (host, _outbound) = JsonRpcRuntimeHost::with_config(config);
@@ -339,18 +472,29 @@ mod tests {
 
         let line = outbound.recv().await.expect("outbound request");
         let id = serde_json::from_str::<Value>(&line).expect("request json")["id"].clone();
+        let id = serde_json::from_value::<RequestId>(id).expect("request id");
         request.abort();
-        host.resolve_response(crate::IncomingMessage {
-            jsonrpc: Some(crate::VERSION.to_owned()),
-            id: Some(id),
-            method: None,
-            params: Value::Null,
-            result: Some(json!({"ok": true})),
-            error: None,
-        })
-        .await;
+        host.resolve_response(id, Ok(json!({"ok": true}))).await;
 
         assert_eq!(host.pending_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn response_errors_resolve_pending_as_err() {
+        let config = HostConfig { request_timeout: Duration::from_secs(5), ..test_config() };
+        let (host, mut outbound) = JsonRpcRuntimeHost::with_config(config);
+        let pending_host = host.clone();
+        let request = tokio::spawn(async move { pending_host.request("fail", Value::Null).await });
+
+        let message = recv_json(&mut outbound).await;
+        let id = serde_json::from_value::<RequestId>(message["id"].clone()).expect("request id");
+        host.resolve_response(
+            id,
+            Err(JSONRPCErrorError { code: -32000, data: None, message: "failed".to_owned() }),
+        )
+        .await;
+
+        assert_eq!(request.await.expect("join").expect_err("error response"), "failed");
     }
 
     #[tokio::test]
@@ -495,7 +639,7 @@ mod tests {
         let parse_error = recv_json(&mut outbound).await;
         let version_error = recv_json(&mut outbound).await;
 
-        assert_eq!(parse_error["id"], Value::Null);
+        assert_eq!(parse_error["id"], "parse-error");
         assert!(parse_error["error"]["message"].as_str().unwrap().contains("invalid json-rpc"));
         assert_eq!(version_error["id"], "bad");
         assert_eq!(handler.calls.load(Ordering::SeqCst), 0);
@@ -509,7 +653,11 @@ mod tests {
 
     #[async_trait::async_trait]
     impl RequestHandler for CountingHandler {
-        async fn handle_request(&self, _method: String, _params: Value) -> Result<Value, String> {
+        async fn handle_request(
+            &self,
+            _method: String,
+            _params: Value,
+        ) -> std::result::Result<Value, String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(Value::Null)
         }

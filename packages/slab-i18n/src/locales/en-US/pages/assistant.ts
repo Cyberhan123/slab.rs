@@ -3,9 +3,23 @@ export const assistant = {
     approve: 'Approve',
     reject: 'Reject',
   },
+  approval: {
+    title: 'Approval required',
+    command: 'command',
+    fileChange: 'file change',
+    plan: 'plan',
+    runOnce: 'Allow once',
+    alwaysInWorkspace: 'Always in workspace',
+    always: 'Always allow',
+  },
+  planMode: {
+    banner: 'Plan mode active — the agent is exploring read-only and drafting a plan.',
+    exit: 'Exit',
+  },
   header: {
     title: 'Assistant',
     subtitle: 'Persistent AI agent assistant',
+    newSession: 'New session',
   },
   runtime: {
     requestAborted: 'Request aborted',
@@ -31,6 +45,26 @@ export const assistant = {
   loading: {
     title: 'Loading this session...',
     description: 'Restoring the saved conversation history before you continue.',
+  },
+  history: {
+    restored: 'History restored',
+  },
+  compaction: {
+    autoCompacting: 'Compacting context…',
+    autoCompacted: 'Context compacted',
+    manuallyCompacting: 'Compacting context…',
+    manuallyCompacted: 'Context compacted',
+  },
+  modelLoad: {
+    downloading: 'Downloading model...',
+    loading: 'Loading model...',
+  },
+  usage: {
+    prompt: 'In {{formatted}}',
+    completion: 'Out {{formatted}}',
+    cached: 'Cached {{formatted}}',
+    used: 'Used {{percent}}%',
+    total: '{{formatted}} tokens',
   },
   emptyState: {
     title: 'Start a new thread and keep the stage focused.',
@@ -132,6 +166,18 @@ export const assistant = {
     commandMcp: 'MCP',
     commandMcpDescription: 'Connect tools and context',
     commandWebSearch: 'Web search',
+    permission: {
+      title: 'Permission mode',
+      requestApproval: 'Request approval',
+      approveForMe: 'Approve for me',
+      fullControl: 'Full control',
+      custom: 'Custom',
+    },
+    interaction: {
+      title: 'Interaction mode',
+      default: 'Default',
+      plan: 'Plan',
+    },
     commandWebSearchDescription: 'Use the available web search tool',
     stopGeneratingResponse: 'Stop generating response',
     sendMessage: 'Send message',
@@ -174,6 +220,8 @@ export const assistant = {
     loadingModel: 'Loading model...',
     copy: 'Copy',
     copied: 'Copied',
+    rollback: 'Rollback',
+    confirmRollback: 'Retract this message and everything after it?',
     continue: 'Continue',
     edit: 'Edit',
     saveEdit: 'Send edit',
@@ -230,6 +278,8 @@ export const assistant = {
     failedToUpdateSession: 'Failed to update assistant session.',
     failedToDeleteSession: 'Failed to delete assistant session.',
     interruptFailed: 'Failed to interrupt assistant thread',
+    compactFailed: 'Failed to compact the conversation.',
+    forkFailed: 'Failed to fork the conversation.',
     eventStreamInterrupted: 'Assistant connection was interrupted. Retry the response when you are ready.',
     unknownError: 'Unknown error',
   },

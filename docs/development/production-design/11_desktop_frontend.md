@@ -72,7 +72,6 @@
 │  │  └─────────────────────────────────────────────────────┘   │ │
 │  │  ┌─────────────────────────────────────────────────────┐   │ │
 │  │  │              UI 组件库                               │   │ │
-│  │  │  • Ant Design X                                     │   │ │
 │  │  │  • @slab/components (共享组件)                       │   │ │
 │  │  │  • Radix UI                                         │   │ │
 │  │  └─────────────────────────────────────────────────────┘   │ │
@@ -216,7 +215,7 @@ flowchart TD
 | **`src/layouts/sidebar.tsx`** | 侧边栏导航 | 主要功能导航菜单 |
 | **`src/layouts/footer-status-bar.tsx`** | 底部状态栏 | 显示系统状态与信息 |
 | **`src/layouts/window-controls.tsx`** | 窗口控制按钮 | 自定义窗口标题栏 |
-| **`src/layouts/global-header-provider.tsx`** | 全局头部上下文 | 头部状态管理 |
+| **`src/layouts/header-provider.tsx`** | 全局头部上下文 | 头部状态管理 |
 
 ### 助手对话页面
 

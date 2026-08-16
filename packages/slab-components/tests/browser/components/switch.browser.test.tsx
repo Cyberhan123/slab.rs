@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function SwitchGallery() {
   return (
-    <div data-testid="switch-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="switch-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Switch size="sm" variant="default" data-testid="switch" />
       <Switch size="default" variant="default" />
       <Switch size="sm" variant="workspace" defaultChecked />

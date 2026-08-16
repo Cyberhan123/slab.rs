@@ -63,9 +63,11 @@ pub struct ResponseFunctionCallArgumentsDoneEvent {
     /// The ID of the item.
     #[serde(rename = "item_id")]
     pub item_id: String,
-    /// The name of the function that was called.
-    #[serde(rename = "name")]
-    pub name: String,
+    /// The name of the function that was called. Optional — OpenAI omits this
+    /// when the name is already declared on the prior `output_item.added`
+    /// skeleton, so the wire format does not require it here.
+    #[serde(rename = "name", default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// The index of the output item.
     #[serde(rename = "output_index")]
     pub output_index: i32,
@@ -82,7 +84,6 @@ impl ResponseFunctionCallArgumentsDoneEvent {
     pub fn new(
         r#type: FuncArgsDoneType,
         item_id: String,
-        name: String,
         output_index: i32,
         sequence_number: i32,
         arguments: String,
@@ -90,7 +91,7 @@ impl ResponseFunctionCallArgumentsDoneEvent {
         ResponseFunctionCallArgumentsDoneEvent {
             r#type,
             item_id,
-            name,
+            name: None,
             output_index,
             sequence_number,
             arguments,

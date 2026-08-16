@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use serde_json::Value;
 use slab_types::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig, Capability,
-    DiffusionLoadOptions, DriverHints, GbnfAssetRef, GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig,
-    GgmlWhisperLoadConfig, JsonOptions, ModelSource, ModelSpec, OnnxLoadConfig, RuntimeBackendId,
-    RuntimeBackendLoadSpec, RuntimeModelLoadCommand, TemplateAssetRef,
+    ContextLengthSpec, DiffusionLoadOptions, DriverHints, GbnfAssetRef, GgmlDiffusionLoadConfig,
+    GgmlLlamaLoadConfig, GgmlParakeetLoadConfig, GgmlWhisperLoadConfig, JsonOptions, ModelSource,
+    ModelSpec, OnnxLoadConfig, RuntimeBackendId, RuntimeBackendLoadSpec, RuntimeModelLoadCommand,
+    TemplateAssetRef,
 };
 
 use crate::error::ModelPackError;
@@ -22,7 +23,16 @@ pub struct ModelPackLoadDefaults {
     pub chat_template_source: Option<String>,
     pub gbnf: Option<GbnfAssetRef>,
     pub gbnf_source: Option<String>,
+    /// Model-provided developer/system instruction template (raw jinja source).
+    /// Consumed by `slab-agent-context` to render the developer instruction;
+    /// absent for cloud models or local packs without one (bundled default).
+    pub instruction_template: Option<TemplateAssetRef>,
+    pub instruction_template_source: Option<String>,
     pub diffusion: Option<DiffusionLoadOptions>,
+    /// Path to a multimodal vision projector (`mmproj` GGUF). When set on a
+    /// `GgmlLlama` pack, the engine loads the projector and the mtmd pipeline
+    /// prefills image parts; absent for text-only packs (vision silently no-ops).
+    pub mmproj_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -177,16 +187,24 @@ impl ModelPackEngineLoadSpec {
                         message: error.to_string(),
                     },
                 )?,
-                context_length: self.load_defaults.context_length,
+                context_length: self.load_defaults.context_length.map(ContextLengthSpec::Fixed),
+                free_vram_bytes: None,
                 flash_attn: true,
                 chat_template: self.load_defaults.chat_template_source.clone(),
                 gbnf: self.load_defaults.gbnf_source.clone(),
+                mmproj_path: self.load_defaults.mmproj_path.clone(),
+                vram_buffer_bytes: None,
+                auto_context_quantum: None,
+                auto_context_fallback: None,
             }),
             RuntimeBackendId::GgmlWhisper => {
                 RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {
                     model_path,
                     flash_attn: true,
                 })
+            }
+            RuntimeBackendId::GgmlParakeet => {
+                RuntimeBackendLoadSpec::GgmlParakeet(GgmlParakeetLoadConfig { model_path })
             }
             RuntimeBackendId::GgmlDiffusion => {
                 let diffusion = self.load_defaults.diffusion.clone().unwrap_or_default();
@@ -396,13 +414,15 @@ fn build_load_defaults(
     reject_legacy_llama_load_fields(backend, &config_id, &options)?;
     let chat_template = parse_optional_asset_ref(&options, "chat_template", &config_id)?;
     let gbnf = parse_optional_asset_ref(&options, "gbnf", &config_id)?;
+    let instruction_template =
+        parse_optional_asset_ref(&options, "instruction_template", &config_id)?;
 
     Ok(ModelPackLoadDefaults {
         num_workers: options.get("num_workers").and_then(as_u32),
-        context_length: resolved
-            .manifest
-            .context_window
-            .or_else(|| options.get("context_length").and_then(as_u32)),
+        // `context_window` is no longer a model-pack property; the active context
+        // length is resolved from settings (default `auto`). Packs may still
+        // override via a `context_length` key in their load config payload.
+        context_length: options.get("context_length").and_then(as_u32),
         chat_template_source: resolve_text_asset_ref(
             resolved,
             &config_id,
@@ -412,12 +432,20 @@ fn build_load_defaults(
         chat_template,
         gbnf_source: resolve_text_asset_ref(resolved, &config_id, "gbnf", gbnf.as_ref())?,
         gbnf,
+        instruction_template_source: resolve_text_asset_ref(
+            resolved,
+            &config_id,
+            "instruction_template",
+            instruction_template.as_ref(),
+        )?,
+        instruction_template,
         diffusion: matches!(
             backend,
             RuntimeBackendId::GgmlDiffusion | RuntimeBackendId::CandleDiffusion
         )
         .then(|| build_diffusion_load_defaults(preset_id, source, &options))
         .transpose()?,
+        mmproj_path: options.get("mmproj_path").and_then(as_string).map(PathBuf::from),
     })
 }
 
@@ -570,6 +598,7 @@ mod v3_tests {
     use std::io::Write;
 
     use serde_json::{Value, json};
+    use slab_types::RuntimeBackendLoadSpec;
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
@@ -592,8 +621,47 @@ mod v3_tests {
                 .as_deref(),
             Some("C:/models/qwen.gguf")
         );
-        assert_eq!(bridge.load_defaults.context_length, Some(8192));
+        // context_window is no longer a pack property; the bridge surfaces no
+        // context_length unless the pack's load config sets one explicitly.
+        assert_eq!(bridge.load_defaults.context_length, None);
+        // Text-only pack: no mmproj projector → vision silently no-ops.
+        assert_eq!(bridge.load_defaults.mmproj_path, None);
         assert_eq!(bridge.inference_defaults.get("temperature").and_then(Value::as_f64), Some(0.7));
+    }
+
+    #[test]
+    fn compiles_mmproj_path_from_load_payload() {
+        let mut entries = local_pack_entries();
+        entries[1].1 = json!({
+            "kind": "backend_config",
+            "label": "Load",
+            "scope": "load",
+            "payload": {
+                "num_workers": 2,
+                "mmproj_path": "C:/models/qwen-vl-mmproj.gguf"
+            }
+        })
+        .to_string();
+
+        let pack = ModelPack::from_bytes(&build_pack(entries)).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
+
+        // Parsed into load defaults...
+        assert_eq!(
+            bridge.load_defaults.mmproj_path.as_deref(),
+            Some(std::path::Path::new("C:/models/qwen-vl-mmproj.gguf"))
+        );
+        // ...and wired through to the GgmlLlama load config the engine consumes.
+        let RuntimeBackendLoadSpec::GgmlLlama(config) =
+            bridge.runtime_load_spec("default").expect("compile load spec")
+        else {
+            panic!("expected GgmlLlama load spec");
+        };
+        assert_eq!(
+            config.mmproj_path.as_deref(),
+            Some(std::path::Path::new("C:/models/qwen-vl-mmproj.gguf"))
+        );
     }
 
     #[test]
@@ -617,6 +685,33 @@ mod v3_tests {
         assert!(error.to_string().contains("use 'gbnf' instead"));
     }
 
+    #[test]
+    fn compiles_instruction_template_source_from_load_payload() {
+        let mut entries = local_pack_entries();
+        entries[1].1 = json!({
+            "kind": "backend_config",
+            "label": "Load",
+            "scope": "load",
+            "payload": {
+                "num_workers": 2,
+                "instruction_template": {
+                    "$path": "ref://models/assets/instruction_template.jinja"
+                }
+            }
+        })
+        .to_string();
+        entries.push(("models/assets/instruction_template.jinja", "{{ skills }}".to_owned()));
+
+        let pack = ModelPack::from_bytes(&build_pack(entries)).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
+
+        assert_eq!(
+            bridge.load_defaults.instruction_template_source.as_deref(),
+            Some("{{ skills }}")
+        );
+    }
+
     fn local_pack_entries() -> Vec<(&'static str, String)> {
         vec![
             (
@@ -628,7 +723,6 @@ mod v3_tests {
                     "label": "Qwen2.5 7B Instruct",
                     "family": "llama",
                     "capabilities": ["text_generation"],
-                    "context_window": 8192,
                     "engines": [{"id": "ggml.llama", "format": "gguf"}],
                     "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$ref": "ref://models/variants/q4.json"}],
                     "presets": [{"id": "default", "label": "Default", "$ref": "ref://models/presets/default.json"}],

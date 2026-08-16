@@ -4,7 +4,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::{NetworkPolicy, SandboxEnvironment, SandboxError, SandboxPolicy, SandboxedCommand};
 
-pub(crate) fn validate_command(
+pub fn validate_command(
     env: &SandboxEnvironment,
     cmd: &SandboxedCommand,
 ) -> Result<(), SandboxError> {
@@ -471,6 +471,7 @@ mod tests {
             env: Default::default(),
             cwd: Some(PathBuf::from("workspace")),
             timeout: None,
+            output_sink: None,
         };
 
         assert!(validate_command(&env, &cmd).is_err());
@@ -488,6 +489,7 @@ mod tests {
             env: Default::default(),
             cwd: Some(PathBuf::from("workspace")),
             timeout: None,
+            output_sink: None,
         };
 
         assert!(validate_command(&env, &cmd).is_err());
@@ -507,6 +509,7 @@ mod tests {
             env: Default::default(),
             cwd: Some(PathBuf::from(".")),
             timeout: None,
+            output_sink: None,
         };
 
         assert!(validate_command(&env, &cmd).is_ok());

@@ -102,6 +102,27 @@ impl ModelService {
             return Ok(AcceptedOperation { operation_id: existing.task_id });
         }
 
+        // Fast path: if every artifact is already in the local hub cache (e.g.
+        // downloaded by the hf CLI or a prior slab run that wrote to the real
+        // global cache), materialize the model and skip the download task
+        // entirely instead of re-fetching bytes the user already has.
+        if let Some(operation_id) = self
+            .try_materialize_cached_download(
+                &model,
+                &download_plan,
+                configured_model_cache_dir.as_deref(),
+            )
+            .await?
+        {
+            info!(
+                task_id = %operation_id,
+                backend_id = %backend_id,
+                model_id = %model_id,
+                "model materialized from local hub cache; skipped download"
+            );
+            return Ok(AcceptedOperation { operation_id });
+        }
+
         let input_data = serde_json::to_string(&ModelDownloadTaskInput {
             model_id: model.id,
             backend_id: canonical_backend_id,
@@ -187,6 +208,124 @@ impl ModelService {
 }
 
 impl ModelService {
+    /// Fast path for downloads: if every artifact of the first candidate is
+    /// already present in the local hub cache, persist the download state
+    /// (`local_path` + `materialized_artifacts` + `selected_download_source`)
+    /// and return a synthetic Succeeded task id — without spawning a download.
+    /// Returns `None` on any cache miss so the caller falls back to a real
+    /// download.
+    async fn try_materialize_cached_download(
+        &self,
+        model: &UnifiedModel,
+        plan: &ResolvedModelDownloadPlan,
+        model_cache_dir: Option<&str>,
+    ) -> Result<Option<String>, AppCoreError> {
+        let Some(candidate) = plan.candidates.first() else {
+            return Ok(None);
+        };
+        let repo_id = candidate.repo_id.trim();
+        let filename = candidate.filename.trim();
+        if repo_id.is_empty() || filename.is_empty() {
+            return Ok(None);
+        }
+
+        let client = catalog::build_hub_client(model_cache_dir, candidate.hub_provider.as_deref())?;
+
+        // Require every declared artifact to be in the cache; on any miss, fall
+        // back to a real download. Candidates without an explicit artifacts map
+        // use the filename directly.
+        let artifact_files: Vec<(String, String)> = if candidate.artifacts.is_empty() {
+            vec![("model".to_owned(), filename.to_owned())]
+        } else {
+            candidate.artifacts.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        };
+        let mut materialized_artifacts = BTreeMap::new();
+        for (artifact_id, artifact_file) in &artifact_files {
+            match client.cached_file_path(repo_id, artifact_file).await {
+                Some(path) => {
+                    materialized_artifacts
+                        .insert(artifact_id.clone(), path.to_string_lossy().into_owned());
+                }
+                None => return Ok(None),
+            }
+        }
+
+        let local_path = candidate
+            .primary_artifact_id
+            .as_ref()
+            .and_then(|id| materialized_artifacts.get(id))
+            .or_else(|| materialized_artifacts.get("model"))
+            .or_else(|| materialized_artifacts.values().next())
+            .cloned()
+            .ok_or_else(|| {
+                AppCoreError::Internal("cache materialization produced no local path".into())
+            })?;
+
+        let selected_source = SelectedModelDownloadSource {
+            source_key: candidate.source_key.clone(),
+            repo_id: repo_id.to_owned(),
+            filename: filename.to_owned(),
+            hub_provider: candidate.hub_provider.clone(),
+        };
+        let materialized_artifacts_json =
+            serde_json::to_string(&materialized_artifacts).map_err(|error| {
+                AppCoreError::Internal(format!("failed to serialize artifacts: {error}"))
+            })?;
+        let selected_source_json = serde_json::to_string(&selected_source).map_err(|error| {
+            AppCoreError::Internal(format!("failed to serialize source: {error}"))
+        })?;
+
+        let store = self.model_state.store();
+        store
+            .update_model_download_state(
+                &model.id,
+                &local_path,
+                "ready",
+                &materialized_artifacts_json,
+                Some(&selected_source_json),
+            )
+            .await?;
+        self.model_state
+            .auto_unload()
+            .invalidate_model_replay(&model.id, "model materialized from local hub cache")
+            .await;
+
+        // Record a synthetic Succeeded task so frontend polling (GET
+        // /v1/tasks/{id}) resolves immediately instead of 404'ing.
+        let operation_id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+        store
+            .insert_model_download_operation(
+                TaskRecord {
+                    id: operation_id.clone(),
+                    task_type: MODEL_DOWNLOAD_TASK_TYPE.to_owned(),
+                    status: TaskStatus::Succeeded,
+                    model_id: Some(model.id.clone()),
+                    input_data: None,
+                    result_data: Some(materialized_artifacts_json),
+                    error_msg: None,
+                    core_task_id: None,
+                    created_at: now,
+                    updated_at: now,
+                },
+                ModelDownloadRecord {
+                    task_id: operation_id.clone(),
+                    model_id: model.id.clone(),
+                    source_key: candidate.source_key.clone(),
+                    repo_id: repo_id.to_owned(),
+                    filename: filename.to_owned(),
+                    hub_provider: candidate.hub_provider.clone(),
+                    status: TaskStatus::Succeeded,
+                    error_msg: None,
+                    created_at: now,
+                    updated_at: now,
+                },
+            )
+            .await?;
+
+        Ok(Some(operation_id))
+    }
+
     pub(crate) async fn restart_model_download_task(
         &self,
         task: TaskRecord,

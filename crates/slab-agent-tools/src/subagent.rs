@@ -4,7 +4,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentConfig, AgentControl, AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentConfig, AgentControl, AgentError, ModelPolicy, ToolContext, ToolHandler, ToolOutput,
+};
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
 const DEFAULT_SUBAGENT_TURNS: u32 = 8;
@@ -22,6 +24,8 @@ impl DelegateSubagentTool {
 #[derive(Debug, Deserialize)]
 struct DelegateSubagentArgs {
     task: String,
+    #[serde(default)]
+    agent_type: Option<String>,
     #[serde(default)]
     model: Option<String>,
     #[serde(default)]
@@ -53,6 +57,10 @@ impl ToolHandler for DelegateSubagentTool {
                 "task": {
                     "type": "string",
                     "description": "The focused task for the child agent."
+                },
+                "agent_type": {
+                    "type": "string",
+                    "description": "Optional built-in agent type (e.g. \"plan\"). Resolves a tool constraint and system prompt from the agent registry; the call fails if the type is unknown."
                 },
                 "model": {
                     "type": "string",
@@ -113,10 +121,37 @@ impl ToolHandler for DelegateSubagentTool {
             serde_json::from_str::<AgentConfig>(&parent.config_json).map_err(|error| {
                 AgentError::ToolExecution(format!("invalid parent agent config: {error}"))
             })?;
+        // Slice 4: resolve a built-in agent_type (if any) BEFORE applying caller
+        // overrides so an explicit caller value still wins. A named type that is
+        // absent from the registry is a hard error — the model asked for an agent
+        // that does not exist.
+        let definition =
+            match args.agent_type.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+                Some(agent_type) => {
+                    let registry = self.control.agent_registry();
+                    Some(registry.get(agent_type).ok_or_else(|| {
+                        AgentError::ToolExecution(format!("unknown agent_type: {agent_type}"))
+                    })?)
+                }
+                None => None,
+            };
+        if let Some(definition) = &definition {
+            child_config.agent_type = Some(definition.agent_type.clone());
+        }
         if let Some(model) = args.model.filter(|value| !value.trim().is_empty()) {
             child_config.model = model;
+        } else if let Some(definition) = &definition
+            && let ModelPolicy::Fixed(model) = &definition.model
+        {
+            child_config.model = model.clone();
         }
-        child_config.system_prompt = Some(args.system_prompt.unwrap_or_else(default_system_prompt));
+        child_config.system_prompt = Some(match args.system_prompt {
+            Some(prompt) => prompt,
+            None => definition
+                .as_ref()
+                .map(|definition| definition.system_prompt.clone())
+                .unwrap_or_else(default_system_prompt),
+        });
         if let Some(allowed_tools) = args.allowed_tools {
             child_config.allowed_tools =
                 allowed_tools.into_iter().filter(|tool| !tool.trim().is_empty()).collect();
@@ -276,9 +311,12 @@ mod tests {
 
     use slab_agent::port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-        ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolCallRecord, ToolSpec,
+        ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec,
     };
-    use slab_agent::{AgentControlLimits, ToolContext, ToolRouter, WorkspaceRef};
+    use slab_agent::{
+        AgentControlLimits, AgentDefinition, AgentRegistry, ToolConstraint, ToolContext,
+        ToolRouter, WorkspaceRef,
+    };
     use slab_agent_tracing::AgentTraceContext;
     use slab_types::ConversationMessage;
 
@@ -309,6 +347,10 @@ mod tests {
     #[derive(Default)]
     struct MemoryStore {
         threads: Mutex<HashMap<String, ThreadSnapshot>>,
+        // The slab-agent `insert_thread_message` trait method is gone;
+        // retained for direct-push seeding in tests. Unread — tests verify
+        // emission via `RecordingNotify`.
+        #[allow(dead_code)]
         messages: Mutex<Vec<ThreadMessageRecord>>,
     }
 
@@ -329,6 +371,7 @@ mod tests {
                     completion_text: Some("parent".to_owned()),
                     created_at: now.clone(),
                     updated_at: now,
+                    archived_at: None,
                 },
             );
         }
@@ -365,43 +408,6 @@ mod tests {
             snapshot.completion_text = completion_text.map(str::to_owned);
             Ok(())
         }
-
-        async fn insert_tool_call(&self, _record: &ToolCallRecord) -> Result<(), AgentError> {
-            Ok(())
-        }
-
-        async fn update_tool_call_status(
-            &self,
-            _id: &str,
-            _status: slab_types::agent::ToolCallStatus,
-        ) -> Result<(), AgentError> {
-            Ok(())
-        }
-
-        async fn update_tool_call(
-            &self,
-            _id: &str,
-            _output: Option<&str>,
-            _status: slab_types::agent::ToolCallStatus,
-            _completed_at: &str,
-        ) -> Result<(), AgentError> {
-            Ok(())
-        }
-
-        async fn insert_thread_message(
-            &self,
-            record: &ThreadMessageRecord,
-        ) -> Result<(), AgentError> {
-            self.messages.lock().unwrap().push(record.clone());
-            Ok(())
-        }
-
-        async fn list_thread_messages(
-            &self,
-            _thread_id: &str,
-        ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
-            Ok(Vec::new())
-        }
     }
 
     struct NoopNotify;
@@ -411,6 +417,55 @@ mod tests {
         async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
     }
 
+    /// A notify port that records emitted `EventMsg`s so tests can
+    /// verify emission (slab-agent no longer writes conversation data to the
+    /// store — it emits `MessageAppended` / `TurnStateChanged` events).
+    #[derive(Default)]
+    struct RecordingNotify {
+        events: std::sync::Mutex<Vec<slab_agent::protocol::EventMsg>>,
+    }
+
+    #[async_trait]
+    impl AgentNotifyPort for RecordingNotify {
+        async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
+
+        async fn on_event_msg(&self, _thread_id: &str, msg: &slab_agent::protocol::EventMsg) {
+            self.events.lock().unwrap().push(msg.clone());
+        }
+    }
+
+    #[async_trait]
+    impl ApprovalPort for RecordingNotify {
+        async fn request_approval(
+            &self,
+            _thread_id: &str,
+            _call_id: &str,
+            _tool_name: &str,
+            _descriptor: &slab_agent::OperationDescriptor,
+            _risk: Option<slab_agent::ToolRiskAssessment>,
+        ) -> ApprovalDecision {
+            ApprovalDecision::Approved(slab_agent::ApprovalScope::RunOnce)
+        }
+    }
+
+    impl RecordingNotify {
+        /// Emitted `MessageAppended` conversation messages for a thread.
+        fn emitted_messages(&self, thread_id: &str) -> Vec<slab_types::ConversationMessage> {
+            use slab_agent::protocol::EventMsg;
+            self.events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|event| match event {
+                    EventMsg::MessageAppended(p) if p.thread_id == thread_id => {
+                        Some(p.message.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
     #[async_trait]
     impl ApprovalPort for NoopNotify {
         async fn request_approval(
@@ -418,10 +473,10 @@ mod tests {
             _thread_id: &str,
             _call_id: &str,
             _tool_name: &str,
-            _command: &str,
+            _descriptor: &slab_agent::OperationDescriptor,
             _risk: Option<slab_agent::ToolRiskAssessment>,
         ) -> ApprovalDecision {
-            ApprovalDecision::Approved
+            ApprovalDecision::Approved(slab_agent::ApprovalScope::RunOnce)
         }
     }
 
@@ -476,12 +531,12 @@ mod tests {
 
         let store = Arc::new(MemoryStore::default());
         store.insert_parent(1);
-        let notify = Arc::new(NoopNotify);
+        let notify = Arc::new(RecordingNotify::default());
         let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
             Arc::new(FinalLlm),
             store.clone(),
             notify.clone(),
-            notify,
+            notify.clone(),
             Arc::new(ToolRouter::new()),
             AgentControlLimits { max_threads: 4, max_depth: 4 },
             Vec::new(),
@@ -515,15 +570,14 @@ mod tests {
         assert_eq!(artifact["completion_text"], "child result");
 
         let child_id = value["child_thread_id"].as_str().expect("child id");
-        let child_prompt = {
-            let messages = store.messages.lock().unwrap();
-            messages
-                .iter()
-                .find(|record| record.thread_id == child_id && record.message.role == "user")
-                .expect("child prompt")
-                .message
-                .rendered_text()
-        };
+        // slab-agent emits `MessageAppended` (no store writes); read
+        // the emitted child-prompt message from the recording notify.
+        let child_prompt = notify
+            .emitted_messages(child_id)
+            .iter()
+            .find(|message| message.role == "user")
+            .expect("emitted child prompt")
+            .rendered_text();
         assert!(child_prompt.contains("Objective:\nsummarize"));
         assert!(child_prompt.contains("workspace-relative scope: src"));
         assert!(child_prompt.contains("Required output format:"));
@@ -587,5 +641,316 @@ mod tests {
             .await;
 
         assert!(matches!(result, Err(AgentError::DepthLimitExceeded { current: 1, max: 0 })));
+    }
+
+    // ---- Slice 4: agent_type integration ----
+
+    const PLAN_PROMPT: &str = "You are a read-only planning agent.";
+
+    /// LLM that records the tool list presented each call, so tests can verify
+    /// the agent tool constraint reached the model-facing projection.
+    #[derive(Default)]
+    struct RecordingLlm {
+        captured_tools: Mutex<Vec<Vec<ToolSpec>>>,
+    }
+
+    #[async_trait]
+    impl LlmPort for RecordingLlm {
+        async fn chat_completion(
+            &self,
+            _model: &str,
+            _messages: &[ConversationMessage],
+            tools: &[ToolSpec],
+            _config: &AgentConfig,
+            _trace_context: &AgentTraceContext,
+        ) -> Result<LlmResponse, AgentError> {
+            self.captured_tools.lock().unwrap().push(tools.to_vec());
+            Ok(LlmResponse {
+                content: Some("child result".to_owned()),
+                content_already_streamed: false,
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".to_owned()),
+                usage: None,
+            })
+        }
+    }
+
+    /// Minimal named tool handler used only to populate a router with specs.
+    struct StubTool {
+        tool_name: String,
+    }
+
+    impl StubTool {
+        fn new(name: &str) -> Self {
+            Self { tool_name: name.to_owned() }
+        }
+    }
+
+    #[async_trait]
+    impl ToolHandler for StubTool {
+        fn name(&self) -> &str {
+            &self.tool_name
+        }
+
+        fn description(&self) -> &str {
+            "stub"
+        }
+
+        fn parameters_schema(&self) -> Value {
+            serde_json::json!({ "type": "object", "properties": {} })
+        }
+
+        async fn execute(
+            &self,
+            _ctx: &ToolContext,
+            _arguments: &Value,
+        ) -> Result<ToolOutput, AgentError> {
+            Ok(ToolOutput { content: "stub".to_owned(), metadata: None })
+        }
+    }
+
+    /// HashMap-backed agent registry for tests.
+    #[derive(Default)]
+    struct MockRegistry {
+        agents: Vec<AgentDefinition>,
+    }
+
+    impl MockRegistry {
+        /// A "plan" agent that denies `shell` with a fixed system prompt.
+        fn plan() -> Self {
+            Self {
+                agents: vec![AgentDefinition {
+                    agent_type: "plan".to_owned(),
+                    description: "test plan agent".to_owned(),
+                    tools: ToolConstraint::Denylist(vec!["shell".to_owned()]),
+                    system_prompt: PLAN_PROMPT.to_owned(),
+                    model: ModelPolicy::Inherit,
+                }],
+            }
+        }
+
+        /// A "plan" agent that also pins a model (for caller-overrides tests).
+        fn plan_with_fixed_model(model: &str) -> Self {
+            let mut registry = Self::plan();
+            if let Some(def) = registry.agents.get_mut(0) {
+                def.model = ModelPolicy::Fixed(model.to_owned());
+            }
+            registry
+        }
+    }
+
+    impl AgentRegistry for MockRegistry {
+        fn get(&self, agent_type: &str) -> Option<AgentDefinition> {
+            self.agents.iter().find(|def| def.agent_type == agent_type).cloned()
+        }
+        fn list(&self) -> Vec<AgentDefinition> {
+            self.agents.clone()
+        }
+    }
+
+    fn build_control(
+        llm: Arc<dyn LlmPort>,
+        store: Arc<MemoryStore>,
+        router: Arc<ToolRouter>,
+        registry: Arc<dyn AgentRegistry>,
+    ) -> Arc<AgentControl> {
+        let notify = Arc::new(NoopNotify);
+        Arc::new(
+            slab_agent::AgentControl::new_with_hooks(
+                llm,
+                store,
+                notify.clone(),
+                notify,
+                router,
+                AgentControlLimits { max_threads: 4, max_depth: 4 },
+                Vec::new(),
+            )
+            .with_agent_registry(registry),
+        )
+    }
+
+    #[tokio::test]
+    async fn delegate_subagent_with_agent_type_sets_config_and_system_prompt() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let control = build_control(
+            Arc::new(FinalLlm),
+            store.clone(),
+            Arc::new(ToolRouter::new()),
+            Arc::new(MockRegistry::plan()),
+        );
+        let tool = DelegateSubagentTool::new(control);
+
+        let output = tool
+            .execute(
+                &ToolContext::for_thread("parent").build(),
+                &serde_json::json!({ "task": "plan it", "agent_type": "plan" }),
+            )
+            .await
+            .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        let child_id = value["child_thread_id"].as_str().expect("child id");
+
+        let child = store.get_thread(child_id).await.expect("thread").expect("child");
+        let child_config: AgentConfig =
+            serde_json::from_str(&child.config_json).expect("child config");
+        assert_eq!(child_config.agent_type.as_deref(), Some("plan"));
+        assert_eq!(child_config.system_prompt.as_deref(), Some(PLAN_PROMPT));
+        assert!(child_config.transient);
+    }
+
+    #[tokio::test]
+    async fn delegate_subagent_agent_type_enforces_tool_constraint_end_to_end() {
+        let router = ToolRouter::new();
+        router.register(Box::new(StubTool::new("shell")));
+        router.register(Box::new(StubTool::new("read_file")));
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let llm = Arc::new(RecordingLlm::default());
+        let control = build_control(
+            Arc::clone(&llm) as Arc<dyn LlmPort>,
+            store.clone(),
+            Arc::new(router),
+            Arc::new(MockRegistry::plan()),
+        );
+        let tool = DelegateSubagentTool::new(control);
+
+        tool.execute(
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "plan it", "agent_type": "plan", "max_turns": 1 }),
+        )
+        .await
+        .expect("delegate");
+
+        let captured = llm.captured_tools.lock().unwrap().clone();
+        let names: Vec<String> = captured.iter().flatten().map(|spec| spec.name.clone()).collect();
+        assert!(
+            !names.contains(&"shell".to_owned()),
+            "plan agent must not see the denied `shell` tool: {names:?}"
+        );
+        assert!(
+            names.contains(&"read_file".to_owned()),
+            "plan agent should still see `read_file`: {names:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delegate_subagent_agent_type_not_in_registry_errors() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        // Default control carries a NoopAgentRegistry — "missing" is unknown.
+        let control = build_control(
+            Arc::new(FinalLlm),
+            store.clone(),
+            Arc::new(ToolRouter::new()),
+            Arc::new(MockRegistry::default()),
+        );
+        let tool = DelegateSubagentTool::new(control);
+
+        let result = tool
+            .execute(
+                &ToolContext::for_thread("parent").build(),
+                &serde_json::json!({ "task": "plan it", "agent_type": "missing" }),
+            )
+            .await;
+
+        let error = result.expect_err("unknown agent_type rejected").to_string();
+        assert!(error.contains("unknown agent_type: missing"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn delegate_subagent_explicit_system_prompt_overrides_definition() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let control = build_control(
+            Arc::new(FinalLlm),
+            store.clone(),
+            Arc::new(ToolRouter::new()),
+            Arc::new(MockRegistry::plan()),
+        );
+        let tool = DelegateSubagentTool::new(control);
+
+        let output = tool
+            .execute(
+                &ToolContext::for_thread("parent").build(),
+                &serde_json::json!({
+                    "task": "plan it",
+                    "agent_type": "plan",
+                    "system_prompt": "custom prompt"
+                }),
+            )
+            .await
+            .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        let child_id = value["child_thread_id"].as_str().expect("child id");
+
+        let child = store.get_thread(child_id).await.expect("thread").expect("child");
+        let child_config: AgentConfig =
+            serde_json::from_str(&child.config_json).expect("child config");
+        assert_eq!(child_config.system_prompt.as_deref(), Some("custom prompt"));
+        assert_eq!(child_config.agent_type.as_deref(), Some("plan"));
+    }
+
+    #[tokio::test]
+    async fn delegate_subagent_explicit_model_overrides_definition() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let control = build_control(
+            Arc::new(FinalLlm),
+            store.clone(),
+            Arc::new(ToolRouter::new()),
+            Arc::new(MockRegistry::plan_with_fixed_model("plan-model")),
+        );
+        let tool = DelegateSubagentTool::new(control);
+
+        let output = tool
+            .execute(
+                &ToolContext::for_thread("parent").build(),
+                &serde_json::json!({
+                    "task": "plan it",
+                    "agent_type": "plan",
+                    "model": "caller-model"
+                }),
+            )
+            .await
+            .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        let child_id = value["child_thread_id"].as_str().expect("child id");
+
+        let child = store.get_thread(child_id).await.expect("thread").expect("child");
+        let child_config: AgentConfig =
+            serde_json::from_str(&child.config_json).expect("child config");
+        // Caller wins over ModelPolicy::Fixed.
+        assert_eq!(child_config.model, "caller-model");
+        assert_eq!(child_config.agent_type.as_deref(), Some("plan"));
+    }
+
+    #[tokio::test]
+    async fn delegate_subagent_definition_model_applies_when_caller_omits() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let control = build_control(
+            Arc::new(FinalLlm),
+            store.clone(),
+            Arc::new(ToolRouter::new()),
+            Arc::new(MockRegistry::plan_with_fixed_model("plan-model")),
+        );
+        let tool = DelegateSubagentTool::new(control);
+
+        let output = tool
+            .execute(
+                &ToolContext::for_thread("parent").build(),
+                &serde_json::json!({ "task": "plan it", "agent_type": "plan" }),
+            )
+            .await
+            .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        let child_id = value["child_thread_id"].as_str().expect("child id");
+
+        let child = store.get_thread(child_id).await.expect("thread").expect("child");
+        let child_config: AgentConfig =
+            serde_json::from_str(&child.config_json).expect("child config");
+        // No caller model → definition's Fixed policy applies.
+        assert_eq!(child_config.model, "plan-model");
     }
 }

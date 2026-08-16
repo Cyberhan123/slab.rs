@@ -1,0 +1,31 @@
+[package]
+name = "slab-linux-sandbox"
+version.workspace = true
+edition.workspace = true
+description = "Linux OS-enforced sandbox (seccomp + landlock + bwrap) for slab.rs"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+dunce = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+slab-utils = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+landlock = { workspace = true }
+seccompiler = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+tokio = { workspace = true, features = ["io-std", "macros", "process", "rt-multi-thread", "signal"] }

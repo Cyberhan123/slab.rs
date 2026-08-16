@@ -6,7 +6,7 @@ import {
   type AgentSessionRestored,
   type AgentThreadMessageResponse,
   type ChatToolCall,
-} from "./fullstack-dev"
+} from "./e2e-runtime"
 
 type AssistantUiState = {
   currentSessionId?: string
@@ -24,15 +24,28 @@ export type ToolExecutionResult = {
   toolMessages: AgentThreadMessageResponse[]
 }
 
-const approveButtonName = /^(Approve|\u6279\u51c6)$/u
-
-export async function openAssistant(page: Page, uiBaseUrl: string): Promise<void> {
-  // WorkspaceModeSync (App.tsx) redirects a *fresh full load* at `/` to
-  // `/workspace` once when a workspace is active (intended workspace-mode
-  // behavior). The e2e stack always configures a workspace, and `page.goto`
-  // is a full reload (which remounts the app and re-triggers that redirect), so
-  // a full load at `/` always lands on `/workspace` and the assistant composer
-  // never renders. Reach the Assistant page with a client-side SPA navigation
+export async function openAssistant(
+  page: Page,
+  uiBaseUrl: string,
+  sessionId?: string
+): Promise<void> {
+  if (sessionId) {
+    // `?session=` deep link pins this page to a specific session, bypassing the
+    // shared `zustand:assistant-ui` "current session" (which is global per
+    // server and would race across concurrent e2e browsers). WorkspaceModeSync
+    // skips its `/`→`/workspace` redirect when a session deep link is present,
+    // so a direct full load mounts the Assistant on this session without the
+    // sidebar workaround.
+    await page.goto(`${uiBaseUrl}/?session=${encodeURIComponent(sessionId)}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    })
+    await waitForComposerReady(page)
+    return
+  }
+  // No override: rely on the shared global "current session". WorkspaceModeSync
+  // (App.tsx) redirects a *fresh full load* at `/` to `/workspace` once when a
+  // workspace is active, so reach the Assistant with a client-side SPA nav
   // instead: full-load at `/workspace` (no `/`-redirect), then click the sidebar
   // Assistant link (a react-router <Link/>) which navigates to `/` without
   // remounting, so the one-time redirect guard does not re-fire.
@@ -44,11 +57,11 @@ export async function openAssistant(page: Page, uiBaseUrl: string): Promise<void
 export async function sendAssistantMessage(page: Page, message: string): Promise<void> {
   const composer = await waitForComposerReady(page)
   await composer.fill(message)
-  await page.getByTestId("assistant-send-button").locator("button").click()
+  await page.getByTestId("assistant-send-button").click()
 }
 
 export async function waitForComposerReady(page: Page): Promise<Locator> {
-  const composer = page.getByTestId("assistant-composer-input").locator("textarea")
+  const composer = page.getByTestId("assistant-composer-input")
   await composer.waitFor({ state: "visible", timeout: 90_000 })
   await eventually("assistant composer is editable", async () => composer.isEditable(), 90_000)
   return composer
@@ -144,21 +157,63 @@ export async function waitForToolExecution(
 }
 
 export async function approvePendingToolCall(page: Page): Promise<void> {
-  await page.getByRole("button", { name: approveButtonName }).click({ timeout: 240_000 })
+  // The ApprovalCard renders one button per advertised scope, each tagged
+  // `assistant-approval-<scope>`; `run_once` is the plain approve action and is
+  // always present (the legacy fallback maps approve → run_once).
+  await page.getByTestId("assistant-approval-run_once").click({ timeout: 240_000 })
+}
+
+/** Approve the pending tool call with a specific persistence scope (e.g.
+ * `always_in_workspace`, which silences repeats for equivalent commands). */
+export async function approveToolCallWithScope(page: Page, scope: string): Promise<void> {
+  await page.getByTestId(`assistant-approval-${scope}`).click({ timeout: 240_000 })
+}
+
+/** Deny the pending tool call (clicks the `deny` scope = `approved:false`). The
+ * kernel maps any deny to a one-shot `Rejected` (it does not remember the
+ * denial), so this only proves the immediate rejection + model recovery. */
+export async function denyToolCall(page: Page): Promise<void> {
+  await page.getByTestId("assistant-approval-deny").click({ timeout: 240_000 })
+}
+
+/** Select a per-message permission mode from the composer's dedicated permission
+ * button (left of Send). `full_control` short-circuits the engine to `Allow` and
+ * surfaces no approval banner. The trigger is tagged
+ * `assistant-permission-mode-trigger`; items `assistant-permission-mode-<mode>`. */
+export async function selectPermissionMode(
+  page: Page,
+  mode: "request_approval" | "approve_for_me" | "full_control" | "custom"
+): Promise<void> {
+  await page.getByTestId("assistant-permission-mode-trigger").click()
+  await page.getByTestId(`assistant-permission-mode-${mode}`).click()
+  // The item `preventDefault`s to keep the popover open; dismiss before composing.
+  await page.keyboard.press("Escape")
+}
+
+/** Toggle plan mode on/off via the `/plan` command in the composer's Commands
+ * menu (mirrors the Sender unit test). Plan mode runs the next turn as the
+ * read-only plan agent (`turn/start` `agentType: "plan"`); the
+ * `assistant-plan-mode-chip` reflects its on/off state. */
+export async function togglePlanMode(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Commands" }).click()
+  await page.getByRole("menuitem", { name: "/plan" }).click()
 }
 
 export async function expectAssistantPageText(page: Page, text: string): Promise<void> {
   const needle = visibleNeedle(text)
-  // Message bubbles are markdown-rendered (AssistantMarkdown), so the DOM text
-  // can differ from the raw prompt by markdown formatting chars — e.g. a marker
-  // like `SLAB_AGENT_E2E_…` renders with its underscores intact, but
-  // `visibleNeedle` strips `_`. Matching the stripped needle against raw DOM
-  // text therefore misses prompts that contain `_`/`*`/`#`/`>`/`[`/`]`. Normalize
-  // the DOM text the same way before comparing.
+  // Assistant message bubbles are tagged `assistant-message-assistant` on
+  // MessageRow (message-item.tsx). The DOM text is markdown-rendered
+  // (AssistantMarkdown), so it can differ from the raw prompt by markdown
+  // formatting chars — e.g. a marker like `SLAB_AGENT_E2E_…` renders with its
+  // underscores intact, but `visibleNeedle` strips `_`. Matching the stripped
+  // needle against raw DOM text therefore misses prompts that contain
+  // `_`/`*`/`#`/`>`/`[`/`]`. Normalize the DOM text the same way before
+  // comparing. Only assistant bubbles are scanned so the needle is not matched
+  // against the user's own bubble.
   await eventually(
     `assistant page text '${needle}'`,
     async () => {
-      const messages = page.locator('[data-testid^="assistant-message-"]')
+      const messages = page.locator('[data-testid="assistant-message-assistant"]')
       const count = await messages.count()
       for (let index = 0; index < count; index += 1) {
         // eslint-disable-next-line no-await-in-loop
@@ -173,12 +228,111 @@ export async function expectAssistantPageText(page: Page, text: string): Promise
   )
 }
 
+/** Assert the apply_patch file-change diff card rendered for `expectation.path`
+ * (the `<code>` holds the patched path, cross-platform normalized) and, when
+ * `expectation.contains` is set, that the diff `<pre>` includes that text (e.g.
+ * `*** Begin Patch`). The card is tagged `assistant-tool-file-change`
+ * (message-tool-file-change-part.tsx). */
+export async function expectFileChangeCard(
+  page: Page,
+  expectation: { path: string; contains?: string }
+): Promise<void> {
+  const wantPath = expectation.path.replace(/\\/g, "/")
+  await eventually(
+    `file-change card for ${wantPath}`,
+    async () => {
+      const card = page.locator('[data-testid="assistant-tool-file-change"]')
+      if (!(await card.isVisible())) {
+        return null
+      }
+      const paths = (await card.locator("code").allTextContents()).map((value) =>
+        value.replace(/\\/g, "/")
+      )
+      if (!paths.some((value) => value.endsWith(wantPath))) {
+        return null
+      }
+      if (expectation.contains) {
+        const diffs = await card.locator("pre").allTextContents()
+        if (!diffs.some((value) => value.includes(expectation.contains as string))) {
+          return null
+        }
+      }
+      return true
+    },
+    60_000
+  )
+}
+
+/** Assert the structured plan card rendered (tagged `assistant-tool-plan`,
+ * message-tool-plan-part.tsx) and, when set, that its summary text contains
+ * `expectation.summaryContains`. */
+export async function expectPlanCard(
+  page: Page,
+  expectation: { summaryContains?: string }
+): Promise<void> {
+  await eventually(
+    "plan card",
+    async () => {
+      const card = page.locator('[data-testid="assistant-tool-plan"]')
+      if (!(await card.first().isVisible())) {
+        return null
+      }
+      if (expectation.summaryContains) {
+        const text = (await card.first().textContent()) ?? ""
+        if (!text.includes(expectation.summaryContains)) {
+          return null
+        }
+      }
+      return true
+    },
+    60_000
+  )
+}
+
+/** Assert the rich plan approval card rendered (tagged `assistant-approval-plan`,
+ * approval-banner.tsx) and click the chosen scope (`approve` = run_once,
+ * `reject` = deny). `timeoutMs` governs only the card-appearance wait (a cold
+ * real-model first turn can take longer than the default to emit `plan` +
+ * `present_plan`); the click keeps its own 240s timeout. */
+export async function expectPlanApprovalCard(
+  page: Page,
+  action: "approve" | "reject",
+  timeoutMs = 240_000
+): Promise<void> {
+  await eventually(
+    "plan approval card",
+    async () => page.locator('[data-testid="assistant-approval-plan"]').first().isVisible(),
+    timeoutMs
+  )
+  const scope = action === "approve" ? "run_once" : "deny"
+  await page.getByTestId(`assistant-approval-${scope}`).click({ timeout: 240_000 })
+}
+
+/** Assert the plan chip (`assistant-plan-mode-chip`, rendered by sender.tsx while
+ * plan mode is on) is visible, or — when `visible` is false — that it has
+ * disappeared (e.g. after plan approval clears plan mode, or the X was clicked). */
+export async function expectPlanChip(page: Page, visible: boolean): Promise<void> {
+  const chip = page.locator('[data-testid="assistant-plan-mode-chip"]')
+  await eventually(
+    visible ? "plan chip visible" : "plan chip hidden",
+    async () => {
+      const count = await chip.count()
+      if (count === 0) {
+        return visible ? null : true
+      }
+      const isVisible = await chip.first().isVisible()
+      return isVisible === visible ? true : null
+    },
+    60_000
+  )
+}
+
 export function latestAssistantTextAfter(
   messages: AgentSessionRestored["messages"],
   prompt: string
 ): string {
   const promptIndex = messages.findIndex(
-    (message) => message.role === "user" && message.content === prompt
+    (message: AgentThreadMessageResponse) => message.role === "user" && message.content === prompt
   )
   if (promptIndex < 0) {
     return ""
@@ -186,7 +340,7 @@ export function latestAssistantTextAfter(
 
   return messages
     .slice(promptIndex + 1)
-    .findLast((message) => message.role === "assistant" && nonBlank(message.content))?.content ?? ""
+    .findLast((message: AgentThreadMessageResponse) => message.role === "assistant" && nonBlank(message.content))?.content ?? ""
 }
 
 export function nonBlank(value: string | null | undefined): boolean {
@@ -214,7 +368,7 @@ function latestFinalAssistantTextAfterTool(
   }
 
   const lastToolIndex = messages.findLastIndex(
-    (message) =>
+    (message: AgentThreadMessageResponse) =>
       message.role === "tool" &&
       typeof message.tool_call_id === "string" &&
       callIds.includes(message.tool_call_id)
@@ -225,7 +379,7 @@ function latestFinalAssistantTextAfterTool(
 
   return messages
     .slice(lastToolIndex + 1)
-    .findLast((message) => message.role === "assistant" && nonBlank(message.content))?.content ?? ""
+    .findLast((message: AgentThreadMessageResponse) => message.role === "assistant" && nonBlank(message.content))?.content ?? ""
 }
 
 function normalizeVisibleText(text: string): string {

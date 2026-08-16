@@ -1,22 +1,24 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import SettingsPage from '@/pages/settings';
-import type { SettingsDocumentResponse } from '@/pages/settings/types';
+import SettingsPage from '@slab/ui/pages/settings';
+import type { SettingsDocumentResponse } from '@slab/ui/pages/settings/types';
 import { expectDesktopSceneAccessible, renderDesktopScene } from '../test-utils';
 
 const { mockUseSettingsAutosave } = vi.hoisted(() => ({
   mockUseSettingsAutosave: vi.fn<() => unknown>(),
 }));
 
-vi.mock('@/pages/settings/hooks/use-settings-autosave', () => ({
+vi.mock('@slab/ui/pages/settings/hooks/use-settings-autosave', () => ({
   useSettingsAutosave: mockUseSettingsAutosave,
 }));
 
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderControl: vi.fn<() => void>(),
-  usePageHeaderSearch: vi.fn<() => void>(),
+vi.mock('@slab/ui/hooks/use-header', () => ({
+  useHeader: vi.fn<() => unknown>(() => ({
+    meta: { title: 'Settings', subtitle: 'Settings', icon: vi.fn(), contextLabel: null },
+    search: null,
+    select: null,
+  })),
 }));
 
 const { mockApiUseQuery } = vi.hoisted(() => ({

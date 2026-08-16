@@ -6,7 +6,7 @@ use crate::token::LlamaToken;
 
 /// A safe wrapper around a llama sampler chain.
 ///
-/// Create one with [`LlamaSampler::chain_new`], add individual samplers with
+/// Create one with `LlamaSampler::chain_new`, add individual samplers with
 /// the builder methods, then call [`LlamaSampler::sample`] after decoding a
 /// batch to get the next token.
 pub struct LlamaSampler {

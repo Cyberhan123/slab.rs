@@ -3,21 +3,40 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{GbnfAssetRef, RuntimeDevicePreference, TemplateAssetRef, defaults};
+use crate::{ContextLengthSpec, GbnfAssetRef, RuntimeDevicePreference, TemplateAssetRef, defaults};
 
 /// Typed `model.load` payload for the `ggml.llama` backend.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct GgmlLlamaLoadConfig {
     pub model_path: PathBuf,
     pub num_workers: usize,
+    /// Context window: an explicit token count, or `auto` (resolve at load to
+    /// the largest context that fits in GPU VRAM). `None` is treated as `auto`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_length: Option<u32>,
+    pub context_length: Option<ContextLengthSpec>,
+    /// Free GPU VRAM (bytes) snapshot taken by the server at dispatch time, used
+    /// to size `auto` context. `None` when no VRAM signal is available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free_vram_bytes: Option<u64>,
     #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gbnf: Option<String>,
+    /// Optional multimodal vision/audio projector (mmproj) GGUF. When set, the
+    /// runtime loads an mtmd context bound to the text model for image inputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mmproj_path: Option<PathBuf>,
+    /// Scheduler sizing tunables forwarded from the server so `auto` context
+    /// sizing uses host policy. `None` fields fall back per-field to
+    /// `SchedulerParams::default()` on the runtime side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vram_buffer_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_context_quantum: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_context_fallback: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -36,6 +55,15 @@ pub struct GgmlWhisperLoadConfig {
     pub model_path: PathBuf,
     #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
+}
+
+/// Typed `model.load` payload for the `ggml.parakeet` backend.
+///
+/// Parakeet's context params only expose `use_gpu` / `gpu_device` (no `flash_attn`),
+/// so the load config is a strict subset of whisper's.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct GgmlParakeetLoadConfig {
+    pub model_path: PathBuf,
 }
 
 /// Typed `model.load` payload for the `ggml.diffusion` backend.
@@ -131,6 +159,7 @@ fn default_execution_providers() -> Vec<String> {
 pub enum RuntimeBackendLoadSpec {
     GgmlLlama(GgmlLlamaLoadConfig),
     GgmlWhisper(GgmlWhisperLoadConfig),
+    GgmlParakeet(GgmlParakeetLoadConfig),
     GgmlDiffusion(Box<GgmlDiffusionLoadConfig>),
     CandleLlama(CandleLlamaLoadConfig),
     CandleWhisper(CandleWhisperLoadConfig),
@@ -143,6 +172,7 @@ impl RuntimeBackendLoadSpec {
         match self {
             Self::GgmlLlama(_) => crate::backend::RuntimeBackendId::GgmlLlama,
             Self::GgmlWhisper(_) => crate::backend::RuntimeBackendId::GgmlWhisper,
+            Self::GgmlParakeet(_) => crate::backend::RuntimeBackendId::GgmlParakeet,
             Self::GgmlDiffusion(_) => crate::backend::RuntimeBackendId::GgmlDiffusion,
             Self::CandleLlama(_) => crate::backend::RuntimeBackendId::CandleLlama,
             Self::CandleWhisper(_) => crate::backend::RuntimeBackendId::CandleWhisper,
@@ -155,6 +185,7 @@ impl RuntimeBackendLoadSpec {
         match self {
             Self::GgmlLlama(config) => config.model_path.as_path(),
             Self::GgmlWhisper(config) => config.model_path.as_path(),
+            Self::GgmlParakeet(config) => config.model_path.as_path(),
             Self::GgmlDiffusion(config) => config.model_path.as_path(),
             Self::CandleLlama(config) => config.model_path.as_path(),
             Self::CandleWhisper(config) => config.model_path.as_path(),

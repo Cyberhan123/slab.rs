@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function ProgressGallery() {
   return (
-    <div data-testid="progress-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="progress-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Progress value={0} data-testid="progress" />
       <Progress value={25} />
       <Progress value={50} />

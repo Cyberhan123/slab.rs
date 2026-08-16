@@ -8,9 +8,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput};
-
-use crate::sensitive_path::approval_for_values;
+use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 
 const DEFAULT_MAX_RESULTS: usize = 200;
 const HARD_MAX_RESULTS: usize = 1000;
@@ -102,14 +100,12 @@ impl ToolHandler for GrepTool {
         })
     }
 
-    fn approval_request(&self, arguments: &Value) -> Option<ToolApprovalRequest> {
-        approval_for_values(
-            "grep",
-            &[
-                ("path", arguments.get("path").and_then(Value::as_str)),
-                ("glob", arguments.get("glob").and_then(Value::as_str)),
-                ("pattern", arguments.get("pattern").and_then(Value::as_str)),
-            ],
+    fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
+        let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+        let pattern = arguments.get("pattern").and_then(Value::as_str).unwrap_or("");
+        Some(
+            slab_agent::OperationDescriptor::read_only(format!("{path}:{pattern}"))
+                .with_workspace(self.workspace_root.clone()),
         )
     }
 
@@ -297,18 +293,14 @@ mod tests {
     }
 
     #[test]
-    fn grep_tool_requires_approval_for_sensitive_path_glob_or_pattern() {
+    fn grep_tool_describes_read_only_operation() {
         let tool = GrepTool::new(Some(PathBuf::from(".")));
 
-        assert!(tool.approval_request(&json!({"path": ".env", "pattern": "KEY"})).is_some());
-        assert!(tool.approval_request(&json!({"path": ".", "pattern": "token"})).is_some());
-        assert!(
-            tool.approval_request(&json!({"path": ".", "pattern": "KEY", "glob": "*.pem"}))
-                .is_some()
-        );
-        assert!(
-            tool.approval_request(&json!({"path": "src", "pattern": "tokenization"})).is_none()
-        );
+        let desc = tool
+            .describe_operation(&json!({"path": "src", "pattern": "fn execute"}))
+            .expect("descriptor");
+        assert_eq!(desc.category, slab_agent::OperationCategory::ReadOnly);
+        assert_eq!(desc.subject, "src:fn execute");
     }
 
     #[tokio::test]

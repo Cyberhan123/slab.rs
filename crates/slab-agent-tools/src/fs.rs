@@ -4,9 +4,11 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, protocol::TurnItem,
+};
 
-use crate::{args::string_arg, sensitive_path::approval_for_path};
+use crate::args::string_arg;
 
 const MAX_LINES: usize = 1000;
 
@@ -50,8 +52,12 @@ impl ToolHandler for ReadFileTool {
         })
     }
 
-    fn approval_request(&self, arguments: &Value) -> Option<ToolApprovalRequest> {
-        approval_for_path("read_file", "path", arguments.get("path").and_then(Value::as_str))
+    fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
+        let path = arguments.get("path").and_then(Value::as_str)?;
+        Some(
+            slab_agent::OperationDescriptor::read_only(path)
+                .with_workspace(self.workspace_root.clone()),
+        )
     }
 
     async fn execute(
@@ -126,6 +132,29 @@ impl ToolHandler for WriteFileTool {
         })
     }
 
+    fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
+        let path = arguments.get("path").and_then(Value::as_str)?;
+        Some(
+            slab_agent::OperationDescriptor::file_edit(path)
+                .with_workspace(self.workspace_root.clone()),
+        )
+    }
+
+    fn category(&self) -> slab_agent::OperationCategory {
+        slab_agent::OperationCategory::FileEdit
+    }
+
+    fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+        TurnItem::FileChange {
+            id: render.call.id.clone(),
+            changes: vec![serde_json::json!({
+                "path": render.args.get("path").and_then(Value::as_str).unwrap_or(""),
+                "type": "edit",
+            })],
+            status: render.status.to_owned(),
+        }
+    }
+
     async fn execute(
         &self,
         _ctx: &ToolContext,
@@ -193,8 +222,12 @@ impl ToolHandler for ListDirTool {
         })
     }
 
-    fn approval_request(&self, arguments: &Value) -> Option<ToolApprovalRequest> {
-        approval_for_path("list_dir", "path", arguments.get("path").and_then(Value::as_str))
+    fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
+        let path = arguments.get("path").and_then(Value::as_str)?;
+        Some(
+            slab_agent::OperationDescriptor::read_only(path)
+                .with_workspace(self.workspace_root.clone()),
+        )
     }
 
     async fn execute(
@@ -290,14 +323,22 @@ mod tests {
     }
 
     #[test]
-    fn read_and_list_tools_require_approval_for_sensitive_paths() {
+    fn read_and_list_tools_describe_read_only_operations() {
         let read = ReadFileTool::new(Some(PathBuf::from(".")));
         let list = ListDirTool::new(Some(PathBuf::from(".")));
 
-        assert!(read.approval_request(&json!({"path": ".env"})).is_some());
-        assert!(read.approval_request(&json!({"path": ".slab/slab.db"})).is_some());
-        assert!(list.approval_request(&json!({"path": "~/.ssh"})).is_some());
-        assert!(read.approval_request(&json!({"path": "src/main.rs"})).is_none());
+        let read_desc =
+            read.describe_operation(&json!({"path": "src/main.rs"})).expect("descriptor");
+        assert_eq!(read_desc.category, slab_agent::OperationCategory::ReadOnly);
+        assert_eq!(read_desc.subject, "src/main.rs");
+
+        let list_desc = list.describe_operation(&json!({"path": "src"})).expect("descriptor");
+        assert_eq!(list_desc.category, slab_agent::OperationCategory::ReadOnly);
+        assert_eq!(list_desc.subject, "src");
+
+        // Sensitive-path protection now lives in the exec-policy engine, not
+        // the tool — `describe_operation` returns a descriptor regardless.
+        assert!(read.describe_operation(&json!({"path": ".env"})).is_some());
     }
 
     #[tokio::test]

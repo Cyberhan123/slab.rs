@@ -74,30 +74,22 @@ pub struct ResponseErrorEvent {
     /// The type of the event. Always `error`.
     #[serde(rename = "type")]
     pub r#type: ErrorType,
-    /// The error code.
-    #[serde(rename = "code", deserialize_with = "Option::deserialize")]
-    pub code: Option<String>,
-    /// The error message.
-    #[serde(rename = "message")]
-    pub message: String,
-    /// The error parameter.
-    #[serde(rename = "param", deserialize_with = "Option::deserialize")]
-    pub param: Option<String>,
     /// The sequence number of this event.
     #[serde(rename = "sequence_number")]
     pub sequence_number: i32,
+    /// The nested error payload (canonical OpenAI streaming shape).
+    #[serde(rename = "error")]
+    pub error: Box<models::Error>,
 }
 
 impl ResponseErrorEvent {
     /// Emitted when an error occurs.
     pub fn new(
         r#type: ErrorType,
-        code: Option<String>,
-        message: String,
-        param: Option<String>,
         sequence_number: i32,
+        error: models::Error,
     ) -> ResponseErrorEvent {
-        ResponseErrorEvent { r#type, code, message, param, sequence_number }
+        ResponseErrorEvent { r#type, sequence_number, error: Box::new(error) }
     }
 }
 

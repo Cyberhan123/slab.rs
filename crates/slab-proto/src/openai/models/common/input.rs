@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum InputContent {
-    #[serde(rename = "InputTextContent")]
+    #[serde(rename = "input_text")]
     InputTextContent(Box<models::InputTextContent>),
-    #[serde(rename = "InputImageContent")]
+    #[serde(rename = "input_image")]
     InputImageContent(Box<models::InputImageContent>),
-    #[serde(rename = "InputFileContent")]
+    #[serde(rename = "input_file")]
     InputFileContent(Box<models::InputFileContent>),
 }
 
@@ -20,9 +20,6 @@ impl Default for InputContent {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputTextContent {
-    /// The type of the input item. Always `input_text`.
-    #[serde(rename = "type")]
-    pub r#type: InputTextContentType,
     /// The text input to the model.
     #[serde(rename = "text")]
     pub text: String,
@@ -30,25 +27,13 @@ pub struct InputTextContent {
 
 impl InputTextContent {
     /// A text input to the model.
-    pub fn new(r#type: InputTextContentType, text: String) -> InputTextContent {
-        InputTextContent { r#type, text }
+    pub fn new(text: String) -> InputTextContent {
+        InputTextContent { text }
     }
-}
-/// The type of the input item. Always `input_text`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum InputTextContentType {
-    #[serde(rename = "input_text")]
-    #[default]
-    InputText,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputTextContentParam {
-    /// The type of the input item. Always `input_text`.
-    #[serde(rename = "type")]
-    pub r#type: InputTextContentParamType,
     /// The text input to the model.
     #[serde(rename = "text")]
     pub text: String,
@@ -56,25 +41,13 @@ pub struct InputTextContentParam {
 
 impl InputTextContentParam {
     /// A text input to the model.
-    pub fn new(r#type: InputTextContentParamType, text: String) -> InputTextContentParam {
-        InputTextContentParam { r#type, text }
+    pub fn new(text: String) -> InputTextContentParam {
+        InputTextContentParam { text }
     }
-}
-/// The type of the input item. Always `input_text`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum InputTextContentParamType {
-    #[serde(rename = "input_text")]
-    #[default]
-    InputText,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputFileContent {
-    /// The type of the input item. Always `input_file`.
-    #[serde(rename = "type")]
-    pub r#type: InputFileContentType,
     /// The ID of the file to be sent to the model.
     #[serde(
         rename = "file_id",
@@ -99,9 +72,8 @@ pub struct InputFileContent {
 
 impl InputFileContent {
     /// A file input to the model.
-    pub fn new(r#type: InputFileContentType) -> InputFileContent {
+    pub fn new() -> InputFileContent {
         InputFileContent {
-            r#type,
             file_id: None,
             filename: None,
             file_data: None,
@@ -110,21 +82,9 @@ impl InputFileContent {
         }
     }
 }
-/// The type of the input item. Always `input_file`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum InputFileContentType {
-    #[serde(rename = "input_file")]
-    #[default]
-    InputFile,
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputFileContentParam {
-    /// The type of the input item. Always `input_file`.
-    #[serde(rename = "type")]
-    pub r#type: InputFileContentParamType,
     /// The ID of the file to be sent to the model.
     #[serde(
         rename = "file_id",
@@ -164,9 +124,8 @@ pub struct InputFileContentParam {
 
 impl InputFileContentParam {
     /// A file input to the model.
-    pub fn new(r#type: InputFileContentParamType) -> InputFileContentParam {
+    pub fn new() -> InputFileContentParam {
         InputFileContentParam {
-            r#type,
             file_id: None,
             filename: None,
             file_data: None,
@@ -174,15 +133,6 @@ impl InputFileContentParam {
             detail: None,
         }
     }
-}
-/// The type of the input item. Always `input_file`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum InputFileContentParamType {
-    #[serde(rename = "input_file")]
-    #[default]
-    InputFile,
 }
 
 #[derive(
@@ -208,12 +158,12 @@ impl std::fmt::Display for InputFidelity {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum InputItem {
-    #[serde(rename = "EasyInputMessage")]
+    #[serde(rename = "message")]
     EasyInputMessage(Box<models::EasyInputMessage>),
     /// An item representing part of the context for the response to be generated by the model. Can contain text, images, and audio inputs, as well as previous assistant responses and tool call outputs.
     #[serde(rename = "one_of_1")]
     Item(Box<serde_json::Value>),
-    #[serde(rename = "ItemReferenceParam")]
+    #[serde(rename = "item_reference")]
     ItemReferenceParam(Box<models::ItemReferenceParam>),
 }
 
@@ -407,30 +357,13 @@ pub struct ItemReferenceParam {
     /// The ID of the item to reference.
     #[serde(rename = "id")]
     pub id: String,
-    /// The type of item to reference. Always `item_reference`.
-    #[serde(
-        rename = "type",
-        default,
-        with = "::serde_with::rust::double_option",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub r#type: Option<Option<ItemReferenceParamType>>,
 }
 
 impl ItemReferenceParam {
     /// An internal identifier for an item to reference.
     pub fn new(id: String) -> ItemReferenceParam {
-        ItemReferenceParam { id, r#type: None }
+        ItemReferenceParam { id }
     }
-}
-/// The type of item to reference. Always `item_reference`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum ItemReferenceParamType {
-    #[serde(rename = "item_reference")]
-    #[default]
-    ItemReference,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]

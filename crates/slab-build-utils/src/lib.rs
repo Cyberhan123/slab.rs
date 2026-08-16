@@ -89,6 +89,9 @@ pub fn configure_bindgen_builder<I, P>(
     header: &str,
     include_dirs: I,
     dynamic_library_name: &str,
+    allowlist: Option<&[&str]>,
+    blocklist: Option<&[&str]>,
+    no_partialeq_types: Option<&[&str]>,
 ) -> BindgenBuilder
 where
     I: IntoIterator<Item = P>,
@@ -101,6 +104,26 @@ where
 
     for include_dir in include_dirs {
         builder = builder.clang_arg(clang_include_arg(include_dir.as_ref()));
+    }
+
+    // Optional symbol filtering. Applied to functions, types and vars so a
+    // single pattern (e.g. "mtmd_.*") covers all three kinds. `None` (the
+    // default for the existing callers) emits everything reachable — unchanged
+    // behaviour.
+    if let Some(patterns) = allowlist {
+        for pat in patterns {
+            builder = builder.allowlist_function(pat).allowlist_type(pat).allowlist_var(pat);
+        }
+    }
+    if let Some(patterns) = blocklist {
+        for pat in patterns {
+            builder = builder.blocklist_function(pat).blocklist_type(pat).blocklist_var(pat);
+        }
+    }
+    if let Some(types) = no_partialeq_types {
+        for ty in types {
+            builder = builder.no_partialeq(*ty);
+        }
     }
 
     builder

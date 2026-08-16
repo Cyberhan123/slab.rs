@@ -13,7 +13,11 @@ pub struct RuntimeConfig {
     pub shutdown_on_stdin_close: bool,
     pub llama_lib_dir: Option<PathBuf>,
     pub whisper_lib_dir: Option<PathBuf>,
+    pub parakeet_lib_dir: Option<PathBuf>,
     pub diffusion_lib_dir: Option<PathBuf>,
+    /// Root directory for the on-disk ggml.llama kv-cache. `None`
+    /// disables disk persistence (in-process snapshot cache still works).
+    pub kv_cache_dir: Option<PathBuf>,
     pub enable_candle_llama: bool,
     pub enable_candle_whisper: bool,
     pub enable_candle_diffusion: bool,
@@ -24,6 +28,7 @@ pub struct RuntimeConfig {
 pub struct CliEnabledBackends {
     pub llama: bool,
     pub whisper: bool,
+    pub parakeet: bool,
     pub diffusion: bool,
     pub candle_llama: bool,
     pub candle_whisper: bool,
@@ -35,6 +40,7 @@ impl CliEnabledBackends {
         Self {
             llama: true,
             whisper: true,
+            parakeet: true,
             diffusion: true,
             candle_llama: false,
             candle_whisper: false,
@@ -49,6 +55,7 @@ impl std::fmt::Display for CliEnabledBackends {
         for name in [
             self.llama.then_some("llama"),
             self.whisper.then_some("whisper"),
+            self.parakeet.then_some("parakeet"),
             self.diffusion.then_some("diffusion"),
             self.candle_llama.then_some("candle.llama"),
             self.candle_whisper.then_some("candle.whisper"),

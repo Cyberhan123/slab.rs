@@ -19,10 +19,10 @@ pub mod glob;
 pub mod grep;
 pub mod mcp;
 pub mod plan;
-mod sensitive_path;
 pub mod shell;
 pub mod subagent;
 pub mod task_complete;
+pub mod tool_search;
 pub mod verify;
 pub mod web_search;
 
@@ -33,74 +33,65 @@ pub use git::{GitCommitTool, GitDiffTool, GitStatusTool};
 pub use glob::FileGlobTool;
 pub use grep::GrepTool;
 pub use mcp::{McpCallTool, McpListToolsTool, McpProxyTool};
-pub use plan::PlanUpdateTool;
+pub use plan::{
+    PRESENT_PLAN_METADATA_KEY, PRESENT_PLAN_TOOL_NAME, PlanTool, PresentPlanTool, UpdatePlanTool,
+};
 pub use shell::{ShellPolicy, ShellTool};
 pub use slab_shell_command::{
-    ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
+    ShellLauncher, ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
 };
 pub use subagent::DelegateSubagentTool;
 pub use task_complete::{TASK_COMPLETE_METADATA_KEY, TASK_COMPLETE_TOOL_NAME, TaskCompleteTool};
+pub use tool_search::{TOOL_SEARCH_TOOL_NAME, ToolSearchTool};
 pub use verify::{CommandWorkspaceVerifier, VerifyTarget, VerifyTool, WorkspaceVerifier};
 pub use web_search::WebSearchTool;
 
 /// Register the full production tool suite.
+///
+/// Permission decisions (allow / require-approval / deny) are owned by the
+/// `slab-exec-policy` engine wired into `AgentControl` — the tools only
+/// describe their operation (`describe_operation`) and execute when authorized.
+#[allow(clippy::too_many_arguments)]
 pub fn register_all_tools(
     router: &mut ToolRouter,
-    shell_policy: ShellPolicy,
     sandbox_driver: Option<Arc<dyn SandboxDriver>>,
     workspace_root: Option<PathBuf>,
     mcp_client: Option<Arc<McpClient>>,
     git_tools: bool,
     web_search_config: AgentWebSearchConfig,
+    shell_launcher: ShellLauncher,
+    shell_bash_path: Option<PathBuf>,
 ) {
-    register_all_tools_with_shell_rules(
-        router,
-        shell_policy,
-        sandbox_driver,
-        workspace_root,
-        mcp_client,
-        git_tools,
-        web_search_config,
-        ShellRuleSet::default(),
-    );
-}
-
-/// Register the full production tool suite with command-specific shell rules.
-#[allow(clippy::too_many_arguments)]
-pub fn register_all_tools_with_shell_rules(
-    router: &mut ToolRouter,
-    shell_policy: ShellPolicy,
-    sandbox_driver: Option<Arc<dyn SandboxDriver>>,
-    workspace_root: Option<PathBuf>,
-    mcp_client: Option<Arc<McpClient>>,
-    git_tools: bool,
-    web_search_config: AgentWebSearchConfig,
-    shell_rules: ShellRuleSet,
-) {
-    router.register(Box::new(ShellTool::new_with_rules(
-        shell_policy,
+    router.register(Box::new(ShellTool::new(
         workspace_root.clone(),
-        sandbox_driver,
-        shell_rules,
+        sandbox_driver.clone(),
+        shell_launcher,
+        shell_bash_path,
     )));
     router.register(Box::new(ReadFileTool::new(workspace_root.clone())));
     router.register(Box::new(WriteFileTool::new(workspace_root.clone())));
     router.register(Box::new(ListDirTool::new(workspace_root.clone())));
     router.register(Box::new(FileGlobTool::new(workspace_root.clone())));
     router.register(Box::new(GrepTool::new(workspace_root.clone())));
-    router.register(Box::new(PlanUpdateTool::new()));
+    router.register(Box::new(PlanTool::new()));
+    router.register(Box::new(UpdatePlanTool::new()));
+    router.register(Box::new(PresentPlanTool::new()));
     router.register(Box::new(TaskCompleteTool::new()));
-    router.register(Box::new(VerifyTool::new()));
+    router.register(Box::new(VerifyTool::new(sandbox_driver.clone())));
     router.register(Box::new(WebSearchTool::new(web_search_config)));
+    // `tool_search` lets the model discover Deferred tools (plugins/MCP) so the
+    // base tool list stays small. Its execution is intercepted by the dispatch
+    // layer; the registration here only contributes the spec.
+    router.register(Box::new(ToolSearchTool::new()));
     if let Some(watcher) = FsWatchTool::new() {
         router.register(Box::new(watcher));
     }
     if let Some(root) = workspace_root {
         router.register(Box::new(ApplyPatchTool::new(root.clone())));
         if git_tools {
-            router.register(Box::new(GitStatusTool::new(root.clone())));
-            router.register(Box::new(GitDiffTool::new(root.clone())));
-            router.register(Box::new(GitCommitTool::new(root)));
+            router.register(Box::new(GitStatusTool::new(root.clone(), sandbox_driver.clone())));
+            router.register(Box::new(GitDiffTool::new(root.clone(), sandbox_driver.clone())));
+            router.register(Box::new(GitCommitTool::new(root, sandbox_driver.clone())));
         }
     }
     if let Some(client) = mcp_client {
@@ -126,16 +117,19 @@ mod tests {
         let mut router = ToolRouter::new();
         register_all_tools(
             &mut router,
-            ShellPolicy::Block,
             None,
             None,
             None,
             true,
             AgentWebSearchConfig::default(),
+            ShellLauncher::default(),
+            None,
         );
         assert!(router.get("shell").is_some());
         assert!(router.get("file_glob").is_some());
-        assert!(router.get("plan_update").is_some());
+        assert!(router.get("plan").is_some());
+        assert!(router.get("update_plan").is_some());
+        assert!(router.get("present_plan").is_some());
         assert!(router.get("task.complete").is_some());
         assert!(router.get("verify").is_some());
         assert!(router.get("web_search").is_some());
@@ -145,27 +139,29 @@ mod tests {
         let mut router = ToolRouter::new();
         register_all_tools(
             &mut router,
-            ShellPolicy::Block,
             None,
             Some(PathBuf::from(".")),
             None,
             false,
             AgentWebSearchConfig::default(),
+            ShellLauncher::default(),
+            None,
         );
         assert!(router.get("file_glob").is_some());
-        assert!(router.get("plan_update").is_some());
+        assert!(router.get("plan").is_some());
         assert!(router.get("apply_patch").is_some());
         assert!(router.get("git_status").is_none());
 
         let mut router = ToolRouter::new();
         register_all_tools(
             &mut router,
-            ShellPolicy::Block,
             None,
             Some(PathBuf::from(".")),
             None,
             true,
             AgentWebSearchConfig::default(),
+            ShellLauncher::default(),
+            None,
         );
         assert!(router.get("git_status").is_some());
         assert!(router.get("git_diff").is_some());

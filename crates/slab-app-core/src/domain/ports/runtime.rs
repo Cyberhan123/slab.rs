@@ -43,6 +43,22 @@ pub struct RuntimeTextGenerationRequest {
     pub gbnf: Option<String>,
     pub stop_sequences: Vec<String>,
     pub agent_trace: Option<AgentTraceContext>,
+    /// Encoded image bytes for multimodal (mtmd) inference. The prompt is
+    /// expected to already carry one media marker sentinel per entry; the
+    /// runtime substitutes the projector's real marker before tokenizing.
+    /// Empty for text-only turns (the common path — leaves behaviour unchanged).
+    pub image_parts: Vec<RuntimeChatImagePart>,
+}
+
+/// An image input accompanying a multimodal chat turn.
+///
+/// `data` holds the raw encoded image bytes (PNG / JPEG / …); the runtime's mtmd
+/// helper decodes them via the loaded vision projector. `mime_type` is optional
+/// metadata.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeChatImagePart {
+    pub data: Vec<u8>,
+    pub mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -199,6 +215,29 @@ pub struct RuntimeBackendStatus {
     pub status: String,
     pub context_length: Option<u32>,
     pub training_context_length: Option<u32>,
+    pub chat_template: Option<String>,
+}
+
+/// Quantize a GGUF model on disk. `ftype` is the raw `llama_ftype` int
+/// (e.g. 15 = Q4_K_M, 36 = TQ1_0); see `slab_llama::LlamaFtype`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeQuantizeRequest {
+    pub input_path: String,
+    pub output_path: String,
+    pub ftype: i32,
+    pub nthread: Option<i32>,
+    pub allow_requantize: Option<bool>,
+    pub quantize_output_tensor: Option<bool>,
+    pub only_copy: Option<bool>,
+    pub pure: Option<bool>,
+    pub keep_split: Option<bool>,
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeQuantizeResult {
+    pub layers_processed: u32,
+    pub output_path: String,
 }
 
 /// Domain port for model runtime inference.
@@ -243,4 +282,9 @@ pub trait RuntimeInferenceGateway: Send + Sync + std::fmt::Debug {
         &self,
         backend_id: RuntimeBackendId,
     ) -> Result<RuntimeBackendStatus, AppCoreError>;
+
+    async fn quantize_model(
+        &self,
+        request: RuntimeQuantizeRequest,
+    ) -> Result<RuntimeQuantizeResult, AppCoreError>;
 }

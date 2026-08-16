@@ -1,0 +1,108 @@
+import type { components } from '@slab/api/v1'
+
+export type AssistantApiError = components['schemas']['OpenAiError']
+export type AssistantApiErrorResponse = components['schemas']['OpenAiErrorResponse']
+export type AgentStatus = components['schemas']['AgentStatusValue']
+export type AgentThreadResponse = components['schemas']['AgentThreadResponse']
+export type AgentThreadMessageResponse = components['schemas']['AgentThreadMessageResponse']
+export type AgentHistoryResponse = components['schemas']['AgentHistoryResponse']
+export type OpenAICreateRequest = components['schemas']['OpenAICreateRequest']
+export type AssistantAgentRequestMessage = components['schemas']['MessageInput']
+
+export type AssistantRequestErrorType = AssistantApiError['type']
+export type AssistantErrorCode = AssistantApiError['code'] | number
+
+export type AssistantThoughtStatus = 'abort' | 'error' | 'loading' | 'success'
+
+export type AssistantThought = {
+  id: string
+  title: string
+  detail?: string
+  status: AssistantThoughtStatus
+  summary?: string
+  toolName?: string
+  callId?: string
+  pendingApproval?: {
+    callId: string
+    toolName: string
+    command: string
+  }
+}
+
+export type AssistantTerminalNotice = {
+  type: 'cancelled' | 'error'
+  message: string
+}
+
+export type AssistantArtifactRef = {
+  kind: 'diff' | 'file' | 'image' | 'other'
+  path: string
+}
+
+export type AssistantMessageRole = 'assistant' | 'system' | 'user' | string
+export type AssistantMessageStatus = 'abort' | 'error' | 'loading' | 'success' | 'updating'
+export type AssistantSseField = 'data' | 'event' | 'id' | 'retry'
+export type AssistantSseResponse = unknown
+
+export type AssistantUiMessage = {
+  content?: unknown
+  role: AssistantMessageRole
+  artifactRefs?: AssistantArtifactRef[]
+  errorCode?: AssistantErrorCode
+  errorParam?: AssistantApiError['param']
+  errorStatus?: number
+  errorType?: AssistantRequestErrorType
+  reasoningContent?: string
+  terminalNotice?: AssistantTerminalNotice
+  thoughts?: AssistantThought[]
+}
+
+export type AssistantMessageRecord = {
+  id: string | number
+  message: AssistantUiMessage
+  status: AssistantMessageStatus
+}
+
+export type AssistantRequestParams = {
+  continue_generation?: boolean
+  max_tokens?: number | null
+  temperature?: number | null
+  thinking?: {
+    type: 'enabled' | 'disabled'
+  }
+  top_p?: number | null
+  top_k?: number | null
+  min_p?: number | null
+  presence_penalty?: number | null
+  repetition_penalty?: number | null
+  userAction?: string
+}
+
+export type AssistantRuntimePresets = {
+  max_tokens?: number | null
+  temperature?: number | null
+  top_p?: number | null
+  top_k?: number | null
+  min_p?: number | null
+  presence_penalty?: number | null
+  repetition_penalty?: number | null
+}
+
+export type AssistantRequestErrorInfo = {
+  error: AssistantApiError
+  message: string
+  name: string
+  status: number
+  statusText: string
+  success: false
+}
+
+export const DEFAULT_CONVERSATION_KEY = '__pending_session__'
+
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+export const isEphemeralConversationKey = (value?: string): boolean => {
+  const key = value?.trim()
+  return !key || key === DEFAULT_CONVERSATION_KEY
+}

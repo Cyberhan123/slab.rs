@@ -1,0 +1,36 @@
+{
+    "name": "build-react-web-application",
+    "version": "0.1.0",
+    "description": "Skills for building React Router, Vite, shadcn, Vitest, and generated api.useXXX front-end applications.",
+    "author": {
+        "name": "Cyberhan123"
+    },
+    "license": "MIT",
+    "keywords": [
+        "react",
+        "react-router",
+        "vite",
+        "shadcn",
+        "vitest",
+        "tanstack-query",
+        "frontend"
+    ],
+    "skills": "./skills/",
+    "interface": {
+        "displayName": "Build React Web Application",
+        "shortDescription": "React Router + Vite + shadcn front-end workflow skills.",
+        "longDescription": "A local Codex plugin bundling front-end code style, project organization, TanStack Query API-hook guidance, shadcn composition, Vite configuration, and Vitest testing guidance for React web applications.",
+        "developerName": "Cyberhan123",
+        "category": "Development",
+        "capabilities": [
+            "Write",
+            "Review"
+        ],
+        "defaultPrompt": [
+            "Build a React Router + Vite feature with shadcn UI.",
+            "Review this front-end code for repo conventions.",
+            "Add Vitest coverage for this React feature."
+        ],
+        "brandColor": "#3B82F6"
+    }
+}

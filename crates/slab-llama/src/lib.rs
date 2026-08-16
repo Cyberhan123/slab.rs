@@ -37,6 +37,7 @@ use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 
+mod chat_template;
 mod context_params;
 mod error;
 mod llama_adapter;
@@ -46,9 +47,12 @@ mod llama_model;
 mod llama_sampler;
 mod logging;
 mod model_params;
+mod perf;
+pub mod quantize;
 pub mod runtime;
 mod token;
 
+pub use chat_template::LlamaChatMessage;
 pub use context_params::LlamaContextParams;
 pub use error::LlamaError;
 pub use llama_adapter::LlamaLoraAdapter;
@@ -58,10 +62,14 @@ pub use llama_model::LlamaModel;
 pub use llama_sampler::{LlamaSampler, SamplerChainBuilder};
 pub use logging::GgmlLogLevel;
 pub use model_params::LlamaModelParams;
+pub use perf::LlamaPerfContextData;
+pub use quantize::{
+    GgmlType, LlamaFtype, LlamaQuantizeParams, attn_rot_disabled, set_attn_rot_disabled,
+};
 pub use runtime::{
     LlamaInferenceOutput, LlamaInferenceParams, LlamaLoadConfig, LlamaLogitBias, LlamaRuntime,
-    LlamaRuntimeError, LlamaSamplingOptions, LlamaSessionSnapshot, LlamaStopInfo, SessionId,
-    StreamChunk, StreamHandle,
+    LlamaRuntimeError, LlamaSamplingOptions, LlamaSessionSnapshot, LlamaStopInfo, RunContext,
+    RunWithContextFn, SessionId, StreamChunk, StreamHandle,
 };
 pub use token::{LlamaPos, LlamaSeqId, LlamaToken};
 

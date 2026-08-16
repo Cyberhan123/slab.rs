@@ -1,41 +1,30 @@
 import * as React from "react"
-import { cva, type VariantProps } from "class-variance-authority"
 
-import { cn } from "./lib/utils"
-
-const inputVariants = cva(
-  "focus-ring file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground h-9 w-full min-w-0 rounded-md border px-3 py-1 text-base transition-[color,box-shadow,background-color,border-color] duration-[var(--dur-180)] ease-out-expo outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
-  {
-    variants: {
-      variant: {
-        default:
-          "border-input bg-transparent shadow-xs dark:bg-input/30",
-        soft:
-          "rounded-2xl border-border/70 bg-[var(--surface-soft)] shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]",
-        shell:
-          "rounded-full border-border/60 bg-[var(--surface-input)] shadow-elevation-2",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-    },
-  }
-)
+import { cn } from "@/lib/utils"
 
 function Input({
   className,
   type,
-  variant = "default",
+  variant,
   ...props
-}: React.ComponentProps<"input"> & VariantProps<typeof inputVariants>) {
+}: React.ComponentProps<"input"> & {
+  variant?: "default" | "panel" | "soft" | "surface"
+}) {
   return (
     <input
       type={type}
       data-slot="input"
       data-variant={variant}
       className={cn(
-        inputVariants({ variant }),
-        "aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
+        "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30",
+        variant === "panel" &&
+          "border-border/60 bg-card",
+        variant === "soft" &&
+          "border-border/60 bg-secondary shadow-none",
+        variant === "surface" &&
+          "border-border/60 bg-card",
+        "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        "aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40",
         className
       )}
       {...props}
@@ -43,4 +32,4 @@ function Input({
   )
 }
 
-export { Input, inputVariants }
+export { Input }

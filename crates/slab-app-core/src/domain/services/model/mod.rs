@@ -3,13 +3,16 @@ mod config_document;
 mod download;
 mod download_progress;
 mod download_status;
+mod load_progress;
 mod pack;
+mod quantize;
 mod runtime;
 
-pub(crate) use catalog::list_chat_models_from_state;
+pub(crate) use catalog::{context_window_for, list_chat_models_from_state};
 pub(crate) use download::MODEL_DOWNLOAD_TASK_TYPE;
+pub use load_progress::ModelLoadProgress;
 pub(crate) use runtime::{
-    resolve_local_chat_prompt_profile, resolve_worker_model_backend_or_default,
+    resolve_local_chat_prompt_profile, resolve_worker_model_backend_or_default, runtime_presets_for,
 };
 
 use serde_json::{Map, Value};
@@ -21,6 +24,7 @@ use crate::domain::models::{
     ModelConfigSectionView, ModelConfigSourceSummary, ModelConfigValueType, UnifiedModel,
 };
 use crate::error::AppCoreError;
+use crate::infra::db::ModelConfigStateStore;
 use crate::infra::model_packs;
 
 use config_document::{
@@ -49,6 +53,7 @@ impl ModelService {
         runtime::resolve_local_backend_from_model(&model)?;
 
         let context = self.load_model_pack_context(id).await?;
+        let config_state = self.model_state.store().get_model_config_state(id).await?;
         let selection = self.resolve_model_pack_selection(id, &context.resolved).await?;
         let command =
             pack::build_model_command_from_pack_context(&context, &selection.selected_preset)?;
@@ -66,6 +71,17 @@ impl ModelService {
                     &mut bridge,
                     context.persisted.as_ref(),
                     selection.selected_preset.variant.effective_sources.first(),
+                );
+                let load_overrides = pack::parse_overrides_map(
+                    config_state.as_ref().and_then(|state| state.load_overrides.as_deref()),
+                );
+                let inference_overrides = pack::parse_overrides_map(
+                    config_state.as_ref().and_then(|state| state.inference_overrides.as_deref()),
+                );
+                pack::apply_user_load_overrides_to_bridge(&mut bridge, load_overrides.as_ref());
+                pack::apply_user_inference_overrides_to_bridge(
+                    &mut bridge,
+                    inference_overrides.as_ref(),
                 );
                 let source_summary = build_model_config_source_summary(&bridge.model_spec.source);
                 let resolved_load_spec = self
@@ -173,15 +189,16 @@ impl ModelService {
         object.insert("num_workers".into(), Value::from(workers));
 
         if backend_id == RuntimeBackendId::GgmlLlama {
-            if let Some(context_length) = bridge.load_defaults.context_length {
-                object.insert("context_length".into(), Value::from(context_length));
+            let context_length = if let Some(context_length) = bridge.load_defaults.context_length {
+                slab_types::ContextLengthSpec::Fixed(context_length)
             } else {
-                let (context_length, source) =
-                    runtime::resolve_llama_context_length(&self.model_state, backend_id).await?;
-                if context_length > 0 || source == "settings" {
-                    object.insert("context_length".into(), Value::from(context_length));
-                }
-            }
+                runtime::resolve_llama_context_length(&self.model_state, backend_id).await?.0
+            };
+            object.insert(
+                "context_length".into(),
+                serde_json::to_value(context_length)
+                    .map_err(|error| AppCoreError::Internal(error.to_string()))?,
+            );
             if let Some(chat_template) = bridge.load_defaults.chat_template.as_ref() {
                 object.insert(
                     "chat_template".into(),
@@ -280,9 +297,7 @@ impl ModelService {
                     Some("Effective llama context window length in tokens.".into()),
                     ModelConfigValueType::Integer,
                     json_property_or_null(resolved_load_spec, "context_length"),
-                    if resolved.manifest.context_window.is_some() {
-                        ModelConfigOrigin::PackManifest
-                    } else if bridge.load_defaults.context_length.is_some() {
+                    if bridge.load_defaults.context_length.is_some() {
                         ModelConfigOrigin::SelectedBackendConfig
                     } else {
                         ModelConfigOrigin::PmidFallback
@@ -366,8 +381,22 @@ impl ModelService {
             _ => {}
         }
 
-        let inference_fields =
+        // Whitelisted load fields are user-editable (overrides persisted via
+        // update_model_config_selection). chat_template / gbnf stay locked
+        // (asset-ref vs. raw-source gap, deferred to a follow-up).
+        for field in &mut load_fields {
+            if is_user_editable_load_path(&field.path) {
+                field.editable = true;
+                field.locked = false;
+            }
+        }
+
+        let mut inference_fields =
             build_model_config_inference_fields(resolved, resolved_inference_spec);
+        for field in &mut inference_fields {
+            field.editable = true;
+            field.locked = false;
+        }
 
         let advanced_fields = vec![
             build_model_config_field(
@@ -521,6 +550,24 @@ impl ModelService {
             ),
         ])
     }
+}
+
+fn is_user_editable_load_path(path: &str) -> bool {
+    matches!(
+        path,
+        "load.num_workers"
+            | "load.context_length"
+            | "load.diffusion_model_path"
+            | "load.vae_path"
+            | "load.taesd_path"
+            | "load.clip_l_path"
+            | "load.clip_g_path"
+            | "load.t5xxl_path"
+            | "load.flash_attn"
+            | "load.offload_params_to_cpu"
+            | "load.vae_device"
+            | "load.clip_device"
+    )
 }
 
 #[cfg(test)]

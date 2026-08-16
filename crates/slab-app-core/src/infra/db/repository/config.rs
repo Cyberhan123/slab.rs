@@ -1,12 +1,7 @@
 use super::AnyStore;
 use std::future::Future;
 
-#[allow(dead_code)]
 pub trait ConfigStore: Send + Sync + 'static {
-    fn get_config_entry(
-        &self,
-        key: &str,
-    ) -> impl Future<Output = Result<Option<(String, String)>, sqlx::Error>> + Send;
     fn get_config_value(
         &self,
         key: &str,
@@ -17,21 +12,9 @@ pub trait ConfigStore: Send + Sync + 'static {
         name: Option<&str>,
         value: &str,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
-    fn list_config_values(
-        &self,
-    ) -> impl Future<Output = Result<Vec<(String, String, String)>, sqlx::Error>> + Send;
 }
 
 impl ConfigStore for AnyStore {
-    async fn get_config_entry(&self, key: &str) -> Result<Option<(String, String)>, sqlx::Error> {
-        let row: Option<(String, String)> =
-            sqlx::query_as("SELECT name, value FROM config_store WHERE key = ?1")
-                .bind(key)
-                .fetch_optional(&self.pool)
-                .await?;
-        Ok(row)
-    }
-
     async fn get_config_value(&self, key: &str) -> Result<Option<String>, sqlx::Error> {
         let row: Option<(String,)> =
             sqlx::query_as("SELECT value FROM config_store WHERE key = ?1")
@@ -63,13 +46,5 @@ impl ConfigStore for AnyStore {
         .execute(&self.pool)
         .await?;
         Ok(())
-    }
-
-    async fn list_config_values(&self) -> Result<Vec<(String, String, String)>, sqlx::Error> {
-        let rows: Vec<(String, String, String)> =
-            sqlx::query_as("SELECT key, name, value FROM config_store ORDER BY key")
-                .fetch_all(&self.pool)
-                .await?;
-        Ok(rows)
     }
 }

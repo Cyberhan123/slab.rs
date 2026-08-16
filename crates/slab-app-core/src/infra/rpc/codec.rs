@@ -19,6 +19,7 @@ pub enum RpcCodecError {
 pub enum ModelLoadRpcRequest {
     GgmlLlama(pb::GgmlLlamaLoadRequest),
     GgmlWhisper(pb::GgmlWhisperLoadRequest),
+    GgmlParakeet(pb::GgmlParakeetLoadRequest),
     GgmlDiffusion(pb::GgmlDiffusionLoadRequest),
     CandleLlama(pb::CandleLlamaLoadRequest),
     CandleWhisper(pb::CandleWhisperLoadRequest),
@@ -31,6 +32,7 @@ impl ModelLoadRpcRequest {
         match self {
             Self::GgmlLlama(_) => RuntimeBackendId::GgmlLlama,
             Self::GgmlWhisper(_) => RuntimeBackendId::GgmlWhisper,
+            Self::GgmlParakeet(_) => RuntimeBackendId::GgmlParakeet,
             Self::GgmlDiffusion(_) => RuntimeBackendId::GgmlDiffusion,
             Self::CandleLlama(_) => RuntimeBackendId::CandleLlama,
             Self::CandleWhisper(_) => RuntimeBackendId::CandleWhisper,
@@ -43,6 +45,7 @@ impl ModelLoadRpcRequest {
         match self {
             Self::GgmlLlama(request) => request.model_path.as_deref(),
             Self::GgmlWhisper(request) => request.model_path.as_deref(),
+            Self::GgmlParakeet(request) => request.model_path.as_deref(),
             Self::GgmlDiffusion(request) => request.model_path.as_deref(),
             Self::CandleLlama(request) => request.model_path.as_deref(),
             Self::CandleWhisper(request) => request.model_path.as_deref(),
@@ -58,16 +61,26 @@ pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> ModelLoadRpcR
             ModelLoadRpcRequest::GgmlLlama(pb::GgmlLlamaLoadRequest {
                 model_path: Some(path_to_string(&config.model_path)),
                 num_workers: Some(usize_to_u32(config.num_workers)),
-                context_length: config.context_length.filter(|value| *value != 0),
+                context_length: config.context_length.and_then(|spec| spec.as_fixed_u32()),
+                free_vram_bytes: config.free_vram_bytes,
                 chat_template: non_empty_string(config.chat_template.as_deref()),
                 gbnf: non_empty_string(config.gbnf.as_deref()),
                 flash_attn: Some(config.flash_attn),
+                mmproj_path: config.mmproj_path.as_ref().map(|path| path_to_string(path)),
+                vram_buffer_bytes: config.vram_buffer_bytes,
+                auto_context_quantum: config.auto_context_quantum,
+                auto_context_fallback: config.auto_context_fallback,
             })
         }
         RuntimeBackendLoadSpec::GgmlWhisper(config) => {
             ModelLoadRpcRequest::GgmlWhisper(pb::GgmlWhisperLoadRequest {
                 model_path: Some(path_to_string(&config.model_path)),
                 flash_attn: Some(config.flash_attn),
+            })
+        }
+        RuntimeBackendLoadSpec::GgmlParakeet(config) => {
+            ModelLoadRpcRequest::GgmlParakeet(pb::GgmlParakeetLoadRequest {
+                model_path: Some(path_to_string(&config.model_path)),
             })
         }
         RuntimeBackendLoadSpec::GgmlDiffusion(config) => {

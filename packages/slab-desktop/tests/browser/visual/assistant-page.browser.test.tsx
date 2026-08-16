@@ -1,9 +1,9 @@
 import { page } from 'vitest/browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import AssistantPage from '@/pages/assistant';
-import type { AssistantMessageRecord } from '@/pages/assistant/assistant-context';
-import type { AssistantConversationItem } from '@/pages/assistant/hooks/use-assistant-sessions';
+import AssistantPage from '@slab/ui/pages/assistant';
+import type { AssistantMessageRecord } from '@slab/ui/pages/assistant/lib/assistant-types';
+import type { AssistantConversationItem } from '@slab/ui/pages/assistant/hooks/use-assistant-sessions';
 import {
   expectDesktopSceneAccessible,
   expectDesktopSceneKeyboardReachable,
@@ -26,35 +26,31 @@ const { mockUseMarkdownTheme } = vi.hoisted(() => ({
   mockUseMarkdownTheme: vi.fn<() => unknown>(),
 }));
 
-vi.mock('@/pages/assistant/hooks/use-assistant-agent', () => ({
+vi.mock('@slab/ui/pages/assistant/hooks/use-assistant-agent', () => ({
   useAssistantAgent: mockUseAssistantAgent,
 }));
 
-vi.mock('@/pages/assistant/hooks/use-assistant-sessions', () => ({
+vi.mock('@slab/ui/pages/assistant/hooks/use-assistant-sessions', () => ({
   useAssistantSessions: mockUseAssistantSessions,
 }));
 
-vi.mock('@/pages/assistant/assistant-locale', () => ({
+vi.mock('@slab/ui/pages/assistant/assistant-locale', () => ({
   useAssistantLocale: mockUseAssistantLocale,
 }));
 
-vi.mock('@/pages/assistant/hooks/use-markdown-theme', () => ({
+vi.mock('@slab/ui/pages/assistant/hooks/use-markdown-theme', () => ({
   useMarkdownTheme: mockUseMarkdownTheme,
 }));
 
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderControl: vi.fn<() => void>(),
-}));
-
-vi.mock('@/hooks/use-persisted-header-select', () => ({
-  usePersistedHeaderSelect: vi.fn<() => unknown>(() => ({
-    value: 'model-1',
-    setValue: vi.fn<() => void>(),
+vi.mock('@slab/ui/hooks/use-header', () => ({
+  useHeader: vi.fn<() => unknown>(() => ({
+    meta: { title: 'Assistant', subtitle: 'Assistant', icon: vi.fn(), contextLabel: null },
+    search: null,
+    select: null,
   })),
 }));
 
-vi.mock('@/store/useAssistantUiStore', () => ({
+vi.mock('@slab/ui/store/useAssistantUiStore', () => ({
   useAssistantUiStore: vi.fn<(selector?: (state: Record<string, unknown>) => unknown) => unknown>((selector) => {
     const state = {
       currentSessionId: 'session-1',

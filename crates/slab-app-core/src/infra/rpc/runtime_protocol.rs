@@ -42,6 +42,18 @@ pub fn encode_chat_request(request: &RuntimeTextGenerationRequest) -> pb::GgmlLl
             .agent_trace
             .as_ref()
             .and_then(|context| serde_json::to_string(context).ok()),
+        image_parts: if request.image_parts.is_empty() {
+            Vec::new()
+        } else {
+            request
+                .image_parts
+                .iter()
+                .map(|part| pb::LlamaChatImagePart {
+                    data: part.data.clone(),
+                    mime_type: part.mime_type.clone(),
+                })
+                .collect()
+        },
     }
 }
 
@@ -253,6 +265,33 @@ pub fn decode_whisper_transcription_response(
     }
 }
 
+pub fn decode_parakeet_transcription_response(
+    response: &pb::GgmlParakeetTranscribeResponse,
+) -> RuntimeTranscriptionResult {
+    RuntimeTranscriptionResult {
+        text: response
+            .transcription
+            .as_ref()
+            .and_then(|transcription| transcription.raw_text.clone())
+            .unwrap_or_default(),
+        segments: response
+            .transcription
+            .as_ref()
+            .map(|transcription| {
+                transcription
+                    .segments
+                    .iter()
+                    .map(|segment| TimedTextSegment {
+                        start_ms: segment.start_ms,
+                        end_ms: segment.end_ms,
+                        text: segment.text.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
 pub fn decode_candle_whisper_transcription_response(
     response: &pb::CandleWhisperTranscribeResponse,
 ) -> RuntimeTranscriptionResult {
@@ -292,6 +331,7 @@ pub fn decode_model_status_response(
         status: response.status.clone(),
         context_length: response.context_length,
         training_context_length: response.training_context_length,
+        chat_template: response.chat_template.clone(),
     })
 }
 

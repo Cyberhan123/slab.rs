@@ -14,7 +14,6 @@
     ".": "./src/index.ts",
     "./config": "./src/config.ts",
     "./errors": "./src/errors.ts",
-    "./models": "./src/models.ts",
     "./v1": "./src/v1.d.ts"
   },
   "dependencies": {

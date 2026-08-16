@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function AlertGallery() {
   return (
-    <div data-testid="alert-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="alert-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Alert variant="default" data-testid="alert">
         <AlertTitle>Default Alert</AlertTitle>
         <AlertDescription>This is a default alert message</AlertDescription>

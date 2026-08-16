@@ -12,8 +12,11 @@ license.workspace = true
 chrono     = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
-slab-otel  = { workspace = true }
+slab-utils = { workspace = true }
 tracing    = { workspace = true }
+# Payload ids under payloads/ are uuid-v4 based so they are unique across
+# writers, turns, and processes (see writer::TraceWriter::write_json_payload).
+uuid       = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

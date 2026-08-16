@@ -57,6 +57,12 @@ struct PowerRequest {
     request_type: POWER_REQUEST_TYPE,
 }
 
+// SAFETY: `HANDLE` here is a process-wide power-request token and the
+// `PowerSetRequest`/`PowerClearRequest`/`CloseHandle` APIs are thread-safe, so a
+// `PowerRequest` may be created on one thread and dropped on another. This lets
+// the inhibitor live behind a `Mutex` shared across the async runtime.
+unsafe impl Send for PowerRequest {}
+
 impl PowerRequest {
     fn new_system_required(reason: &str) -> Result<Self, String> {
         let mut wide_reason: Vec<u16> = OsStr::new(reason).encode_wide().chain(once(0)).collect();

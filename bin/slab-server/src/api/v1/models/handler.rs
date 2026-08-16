@@ -11,8 +11,9 @@ const MAX_MODEL_PACK_SIZE: usize = 10 * 1024 * 1024 * 1024; // 10GB
 use crate::api::v1::models::schema::{
     AvailableModelsResponse, CreateModelRequest, DeleteModelResponse, DownloadModelRequest,
     ListAvailableQuery, ListModelsQuery, LoadModelRequest, ModelConfigDocumentResponse,
-    ModelRuntimeStateResponse, ModelStatusResponse, SwitchModelRequest, UnifiedModelResponse,
-    UnloadModelRequest, UpdateModelConfigSelectionRequest, UpdateModelRequest,
+    ModelRuntimeStateResponse, ModelStatusResponse, QuantizeModelRequest, SwitchModelRequest,
+    UnifiedModelResponse, UnloadModelRequest, UpdateModelConfigSelectionRequest,
+    UpdateModelRequest,
 };
 use crate::api::v1::path::IdPath;
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
@@ -44,7 +45,8 @@ struct ImportModelPackMultipartRequest {
         unload_model,
         list_available_models,
         switch_model,
-        download_model
+        download_model,
+        quantize_model
     ),
     components(schemas(
         CreateModelRequest,
@@ -56,6 +58,7 @@ struct ImportModelPackMultipartRequest {
         ModelStatusResponse,
         SwitchModelRequest,
         DownloadModelRequest,
+        QuantizeModelRequest,
         DeleteModelResponse,
         AvailableModelsResponse,
         ListAvailableQuery,
@@ -80,6 +83,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/models/unload", post(unload_model))
         .route("/models/switch", post(switch_model))
         .route("/models/download", post(download_model))
+        .route("/models/quantize", post(quantize_model))
 }
 
 #[utoipa::path(
@@ -390,6 +394,25 @@ async fn download_model(
     ValidatedJson(req): ValidatedJson<DownloadModelRequest>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
     let response = service.download_model(req.into()).await?;
+    Ok((StatusCode::ACCEPTED, Json(response.into())))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/models/quantize",
+    tag = "models",
+    request_body = QuantizeModelRequest,
+    responses(
+        (status = 202, description = "Quantize task accepted", body = OperationAcceptedResponse),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn quantize_model(
+    State(service): State<ModelService>,
+    ValidatedJson(req): ValidatedJson<QuantizeModelRequest>,
+) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
+    let response = service.quantize_model(req.into()).await?;
     Ok((StatusCode::ACCEPTED, Json(response.into())))
 }
 

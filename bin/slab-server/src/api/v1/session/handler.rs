@@ -6,18 +6,27 @@ use axum::{Json, Router};
 use utoipa::OpenApi;
 
 use crate::api::v1::session::schema::{
-    CreateSessionRequest, DeleteSessionResponse, MessageResponse, SessionIdPath, SessionResponse,
-    UpdateSessionRequest,
+    AgentHistoryResponse, CreateSessionRequest, DeleteSessionResponse, MessageResponse,
+    SessionIdPath, SessionResponse, UpdateSessionRequest,
 };
 use crate::api::validation::{ValidatedJson, validate};
 use crate::error::ServerError;
 use slab_app_core::context::AppState;
+use slab_app_core::domain::services::ResponseService;
 use slab_app_core::domain::services::SessionService;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(create_session, list_sessions, update_session, delete_session, list_session_messages),
+    paths(
+        create_session,
+        list_sessions,
+        update_session,
+        delete_session,
+        list_session_messages,
+        get_session_agent_history
+    ),
     components(schemas(
+        AgentHistoryResponse,
         CreateSessionRequest,
         UpdateSessionRequest,
         SessionResponse,
@@ -33,6 +42,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/sessions", post(create_session).get(list_sessions))
         .route("/sessions/{id}", delete(delete_session).put(update_session))
         .route("/sessions/{id}/messages", get(list_session_messages))
+        .route("/sessions/{id}/agent-history", get(get_session_agent_history))
 }
 
 #[utoipa::path(
@@ -132,6 +142,25 @@ async fn list_session_messages(
     Ok(Json(messages))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/sessions/{id}/agent-history",
+    tag = "sessions",
+    params(SessionIdPath),
+    responses(
+        (status = 200, description = "Session agent history retrieved", body = AgentHistoryResponse),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn get_session_agent_history(
+    State(service): State<ResponseService>,
+    Path(params): Path<SessionIdPath>,
+) -> Result<Json<AgentHistoryResponse>, ServerError> {
+    let params = validate(params)?;
+    Ok(Json(service.restore_session_snapshot(&params.id).await?.into()))
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::Value;
@@ -151,6 +180,7 @@ mod tests {
         for (path, method) in [
             ("/v1/sessions/{id}", "delete"),
             ("/v1/sessions/{id}", "put"),
+            ("/v1/sessions/{id}/agent-history", "get"),
             ("/v1/sessions/{id}/messages", "get"),
         ] {
             let parameters = operation_parameters(&openapi, path, method);

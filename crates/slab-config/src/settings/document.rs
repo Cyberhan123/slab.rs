@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
@@ -7,7 +8,7 @@ use slab_otel::config::OtelSettings;
 
 use super::defaults;
 use super::launch::RuntimeTransportMode;
-use slab_types::{DESKTOP_API_BIND, I18nMessageRef, I18nPayload, ServerI18nKey};
+use slab_types::{ContextLengthSpec, DESKTOP_API_BIND, I18nMessageRef, I18nPayload, ServerI18nKey};
 
 pub const PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL: &str =
     "https://slab.reorgix.com/manifests/v1/settings-document.schema.json";
@@ -94,6 +95,11 @@ pub struct SettingsDocument {
     pub database: DatabaseConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    /// OpenTelemetry provider/export settings. `telemetry.enabled` assembles and
+    /// enables the OTel provider for local/remote trace, log, and metric export.
+    /// This is INDEPENDENT of the agent trace bundle: the bundle is gated by
+    /// `agent.debug` alone, so `agent.debug` users get the bundle even with OTel
+    /// export disabled here.
     #[serde(default)]
     pub telemetry: OtelSettings,
     #[serde(default)]
@@ -300,6 +306,11 @@ impl Default for FfmpegToolConfig {
 /// Agent-specific settings.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AgentSettingsConfig {
+    /// Enable agent diagnostics. Gates BOTH the full-fidelity per-session agent
+    /// trace files (prompt/tool/runtime) AND the per-root-thread trace bundle
+    /// that `slab-agent-tracing` writes under `logs/agent_trace/`. This is
+    /// INDEPENDENT of `telemetry.enabled`: the bundle is recorded even when the
+    /// OpenTelemetry provider/export is off.
     #[serde(default = "default_enabled")]
     pub debug: bool,
     #[serde(default)]
@@ -310,6 +321,10 @@ pub struct AgentSettingsConfig {
     pub memories: AgentMemoriesConfig,
     #[serde(default)]
     pub runtime: AgentRuntimeConfig,
+    /// Global permission baseline used by the agent's `Custom` permission mode.
+    /// Maps onto the sandbox policy. Surfaced as a PMID setting.
+    #[serde(default)]
+    pub permissions: AgentPermissionsConfig,
     /// Force offline degradation (INFRA-07): when true the agent's tool list is
     /// narrowed to drop tools that need external network/provider reachability
     /// (`web_search`, `mcp_call`, `mcp_list_tools`, `mcp__*`). Set this when the
@@ -317,6 +332,10 @@ pub struct AgentSettingsConfig {
     /// provider reachability probe can set this automatically in a follow-up.
     #[serde(default)]
     pub offline: bool,
+    /// Keep the machine awake while an agent turn is in progress. Defaults to
+    /// `true`; surfaced as the `agent.sleep_inhibitor` PMID setting.
+    #[serde(default = "default_enabled")]
+    pub sleep_inhibitor: bool,
 }
 
 impl Default for AgentSettingsConfig {
@@ -327,9 +346,91 @@ impl Default for AgentSettingsConfig {
             hooks: AgentHooksConfig::default(),
             memories: AgentMemoriesConfig::default(),
             runtime: AgentRuntimeConfig::default(),
+            permissions: AgentPermissionsConfig::default(),
             offline: false,
+            sleep_inhibitor: true,
         }
     }
+}
+
+/// Global agent permission baseline (the `agent.permissions` PMID setting).
+///
+/// This mirrors `slab_exec_policy::PermissionBaseline` (kept decoupled so the
+/// config crate does not depend on the runtime policy crate). The host converts
+/// it to the runtime type when building the exec-policy engine.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct AgentPermissionsConfig {
+    /// Sandbox policy baseline used by `Custom` permission mode.
+    #[serde(default)]
+    pub baseline: AgentPermissionBaseline,
+    /// Platform-specific sandbox knobs. Mirrors `slab_sandboxing::SandboxPlatformConfig`
+    /// (kept decoupled so this crate does not depend on the runtime sandbox crate); the host
+    /// converts it at the bootstrap boundary.
+    #[serde(default)]
+    pub platform: AgentSandboxPlatformConfig,
+}
+
+/// Sandbox policy baseline, mapping 1:1 onto `slab_sandboxing::SandboxPolicy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPermissionBaseline {
+    ReadOnly,
+    #[default]
+    WorkspaceWrite,
+    FullAccess,
+}
+
+/// Platform-specific sandbox knobs, mapping 1:1 onto `slab_sandboxing::SandboxPlatformConfig`.
+/// `windows_setup_required` opts in to the elevated Windows helper for OS-enforced isolation
+/// (S2): when true and not yet provisioned, the shell tool is blocked (fail-closed). It is
+/// Windows-only and ignored on other platforms.
+///
+/// `linux_allow_landlock_fallback` (S4) gates the landlock filesystem-isolation fallback used when
+/// `bwrap` is unavailable (containers without user namespaces). Default `true` matches the runtime
+/// default; when `false` and neither bwrap nor landlock is available, the shell is blocked
+/// (fail-closed). Linux-only; ignored on other platforms.
+///
+/// `macos_use_sandbox_exec` (S5) gates the macOS seatbelt (`/usr/bin/sandbox-exec`) wrapper that
+/// provides OS-enforced filesystem + network isolation. Default `true` matches the runtime default;
+/// when `false` the child runs without the seatbelt profile and the driver honestly reports
+/// `Degraded`/lexical isolation (only the lexical guard applies). macOS-only; ignored elsewhere.
+///
+/// `windows_use_conpty` (S6a) opts the elevated Windows shell into a pseudoconsole (ConPTY) for
+/// terminal-aware child output (ANSI/TUI fidelity) instead of piped stdio. Default `false` (piped
+/// stays the safe default); ignored unless `windows_setup_required` is also enabled. Windows-only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct AgentSandboxPlatformConfig {
+    #[serde(default)]
+    pub windows_setup_required: bool,
+    #[serde(default = "default_linux_allow_landlock_fallback")]
+    pub linux_allow_landlock_fallback: bool,
+    #[serde(default = "default_macos_use_sandbox_exec")]
+    pub macos_use_sandbox_exec: bool,
+    #[serde(default)]
+    pub windows_use_conpty: bool,
+}
+
+impl Default for AgentSandboxPlatformConfig {
+    fn default() -> Self {
+        Self {
+            windows_setup_required: false,
+            linux_allow_landlock_fallback: default_linux_allow_landlock_fallback(),
+            macos_use_sandbox_exec: default_macos_use_sandbox_exec(),
+            windows_use_conpty: false,
+        }
+    }
+}
+
+/// Default for `linux_allow_landlock_fallback` — `true`, matching the runtime default in
+/// `slab_sandboxing::SandboxPlatformConfig` so an unset field keeps the landlock fallback on.
+fn default_linux_allow_landlock_fallback() -> bool {
+    true
+}
+
+/// Default for `macos_use_sandbox_exec` — `true`, matching the runtime default in
+/// `slab_sandboxing::SandboxPlatformConfig` so an unset field keeps the seatbelt wrapper on.
+fn default_macos_use_sandbox_exec() -> bool {
+    true
 }
 
 /// Agent runtime budget / concurrency settings (ADR-013).
@@ -534,6 +635,32 @@ pub struct AgentToolsConfig {
     pub mcp: AgentMcpConfig,
     #[serde(default)]
     pub websearch: AgentWebSearchConfig,
+    #[serde(default)]
+    pub shell: AgentShellToolsConfig,
+}
+
+/// Which shell the `shell` tool uses to run commands. `auto` probes for a
+/// POSIX shell (Git Bash on Windows) and falls back to PowerShell.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ShellLauncherKind {
+    #[default]
+    Auto,
+    Bash,
+    PowerShell,
+    Cmd,
+}
+
+/// Agent `shell` tool configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentShellToolsConfig {
+    /// Shell launcher the `shell` tool invokes.
+    #[serde(default)]
+    pub launcher: ShellLauncherKind,
+    /// Explicit POSIX shell path; overrides auto-detection when it points to an
+    /// existing file. Only meaningful when `launcher` is `auto` or `bash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bash_path: Option<PathBuf>,
 }
 
 /// Agent MCP tool integration settings.
@@ -909,6 +1036,8 @@ pub struct GgmlRuntimeBackendsConfig {
     #[serde(default)]
     pub whisper: RuntimeLeafConfig,
     #[serde(default)]
+    pub parakeet: RuntimeLeafConfig,
+    #[serde(default)]
     pub diffusion: RuntimeLeafConfig,
 }
 
@@ -950,9 +1079,10 @@ pub struct LlamaRuntimeLeafConfig {
     /// Whether the llama backend is enabled.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// Optional context length override.
+    /// Optional context length override (`auto` resolves at load to the largest
+    /// context that fits in GPU VRAM).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_length: Option<u32>,
+    pub context_length: Option<ContextLengthSpec>,
     /// Whether Flash Attention is enabled for llama contexts.
     #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
@@ -970,7 +1100,10 @@ impl Default for LlamaRuntimeLeafConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            context_length: Some(2048),
+            // Unset = `auto` (resolve at load to the largest context that fits
+            // in GPU VRAM). The explicit default keeps programmatic `default()`
+            // consistent with an absent settings field.
+            context_length: None,
             flash_attn: defaults::flash_attn_enabled(),
             source: SourceConfig::default(),
             logging: LoggingOverrideConfig::default(),
@@ -1922,6 +2055,41 @@ mod tests {
         assert!(!telemetry_default.contains_key("slab_home"));
         assert!(!telemetry_default.contains_key("exporter"));
         assert!(!telemetry_default.contains_key("trace_exporter"));
+    }
+
+    #[test]
+    fn diagnostic_switch_leaves_carry_independence_descriptions() {
+        // The two independent diagnostic switches (`telemetry.enabled`
+        // and `agent.debug`) must both expose a schema `description` so the
+        // settings UI and docs render the independence contract symmetrically.
+        // A dropped doc comment + regenerated schema fails here.
+        let schema = settings_document_json_schema();
+        let telemetry_enabled = schema
+            .pointer("/$defs/OtelSettings/properties/enabled")
+            .and_then(Value::as_object)
+            .expect("telemetry.enabled leaf");
+        let agent_debug = schema
+            .pointer("/$defs/AgentSettingsConfig/properties/debug")
+            .and_then(Value::as_object)
+            .expect("agent.debug leaf");
+
+        let telemetry_desc = telemetry_enabled
+            .get("description")
+            .and_then(Value::as_str)
+            .expect("telemetry.enabled description");
+        let agent_desc = agent_debug
+            .get("description")
+            .and_then(Value::as_str)
+            .expect("agent.debug description");
+
+        assert!(
+            telemetry_desc.to_lowercase().contains("independent"),
+            "telemetry.enabled schema description must state independence: {telemetry_desc}"
+        );
+        assert!(
+            agent_desc.to_lowercase().contains("independent"),
+            "agent.debug schema description must state independence: {agent_desc}"
+        );
     }
 
     #[test]

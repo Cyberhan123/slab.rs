@@ -441,8 +441,8 @@ impl PluginService {
 
     /// Dispatch a plugin agent-capability call by resolving `capability_id` to
     /// its transport function and delegating to [`dispatch_rpc`] (B-7). Only
-    /// `Tool`-kind capabilities are invocable this way; other kinds (workflow,
-    /// a2u_surface) are surfaced via the a2u surface path, not as agent tools.
+    /// `Tool`-kind capabilities are invocable this way; other kinds (workflow)
+    /// are not invocable as agent tools.
     ///
     /// [`dispatch_rpc`]: Self::dispatch_rpc
     pub async fn dispatch_agent_capability(

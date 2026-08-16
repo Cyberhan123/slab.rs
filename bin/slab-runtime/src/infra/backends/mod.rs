@@ -20,7 +20,11 @@ pub(crate) struct RuntimeDriversConfig {
     #[cfg_attr(not(feature = "ggml"), allow(dead_code))]
     pub whisper_lib_dir: Option<PathBuf>,
     #[cfg_attr(not(feature = "ggml"), allow(dead_code))]
+    pub parakeet_lib_dir: Option<PathBuf>,
+    #[cfg_attr(not(feature = "ggml"), allow(dead_code))]
     pub diffusion_lib_dir: Option<PathBuf>,
+    #[cfg_attr(not(feature = "ggml"), allow(dead_code))]
+    pub kv_cache_dir: Option<PathBuf>,
     #[cfg_attr(not(feature = "onnx"), allow(dead_code))]
     pub onnx_enabled: bool,
     pub enable_candle_llama: bool,
@@ -33,7 +37,9 @@ impl From<&RuntimeConfig> for RuntimeDriversConfig {
         Self {
             llama_lib_dir: value.llama_lib_dir.clone(),
             whisper_lib_dir: value.whisper_lib_dir.clone(),
+            parakeet_lib_dir: value.parakeet_lib_dir.clone(),
             diffusion_lib_dir: value.diffusion_lib_dir.clone(),
+            kv_cache_dir: value.kv_cache_dir.clone(),
             onnx_enabled: value.onnx_enabled,
             enable_candle_llama: value.enable_candle_llama,
             enable_candle_whisper: value.enable_candle_whisper,
@@ -50,7 +56,9 @@ pub(crate) fn service_ids(_config: &RuntimeDriversConfig) -> Vec<&'static str> {
     service_ids.extend(ggml::service_ids(&ggml::GgmlBackendConfig {
         llama_lib_dir: _config.llama_lib_dir.clone(),
         whisper_lib_dir: _config.whisper_lib_dir.clone(),
+        parakeet_lib_dir: _config.parakeet_lib_dir.clone(),
         diffusion_lib_dir: _config.diffusion_lib_dir.clone(),
+        kv_cache_dir: _config.kv_cache_dir.clone(),
     }));
 
     #[cfg(feature = "candle")]
@@ -77,7 +85,9 @@ pub(crate) fn register_backends(
         &ggml::GgmlBackendConfig {
             llama_lib_dir: _config.llama_lib_dir.clone(),
             whisper_lib_dir: _config.whisper_lib_dir.clone(),
+            parakeet_lib_dir: _config.parakeet_lib_dir.clone(),
             diffusion_lib_dir: _config.diffusion_lib_dir.clone(),
+            kv_cache_dir: _config.kv_cache_dir.clone(),
         },
         _resource_manager,
         _worker_count,

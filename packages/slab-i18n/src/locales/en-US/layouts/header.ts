@@ -1,4 +1,5 @@
 export const header = {
+  history: 'Open conversation history',
   select: {
     loadingOptions: 'Loading options...',
     selectOption: 'Select option',

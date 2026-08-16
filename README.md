@@ -23,21 +23,23 @@ Slab is a local-first AI desktop workspace that brings chat, speech transcriptio
 
 ## Introduction
 
-Slab is built for developers, researchers, creators, and teams who want to run AI workflows on their own machines. Think of it as a single entry point where you can download and manage models, start chats, process audio, generate images, and track long-running jobs.
+Slab is built for developers, researchers, creators, and teams who want to run AI workflows on their own machines. Think of it as a single entry point where you can download and manage models, start chats, process audio, generate images, work inside a built-in workspace, and track long-running jobs — local models by default, with the option to connect cloud providers when you need them.
 
 ## Why Choose Slab
 
 - One app covers multiple AI workflows, so you do not need to jump between separate tools for chat, transcription, image generation, and model management.
-- It fits privacy-first, offline-friendly, and local-control workflows, with many tasks handled directly on your device.
-- It is built for daily use, with a task queue for long jobs, centralized model management, and plugin-driven extensibility for add-on workflows.
-- It works both as a desktop application and as a unified interface that can connect with your broader tooling and workflows.
+- It is local-first: many tasks run directly on your device for privacy and offline use, while chat and completion can optionally route to cloud providers when you supply an API key.
+- It is built for daily use, with a task queue for long jobs, centralized model management, a built-in workspace, and plugin-driven extensibility for add-on workflows.
+- It runs as a desktop application, but the same application core also powers a headless HTTP host and a runtime worker, so it can fit into your broader tooling and workflows.
 
 ## Key Features
 
 ### Available Today
 
 - **AI Chat**  
-  Chat with local models in one interface for writing help, Q&A, summarization, and everyday reasoning.
+  Chat with local or cloud-connected models in one interface for writing help, Q&A, summarization, and everyday reasoning, with optional agent tooling for multi-step tasks such as file edits and shell commands, plus automatic context management.
+- **Workspace**  
+  A built-in workspace with a file explorer, code editor, language servers, and git so you can keep a project open right next to the assistant.
 - **Audio Transcription**  
   Turn speech or audio into text for meeting notes, interview cleanup, lecture capture, and content archiving.
 - **Image Generation**  
@@ -57,6 +59,8 @@ Slab is built for developers, researchers, creators, and teams who want to run A
 
 - **Plugin Lifecycle Management**  
   Desktop builds manage installed plugins while keeping `plugin.json` as the static source of truth for runtime assets, permissions, and contribution points.
+- **Multi-Runtime Plugin Backends**  
+  Plugins can ship backend logic as JavaScript, Python, or WebAssembly, with frontend UIs hosted in sandboxed Tauri child WebViews.
 
 ## Project Structure
 
@@ -68,11 +72,15 @@ The tree below is a high-level view distilled from the current repository. It is
 |   |-- slab-app/                      Desktop host app and Tauri packaging
 |   |-- slab-server/                   Local service entry for product APIs
 |   |-- slab-runtime/                  Runtime worker for AI task execution
+|   |-- slab-js-runtime/               Supervised JavaScript plugin runtime
+|   |-- slab-python-runtime/           Supervised Python plugin runtime
+|   |-- slab-mcp-server/               Model Context Protocol bridge server
 |   `-- slab-windows-full-installer/   Windows full installer bootstrap
 |-- crates/
 |   |-- slab-app-core/                 Shared application logic
 |   |-- slab-agent/                    Agent control-plane and orchestration kernel
 |   |-- slab-agent-tools/              Built-in deterministic agent tools
+|   |-- slab-cloud-provider/           Cloud model-provider routing (genai)
 |   |-- slab-hub/                      Model hub abstraction
 |   |-- slab-proto/                    Shared protocol definitions
 |   |-- slab-runtime-core/             Backend worker substrate and admission core
@@ -81,8 +89,9 @@ The tree below is a high-level view distilled from the current repository. It is
 |-- packages/
 |   |-- slab-desktop/                  Desktop frontend application
 |   |-- slab-components/               Shared UI component library
-|   |-- slab-plugin-sdk/              Plugin author SDK package
-|   `-- slab-i18n/                     Shared internationalization package
+|   |-- slab-plugin-sdk/               Plugin author SDK package
+|   |-- slab-i18n/                     Shared internationalization package
+|   `-- ...                            API client, plugin CLI/UI, and test utilities
 |-- docs/                              Documentation site and guides
 |-- models/                            Model packaging scripts and assets
 |-- plugins/                           Runtime plugin package workspace
@@ -91,7 +100,7 @@ The tree below is a high-level view distilled from the current repository. It is
 ```
 
 - `packages/slab-desktop` is the desktop interface users interact with every day.
-- `bin/slab-app`, `bin/slab-server`, and `bin/slab-runtime` together support the local app shell, task execution, and service entry points.
+- `bin/slab-app`, `bin/slab-server`, and `bin/slab-runtime` together support the local app shell, task execution, and service entry points, while `bin/slab-js-runtime`, `bin/slab-python-runtime`, and `bin/slab-mcp-server` host supervised plugin runtimes and the MCP bridge.
 - `crates/` contains the main shared capability layer for models, tasks, contracts, and reusable logic.
 - `plugins/` contains runtime plugin packages. Manifest v1 declares runtime assets, extension contributions, permissions, and agent capabilities, while the host tracks install/runtime state separately.
 - `docs/`, `models/`, `testdata/`, and `vendor/` support documentation, model packaging assets, sample data, and bundled runtime resources.
@@ -116,8 +125,7 @@ bun install
 Use these commands from the repository root for the most common day-to-day workflows.
 
 ```sh
-# Start the main development stack
-bun run dev
+# Start the main development stack (desktop host + sidecars + server/runtime)
 bun run dev:app
 
 # Start the desktop frontend only
@@ -134,13 +142,12 @@ bun run check
 bun run check:rust
 bun run lint:rust
 
-# Run the standard automated test suite
+# Run the standard automated test suite (frontend + Rust workspace)
 bun run test
 
-# Run browser and visual tests
+# Run targeted test suites
+bun run test:frontend
 bun run test:browser
-
-# Run fullstack frontend E2E tests
 bun run test:e2e
 
 # Build the desktop frontend only
@@ -160,10 +167,6 @@ bun run gen:api
 bun run gen:schemas
 bun run gen:plugin-packs
 bun run gen:model-packs
-
-# Server compatibility tests
-python -m pip install -r bin/slab-server/tests/requirements.txt
-pytest bin/slab-server/tests
 ```
 
 ### Build Workflow Guide

@@ -11,7 +11,7 @@ schema_version = "1"
 
 [artifacts.ggml]
 repo = "seasonjs/ggml.cpp-build"
-version = "v0.14.0"
+version = "v0.17.0"
 lib_name = "ggml"
 # Asset name pattern with template variables: {version}, {os}, {arch}, {variant}
 asset_pattern = "ggml-{version}-{os}-{arch}.{extension}"
@@ -33,7 +33,7 @@ extension = "tar.gz"
 
 [artifacts.llama]
 repo = "seasonjs/llama.cpp-build"
-version = "v9555"
+version = "v10159"
 lib_name = "llama"
 # Asset name pattern with template variables: {version}, {os}, {arch}, {variant}
 asset_pattern = "llama-sdk-{version}-{os}-{arch}.{extension}"
@@ -55,7 +55,7 @@ extension = "tar.gz"
 
 [artifacts.whisper]
 repo = "seasonjs/whisper.cpp-build"
-version = "v1.8.6"
+version = "v1.9.1"
 lib_name = "whisper"
 asset_pattern = "whisper-sdk-{os}-{arch}.{extension}"
 
@@ -77,7 +77,7 @@ extension = "tar.gz"
 
 [artifacts.diffusion]
 repo = "seasonjs/stable-diffusion.cpp-build"
-version = "vb20910d6"
+version = "v5ef4a75"
 lib_name = "stable-diffusion"
 asset_pattern = "stable-diffusion-sdk-{os}-{arch}.{extension}"
 

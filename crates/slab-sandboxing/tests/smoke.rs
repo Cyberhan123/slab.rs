@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use slab_sandboxing::{
-    NetworkPolicy, SandboxDriver, SandboxEnvironment, SandboxError, SandboxPolicy,
-    SandboxedCommand, create_platform_driver,
+    IsolationStrength, NetworkPolicy, SandboxDriver, SandboxEnvironment, SandboxError,
+    SandboxIsolation, SandboxPolicy, SandboxedCommand, create_platform_driver,
 };
 use tempfile::TempDir;
 
@@ -37,6 +37,161 @@ async fn platform_driver_reports_capabilities() {
 
     assert!(driver.setup_status().available);
     assert!(capabilities.filesystem || capabilities.isolation as u8 > 0);
+    // Honest-reporting regression guard: a driver that claims `Full` isolation
+    // must actually OS-enforce the filesystem dimension. This is the exact
+    // regression the old Windows `filesystem: true` lie would re-introduce.
+    if capabilities.isolation == SandboxIsolation::Full {
+        assert_eq!(capabilities.filesystem_isolation, IsolationStrength::OsEnforced);
+        assert!(capabilities.filesystem, "Full isolation must report OS-enforced fs");
+    }
+}
+
+#[tokio::test]
+async fn platform_driver_streams_output_through_sink() {
+    let Some((workspace, driver)) = smoke_workspace(SandboxPolicy::WorkspaceWrite) else {
+        return;
+    };
+
+    #[derive(Clone)]
+    struct CapturingSink(std::sync::Arc<std::sync::Mutex<String>>);
+    impl slab_sandboxing::OutputSink for CapturingSink {
+        fn on_output(&self, _stream: slab_sandboxing::OutputStream, delta: &str) {
+            *self.0.lock().unwrap() += delta;
+        }
+    }
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let sink = std::sync::Arc::new(CapturingSink(captured.clone()))
+        as std::sync::Arc<dyn slab_sandboxing::OutputSink>;
+
+    let mut cmd = shell_command("echo slab-smoke-marker", workspace.path());
+    cmd.output_sink = Some(sink);
+
+    // Wrap in a hard timeout so a deadlock fails the test instead of hanging.
+    let output = tokio::time::timeout(Duration::from_secs(15), driver.run(cmd))
+        .await
+        .expect("driver.run hung past 15s (streaming deadlock?)")
+        .expect("run");
+    let streamed = captured.lock().unwrap().clone();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    eprintln!("streamed={streamed:?} stdout={stdout:?} exit={}", output.exit_code);
+    assert!(
+        streamed.contains("slab-smoke-marker") || stdout.contains("slab-smoke-marker"),
+        "neither stream nor stdout carried the marker"
+    );
+}
+
+/// Reproduce the production shell path: `bash -lc "<cmd>"` through the real
+/// platform driver with a streaming sink. Skips when no POSIX shell is found.
+#[tokio::test]
+async fn platform_driver_streams_bash_lc_command_with_sink() {
+    let Some(bash) = find_posix_shell() else {
+        eprintln!("skipping: no bash/sh found on PATH");
+        return;
+    };
+    let Some((workspace, driver)) = smoke_workspace(SandboxPolicy::WorkspaceWrite) else {
+        return;
+    };
+
+    #[derive(Clone)]
+    struct CapturingSink(std::sync::Arc<std::sync::Mutex<String>>);
+    impl slab_sandboxing::OutputSink for CapturingSink {
+        fn on_output(&self, _stream: slab_sandboxing::OutputStream, delta: &str) {
+            *self.0.lock().unwrap() += delta;
+        }
+    }
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let sink = std::sync::Arc::new(CapturingSink(captured.clone()))
+        as std::sync::Arc<dyn slab_sandboxing::OutputSink>;
+
+    let cmd = SandboxedCommand {
+        argv: vec![bash.to_string_lossy().into_owned(), "-lc".to_string(), "date +%A".to_string()],
+        env: HashMap::new(),
+        cwd: Some(workspace.path().to_path_buf()),
+        timeout: Some(Duration::from_secs(10)),
+        output_sink: Some(sink),
+    };
+
+    let output = tokio::time::timeout(Duration::from_secs(20), driver.run(cmd))
+        .await
+        .expect("driver.run hung past 20s (bash streaming deadlock?)")
+        .expect("run");
+    let streamed = captured.lock().unwrap().clone();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    eprintln!("bash streamed={streamed:?} stdout={stdout:?} exit={}", output.exit_code);
+    assert!(output.exit_code == 0, "stderr={}", String::from_utf8_lossy(&output.stderr));
+    assert!(!stdout.trim().is_empty(), "expected weekday from `date +%A`");
+}
+
+/// Regression: a command that prints a marker then backgrounds a long-lived
+/// child (which inherits and holds the stdout pipe) must NOT hang. Before the
+/// tree-kill fix the read tasks waited for pipe EOF forever and the turn hung
+/// indefinitely after a shell approval.
+#[tokio::test]
+async fn platform_driver_does_not_hang_on_backgrounded_child() {
+    let Some(bash) = find_posix_shell() else {
+        eprintln!("skipping: no bash/sh found on PATH");
+        return;
+    };
+    let Some((workspace, driver)) = smoke_workspace(SandboxPolicy::WorkspaceWrite) else {
+        return;
+    };
+    // `sleep 120 &` backgrounds a child that inherits the shell's stdout pipe.
+    // Under POSIX shells (incl. Git Bash on Windows) this reliably holds the
+    // pipe open after the shell exits, reproducing the post-approval hang that
+    // the tree-kill in `wait_for_child` must resolve.
+    let cmd = SandboxedCommand {
+        argv: vec![
+            bash.to_string_lossy().into_owned(),
+            "-lc".to_string(),
+            "echo slab-bg-marker; sleep 120 &".to_string(),
+        ],
+        env: HashMap::new(),
+        cwd: Some(workspace.path().to_path_buf()),
+        timeout: Some(Duration::from_secs(10)),
+        output_sink: None,
+    };
+
+    let started = std::time::Instant::now();
+    let output = tokio::time::timeout(Duration::from_secs(20), driver.run(cmd))
+        .await
+        .expect("driver.run hung past 20s (backgrounded-child pipe deadlock?)")
+        .expect("run");
+    let elapsed = started.elapsed();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    eprintln!("bg-child elapsed={elapsed:?} exit={} stdout={stdout:?}", output.exit_code);
+    assert!(stdout.contains("slab-bg-marker"), "marker missing from stdout");
+    // Tree-kill closes the pipes so reads reach EOF immediately (~sub-second).
+    // Without it the read tasks fall back to the `READ_DRAIN_GRACE` backstop
+    // (~5s per stream, drained sequentially ≈ 10s), which exceeds this bound —
+    // so this trips if tree-kill regresses.
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "run took too long ({elapsed:?}) — tree-kill regressed?"
+    );
+}
+
+fn find_posix_shell() -> Option<PathBuf> {
+    for name in ["bash", "sh"] {
+        if let Some(p) = which(name) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn which(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        let exe = dir.join(format!("{name}.exe"));
+        if exe.is_file() {
+            return Some(exe);
+        }
+    }
+    None
 }
 
 #[tokio::test]
@@ -143,6 +298,7 @@ fn shell_command(command: &str, cwd: &Path) -> SandboxedCommand {
         env: HashMap::new(),
         cwd: Some(cwd.to_path_buf()),
         timeout: Some(Duration::from_secs(10)),
+        output_sink: None,
     }
 }
 

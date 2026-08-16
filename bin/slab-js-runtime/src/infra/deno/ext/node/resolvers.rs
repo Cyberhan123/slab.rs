@@ -526,6 +526,15 @@ impl NodeRequireLoader for RequireLoader {
         Ok(text.into_owned().into())
     }
 
+    fn is_maybe_cjs_from_require(
+        &self,
+        _specifier: &ModuleSpecifier,
+    ) -> Result<bool, PackageJsonLoadError> {
+        // slab-js-runtime does not statically classify require()'d modules as CJS,
+        // matching the pre-0.193 behaviour where this trait hook did not exist.
+        Ok(false)
+    }
+
     fn ensure_read_permission<'a>(
         &self,
         permissions: &mut PermissionsContainer,

@@ -19,3 +19,13 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[features]
+# Enables the live integration tests in `tests/live.rs` (network + vendored
+# native runtime). Off by default so normal `cargo test` stays lean.
+live = []
+
+[dev-dependencies]
+# hf-hub 1.0: sync (`blocking`) client + rustls TLS, mirroring slab-diffusion.
+hf-hub = { workspace = true, features = ["blocking", "rustls-tls"] }
+tempfile = { workspace = true }

@@ -1,19 +1,15 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest"
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright"
 
+import type { E2eRuntimeEndpoints } from "./support/e2e-global-setup"
 import {
-  bootstrapLocalModel,
-  cleanupFullstackDevEnvironment,
-  createFullstackDevEnvironment,
   createSession,
   listSessions,
   restoreSession,
   selectAssistantSession,
-  startFullstackDev,
-  type FullstackDevEnvironment,
-  type ManagedDevProcess,
+  type AgentThreadMessageResponse,
   type SessionResponse,
-} from "./support/fullstack-dev"
+} from "./support/e2e-runtime"
 import {
   expectAssistantPageText,
   openAssistant,
@@ -23,22 +19,16 @@ import {
   waitForCurrentAssistantSession,
 } from "./support/assistant-ui"
 
-let env: FullstackDevEnvironment | undefined
+let env: E2eRuntimeEndpoints | undefined
 
-describe.sequential("assistant e2e", () => {
+describe("assistant e2e", () => {
   let browser: Browser | undefined
   let context: BrowserContext | undefined
-  let dev: ManagedDevProcess | undefined
   let page: Page
   let session: SessionResponse
 
   beforeAll(async () => {
-    env = await createFullstackDevEnvironment()
-    dev = await startFullstackDev(env)
-    await bootstrapLocalModel(env.serverBaseUrl, {
-      modelId: "Qwen2.5-0.5B-Instruct",
-      selectedVariantId: "Q4_K_M",
-    })
+    env = inject("e2e-runtime")
     session = await createSession(env.serverBaseUrl, `assistant-e2e-${Date.now()}`)
     await selectAssistantSession(env.serverBaseUrl, session.id, session.name)
 
@@ -56,8 +46,6 @@ describe.sequential("assistant e2e", () => {
   afterAll(async () => {
     await context?.close().catch(() => {})
     await browser?.close().catch(() => {})
-    await dev?.stop().catch(() => {})
-    cleanupFullstackDevEnvironment(env)
   })
 
   it("drives UI assistant inference through /v1/agents/responses and restores the session", async () => {
@@ -74,10 +62,10 @@ describe.sequential("assistant e2e", () => {
     await expectAssistantPageText(page, reply.text)
 
     const restored = await restoreSession(testEnv.serverBaseUrl, session.id)
-    expect(restored.messages.some((message) => message.role === "user" && message.content === prompt)).toBe(true)
-    expect(restored.messages.some((message) => message.role === "assistant" && message.content.trim().length > 0)).toBe(true)
+    expect(restored.messages.some((message: AgentThreadMessageResponse) => message.role === "user" && message.content === prompt)).toBe(true)
+    expect(restored.messages.some((message: AgentThreadMessageResponse) => message.role === "assistant" && message.content.trim().length > 0)).toBe(true)
 
-    await page.getByTestId("assistant-summary-desktop-new-session-button").click()
+    await page.getByTestId("header-new-session-control").click()
     const secondSessionId = await waitForCurrentAssistantSession(
       testEnv.serverBaseUrl,
       (sessionId) => sessionId !== session.id
@@ -102,9 +90,9 @@ describe.sequential("assistant e2e", () => {
   })
 })
 
-function requireEnv(): FullstackDevEnvironment {
+function requireEnv(): E2eRuntimeEndpoints {
   if (!env) {
-    throw new Error("Fullstack dev environment was not initialized.")
+    throw new Error("e2e shared runtime endpoints were not provided.")
   }
 
   return env

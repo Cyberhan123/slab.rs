@@ -4042,21 +4042,10 @@ React keys must be passed directly to JSX without using spread:
     "input",
     "ring",
     "radius",
-    "app-canvas",
-    "surface-1",
-    "surface-2",
-    "surface-soft",
-    "surface-selected",
-    "surface-input",
-    "brand-teal",
-    "brand-teal-foreground",
+    "sidebar",
     "brand-gold",
     "success",
-    "success-foreground",
-    "status-success-bg",
-    "status-info-bg",
-    "status-danger-bg",
-    "status-neutral-bg"
+    "success-foreground"
   ];
   var JSON_HEADERS = { "content-type": "application/json" };
   var THEME_EVENT_NAME = "plugin://host/theme";

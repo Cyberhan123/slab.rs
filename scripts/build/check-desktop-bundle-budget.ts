@@ -38,9 +38,16 @@ async function main() {
   }
 
   const mainChunk = await chunkSize(assetsDir, mainChunkName);
-  const workspaceLsp = await findChunkSize(assetsDir, files, "workspace-lsp-client-");
+  // The LSP/vscode bundle was renamed `workspace-lsp-client` → `vscode-services`
+  // in 02be6f3f; accept either name so stale checkouts still report.
+  const workspaceLsp = (
+    await Promise.all([
+      findChunkSize(assetsDir, files, "vscode-services-").catch(() => null),
+      findChunkSize(assetsDir, files, "workspace-lsp-client-").catch(() => null),
+    ])
+  ).find((chunk) => chunk !== null)!;
   const workspaceRoute = await findChunkSize(assetsDir, files, "workspace-", (file) =>
-    !file.startsWith("workspace-lsp"),
+    !file.startsWith("workspace-lsp") && !file.startsWith("vscode-services"),
   );
   const maxMainBytes = Math.ceil(
     config.budgets.main.baselineBytes * (1 + config.budgets.main.maxIncreasePercent / 100),

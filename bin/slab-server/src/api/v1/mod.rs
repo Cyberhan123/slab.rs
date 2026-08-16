@@ -82,7 +82,7 @@ mod tests {
 
     const DOCUMENTED_METHODS: &[&str] = &["delete", "get", "patch", "post", "put"];
     const EXPECTED_OPERATIONS: &[(&str, &str)] = &[
-        ("/v1/agents/migrate", "post"),
+        ("/v1/agents/harness", "get"),
         ("/v1/agents/responses", "get"),
         ("/v1/agents/responses", "post"),
         ("/v1/audio/transcriptions", "get"),
@@ -110,6 +110,7 @@ mod tests {
         ("/v1/models/download", "post"),
         ("/v1/models/import-pack", "post"),
         ("/v1/models/load", "post"),
+        ("/v1/models/quantize", "post"),
         ("/v1/models/switch", "post"),
         ("/v1/models/unload", "post"),
         ("/v1/plugins", "get"),
@@ -128,6 +129,7 @@ mod tests {
         ("/v1/sessions", "post"),
         ("/v1/sessions/{id}", "delete"),
         ("/v1/sessions/{id}", "put"),
+        ("/v1/sessions/{id}/agent-history", "get"),
         ("/v1/sessions/{id}/messages", "get"),
         ("/v1/settings", "get"),
         ("/v1/settings/{pmid}", "get"),
@@ -139,6 +141,7 @@ mod tests {
         ("/v1/system/diagnostics", "get"),
         ("/v1/system/diagnostics/agent-stats", "get"),
         ("/v1/system/gpu", "get"),
+        ("/v1/system/gpu/ledger", "get"),
         ("/v1/tasks", "get"),
         ("/v1/tasks/{id}", "get"),
         ("/v1/tasks/{id}/cancel", "post"),
@@ -206,7 +209,7 @@ mod tests {
         let schemas = openapi["components"]["schemas"].as_object().expect("schema components");
 
         for schema in [
-            "AgentResponsesClientMessage",
+            "AgentHistoryResponse",
             "AudioTranscriptionRequest",
             "BackendStatusResponse",
             "ChatCompletionRequest",

@@ -5,7 +5,7 @@ use slab_types::load_config::{
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
 };
 use slab_types::runtime::DiffusionLoadOptions;
-use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
+use slab_types::{ContextLengthSpec, RuntimeBackendId, RuntimeBackendLoadSpec};
 use tracing::info;
 
 use crate::context::{ModelState, WorkerState};
@@ -16,7 +16,6 @@ use crate::domain::ports::RuntimeBackendStatus;
 use crate::error::{AppCoreError, AppCoreErrorData, RuntimeEngineAttemptError};
 use crate::infra::db::{ModelConfigStateStore, ModelStore};
 use crate::infra::model_packs;
-use crate::model_auto_unload::ModelReplayPlan;
 
 use super::{ModelService, catalog, pack};
 
@@ -27,6 +26,10 @@ pub(crate) struct LocalLlamaPromptProfile {
     pub(crate) backend_id: RuntimeBackendId,
     pub(crate) chat_template_source: Option<String>,
     pub(crate) default_gbnf: Option<String>,
+    /// Model-provided developer instruction template (raw jinja), threaded to
+    /// `slab-agent-context` to render the developer instruction. `None` for
+    /// models whose pack ships no `instruction_template.jinja`.
+    pub(crate) instruction_template_source: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +59,14 @@ impl ModelService {
         info!(backend = %backend_id, model_id = ?command.model_id, "unloading model");
 
         self.model_state.auto_unload().ensure_idle_for_manual_unload(backend_id).await?;
+        self.model_state
+            .gpu_scheduler()
+            .hooks()
+            .dispatch_before_unload(&slab_gpu_memory_scheduler::UnloadContext {
+                backend: backend_id,
+                reason: slab_gpu_memory_scheduler::UnloadReason::Manual,
+            })
+            .await;
         let response = self.model_state.runtime().unload_model(backend_id).await?;
         self.model_state.auto_unload().notify_model_unloaded(backend_id).await;
 
@@ -83,8 +94,15 @@ impl ModelService {
                 loaded: snapshot.loaded,
                 active: snapshot.active_refs > 0,
                 active_refs: snapshot.active_refs,
+                chat_template: snapshot.chat_template,
             },
-            None => ModelRuntimeState { backend_id, loaded: false, active: false, active_refs: 0 },
+            None => ModelRuntimeState {
+                backend_id,
+                loaded: false,
+                active: false,
+                active_refs: 0,
+                chat_template: None,
+            },
         })
     }
 
@@ -111,11 +129,22 @@ pub(crate) async fn resolve_local_chat_prompt_profile(
         )));
     }
 
+    // GGUF `tokenizer.chat_template` read from the loaded model at load time
+    // (cached in the per-model runtime snapshot). Used as the default chat
+    // template source when no pack template is configured, so models without a
+    // pack template still render via minijinja instead of the raw `Role:` fallback.
+    let gguf_chat_template = state
+        .auto_unload()
+        .snapshot_for_model(backend_id, &model.id)
+        .await
+        .and_then(|snapshot| snapshot.chat_template);
+
     let Some(model_path) = model.spec.local_path.as_deref() else {
         return Ok(LocalLlamaPromptProfile {
             backend_id,
-            chat_template_source: None,
+            chat_template_source: gguf_chat_template,
             default_gbnf: None,
+            instruction_template_source: None,
         });
     };
     if let Some(pack_target) =
@@ -123,12 +152,21 @@ pub(crate) async fn resolve_local_chat_prompt_profile(
     {
         return Ok(LocalLlamaPromptProfile {
             backend_id: pack_target.backend_id,
-            chat_template_source: pack_target.load_defaults.chat_template_source,
+            chat_template_source: pack_target
+                .load_defaults
+                .chat_template_source
+                .or_else(|| gguf_chat_template.clone()),
             default_gbnf: pack_target.load_defaults.gbnf_source,
+            instruction_template_source: pack_target.load_defaults.instruction_template_source,
         });
     }
 
-    Ok(LocalLlamaPromptProfile { backend_id, chat_template_source: None, default_gbnf: None })
+    Ok(LocalLlamaPromptProfile {
+        backend_id,
+        chat_template_source: gguf_chat_template,
+        default_gbnf: None,
+        instruction_template_source: None,
+    })
 }
 
 pub(crate) async fn resolve_worker_model_backend_or_default(
@@ -205,6 +243,7 @@ pub(super) async fn resolve_model_workers(
         match backend_id {
             RuntimeBackendId::GgmlLlama => Some(config.runtime.llama.num_workers),
             RuntimeBackendId::GgmlWhisper => Some(config.runtime.whisper.num_workers),
+            RuntimeBackendId::GgmlParakeet => Some(config.runtime.parakeet.num_workers),
             RuntimeBackendId::GgmlDiffusion => Some(config.runtime.diffusion.num_workers),
             _ => None,
         }
@@ -222,16 +261,16 @@ pub(super) async fn resolve_model_workers(
 pub(super) async fn resolve_llama_context_length(
     state: &ModelState,
     backend_id: RuntimeBackendId,
-) -> Result<(u32, &'static str), AppCoreError> {
+) -> Result<(ContextLengthSpec, &'static str), AppCoreError> {
     if backend_id != RuntimeBackendId::GgmlLlama {
-        return Ok((0, "not_applicable"));
+        return Ok((ContextLengthSpec::Auto, "not_applicable"));
     }
-
-    let configured = state.pmid().config().runtime.llama.context_length;
-    let Some(context_length) = configured else {
-        return Ok((0, "default"));
-    };
-    Ok((context_length, "settings"))
+    // The settings field is `Option<ContextLengthSpec>`; unset (None) means
+    // `auto` — resolve at load to the largest context that fits in GPU VRAM.
+    match state.pmid().config().runtime.llama.context_length {
+        Some(spec) => Ok((spec, "settings")),
+        None => Ok((ContextLengthSpec::Auto, "default")),
+    }
 }
 
 fn resolve_backend_flash_attn(state: &ModelState, backend_id: RuntimeBackendId) -> bool {
@@ -279,6 +318,7 @@ pub(super) fn decode_model_status(
         status: response.status,
         context_length: response.context_length,
         training_context_length: response.training_context_length,
+        chat_template: response.chat_template,
     })
 }
 
@@ -344,7 +384,7 @@ async fn load_model_candidate(
     let (context_length, context_source) = if let Some(context_length) =
         candidate.pack_load_defaults.as_ref().and_then(|defaults| defaults.context_length)
     {
-        (context_length, "model_pack")
+        (ContextLengthSpec::Fixed(context_length), "model_pack")
     } else {
         resolve_llama_context_length(state, candidate.backend_id).await?
     };
@@ -364,18 +404,24 @@ async fn load_model_candidate(
         model_path = %candidate.model_path,
         workers = num_workers,
         worker_source = worker_source,
-        context_length = context_length,
+        context_length = %context_length,
         context_source = context_source,
         flash_attn = flash_attn,
         "{log_message}"
     );
 
+    // Snapshot free GPU VRAM so the runtime can size an `auto` context to fit,
+    // and forward the scheduler's sizing tunables so the engine resolves
+    // `auto` with host policy (never a divergent local default).
+    let scheduler_params = state.gpu_scheduler().params();
+    let free_vram_bytes = state.gpu_scheduler().free_bytes_for_load().await;
     let load_spec = build_backend_load_spec(
         candidate.backend_id,
         &candidate.model_path,
         BackendLoadSpecOptions {
             num_workers,
             context_length,
+            free_vram_bytes,
             chat_template: candidate
                 .pack_load_defaults
                 .as_ref()
@@ -386,17 +432,20 @@ async fn load_model_candidate(
                 .and_then(|defaults| defaults.gbnf_source.clone()),
             flash_attn,
             diffusion,
+            vram_buffer_bytes: Some(scheduler_params.vram_buffer_bytes),
+            auto_context_quantum: Some(scheduler_params.auto_context_quantum),
+            auto_context_fallback: Some(scheduler_params.auto_context_fallback),
         },
     )?;
-    let response = state.auto_unload().load_model_with_pressure_control(&load_spec).await?;
-    state
+
+    // Full lifecycle load (shared with the replay path): before_load → load
+    // under pressure control → fresh replay plan → after_load with the
+    // engine-resolved n_ctx into the ledger.
+    let response = state
         .auto_unload()
-        .notify_model_loaded(ModelReplayPlan {
-            backend_id: candidate.backend_id,
-            model_id: resolved_target.model_id.clone(),
-            load_spec,
-        })
-        .await;
+        .load_with_lifecycle(&load_spec, resolved_target.model_id.clone())
+        .await?;
+    let status = decode_model_status(response)?;
 
     if resolved_target.persist_selected_engine_id
         && let Some(model_id) = resolved_target.model_id.as_deref()
@@ -404,7 +453,7 @@ async fn load_model_candidate(
         persist_selected_engine_id(state, model_id, candidate.backend_id).await?;
     }
 
-    decode_model_status(response)
+    Ok(status)
 }
 
 fn is_retryable_engine_load_error(error: &AppCoreError) -> bool {
@@ -440,6 +489,8 @@ async fn persist_selected_engine_id(
             selected_preset_id: None,
             selected_variant_id: None,
             selected_engine_id: None,
+            load_overrides: None,
+            inference_overrides: None,
             updated_at: chrono::Utc::now(),
         }
     });
@@ -451,11 +502,17 @@ async fn persist_selected_engine_id(
 
 struct BackendLoadSpecOptions {
     num_workers: u32,
-    context_length: u32,
+    context_length: ContextLengthSpec,
+    free_vram_bytes: Option<u64>,
     chat_template: Option<String>,
     gbnf: Option<String>,
     flash_attn: bool,
     diffusion: Option<DiffusionLoadOptions>,
+    /// Scheduler sizing tunables so the runtime's `auto` context sizing uses
+    /// host policy (mirrors `SchedulerParams` 1:1; see the load request proto).
+    vram_buffer_bytes: Option<u64>,
+    auto_context_quantum: Option<u32>,
+    auto_context_fallback: Option<u32>,
 }
 
 fn build_backend_load_spec(
@@ -467,10 +524,14 @@ fn build_backend_load_spec(
     let BackendLoadSpecOptions {
         num_workers,
         context_length,
+        free_vram_bytes,
         chat_template,
         gbnf,
         flash_attn,
         diffusion,
+        vram_buffer_bytes,
+        auto_context_quantum,
+        auto_context_fallback,
     } = options;
 
     match backend_id {
@@ -481,10 +542,15 @@ fn build_backend_load_spec(
                     "failed to convert num_workers into usize for ggml.llama: {error}"
                 ))
             })?,
-            context_length: (context_length > 0).then_some(context_length),
+            context_length: Some(context_length),
+            free_vram_bytes,
             flash_attn,
             chat_template,
             gbnf,
+            mmproj_path: None,
+            vram_buffer_bytes,
+            auto_context_quantum,
+            auto_context_fallback,
         })),
         RuntimeBackendId::GgmlWhisper => {
             Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {
@@ -709,6 +775,10 @@ async fn build_selected_model_pack_load_target(
         persisted.as_ref(),
         selected_preset.variant.effective_sources.first(),
     );
+    let load_overrides = pack::parse_overrides_map(
+        state_record.as_ref().and_then(|record| record.load_overrides.as_deref()),
+    );
+    pack::apply_user_load_overrides_to_bridge(&mut bridge, load_overrides.as_ref());
     let preset_id = effective_selection
         .preset_id
         .clone()
@@ -801,6 +871,18 @@ async fn resolve_local_catalog_model(
         record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
     resolve_local_backend_from_model(&model)?;
     Ok(model)
+}
+
+/// Best-effort lookup of a model's runtime sampling presets by id (works for
+/// local and cloud models). Returns `None` when the model is absent or carries
+/// no presets — callers fall back to request params + built-in effort presets.
+pub(crate) async fn runtime_presets_for(
+    state: &ModelState,
+    model_id: &str,
+) -> Option<crate::domain::models::RuntimePresets> {
+    let record = state.store().get_model(model_id).await.ok().flatten()?;
+    let model: UnifiedModel = record.try_into().ok()?;
+    model.runtime_presets
 }
 
 pub(super) fn resolve_local_backend_from_model(

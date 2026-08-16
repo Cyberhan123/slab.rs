@@ -1,0 +1,25 @@
+[package]
+name = "slab-gpu-memory-scheduler"
+version.workspace = true
+edition.workspace = true
+description = "Single source of truth for GPU memory management: probing, ledger, lifecycle hooks, scheduling policy"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[features]
+default = ["gpu-telemetry"]
+gpu-telemetry = ["dep:all-smi"]
+
+[dependencies]
+slab-types = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+all-smi = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

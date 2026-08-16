@@ -1,8 +1,8 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import HubPage from '@/pages/hub';
-import TaskPage from '@/pages/task';
+import HubPage from '@slab/ui/pages/hub';
+import TaskPage from '@slab/ui/pages/task';
 import { renderDesktopScene } from '../test-utils';
 
 const {
@@ -17,11 +17,7 @@ const {
   mockFetchTaskDetail: vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined),
 }));
 
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-}));
-
-vi.mock('@/pages/hub/hooks/use-hub-model-catalog', async () => {
+vi.mock('@slab/ui/pages/hub/hooks/use-hub-model-catalog', async () => {
   const React = await import('react');
 
   const readyModel = {
@@ -106,7 +102,7 @@ vi.mock('@/pages/hub/hooks/use-hub-model-catalog', async () => {
   };
 });
 
-vi.mock('@/pages/task/hooks/use-task-list', async () => {
+vi.mock('@slab/ui/pages/task/hooks/use-task-list', async () => {
   const React = await import('react');
   const runningTask = {
     created_at: '2026-06-01T10:00:00Z',

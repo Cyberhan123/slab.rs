@@ -1,148 +1,103 @@
+use std::fmt;
+
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 pub mod host;
+pub mod notifier;
+pub mod router;
+pub mod ws;
 
-pub const VERSION: &str = "2.0";
+pub const JSONRPC_VERSION: &str = "2.0";
 pub const PARSE_ERROR: i64 = -32700;
 pub const INVALID_REQUEST: i64 = -32600;
 pub const METHOD_NOT_FOUND: i64 = -32601;
 pub const INTERNAL_ERROR: i64 = -32603;
 pub const APPLICATION_ERROR: i64 = -32000;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RpcError {
-    pub code: i64,
-    pub message: String,
+#[derive(
+    Debug, Clone, PartialEq, PartialOrd, Ord, Deserialize, Serialize, Hash, Eq, JsonSchema,
+)]
+#[serde(untagged)]
+pub enum RequestId {
+    String(String),
+    Integer(i64),
+}
+
+impl fmt::Display for RequestId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::String(value) => f.write_str(value),
+            Self::Integer(value) => write!(f, "{value}"),
+        }
+    }
+}
+
+pub type Result = serde_json::Value;
+
+/// Refers to any valid JSON-RPC object that can be decoded off the wire, or encoded to be sent.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum JSONRPCMessage {
+    Request(JSONRPCRequest),
+    Notification(JSONRPCNotification),
+    Response(JSONRPCResponse),
+    Error(JSONRPCError),
+}
+
+/// A request that expects a response.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JSONRPCRequest {
+    pub id: RequestId,
+    pub method: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
+    pub params: Option<serde_json::Value>,
+    /// Optional W3C Trace Context for distributed tracing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<W3cTraceContext>,
 }
 
-impl RpcError {
-    pub fn new(code: i64, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), data: None }
-    }
+/// A notification which does not expect a response.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JSONRPCNotification {
+    pub method: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct IncomingMessage {
-    #[serde(default)]
-    pub jsonrpc: Option<String>,
-    #[serde(default)]
-    pub id: Option<Value>,
-    #[serde(default)]
-    pub method: Option<String>,
-    #[serde(default)]
-    pub params: Value,
-    #[serde(default)]
-    pub result: Option<Value>,
-    #[serde(default)]
-    pub error: Option<RpcError>,
+/// A successful (non-error) response to a request.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JSONRPCResponse {
+    pub id: RequestId,
+    pub result: Result,
 }
 
-impl IncomingMessage {
-    pub fn has_valid_version(&self) -> bool {
-        self.jsonrpc.as_deref() == Some(VERSION)
-    }
+/// A response to a request that indicates an error occurred.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JSONRPCError {
+    pub error: JSONRPCErrorError,
+    pub id: RequestId,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct RpcRequest<'a> {
-    pub jsonrpc: &'static str,
-    pub id: Value,
-    pub method: &'a str,
-    #[serde(default)]
-    pub params: Value,
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JSONRPCErrorError {
+    pub code: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+    pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct RpcNotification<'a> {
-    pub jsonrpc: &'static str,
-    pub method: &'a str,
-    #[serde(default)]
-    pub params: Value,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RpcOptionalRequest<'a> {
-    pub jsonrpc: &'static str,
-    pub id: Value,
-    pub method: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub params: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RpcOptionalNotification<'a> {
-    pub jsonrpc: &'static str,
-    pub method: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub params: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RpcResponse {
-    pub jsonrpc: &'static str,
-    pub id: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<RpcError>,
-}
-
-pub fn request(id: Value, method: &str, params: Value) -> RpcRequest<'_> {
-    RpcRequest { jsonrpc: VERSION, id, method, params }
-}
-
-pub fn request_with_optional_params(
-    id: Value,
-    method: &str,
-    params: Option<Value>,
-) -> RpcOptionalRequest<'_> {
-    RpcOptionalRequest { jsonrpc: VERSION, id, method, params }
-}
-
-pub fn notification(method: &str, params: Value) -> RpcNotification<'_> {
-    RpcNotification { jsonrpc: VERSION, method, params }
-}
-
-pub fn notification_with_optional_params(
-    method: &str,
-    params: Option<Value>,
-) -> RpcOptionalNotification<'_> {
-    RpcOptionalNotification { jsonrpc: VERSION, method, params }
-}
-
-pub fn success_response(id: Value, result: Value) -> RpcResponse {
-    RpcResponse { jsonrpc: VERSION, id, result: Some(result), error: None }
-}
-
-pub fn error_response(id: Value, code: i64, message: impl Into<String>) -> RpcResponse {
-    RpcResponse { jsonrpc: VERSION, id, result: None, error: Some(RpcError::new(code, message)) }
-}
-
-pub fn application_error_response(id: Value, message: impl Into<String>) -> RpcResponse {
-    error_response(id, APPLICATION_ERROR, message)
-}
-
-pub fn parse_message(line: &str) -> Result<IncomingMessage, serde_json::Error> {
-    serde_json::from_str(line)
-}
-
-pub fn serialize_response(response: &RpcResponse) -> String {
-    serde_json::to_string(response).unwrap_or_else(|error| {
-        format!(
-            "{{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{{\"code\":-32603,\"message\":\"failed to serialize response: {error}\"}}}}"
-        )
-    })
-}
-
-pub fn id_key(id: &Value) -> String {
-    match id {
-        Value::String(value) => value.clone(),
-        Value::Number(value) => value.to_string(),
-        other => other.to_string(),
-    }
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct W3cTraceContext {
+    pub traceparent: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracestate: Option<String>,
 }
 
 #[cfg(test)]
@@ -150,109 +105,129 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        APPLICATION_ERROR, IncomingMessage, RpcError, application_error_response, id_key,
-        notification, notification_with_optional_params, parse_message, request,
-        request_with_optional_params, serialize_response, success_response,
+        JSONRPCError, JSONRPCErrorError, JSONRPCMessage, JSONRPCNotification, JSONRPCRequest,
+        JSONRPCResponse, RequestId, W3cTraceContext,
     };
 
     #[test]
-    fn parses_single_request_envelope() {
-        let message =
-            parse_message(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#).expect("message");
+    fn request_id_serializes_and_displays_string_and_integer_ids() {
+        let string_id = RequestId::String("call-1".to_owned());
+        let integer_id = RequestId::Integer(42);
 
-        assert!(message.has_valid_version());
-        assert_eq!(message.id, Some(Value::from(1)));
-        assert_eq!(message.method.as_deref(), Some("ping"));
+        assert_eq!(string_id.to_string(), "call-1");
+        assert_eq!(integer_id.to_string(), "42");
+        assert_eq!(serde_json::to_value(&string_id).expect("string id json"), "call-1");
+        assert_eq!(serde_json::to_value(&integer_id).expect("integer id json"), 42);
+        assert_eq!(
+            serde_json::from_value::<RequestId>(json!("call-1")).expect("string request id"),
+            string_id
+        );
+        assert_eq!(
+            serde_json::from_value::<RequestId>(json!(42)).expect("integer request id"),
+            integer_id
+        );
+        assert!(RequestId::String("a".to_owned()) < RequestId::String("b".to_owned()));
     }
 
     #[test]
-    fn serializes_optional_request_without_params_when_absent() {
-        let request = request_with_optional_params(Value::from("call-1"), "plugin.call", None);
+    fn request_id_rejects_unsupported_json_id_types() {
+        for value in
+            [Value::Null, Value::Bool(true), json!({"id": "call-1"}), json!(["call-1"]), json!(1.5)]
+        {
+            assert!(serde_json::from_value::<RequestId>(value).is_err());
+        }
+    }
+
+    #[test]
+    fn parses_jsonrpc_message_variants() {
+        let request: JSONRPCMessage =
+            serde_json::from_str(r#"{"id":1,"method":"ping","params":{"ok":true}}"#)
+                .expect("request");
+        assert!(matches!(
+            request,
+            JSONRPCMessage::Request(JSONRPCRequest { id: RequestId::Integer(1), .. })
+        ));
+
+        let notification: JSONRPCMessage =
+            serde_json::from_str(r#"{"method":"ready"}"#).expect("notification");
+        assert!(matches!(notification, JSONRPCMessage::Notification(JSONRPCNotification { .. })));
+
+        let response: JSONRPCMessage =
+            serde_json::from_str(r#"{"id":"call-1","result":{"ok":true}}"#).expect("response");
+        assert!(matches!(
+            response,
+            JSONRPCMessage::Response(JSONRPCResponse { id: RequestId::String(_), .. })
+        ));
+
+        let error: JSONRPCMessage =
+            serde_json::from_str(r#"{"id":"call-1","error":{"code":-32000,"message":"failed"}}"#)
+                .expect("error");
+        assert!(matches!(error, JSONRPCMessage::Error(JSONRPCError { .. })));
+    }
+
+    #[test]
+    fn rejects_messages_with_invalid_request_ids() {
+        for payload in [
+            r#"{"id":null,"method":"ping"}"#,
+            r#"{"id":true,"method":"ping"}"#,
+            r#"{"id":{"bad":true},"method":"ping"}"#,
+            r#"{"id":["bad"],"method":"ping"}"#,
+        ] {
+            assert!(serde_json::from_str::<JSONRPCMessage>(payload).is_err());
+        }
+    }
+
+    #[test]
+    fn serializes_request_without_absent_optional_fields() {
+        let request = JSONRPCMessage::Request(JSONRPCRequest {
+            id: RequestId::String("call-1".to_owned()),
+            method: "plugin.call".to_owned(),
+            params: None,
+            trace: None,
+        });
+
         let value = serde_json::to_value(request).expect("request json");
 
-        assert_eq!(value["jsonrpc"], "2.0");
+        assert_eq!(value["id"], "call-1");
+        assert_eq!(value["method"], "plugin.call");
         assert!(value.get("params").is_none());
+        assert!(value.get("trace").is_none());
     }
 
     #[test]
-    fn serializes_requests_and_notifications_with_params_when_present() {
-        let request = request(Value::from(3), "plugin.call", json!({"name": "search"}));
-        let request_value = serde_json::to_value(request).expect("request json");
-        assert_eq!(request_value["jsonrpc"], "2.0");
-        assert_eq!(request_value["id"], 3);
-        assert_eq!(request_value["method"], "plugin.call");
-        assert_eq!(request_value["params"], json!({"name": "search"}));
+    fn serializes_request_with_w3c_trace_context() {
+        let request = JSONRPCMessage::Request(JSONRPCRequest {
+            id: RequestId::Integer(7),
+            method: "plugin.call".to_owned(),
+            params: Some(json!({"name": "search"})),
+            trace: Some(W3cTraceContext {
+                traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_owned(),
+                tracestate: Some("vendor=value".to_owned()),
+            }),
+        });
 
-        let notification = notification("plugin.ready", json!({"ok": true}));
-        let notification_value = serde_json::to_value(notification).expect("notification json");
-        assert_eq!(notification_value["jsonrpc"], "2.0");
-        assert!(notification_value.get("id").is_none());
-        assert_eq!(notification_value["params"], json!({"ok": true}));
+        let value = serde_json::to_value(request).expect("request json");
+
+        assert_eq!(value["params"], json!({"name": "search"}));
+        assert_eq!(
+            value["trace"]["traceparent"],
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        );
+        assert_eq!(value["trace"]["tracestate"], "vendor=value");
     }
 
     #[test]
-    fn serializes_optional_notifications_without_absent_params() {
-        let notification = notification_with_optional_params("plugin.ready", None);
-        let value = serde_json::to_value(notification).expect("notification json");
-
-        assert_eq!(value["jsonrpc"], "2.0");
-        assert_eq!(value["method"], "plugin.ready");
-        assert!(value.get("id").is_none());
-        assert!(value.get("params").is_none());
-    }
-
-    #[test]
-    fn serializes_success_and_error_responses() {
-        let success = serialize_response(&success_response(Value::from(7), json!({"ok": true})));
-        assert_eq!(success, r#"{"jsonrpc":"2.0","id":7,"result":{"ok":true}}"#);
-
-        let error = application_error_response(Value::from("call-1"), "failed");
-        assert_eq!(error.error.as_ref().expect("error").code, APPLICATION_ERROR);
-    }
-
-    #[test]
-    fn omits_error_data_when_absent() {
-        let error = RpcError::new(-32600, "bad request");
-        let value = serde_json::to_value(error).expect("error json");
-        assert!(value.get("data").is_none());
-    }
-
-    #[test]
-    fn preserves_error_data_and_response_envelopes_when_parsing() {
-        let error = RpcError {
-            code: -32600,
-            message: "bad request".to_string(),
-            data: Some(json!({"path": "params.name"})),
+    fn omits_absent_tracestate_and_error_data() {
+        let trace = W3cTraceContext {
+            traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_owned(),
+            tracestate: None,
         };
-        let value = serde_json::to_value(error).expect("error json");
-        assert_eq!(value["data"], json!({"path": "params.name"}));
+        let trace_value = serde_json::to_value(trace).expect("trace json");
+        assert!(trace_value.get("tracestate").is_none());
 
-        let message = parse_message(
-            r#"{"jsonrpc":"2.0","id":"call-1","error":{"code":-32000,"message":"failed","data":{"retry":false}}}"#,
-        )
-        .expect("response message");
-
-        assert!(message.has_valid_version());
-        assert_eq!(message.id, Some(Value::from("call-1")));
-        assert!(message.method.is_none());
-        let error = message.error.expect("response error");
-        assert_eq!(error.code, APPLICATION_ERROR);
-        assert_eq!(error.data, Some(json!({"retry": false})));
-    }
-
-    #[test]
-    fn normalizes_id_keys() {
-        assert_eq!(id_key(&Value::from("abc")), "abc");
-        assert_eq!(id_key(&Value::from(42)), "42");
-        assert_eq!(id_key(&Value::Null), "null");
-        assert_eq!(id_key(&Value::Bool(true)), "true");
-    }
-
-    #[test]
-    fn invalid_version_is_detected_without_rejecting_parse() {
-        let message: IncomingMessage =
-            parse_message(r#"{"jsonrpc":"1.0","id":1,"method":"ping"}"#).expect("message");
-
-        assert!(!message.has_valid_version());
+        let error =
+            JSONRPCErrorError { code: -32600, data: None, message: "bad request".to_owned() };
+        let error_value = serde_json::to_value(error).expect("error json");
+        assert!(error_value.get("data").is_none());
     }
 }

@@ -13,17 +13,20 @@ use slab_types::{ConversationMessage, agent::ToolCallStatus};
 
 use crate::{
     error::AgentError,
-    event::{AgentArtifactKind, AgentArtifactRef, AgentEventKind, ToolRiskAssessment},
     hook::{HookEvent, HookToolAction, dispatch_registered_hooks},
-    port::{ApprovalDecision, ParsedToolCall, TurnEvent},
-    risk::ToolApprovalDecision,
+    port::{ApprovalDecision, ParsedToolCall, ToolRiskAssessment},
+    protocol::{
+        CommandExecutionOutputDeltaParams, CommandExecutionRequestApprovalParams, EventMsg,
+        FileChangeOutputDeltaParams, ItemCompletedParams, ItemStartedParams, TurnItem,
+    },
     state::ToolCallStateMachine,
-    tool::{PlanRef, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput},
+    tool::{
+        PlanRef, ToolApprovalRequest, ToolCallRender, ToolContext, ToolHandler, ToolOutput,
+        ToolOutputObserver, ToolOutputStream,
+    },
     turn::TurnExecutionContext,
     turn_tool_record::{
-        insert_tool_call_record, persist_tool_message_record,
-        record_failed_tool_call_without_persisting_message, tool_execution_status,
-        update_tool_call_record, update_tool_call_status,
+        persist_tool_message_record, record_failed_tool_call_without_persisting_message,
     },
 };
 
@@ -37,12 +40,52 @@ const TASK_COMPLETE_TOOL_NAME: &str = "task.complete";
 /// Mirrors `slab_agent_tools::TASK_COMPLETE_METADATA_KEY`.
 const TASK_COMPLETE_METADATA_KEY: &str = "task_complete";
 
+/// Tool name for on-demand Deferred-tool discovery. Mirrors
+/// `slab_agent_tools::TOOL_SEARCH_TOOL_NAME`; duplicated here because
+/// `slab-agent` cannot depend on `slab-agent-tools` (dependency direction is
+/// reversed). `tool_search` is intercepted by the dispatch layer before
+/// execution — see [`handle_tool_search`].
+const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
+
+/// Tool name that presents the current plan for user approval. Mirrors
+/// `slab_agent_tools::PRESENT_PLAN_TOOL_NAME`; duplicated here because
+/// `slab-agent` cannot depend on `slab-agent-tools`. The loop detects the call
+/// by name and drives the approval gate; the plan snapshot travels in the
+/// tool's content (the metadata marker is a producer-side signal only).
+const PRESENT_PLAN_TOOL_NAME: &str = "present_plan";
+
+/// Plan-authoring tool names. Mirror `slab_agent_tools::{PLAN,UPDATE_PLAN}_TOOL_NAME`.
+const PLAN_TOOL_NAME: &str = "plan";
+const UPDATE_PLAN_TOOL_NAME: &str = "update_plan";
+
+/// Metadata key under which `present_plan` nests the plan snapshot. Mirrors
+/// `slab_agent_tools::PRESENT_PLAN_METADATA_KEY`.
+const PRESENT_PLAN_METADATA_KEY: &str = "present_plan";
+
+/// Extract the structured plan snapshot a plan tool stashed in its `metadata`.
+///
+/// `plan` / `update_plan` carry the plan as the metadata object itself;
+/// `present_plan` nests it under [`PRESENT_PLAN_METADATA_KEY`]. Shared by the
+/// loop-side `TurnItem::Plan` synthesis (UI card) and the approval-request
+/// `plan_snapshot` (rich approval card). Returns `None` for other tools or when
+/// no snapshot is present (e.g. a failed call).
+fn plan_snapshot_for(
+    name: &str,
+    metadata: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let metadata = metadata?;
+    match name {
+        PLAN_TOOL_NAME | UPDATE_PLAN_TOOL_NAME => Some(metadata.clone()),
+        PRESENT_PLAN_TOOL_NAME => metadata.get(PRESENT_PLAN_METADATA_KEY).cloned(),
+        _ => None,
+    }
+}
+
 /// Structured completion payload extracted from a successful `task.complete`
 /// tool call. Consumed by the turn loop to emit the final answer (双轨 2).
 #[derive(Debug, Clone)]
 pub(crate) struct TaskCompletion {
     pub summary: String,
-    pub artifact_refs: Vec<AgentArtifactRef>,
 }
 
 /// Parse a [`TaskCompletion`] out of a tool's metadata marker, when the tool
@@ -53,31 +96,365 @@ fn parse_task_completion(metadata: Option<&serde_json::Value>) -> Option<TaskCom
     if summary.is_empty() {
         return None;
     }
-    let artifact_refs = marker
-        .get("artifact_refs")
-        .and_then(|refs| refs.as_array())
-        .map(|refs| refs.iter().filter_map(parse_artifact_ref).collect())
-        .unwrap_or_default();
-    Some(TaskCompletion { summary, artifact_refs })
-}
-
-fn parse_artifact_ref(value: &serde_json::Value) -> Option<AgentArtifactRef> {
-    let path = value.get("path")?.as_str()?.trim();
-    if path.is_empty() {
-        return None;
-    }
-    let kind = match value.get("kind").and_then(|kind| kind.as_str()).map(str::to_ascii_lowercase) {
-        Some(ref kind) if kind == "diff" => AgentArtifactKind::Diff,
-        Some(ref kind) if kind == "image" => AgentArtifactKind::Image,
-        _ => AgentArtifactKind::File,
-    };
-    Some(AgentArtifactRef { path: path.to_owned(), kind })
+    Some(TaskCompletion { summary })
 }
 
 struct ToolCallRunResult {
     message: ConversationMessage,
     status: ToolCallStatus,
     task_completion: Option<TaskCompletion>,
+}
+
+// ── Harness-protocol (EventMsg) tool-item emits ───────────────────────────────
+//
+// slab-agent emits the harness protocol directly (the `EventMsg`/`TurnItem`
+// surface in `crate::protocol`). This is what makes tool calls visible to the
+// harness WS fan-out and turn-item persistence (bug 1). The legacy
+// `AgentEventKind`/`/responses` emits left this crate.
+
+/// Workspace root for `CommandExecution.cwd`, or `None` when no workspace is bound.
+fn workspace_root_of(context: &TurnExecutionContext<'_>) -> Option<String> {
+    context.thread_context.workspace.as_ref().map(|w| w.root.to_string_lossy().into_owned())
+}
+
+/// Resolve a tool call to its harness [`TurnItem`].
+///
+/// Tools own their render via [`ToolHandler::render_turn_item`]; this looks up
+/// the handler and delegates, falling back to the generic
+/// [`default_tool_turn_item`] for tools not in the registry. `status` is
+/// `"running"` for `ItemStarted`, `"completed"`/`"failed"` for `ItemCompleted`;
+/// `output` is the tool result text (filled only on completion). The item id is
+/// the provider-assigned `tool_call.id`.
+#[allow(clippy::too_many_arguments)]
+fn render_tool_call_item(
+    handler: Option<&dyn ToolHandler>,
+    tool_call: &ParsedToolCall,
+    args: &serde_json::Value,
+    status: &str,
+    output: Option<&str>,
+    workspace_root: Option<&str>,
+    exit_code: Option<i64>,
+    duration_ms: Option<u64>,
+) -> TurnItem {
+    let render = ToolCallRender {
+        call: tool_call,
+        args,
+        status,
+        output,
+        workspace_root,
+        exit_code,
+        duration_ms,
+    };
+    match handler {
+        Some(handler) => handler.render_turn_item(&render),
+        None => crate::tool::default_tool_turn_item(&render),
+    }
+}
+
+/// Handle a `tool_search` call: match the query against Deferred tool specs,
+/// inject the hits into the per-thread discovery state, and return the matched
+/// specs (schema-compacted) to the model.
+///
+/// Bypasses hooks/risk/approval (read-only registry query). Emits the standard
+/// ItemStarted/ItemCompleted pair so the call is visible on the harness
+/// timeline, and records the result as a tool message so it reaches the LLM.
+async fn handle_tool_search(
+    context: &TurnExecutionContext<'_>,
+    tool_call: &ParsedToolCall,
+    args: &serde_json::Value,
+    _created_at: &str,
+) -> Result<ToolCallRunResult, AgentError> {
+    let query = args.get("query").and_then(serde_json::Value::as_str).unwrap_or("");
+    let namespace = args.get("namespace").and_then(serde_json::Value::as_str);
+    let q = query.to_ascii_lowercase();
+
+    let matched: Vec<_> = context
+        .tools
+        .deferred_tool_specs()
+        .into_iter()
+        .filter(|spec| {
+            if namespace.is_some_and(|ns| {
+                crate::tool::ToolName::parse_wire(&spec.name).namespace.as_str() != ns
+            }) {
+                return false;
+            }
+            if q.is_empty() {
+                return true;
+            }
+            spec.name.to_ascii_lowercase().contains(&q)
+                || spec.description.to_ascii_lowercase().contains(&q)
+        })
+        .collect();
+
+    // Inject every hit so it becomes visible/callable on subsequent turns.
+    for spec in &matched {
+        context.tool_discovery.inject(&spec.name);
+    }
+
+    let summarized: Vec<serde_json::Value> = matched
+        .iter()
+        .map(|spec| {
+            serde_json::json!({
+                "name": spec.name,
+                "description": spec.description,
+                "parameters": crate::tool_schema::process_tool_schema(&spec.parameters_schema),
+            })
+        })
+        .collect();
+    let content = serde_json::to_string(&serde_json::Value::Array(summarized))
+        .unwrap_or_else(|_| "[]".to_owned());
+
+    // Emit the standard start→complete pair. tool_search renders via its
+    // handler's render_turn_item (the generic CommandExecution fallback — no
+    // dedicated TurnItem variant for discovery).
+    let workspace_root = workspace_root_of(context);
+    let handler = context.tools.get(tool_call.name.as_str());
+    emit_item_started(
+        context,
+        render_tool_call_item(
+            handler.as_deref(),
+            tool_call,
+            args,
+            "running",
+            None,
+            workspace_root.as_deref(),
+            None,
+            None,
+        ),
+    )
+    .await;
+    emit_item_completed(
+        context,
+        render_tool_call_item(
+            handler.as_deref(),
+            tool_call,
+            args,
+            "completed",
+            Some(&content),
+            workspace_root.as_deref(),
+            None,
+            None,
+        ),
+    )
+    .await;
+
+    let message = crate::turn_tool_record::tool_message(tool_call, content);
+    Ok(ToolCallRunResult { message, status: ToolCallStatus::Completed, task_completion: None })
+}
+
+/// Emit `EventMsg::ItemStarted` for `item` on the harness channel.
+async fn emit_item_started(context: &TurnExecutionContext<'_>, item: TurnItem) {
+    let msg = EventMsg::ItemStarted(ItemStartedParams {
+        item,
+        thread_id: context.thread_id.to_owned(),
+        turn_id: context.turn_index.to_string(),
+    });
+    context.notify.on_event_msg(context.thread_id, &msg).await;
+}
+
+/// Emit `EventMsg::ItemCompleted` for `item` on the harness channel.
+async fn emit_item_completed(context: &TurnExecutionContext<'_>, item: TurnItem) {
+    let msg = EventMsg::ItemCompleted(ItemCompletedParams {
+        item,
+        thread_id: context.thread_id.to_owned(),
+        turn_id: context.turn_index.to_string(),
+    });
+    context.notify.on_event_msg(context.thread_id, &msg).await;
+}
+
+/// Emit `EventMsg::CommandExecutionOutputDelta` for a running command item.
+/// Display-only: the finalized output still arrives via `item/completed`.
+async fn emit_command_output_delta(context: &TurnExecutionContext<'_>, item_id: &str, delta: &str) {
+    let msg = EventMsg::CommandExecutionOutputDelta(CommandExecutionOutputDeltaParams {
+        thread_id: context.thread_id.to_owned(),
+        turn_id: context.turn_index.to_string(),
+        item_id: item_id.to_owned(),
+        delta: delta.to_owned(),
+    });
+    context.notify.on_event_msg(context.thread_id, &msg).await;
+}
+
+/// Emit `EventMsg::FileChangeOutputDelta` for a running `apply_patch` item.
+/// Each delta is a JSON line `{"path": ..., "kind": ...}` reporting a file
+/// committed mid-apply; the finalized change set still arrives via
+/// `item/completed`.
+async fn emit_file_change_delta(context: &TurnExecutionContext<'_>, item_id: &str, delta: &str) {
+    let msg = EventMsg::FileChangeOutputDelta(FileChangeOutputDeltaParams {
+        thread_id: context.thread_id.to_owned(),
+        turn_id: context.turn_index.to_string(),
+        item_id: item_id.to_owned(),
+        delta: delta.to_owned(),
+    });
+    context.notify.on_event_msg(context.thread_id, &msg).await;
+}
+
+/// [`ToolOutputObserver`] that funnels incremental tool output into a channel a
+/// concurrent drain task forwards to `emit_command_output_delta`.
+struct ChannelToolOutputObserver {
+    sender: tokio::sync::mpsc::UnboundedSender<String>,
+}
+
+impl ToolOutputObserver for ChannelToolOutputObserver {
+    fn on_output(&self, _stream: ToolOutputStream, delta: &str) {
+        let _ = self.sender.send(delta.to_string());
+    }
+}
+
+/// Emit a well-formed `ItemStarted` + `ItemCompleted(failed)` pair for a tool
+/// call that never reaches the normal execution path (argument-parse failure,
+/// hook block, policy deny, invalid tool call).
+///
+/// Every `item_id` the client ever observes must have a start→complete
+/// lifecycle; callers that bail before the success-path `ItemStarted` use this
+/// so a lone `ItemCompleted` never appears for an unseen item.
+pub(crate) async fn emit_tool_item_failed(
+    context: &TurnExecutionContext<'_>,
+    tool_call: &ParsedToolCall,
+    args: &serde_json::Value,
+    output: &str,
+) {
+    let workspace_root = workspace_root_of(context);
+    let handler = context.tools.get(&tool_call.name);
+    let started = render_tool_call_item(
+        handler.as_deref(),
+        tool_call,
+        args,
+        "running",
+        None,
+        workspace_root.as_deref(),
+        None,
+        None,
+    );
+    emit_item_started(context, started).await;
+    let completed = render_tool_call_item(
+        handler.as_deref(),
+        tool_call,
+        args,
+        "failed",
+        Some(output),
+        workspace_root.as_deref(),
+        None,
+        None,
+    );
+    emit_item_completed(context, completed).await;
+}
+
+/// The full set of persistence scopes a client may offer when approving.
+/// Mirrors the harness projection's `default_allowed_scopes` so the approval
+/// banner offers the same choices on the `EventMsg` path.
+fn default_allowed_scopes() -> Vec<slab_exec_policy::ApprovalScope> {
+    use slab_exec_policy::ApprovalScope;
+    vec![
+        ApprovalScope::RunOnce,
+        ApprovalScope::AlwaysInWorkspace,
+        ApprovalScope::Always,
+        ApprovalScope::Deny,
+    ]
+}
+
+/// Emit `EventMsg::CommandExecutionRequestApproval` for a tool that the
+/// exec-policy engine gated behind approval. `item_id` is the per-call UUID
+/// (`call_id`) — the same key the approval resolution flow correlates on, so
+/// the client can match the banner back to the pending decision.
+async fn emit_approval_request(run: &ToolRunContext<'_, '_>) {
+    let Some(request) = &run.approval_request else {
+        return;
+    };
+    let msg = EventMsg::CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams {
+        thread_id: run.context.thread_id.to_owned(),
+        turn_id: run.context.turn_index.to_string(),
+        item_id: run.call_id.to_owned(),
+        command: request.display.clone(),
+        cwd: String::new(),
+        reason: None,
+        category: Some(request.descriptor.category),
+        allowed_scopes: default_allowed_scopes(),
+        plan_snapshot: None,
+    });
+    run.context.notify.on_event_msg(run.context.thread_id, &msg).await;
+}
+
+/// Drive the `present_plan` approval gate after the tool ran. Emits the plan
+/// for approval via the existing `CommandExecutionRequestApproval` channel
+/// (plan summary shown as `command`), awaits the host approval decision, and
+/// returns the verdict. On approval the caller (the UI, by clearing the plan
+/// chip) runs the next turn as the default agent with the full tool set — this
+/// gate no longer flips a server-side mode. Returns the content + status to
+/// surface as the tool result (the verdict flows back to the LLM as the tool
+/// output).
+async fn drive_present_plan_approval(
+    context: &TurnExecutionContext<'_>,
+    call_id: &str,
+    plan_summary: String,
+    plan_snapshot: Option<serde_json::Value>,
+    risk: &ToolRiskAssessment,
+) -> Result<(String, ToolCallStatus), AgentError> {
+    use slab_exec_policy::{OperationCategory, OperationDescriptor};
+
+    let descriptor = OperationDescriptor::read_only("present_plan".to_owned());
+    let msg = EventMsg::CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams {
+        thread_id: context.thread_id.to_owned(),
+        turn_id: context.turn_index.to_string(),
+        item_id: call_id.to_owned(),
+        command: plan_summary,
+        cwd: String::new(),
+        reason: Some("Plan ready for approval".to_owned()),
+        category: Some(OperationCategory::ReadOnly),
+        allowed_scopes: default_allowed_scopes(),
+        plan_snapshot,
+    });
+    context.notify.on_event_msg(context.thread_id, &msg).await;
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "plan_approval_required",
+        serde_json::json!({ "item_id": call_id, "tool_name": PRESENT_PLAN_TOOL_NAME }),
+    );
+
+    let decision = tokio::select! {
+        decision = context.approval.request_approval(
+            context.thread_id,
+            call_id,
+            PRESENT_PLAN_TOOL_NAME,
+            &descriptor,
+            Some(risk.clone()),
+        ) => decision,
+        _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+    };
+
+    Ok(match decision {
+        ApprovalDecision::Approved(_) => {
+            record_json(
+                context.trace,
+                &context.trace_context,
+                "slab-agent",
+                "plan_approval_resolved",
+                serde_json::json!({ "item_id": call_id, "approved": true }),
+            );
+            // On approval the caller (the UI, by clearing the plan chip) runs the
+            // next turn as the default agent with the full tool set. Mutation
+            // tools stay hidden for the remainder of THIS turn (agent_type can't
+            // change mid-turn) — tell the model to wrap up and stop.
+            (
+                "Plan approved. Summarize the next steps in one sentence and end your turn; full tools become available on your next message.".to_owned(),
+                ToolCallStatus::Completed,
+            )
+        }
+        ApprovalDecision::Rejected => {
+            record_json(
+                context.trace,
+                &context.trace_context,
+                "slab-agent",
+                "plan_approval_resolved",
+                serde_json::json!({ "item_id": call_id, "approved": false }),
+            );
+            (
+                "Plan not approved. Stay in Plan mode, revise the plan, and call present_plan again when ready.".to_owned(),
+                ToolCallStatus::Failed,
+            )
+        }
+    })
 }
 
 /// Execute the given tool calls and persist their results.
@@ -92,7 +469,8 @@ pub(crate) async fn handle_tool_calls(
 ) -> Result<Option<TaskCompletion>, AgentError> {
     let mut tool_context_builder = ToolContext::for_thread(context.thread_id)
         .turn_index(context.turn_index)
-        .depth(context.depth);
+        .depth(context.depth)
+        .plan_store(Arc::clone(&context.plan_store));
     if let Some(workspace) = context.thread_context.workspace.as_ref() {
         let mut workspace = workspace.clone();
         if workspace.session_id.is_none() {
@@ -191,16 +569,6 @@ async fn emit_tool_concurrency_started(
             "concurrency": concurrency,
         }),
     );
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseToolCallConcurrencyStarted { total, concurrency },
-            },
-        )
-        .await;
 }
 
 async fn emit_tool_concurrency_completed(
@@ -220,20 +588,6 @@ async fn emit_tool_concurrency_completed(
             "failed": failed,
         }),
     );
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseToolCallConcurrencyCompleted {
-                    total,
-                    completed,
-                    failed,
-                },
-            },
-        )
-        .await;
 }
 
 async fn handle_tool_call(
@@ -294,6 +648,7 @@ async fn handle_tool_call(
                 "failed to parse tool call arguments as JSON"
             );
             let output = format!("invalid tool call arguments: {error}");
+            emit_tool_item_failed(context, tool_call, &serde_json::Value::Null, &output).await;
             let message = record_failed_tool_call_without_persisting_message(
                 context, &call_id, tool_call, output, created_at,
             )
@@ -317,6 +672,16 @@ async fn handle_tool_call(
             "arguments": parsed_args,
         }),
     );
+
+    // `tool_search` is a read-only meta-op that discovers Deferred tools and
+    // injects them into the per-thread discovery state. Intercept it BEFORE
+    // hooks/risk/approval: it needs registry + discovery access that live in the
+    // dispatch layer (not on `ToolContext`), and a registry query must not be
+    // approval-gated. Uses pre-hook `parsed_args` (the hook may ModifyArgs for
+    // real tools, but tool_search bypasses hooks entirely).
+    if tool_call.name == TOOL_SEARCH_TOOL_NAME {
+        return handle_tool_search(context, tool_call, &parsed_args, created_at).await;
+    }
 
     let pre_event = HookEvent::OnToolStart {
         thread_id: context.thread_id.to_owned(),
@@ -351,6 +716,7 @@ async fn handle_tool_call(
                 reason = %output,
                 "tool call blocked by hook"
             );
+            emit_tool_item_failed(context, tool_call, &parsed_args, &output).await;
             let message = record_failed_tool_call_without_persisting_message(
                 context, &call_id, tool_call, output, created_at,
             )
@@ -378,58 +744,130 @@ async fn handle_tool_call(
         "agent function call arguments done"
     );
 
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseFunctionCallArgumentsDone {
-                    item_id: tool_call.id.clone(),
-                    call_id: call_id.clone(),
-                    name: tool_call.name.clone(),
-                    output_index: 0,
-                    arguments: effective_arguments.clone(),
-                    risk: Some(risk.clone()),
-                },
-            },
-        )
-        .await;
-
     let handler = context.tools.get(&tool_call.name);
-    let approval_request = handler
+    // Unified permission decision (slab-exec-policy). The descriptor is built
+    // from the tool's own `describe_operation`, falling back to a name-based
+    // inference. The engine is the SINGLE owner of Allow/RequireApproval/Deny —
+    // this replaces the legacy per-tool `approval_request` + risk-fallback pair
+    // that could disagree (the approve-then-block bug).
+    let descriptor = handler
         .as_ref()
-        .and_then(|handler| handler.approval_request(&effective_args))
-        .or_else(|| {
-            // ADR-008: when the tool has no own approval metadata, the
-            // configured risk policy decides (default asks for Medium+ tools).
-            if context.risk.approval_decision(&risk) == ToolApprovalDecision::Ask {
-                Some(ToolApprovalRequest {
-                    command: format!("{} {effective_arguments}", tool_call.name),
-                })
-            } else {
-                None
-            }
-        });
+        .and_then(|handler| handler.describe_operation(&effective_args))
+        .or_else(|| infer_descriptor(&tool_call.name, &effective_args, context))
+        .unwrap_or_else(|| slab_exec_policy::OperationDescriptor::read_only(tool_call.name.clone()))
+        .with_tool_name(tool_call.name.clone());
+    // Backfill the workspace root when the tool did not set it (shell,
+    // web_search, …). The acceptEdits FileEdit-containment check needs it, and
+    // without it a remembered AlwaysInWorkspace approval for such a tool would
+    // leak into the global default.rules (the store falls back when the
+    // descriptor carries no workspace).
+    let descriptor = if descriptor.workspace_root.is_none() {
+        descriptor.with_workspace(workspace_root_of(context).map(std::path::PathBuf::from))
+    } else {
+        descriptor
+    };
+    let decision = context.exec_policy.evaluate(context.thread_id, &descriptor).await;
+    let approval_request = match decision {
+        slab_exec_policy::ExecDecision::Allow => None,
+        slab_exec_policy::ExecDecision::Deny => {
+            // Hard refusal by policy: do NOT request approval — return blocked
+            // output immediately so the model learns the operation is refused.
+            record_json(
+                context.trace,
+                &context.trace_context,
+                "slab-agent",
+                "tool_call_blocked_by_policy",
+                serde_json::json!({
+                    "item_id": tool_call.id,
+                    "call_id": call_id,
+                    "tool_name": tool_call.name,
+                    "category": descriptor.category.as_str(),
+                }),
+            );
+            let output = "tool call blocked by permission policy".to_string();
+            emit_tool_item_failed(context, tool_call, &effective_args, &output).await;
+            let message = record_failed_tool_call_without_persisting_message(
+                context, &call_id, tool_call, output, created_at,
+            )
+            .await?;
+            return Ok(ToolCallRunResult {
+                message,
+                status: ToolCallStatus::Failed,
+                task_completion: None,
+            });
+        }
+        slab_exec_policy::ExecDecision::RequireApproval => Some(ToolApprovalRequest {
+            descriptor: descriptor.clone(),
+            display: descriptor.subject.clone(),
+        }),
+    };
     let initial_status =
         if approval_request.is_some() { ToolCallStatus::Pending } else { ToolCallStatus::Running };
     let mut tool_state = ToolCallStateMachine::new(initial_status);
-    insert_tool_call_record(context, &call_id, tool_call, tool_state.status(), created_at).await;
-
-    let (tool_output, call_status) = run_tool_with_optional_approval(ToolRunContext {
+    let workspace_root = workspace_root_of(context);
+    emit_item_started(
         context,
-        call_id: &call_id,
-        tool_call,
-        tool_context,
-        effective_args: &effective_args,
-        effective_arguments: &effective_arguments,
-        risk: &risk,
-        handler,
-        approval_request,
-        tool_state: &mut tool_state,
-    })
-    .await?;
-    let call_status = tool_state.transition(call_status)?;
+        render_tool_call_item(
+            handler.as_deref(),
+            tool_call,
+            &effective_args,
+            "running",
+            None,
+            workspace_root.as_deref(),
+            None,
+            None,
+        ),
+    )
+    .await;
+
+    // Stream incremental command output (display-only) while the tool runs. A
+    // channel-backed observer on the tool context forwards each delta to the
+    // harness; the finalized result still arrives via `item/completed` below.
+    let item_id = tool_call.id.clone();
+    let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let started = Instant::now();
+    let run = async {
+        // The streaming context (and the sender inside it) is dropped at the end
+        // of this block, which closes the channel so the drain below terminates.
+        let mut streaming_context = tool_context.clone();
+        streaming_context.output =
+            Some(Arc::new(ChannelToolOutputObserver { sender: delta_tx })
+                as Arc<dyn ToolOutputObserver>);
+        run_tool_with_optional_approval(ToolRunContext {
+            context,
+            call_id: &call_id,
+            tool_call,
+            tool_context: &streaming_context,
+            effective_args: &effective_args,
+            effective_arguments: &effective_arguments,
+            risk: &risk,
+            handler,
+            approval_request,
+            tool_state: &mut tool_state,
+        })
+        .await
+    };
+    let drain = async {
+        while let Some(delta) = delta_rx.recv().await {
+            if tool_call.name == "apply_patch" {
+                emit_file_change_delta(context, &item_id, &delta).await;
+            } else {
+                emit_command_output_delta(context, &item_id, &delta).await;
+            }
+        }
+    };
+    let (run_result, ()) = tokio::join!(run, drain);
+    let (tool_output, call_status) = run_result?;
+    let duration_ms = started.elapsed().as_millis() as u64;
+    // Best-effort: surface the shell exit code on the completed item.
+    let shell_exit_code = if tool_call.name == "shell" {
+        serde_json::from_str::<serde_json::Value>(&tool_output.content)
+            .ok()
+            .and_then(|v| v.get("exit_code").and_then(|c| c.as_i64()))
+    } else {
+        None
+    };
+    let mut call_status = tool_state.transition(call_status)?;
     if context.cancellation.is_cancelled() {
         return Err(AgentError::Interrupted);
     }
@@ -443,7 +881,30 @@ async fn handle_tool_call(
             None
         };
 
-    let mut content = tool_output.content;
+    // A successful `present_plan` raises the plan for user approval via the same
+    // approval channel as RequireApproval operations. On approval the thread
+    // flips to Default interaction mode (mutation tools re-appear next turn); on
+    // rejection it stays in Plan mode and the verdict flows back to the LLM as
+    // the tool result. The plan summary shown in the approval card is the tool's
+    // own content; the metadata marker is the loop-side signal (mirrors the
+    // `task.complete` detection pattern).
+    let mut content =
+        if tool_call.name == PRESENT_PLAN_TOOL_NAME && call_status == ToolCallStatus::Completed {
+            let plan_snapshot =
+                plan_snapshot_for(PRESENT_PLAN_TOOL_NAME, tool_output.metadata.as_ref());
+            let (approved_content, resolved_status) = drive_present_plan_approval(
+                context,
+                &call_id,
+                tool_output.content.clone(),
+                plan_snapshot,
+                &risk,
+            )
+            .await?;
+            call_status = resolved_status;
+            approved_content
+        } else {
+            tool_output.content
+        };
     info!(
         thread_id = context.thread_id,
         turn_index = context.turn_index,
@@ -476,30 +937,34 @@ async fn handle_tool_call(
         messages: messages.to_vec(),
         call_id: call_id.clone(),
         tool_name: tool_call.name.clone(),
-        arguments: effective_args,
+        arguments: effective_args.clone(),
         output: content.clone(),
         status: call_status,
     };
     let post_effects = dispatch_registered_hooks(context.hooks, &post_event).await;
     append_hook_observations(&mut content, post_effects.observations);
 
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseToolCallOutput {
-                    item_id: tool_call.id.clone(),
-                    call_id: call_id.clone(),
-                    output: content.clone(),
-                    status: tool_execution_status(call_status),
-                },
-            },
-        )
-        .await;
+    let item_status =
+        if matches!(call_status, ToolCallStatus::Completed) { "completed" } else { "failed" };
+    // Plan-authoring tools stash the structured plan in `metadata`, which the
+    // generic render path can't see. Synthesize a `TurnItem::Plan` (UI card)
+    // when a snapshot is present; otherwise fall back to the tool's own render.
+    // Mirrors the loop-side `task.complete` / `present_plan` detection pattern.
+    let completed_item = match plan_snapshot_for(&tool_call.name, tool_output.metadata.as_ref()) {
+        Some(plan) => TurnItem::Plan { id: tool_call.id.clone(), plan },
+        _ => render_tool_call_item(
+            context.tools.get(&tool_call.name).as_deref(),
+            tool_call,
+            &effective_args,
+            item_status,
+            Some(&content),
+            workspace_root.as_deref(),
+            shell_exit_code,
+            Some(duration_ms),
+        ),
+    };
+    emit_item_completed(context, completed_item).await;
 
-    update_tool_call_record(context, &call_id, Some(&content), call_status).await;
     let message = crate::turn_tool_record::tool_message(tool_call, content);
 
     Ok(ToolCallRunResult { message, status: call_status, task_completion })
@@ -524,6 +989,7 @@ async fn run_tool_with_optional_approval(
     let Some(ref request) = run.approval_request else {
         return run_tool_without_approval(&run).await;
     };
+    emit_approval_request(&run).await;
 
     record_json(
         run.context.trace,
@@ -534,7 +1000,8 @@ async fn run_tool_with_optional_approval(
             "item_id": run.tool_call.id,
             "call_id": run.call_id,
             "tool_name": run.tool_call.name,
-            "command": &request.command,
+            "command": &request.display,
+            "category": request.descriptor.category.as_str(),
             "risk": run.risk,
         }),
     );
@@ -552,20 +1019,25 @@ async fn run_tool_with_optional_approval(
             run.context.thread_id,
             run.call_id,
             &run.tool_call.name,
-            &request.command,
+            &request.descriptor,
             Some(run.risk.clone()),
         ) => decision,
         _ = run.context.cancellation.cancelled() => return Err(AgentError::Interrupted),
     };
 
     match decision {
-        ApprovalDecision::Approved => {
+        ApprovalDecision::Approved(scope) => {
             emit_approval_resolved(&run, true).await;
+            // Persist the user's scope as a rule (no-op for RunOnce/Deny) so
+            // future identical operations skip the prompt.
+            run.context
+                .exec_policy
+                .remember(run.context.thread_id, &request.descriptor, scope)
+                .await;
             if run.context.cancellation.is_cancelled() {
                 return Err(AgentError::Interrupted);
             }
-            let running_status = run.tool_state.transition(ToolCallStatus::Running)?;
-            update_tool_call_status(run.context, run.call_id, running_status).await;
+            run.tool_state.transition(ToolCallStatus::Running)?;
             emit_tool_execution_started(&run).await;
             Ok(tokio::select! {
                 result = execute_tool_call(
@@ -632,21 +1104,6 @@ async fn emit_approval_resolved(run: &ToolRunContext<'_, '_>, approved: bool) {
         status = if approved { "approved" } else { "rejected" },
         "agent tool call approval resolved"
     );
-    run.context
-        .notify
-        .on_turn_event(
-            run.context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(run.context.turn_index),
-                event: AgentEventKind::ResponseToolCallApprovalResolved {
-                    item_id: run.tool_call.id.clone(),
-                    call_id: run.call_id.to_owned(),
-                    tool_name: run.tool_call.name.clone(),
-                    approved,
-                },
-            },
-        )
-        .await;
 }
 
 async fn emit_tool_execution_started(run: &ToolRunContext<'_, '_>) {
@@ -722,6 +1179,65 @@ async fn execute_tool_call(
     result
 }
 
+/// Infer an [`slab_exec_policy::OperationDescriptor`] for a tool that does not
+/// override [`ToolHandler::describe_operation`]. Maps the tool name to a
+/// category and pulls the most relevant subject (command / path / query) from
+/// the arguments. Tools with their own `describe_operation` bypass this.
+fn infer_descriptor(
+    tool_name: &str,
+    args: &serde_json::Value,
+    context: &TurnExecutionContext<'_>,
+) -> Option<slab_exec_policy::OperationDescriptor> {
+    let workspace_root = context.thread_context.workspace.as_ref().map(|w| w.root.clone());
+    let descriptor = match tool_name {
+        "shell" => {
+            let command = args.get("command").and_then(serde_json::Value::as_str).unwrap_or("");
+            slab_exec_policy::OperationDescriptor::shell(command)
+        }
+        "write_file" => {
+            let path = args.get("path").and_then(serde_json::Value::as_str).unwrap_or("");
+            slab_exec_policy::OperationDescriptor::file_edit(path)
+        }
+        "apply_patch" => {
+            let patch = args.get("patch").and_then(serde_json::Value::as_str).unwrap_or("");
+            slab_exec_policy::OperationDescriptor::file_edit(first_path_in_patch(patch))
+        }
+        "web_search" => {
+            let query = args.get("query").and_then(serde_json::Value::as_str).unwrap_or("");
+            slab_exec_policy::OperationDescriptor::network(query)
+        }
+        _ => return None,
+    };
+    Some(descriptor.with_workspace(workspace_root))
+}
+
+/// Extract the first modified file path from a patch, for the file-edit
+/// descriptor subject. Recognizes the `*** Begin Patch` dialect headers first
+/// and falls back to unified-diff `+++ b/path`. Returns `"patch"` when no path
+/// can be parsed.
+fn first_path_in_patch(patch: &str) -> String {
+    for line in patch.lines() {
+        let trimmed = line.trim_start();
+        for header in ["*** Add File:", "*** Delete File:", "*** Update File:"] {
+            if let Some(rest) = trimmed.strip_prefix(header) {
+                let path = rest.trim().trim_matches('"');
+                if !path.is_empty() {
+                    return path.to_owned();
+                }
+            }
+        }
+        if let Some(rest) = trimmed.strip_prefix("+++ ") {
+            let candidate = rest.trim();
+            // Strip the leading `b/` that git diffs use.
+            let path = candidate.strip_prefix("b/").unwrap_or(candidate).trim_matches('"');
+            if !path.is_empty() && path != "/dev/null" {
+                return path.to_owned();
+            }
+        }
+    }
+    "patch".to_owned()
+}
+
 fn append_hook_observations(output: &mut String, observations: Vec<String>) {
     let observations = observations
         .into_iter()
@@ -738,5 +1254,180 @@ fn append_hook_observations(output: &mut String, observations: Vec<String>) {
         output.push_str("- ");
         output.push_str(observation.trim());
         output.push('\n');
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::port::ParsedToolCall;
+    use crate::tool::{ToolCallRender, ToolContext};
+    use async_trait::async_trait;
+
+    fn call(name: &str) -> ParsedToolCall {
+        ParsedToolCall {
+            id: "call-1".to_owned(),
+            name: name.to_owned(),
+            arguments: "{}".to_owned(),
+        }
+    }
+
+    #[test]
+    fn plan_snapshot_extracts_per_tool_shape() {
+        let plan = serde_json::json!({ "plan_id": "plan-0", "items": [], "counts": {
+            "pending": 0, "in_progress": 0, "completed": 0, "blocked": 0
+        }});
+        // plan / update_plan carry the plan as the metadata object itself.
+        assert_eq!(plan_snapshot_for(PLAN_TOOL_NAME, Some(&plan)), Some(plan.clone()));
+        assert_eq!(plan_snapshot_for(UPDATE_PLAN_TOOL_NAME, Some(&plan)), Some(plan.clone()));
+        // present_plan nests it under the metadata key.
+        let nested = serde_json::json!({ PRESENT_PLAN_METADATA_KEY: plan });
+        assert_eq!(plan_snapshot_for(PRESENT_PLAN_TOOL_NAME, Some(&nested)), Some(plan));
+        // Other tools / absent metadata yield None.
+        assert!(plan_snapshot_for("shell", Some(&nested)).is_none());
+        assert!(plan_snapshot_for(PRESENT_PLAN_TOOL_NAME, None).is_none());
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_of(
+        handler: Option<&dyn ToolHandler>,
+        name: &str,
+        args: &serde_json::Value,
+        status: &str,
+        output: Option<&str>,
+        workspace_root: Option<&str>,
+        exit_code: Option<i64>,
+        duration_ms: Option<u64>,
+    ) -> TurnItem {
+        render_tool_call_item(
+            handler,
+            &call(name),
+            args,
+            status,
+            output,
+            workspace_root,
+            exit_code,
+            duration_ms,
+        )
+    }
+
+    // Unknown tool (no handler registered) → default CommandExecution, so every
+    // tool call is visible on the harness timeline.
+    #[test]
+    fn render_no_handler_falls_back_to_command_execution() {
+        let item = render_of(
+            None,
+            "read_file",
+            &serde_json::json!({}),
+            "completed",
+            Some("file contents"),
+            None,
+            None,
+            None,
+        );
+        match item {
+            TurnItem::CommandExecution { command, aggregated_output, status, .. } => {
+                assert_eq!(command, "read_file");
+                assert_eq!(status, "completed");
+                assert_eq!(aggregated_output.as_deref(), Some("file contents"));
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    // A stub tool that does NOT override render_turn_item.
+    struct DefaultRenderTool;
+
+    #[async_trait]
+    impl ToolHandler for DefaultRenderTool {
+        fn name(&self) -> &str {
+            "default_render"
+        }
+        fn description(&self) -> &str {
+            "stub"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        async fn execute(
+            &self,
+            _ctx: &ToolContext,
+            _arguments: &serde_json::Value,
+        ) -> Result<ToolOutput, crate::error::AgentError> {
+            Ok(ToolOutput { content: String::new(), metadata: None })
+        }
+    }
+
+    #[test]
+    fn render_turn_item_default_is_command_execution() {
+        let tool = DefaultRenderTool;
+        let item = render_of(
+            Some(&tool),
+            "default_render",
+            &serde_json::json!({}),
+            "running",
+            None,
+            None,
+            None,
+            None,
+        );
+        match item {
+            TurnItem::CommandExecution { command, cwd, status, aggregated_output, .. } => {
+                assert_eq!(command, "default_render");
+                assert_eq!(cwd, "");
+                assert_eq!(status, "running");
+                assert!(aggregated_output.is_none());
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    // A stub tool that DOES override render_turn_item — verifies the dispatcher
+    // delegates to the tool's own render instead of the default.
+    struct CustomRenderTool;
+
+    #[async_trait]
+    impl ToolHandler for CustomRenderTool {
+        fn name(&self) -> &str {
+            "custom"
+        }
+        fn description(&self) -> &str {
+            "stub"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+            TurnItem::AgentMessage {
+                id: render.call.id.clone(),
+                text: format!("custom:{}", render.call.name),
+            }
+        }
+        async fn execute(
+            &self,
+            _ctx: &ToolContext,
+            _arguments: &serde_json::Value,
+        ) -> Result<ToolOutput, crate::error::AgentError> {
+            Ok(ToolOutput { content: String::new(), metadata: None })
+        }
+    }
+
+    #[test]
+    fn render_turn_item_delegates_to_handler_override() {
+        let tool = CustomRenderTool;
+        let item = render_of(
+            Some(&tool),
+            "custom",
+            &serde_json::json!({}),
+            "completed",
+            None,
+            None,
+            None,
+            None,
+        );
+        match item {
+            TurnItem::AgentMessage { text, .. } => assert_eq!(text, "custom:custom"),
+            other => panic!("unexpected item: {other:?}"),
+        }
     }
 }

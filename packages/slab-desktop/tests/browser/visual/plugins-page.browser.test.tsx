@@ -1,7 +1,7 @@
 import { page } from "vitest/browser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import PluginsPage from "@/pages/plugins";
+import PluginsPage from "@slab/ui/pages/plugins";
 import type { components } from "@slab/api/v1";
 import { expectDesktopSceneAccessible, renderDesktopScene } from "../test-utils";
 
@@ -9,7 +9,6 @@ type PluginRecord = components["schemas"]["PluginResponse"];
 
 const {
   mockApiState,
-  mockIsTauri,
   mockUseMutation,
   mockUseQuery,
 } = vi.hoisted(() => ({
@@ -18,19 +17,16 @@ const {
     pluginsLoading: false,
     pluginsError: null as unknown,
   },
-  mockIsTauri: vi.fn<() => boolean>(),
   mockUseMutation: vi.fn<(...args: unknown[]) => unknown>(),
   mockUseQuery: vi.fn<(...args: unknown[]) => unknown>(),
 }));
 
-vi.mock("@/hooks/use-tauri", () => ({
-  isTauri: mockIsTauri,
-}));
-
-vi.mock("@/hooks/use-global-header-meta", () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderControl: vi.fn<() => void>(),
-  usePageHeaderSearch: vi.fn<() => void>(),
+vi.mock("@slab/ui/hooks/use-header", () => ({
+  useHeader: vi.fn<() => unknown>(() => ({
+    meta: { title: "Plugins", subtitle: "Plugins", icon: vi.fn(), contextLabel: null },
+    search: null,
+    select: null,
+  })),
 }));
 
 vi.mock("@slab/api", async () => {
@@ -47,7 +43,7 @@ vi.mock("@slab/api", async () => {
   });
 });
 
-vi.mock("@/lib/plugin-host-bridge", () => ({
+vi.mock("@slab/core/infra/tauri/plugin-host-bridge", () => ({
   pluginRuntimeList: vi.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
   pluginCall: vi.fn<() => Promise<{ outputText: string; outputBase64: string }>>().mockResolvedValue({
     outputText: "{}",
@@ -123,8 +119,6 @@ describe("PluginsPage browser visual regression", () => {
   });
 
   it("captures the plugins page non-Tauri fallback state", async () => {
-    mockIsTauri.mockReturnValue(false);
-
     await renderDesktopScene(<PluginsPage />, { route: "/plugins" });
 
     await expectDesktopSceneAccessible();
@@ -135,9 +129,10 @@ describe("PluginsPage browser visual regression", () => {
   });
 
   it("captures the plugins page empty state in Tauri", async () => {
-    mockIsTauri.mockReturnValue(true);
-
-    await renderDesktopScene(<PluginsPage />, { route: "/plugins" });
+    await renderDesktopScene(<PluginsPage />, {
+      route: "/plugins",
+      portsOverrides: { platformInfo: { desktop: true, mobile: false } },
+    });
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     await expect.element(page.getByText("No installed plugins found.")).toBeVisible();
@@ -147,7 +142,6 @@ describe("PluginsPage browser visual regression", () => {
   });
 
   it("captures the plugins page with plugins loaded in Tauri", async () => {
-    mockIsTauri.mockReturnValue(true);
     mockApiState.plugins = [
       createMockPlugin({
         id: "plugin-1",
@@ -169,7 +163,10 @@ describe("PluginsPage browser visual regression", () => {
       }),
     ];
 
-    await renderDesktopScene(<PluginsPage />, { route: "/plugins" });
+    await renderDesktopScene(<PluginsPage />, {
+      route: "/plugins",
+      portsOverrides: { platformInfo: { desktop: true, mobile: false } },
+    });
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     await expectDesktopSceneAccessible();
@@ -181,10 +178,12 @@ describe("PluginsPage browser visual regression", () => {
   });
 
   it("captures the plugins page loading state in Tauri", async () => {
-    mockIsTauri.mockReturnValue(true);
     mockApiState.pluginsLoading = true;
 
-    await renderDesktopScene(<PluginsPage />, { route: "/plugins" });
+    await renderDesktopScene(<PluginsPage />, {
+      route: "/plugins",
+      portsOverrides: { platformInfo: { desktop: true, mobile: false } },
+    });
 
     await expect.element(page.getByText(/refresh/i)).toBeVisible();
     await expect(page.getByTestId("desktop-browser-scene")).toMatchScreenshot(

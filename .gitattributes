@@ -9,3 +9,8 @@
 *.dll !text !filter !merge !diff
 *.so !text !filter !merge !diff
 *.dylib !text !filter !merge !diff
+
+# SQL migrations are byte-checksummed by sqlx::migrate!() at compile time.
+# Force LF on every platform so CRLF <-> LF drift cannot desync the stored
+# checksum and abort slab-server startup with a VersionMismatch error.
+*.sql text eol=lf

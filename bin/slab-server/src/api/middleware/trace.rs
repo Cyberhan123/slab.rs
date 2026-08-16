@@ -30,7 +30,9 @@ pub async fn trace_middleware(
 
     let method = req.method().clone();
     let path = req.uri().path().to_string();
-    let skip_logging = path == "/v1/system/gpu";
+    // Polled GPU diagnostics endpoints: exact matches only — the one-shot
+    // diagnostics endpoints stay traced.
+    let skip_logging = path == "/v1/system/gpu" || path == "/v1/system/gpu/ledger";
 
     let span = if skip_logging {
         tracing::Span::none()

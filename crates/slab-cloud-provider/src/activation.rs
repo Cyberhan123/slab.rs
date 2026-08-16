@@ -18,6 +18,13 @@ pub struct CloudModelSpec {
     pub remote_model_id: String,
     /// Label shown in the model catalog UI.
     pub display_name: String,
+    /// Human-readable description surfaced to clients (e.g. the harness
+    /// `model/list` `ModelInfo.description`). Defaults to the display name when
+    /// the curated catalog has no richer copy.
+    pub description: String,
+    /// Whether this is the flagship default model for its provider family
+    /// (the first curated entry). Lets clients preselect a sensible model.
+    pub is_default: bool,
 }
 
 /// Returns the curated default model list for `provider`'s family.
@@ -27,9 +34,15 @@ pub struct CloudModelSpec {
 pub fn default_models_for_provider(provider: &CloudProviderConfig) -> Vec<CloudModelSpec> {
     catalog_for_family(provider.family)
         .iter()
-        .map(|(remote_model_id, display_name)| CloudModelSpec {
+        .enumerate()
+        .map(|(index, (remote_model_id, display_name))| CloudModelSpec {
             remote_model_id: (*remote_model_id).to_owned(),
             display_name: (*display_name).to_owned(),
+            // The curated catalog carries only an id + label today; richer
+            // per-model copy can be added later. The first entry of each
+            // family is treated as the flagship default.
+            description: (*display_name).to_owned(),
+            is_default: index == 0,
         })
         .collect()
 }
@@ -161,6 +174,10 @@ mod tests {
         assert!(!specs.is_empty(), "Anthropic should expose a curated Claude catalog");
         assert!(specs.iter().any(|spec| spec.remote_model_id.contains("claude")));
         assert!(specs.iter().all(|spec| !spec.display_name.is_empty()));
+        assert!(specs.iter().all(|spec| !spec.description.is_empty()));
+        // Exactly one flagship default per family (the first entry).
+        assert_eq!(specs.iter().filter(|spec| spec.is_default).count(), 1);
+        assert!(specs.first().is_some_and(|spec| spec.is_default));
     }
 
     #[test]

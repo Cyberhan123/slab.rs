@@ -1,5 +1,7 @@
 //! Single-turn execution logic (private to the crate).
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
@@ -14,17 +16,21 @@ use slab_types::{
 use crate::{
     config::{AgentConfig, AgentToolChoice},
     error::AgentError,
-    event::{AgentArtifactKind, AgentArtifactRef, AgentEventKind, AgentMetrics},
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
-        AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, LlmStreamObserver, ParsedToolCall,
-        ThreadMessageRecord, ToolSpec, TurnEvent, TurnStateRecord,
+        AgentNotifyPort, ApprovalPort, ExecPolicyPort, LlmPort, LlmStreamObserver, LlmUsage,
+        ParsedToolCall, PlanStorePort, ToolSpec,
+    },
+    protocol::{
+        AgentMessageDeltaParams, EventMsg, ItemCompletedParams, ItemStartedParams,
+        MessageAppendedParams, ReasoningText, ReasoningTextDeltaParams, TurnItem,
+        TurnStateChangedParams,
     },
     repetition_guard::ToolCallSignature,
     risk::ToolRiskAnalyzer,
-    tool::{AgentThreadContext, ToolRouter},
+    tool::{AgentThreadContext, ToolDiscoveryState, ToolRouter},
     tool_validation::{InvalidToolCall, validate_tool_calls},
-    turn_tool_call::handle_tool_calls,
+    turn_tool_call::{emit_tool_item_failed, handle_tool_calls},
     turn_tool_record::record_failed_tool_call,
 };
 
@@ -40,9 +46,16 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub config: &'a AgentConfig,
     pub llm: &'a dyn LlmPort,
     pub tools: &'a ToolRouter,
-    pub store: &'a dyn AgentStorePort,
+    pub tool_discovery: &'a ToolDiscoveryState,
     pub notify: &'a dyn AgentNotifyPort,
     pub approval: &'a dyn ApprovalPort,
+    pub exec_policy: &'a dyn ExecPolicyPort,
+    /// Built-in agent registry (Slice 4). Read-only turn use — drives
+    /// [`crate::agent::filter_tools_for_agent`] from `config.agent_type`.
+    pub agent_registry: &'a dyn crate::agent::AgentRegistry,
+    /// Owned `Arc` (not `&'a dyn`) because it is cloned into each call's
+    /// [`crate::ToolContext`] so the plan tools can persist/query the durable plan.
+    pub plan_store: Arc<dyn PlanStorePort>,
     pub hooks: &'a AgentHookRegistry,
     pub risk: &'a dyn ToolRiskAnalyzer,
     pub trace: &'a dyn AgentTraceSink,
@@ -53,16 +66,23 @@ pub(crate) struct TurnExecutionContext<'a> {
 }
 
 pub(crate) enum TurnOutcome {
-    Final { token_usage: u32 },
-    BudgetExceeded { token_usage: u32 },
-    ToolCalls { invalid_tool_calls: usize, signatures: Vec<ToolCallSignature>, token_usage: u32 },
+    Final {
+        usage: Option<LlmUsage>,
+    },
+    BudgetExceeded {
+        usage: Option<LlmUsage>,
+    },
+    ToolCalls {
+        invalid_tool_calls: usize,
+        signatures: Vec<ToolCallSignature>,
+        usage: Option<LlmUsage>,
+    },
 }
 
 pub(crate) async fn execute_turn(
     context: TurnExecutionContext<'_>,
     messages: &mut Vec<ConversationMessage>,
 ) -> Result<TurnOutcome, AgentError> {
-    let turn_started_at = std::time::Instant::now();
     if context.cancellation.is_cancelled() {
         return Err(AgentError::Interrupted);
     }
@@ -81,7 +101,7 @@ pub(crate) async fn execute_turn(
     .await;
     insert_injected_messages(messages, llm_start_effects.injected_messages);
     append_observations(messages, llm_start_effects.observations);
-    persist_turn_state(
+    emit_turn_state_changed(
         &context,
         "running",
         Some(messages.as_slice()),
@@ -131,6 +151,7 @@ pub(crate) async fn execute_turn(
         thread_id: context.thread_id,
         turn_index: context.turn_index,
         notify: context.notify,
+        text_started: false,
     };
     let response_result = tokio::select! {
         response = context.llm.chat_completion_streaming(
@@ -146,7 +167,7 @@ pub(crate) async fn execute_turn(
     let response = match response_result {
         Ok(response) => response,
         Err(error) => {
-            persist_turn_state(
+            emit_turn_state_changed(
                 &context,
                 "failed",
                 Some(messages.as_slice()),
@@ -176,7 +197,7 @@ pub(crate) async fn execute_turn(
             "usage": response.usage,
         }),
     );
-    persist_turn_state(
+    emit_turn_state_changed(
         &context,
         "llm_completed",
         Some(messages.as_slice()),
@@ -200,13 +221,14 @@ pub(crate) async fn execute_turn(
     insert_injected_messages(messages, llm_end_effects.injected_messages);
     append_observations(messages, llm_end_effects.observations);
 
-    let token_usage = response.usage.as_ref().map(|usage| usage.total_tokens).unwrap_or_default();
+    let usage = response.usage.clone();
+    let token_usage = usage.as_ref().map(|usage| usage.total_tokens).unwrap_or_default();
     if token_budget_would_be_exhausted(
         context.config.token_budget,
         context.consumed_tokens,
         token_usage,
     ) {
-        persist_turn_state(
+        emit_turn_state_changed(
             &context,
             "budget_exhausted",
             Some(messages.as_slice()),
@@ -228,12 +250,12 @@ pub(crate) async fn execute_turn(
                 "has_tool_calls": !response.tool_calls.is_empty(),
             }),
         );
-        return Ok(TurnOutcome::BudgetExceeded { token_usage });
+        return Ok(TurnOutcome::BudgetExceeded { usage: usage.clone() });
     }
 
     if response.tool_calls.is_empty() {
         if let Err(error) = reject_missing_required_tool_call(&context) {
-            persist_turn_state(
+            emit_turn_state_changed(
                 &context,
                 "failed",
                 Some(messages.as_slice()),
@@ -245,16 +267,8 @@ pub(crate) async fn execute_turn(
             .await;
             return Err(error);
         }
-        persist_final_answer(
-            &context,
-            messages,
-            response.content.unwrap_or_default(),
-            collect_turn_artifact_refs(messages),
-            None,
-        )
-        .await;
-        emit_turn_metrics(&context, turn_started_at, true).await;
-        persist_turn_state(
+        persist_final_answer(&context, messages, response.content.unwrap_or_default()).await;
+        emit_turn_state_changed(
             &context,
             "completed",
             Some(messages.as_slice()),
@@ -271,7 +285,7 @@ pub(crate) async fn execute_turn(
             "turn_completed",
             serde_json::json!({ "more_turns": false }),
         );
-        return Ok(TurnOutcome::Final { token_usage });
+        return Ok(TurnOutcome::Final { usage: usage.clone() });
     }
 
     let validation = validate_tool_calls(
@@ -296,16 +310,8 @@ pub(crate) async fn execute_turn(
             // 双轨 2: the deterministic `task.complete` gate passed; emit the
             // summary as the final answer and end the run (alongside the
             // existing `tool_calls.is_empty()` Final path).
-            persist_final_answer(
-                &context,
-                messages,
-                completion.summary,
-                completion.artifact_refs,
-                Some("completed".to_owned()),
-            )
-            .await;
-            emit_turn_metrics(&context, turn_started_at, true).await;
-            persist_turn_state(
+            persist_final_answer(&context, messages, completion.summary).await;
+            emit_turn_state_changed(
                 &context,
                 "completed",
                 Some(messages.as_slice()),
@@ -322,12 +328,11 @@ pub(crate) async fn execute_turn(
                 "turn_completed",
                 serde_json::json!({ "more_turns": false, "task_complete": true }),
             );
-            return Ok(TurnOutcome::Final { token_usage });
+            return Ok(TurnOutcome::Final { usage: usage.clone() });
         }
     }
 
-    emit_turn_metrics(&context, turn_started_at, true).await;
-    persist_turn_state(
+    emit_turn_state_changed(
         &context,
         "tool_calls_completed",
         Some(messages.as_slice()),
@@ -347,7 +352,7 @@ pub(crate) async fn execute_turn(
     Ok(TurnOutcome::ToolCalls {
         invalid_tool_calls: validation.invalid.len(),
         signatures: validation.valid.iter().map(ToolCallSignature::new).collect(),
-        token_usage,
+        usage: usage.clone(),
     })
 }
 
@@ -362,13 +367,36 @@ fn token_budget_would_be_exhausted(
 
 /// External tools that require provider/network reachability and are removed
 /// from the agent's tool list in offline mode (INFRA-07). Local filesystem,
-/// shell, plan, verify, and a2u surface tools remain available offline.
+/// shell, plan, and verify tools remain available offline.
 fn is_external_tool_name(name: &str) -> bool {
     matches!(name, "web_search" | "mcp_call" | "mcp_list_tools") || name.starts_with("mcp__")
 }
 
 fn allowed_tool_specs(context: &TurnExecutionContext<'_>) -> Result<Vec<ToolSpec>, AgentError> {
-    let mut specs = context.tools.tool_specs();
+    // Visibility (Direct/Deferred/Hidden) + category-exposure projection.
+    // Computed fresh each turn from the live per-thread permission mode, so a
+    // mid-thread mode/permission flip is reflected immediately. `injected_deferred`
+    // is the set of Deferred tools `tool_search` has injected for this thread;
+    // empty means Deferred tools stay hidden from the base list until discovered.
+    let exposure = context.exec_policy.permission_state_for(context.thread_id).exposure;
+    let injected_deferred = context.tool_discovery.snapshot();
+    let mut specs = context.tools.visible_tool_specs(exposure, &injected_deferred);
+    // Slice 4: per-agent tool constraint, layered above visibility/exposure and
+    // below `config.allowed_tools`. `agent_type` is set only by `delegate_subagent`
+    // after a successful registry lookup; a miss here is misconfiguration, so we
+    // fail open (the constraint is tool-shaping, not a security boundary) with a
+    // warning rather than starving the agent of tools.
+    let agent_constraint = context.config.agent_type.as_deref().and_then(|agent_type| {
+        let constraint = context.agent_registry.get(agent_type).map(|def| def.tools);
+        if constraint.is_none() {
+            warn!(
+                thread_id = context.thread_id,
+                agent_type, "agent_type not found in registry; skipping tool constraint"
+            );
+        }
+        constraint
+    });
+    specs = crate::agent::filter_tools_for_agent(&specs, agent_constraint.as_ref());
     if !context.config.allowed_tools.is_empty() {
         specs.retain(|tool| context.config.allowed_tools.contains(&tool.name));
     }
@@ -440,26 +468,19 @@ async fn record_invalid_tool_calls(
                 "reason": invalid_call.reason,
             }),
         );
-        context
-            .notify
-            .on_turn_event(
-                context.thread_id,
-                &TurnEvent::Response {
-                    turn_index: Some(context.turn_index),
-                    event: AgentEventKind::ResponseToolCallValidationFailed {
-                        item_id: invalid_call.tool_call.id.clone(),
-                        call_id: call_id.clone(),
-                        tool_name: invalid_call.tool_call.name.clone(),
-                        reason: invalid_call.reason.clone(),
-                    },
-                },
-            )
-            .await;
+        let invalid_output = format!("invalid tool call: {}", invalid_call.reason);
+        emit_tool_item_failed(
+            context,
+            &invalid_call.tool_call,
+            &serde_json::Value::Null,
+            &invalid_output,
+        )
+        .await;
         record_failed_tool_call(
             context,
             &call_id,
             &invalid_call.tool_call,
-            format!("invalid tool call: {}", invalid_call.reason),
+            invalid_output,
             &created_at,
             messages,
         )
@@ -472,26 +493,15 @@ async fn persist_final_answer(
     context: &TurnExecutionContext<'_>,
     messages: &mut Vec<ConversationMessage>,
     content: String,
-    artifact_refs: Vec<AgentArtifactRef>,
-    reason: Option<String>,
 ) {
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseOutputTextDone {
-                    item_id: assistant_item_id(context.turn_index),
-                    output_index: 0,
-                    content_index: 0,
-                    text: content.clone(),
-                    artifact_refs,
-                    reason,
-                },
-            },
-        )
-        .await;
+    emit_agent_message_completed(
+        context.notify,
+        context.thread_id,
+        context.turn_index,
+        &assistant_item_id(context.turn_index),
+        &content,
+    )
+    .await;
 
     let message = ConversationMessage {
         role: "assistant".to_owned(),
@@ -500,7 +510,7 @@ async fn persist_final_answer(
         tool_call_id: None,
         tool_calls: vec![],
     };
-    persist_thread_message(context.store, context.thread_id, context.turn_index, &message).await;
+    emit_message_appended(context.notify, context.thread_id, context.turn_index, &message).await;
     record_json(
         context.trace,
         &context.trace_context,
@@ -512,68 +522,6 @@ async fn persist_final_answer(
         }),
     );
     messages.push(message);
-}
-
-fn collect_turn_artifact_refs(messages: &[ConversationMessage]) -> Vec<AgentArtifactRef> {
-    let mut refs = messages
-        .iter()
-        .rev()
-        .take_while(|message| message.role == "tool")
-        .filter_map(tool_message_artifact_ref)
-        .collect::<Vec<_>>();
-    refs.reverse();
-    refs
-}
-
-fn tool_message_artifact_ref(message: &ConversationMessage) -> Option<AgentArtifactRef> {
-    let raw = message.content.rendered_text();
-    let value = serde_json::from_str::<serde_json::Value>(raw.trim()).ok()?;
-    let surface = value.get("surface").and_then(serde_json::Value::as_str)?;
-    match surface {
-        "workspace" => string_field(&value, "revealPath")
-            .or_else(|| string_field(&value, "path"))
-            .and_then(|path| normalize_workspace_artifact_path(&path))
-            .map(|path| AgentArtifactRef { path, kind: AgentArtifactKind::File }),
-        "review" => string_field(&value, "path")
-            .and_then(|path| normalize_workspace_artifact_path(&path))
-            .map(|path| AgentArtifactRef { path, kind: AgentArtifactKind::Diff }),
-        "image" => string_field(&value, "path")
-            .and_then(|path| normalize_workspace_artifact_path(&path))
-            .map(|path| AgentArtifactRef { path, kind: AgentArtifactKind::Image }),
-        _ => None,
-    }
-}
-
-fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-}
-
-fn normalize_workspace_artifact_path(path: &str) -> Option<String> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() || is_absolute_or_drive_path(trimmed) {
-        return None;
-    }
-
-    let normalized = trimmed.replace('\\', "/");
-    let parts =
-        normalized.split('/').filter(|part| !part.is_empty() && *part != ".").collect::<Vec<_>>();
-    if parts.is_empty() || parts.contains(&"..") {
-        return None;
-    }
-
-    Some(parts.join("/"))
-}
-
-fn is_absolute_or_drive_path(path: &str) -> bool {
-    let bytes = path.as_bytes();
-    path.starts_with('/')
-        || path.starts_with('\\')
-        || (bytes.first().is_some_and(u8::is_ascii_alphabetic) && bytes.get(1) == Some(&b':'))
 }
 
 async fn emit_unstreamed_tool_text(
@@ -588,20 +536,13 @@ async fn emit_unstreamed_tool_text(
         return;
     }
 
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseOutputTextDelta {
-                    item_id: assistant_item_id(context.turn_index),
-                    output_index: 0,
-                    content_index: 0,
-                    delta: text.to_owned(),
-                },
-            },
-        )
+    // This path only runs when the content was NOT streamed, so the streaming
+    // observer never announced the item — emit the harness ItemStarted here,
+    // then the delta (mirrors the projection's first-delta behavior).
+    let item_id = assistant_item_id(context.turn_index);
+    emit_agent_message_started(context.notify, context.thread_id, context.turn_index, &item_id)
+        .await;
+    emit_agent_message_delta(context.notify, context.thread_id, context.turn_index, &item_id, text)
         .await;
 }
 
@@ -630,8 +571,8 @@ async fn persist_assistant_tool_request(
         tool_call_id: None,
         tool_calls: assistant_tool_calls,
     };
-    persist_thread_message(
-        context.store,
+    emit_message_appended(
+        context.notify,
         context.thread_id,
         context.turn_index,
         &assistant_message,
@@ -650,25 +591,35 @@ async fn persist_assistant_tool_request(
     messages.push(assistant_message);
 }
 
-pub(crate) async fn persist_thread_message(
-    store: &dyn AgentStorePort,
+/// Emit a conversation message append as a persistence-grade
+/// `MessageAppended` event. The app-core rollout observer lands it in the
+/// rollout true source (`TurnContext::MessageAppend`), replacing the old
+/// slab-agent store-trait `insert_thread_message` route. Carries the original
+/// record `id` + `created_at` (F3) so replay recovers them verbatim.
+pub(crate) async fn emit_message_appended(
+    notify: &dyn AgentNotifyPort,
     thread_id: &str,
     turn_index: u32,
     message: &ConversationMessage,
 ) {
-    let record = ThreadMessageRecord {
-        id: Uuid::new_v4().to_string(),
+    let id = Uuid::new_v4().to_string();
+    let created_at = Utc::now().to_rfc3339();
+    let event = EventMsg::MessageAppended(MessageAppendedParams {
         thread_id: thread_id.to_owned(),
         turn_index,
         message: message.clone(),
-        created_at: Utc::now().to_rfc3339(),
-    };
-    if let Err(error) = store.insert_thread_message(&record).await {
-        warn!(error = %error, thread_id, "failed to persist thread message");
-    }
+        id,
+        created_at,
+    });
+    notify.on_event_msg(thread_id, &event).await;
 }
 
-async fn persist_turn_state(
+/// Emit a turn-state snapshot as a persistence-grade `TurnStateChanged`
+/// event. The app-core rollout observer lands it in the rollout true source
+/// (`TurnContext::TurnState`), replacing the old slab-agent store-trait
+/// `upsert_turn_state` route. Carries the typed input-messages vec directly (so
+/// the F6 raw-blob recovery path is dead here).
+async fn emit_turn_state_changed(
     context: &TurnExecutionContext<'_>,
     status: &str,
     messages: Option<&[ConversationMessage]>,
@@ -677,23 +628,23 @@ async fn persist_turn_state(
     error: Option<&str>,
     completed_at: Option<String>,
 ) {
-    let input_messages_json = messages.and_then(|messages| serde_json::to_string(messages).ok());
     let tool_specs_json = tool_specs.and_then(|tool_specs| serde_json::to_string(tool_specs).ok());
     let llm_response_json = response.and_then(|response| serde_json::to_string(response).ok());
-    let record = TurnStateRecord {
+    let event = EventMsg::TurnStateChanged(TurnStateChangedParams {
         thread_id: context.thread_id.to_owned(),
         turn_index: context.turn_index,
         status: status.to_owned(),
-        input_messages_json,
+        input_messages: messages.unwrap_or(&[]).to_vec(),
         tool_specs_json,
         llm_response_json,
         error: error.map(str::to_owned),
+        // F4: started_at is stamped at emit time (matches the legacy
+        // `persist_turn_state` behavior, which used `Utc::now()` at the persist
+        // call as the turn-start proxy).
         started_at: Utc::now().to_rfc3339(),
         completed_at,
-    };
-    if let Err(error) = context.store.upsert_turn_state(&record).await {
-        warn!(error = %error, thread_id = context.thread_id, "failed to persist turn state");
-    }
+    });
+    context.notify.on_event_msg(context.thread_id, &event).await;
 }
 
 fn insert_injected_messages(
@@ -724,29 +675,6 @@ fn append_observations(messages: &mut Vec<ConversationMessage>, observations: Ve
             tool_calls: Vec::new(),
         });
     }
-}
-
-async fn emit_turn_metrics(
-    context: &TurnExecutionContext<'_>,
-    started_at: std::time::Instant,
-    success: bool,
-) {
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseMetrics {
-                    metrics: AgentMetrics {
-                        name: "agent_turn".to_owned(),
-                        duration_ms: started_at.elapsed().as_millis(),
-                        success: Some(success),
-                    },
-                },
-            },
-        )
-        .await;
 }
 
 fn assistant_item_id(turn_index: u32) -> String {
@@ -783,10 +711,106 @@ fn parsed_tool_calls_trace_payload(tool_calls: &[ParsedToolCall]) -> serde_json:
     )
 }
 
+// ── Harness-protocol (EventMsg) text/reasoning emits ──────────────────────────
+//
+// The harness text/reasoning emits. slab-agent speaks `EventMsg` (its harness
+// protocol) exclusively — the legacy `AgentEventKind`/`/responses` wire left
+// this crate. These mirror, byte-for-byte, what `HarnessProjection`
+// used to derive so the harness wire is unchanged.
+
+fn harness_turn_id(turn_index: u32) -> String {
+    turn_index.to_string()
+}
+
+async fn emit_agent_message_started(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    item_id: &str,
+) {
+    let msg = EventMsg::ItemStarted(ItemStartedParams {
+        item: TurnItem::AgentMessage { id: item_id.to_owned(), text: String::new() },
+        thread_id: thread_id.to_owned(),
+        turn_id: harness_turn_id(turn_index),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_agent_message_delta(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    item_id: &str,
+    delta: &str,
+) {
+    let msg = EventMsg::AgentMessageDelta(AgentMessageDeltaParams {
+        thread_id: thread_id.to_owned(),
+        turn_id: harness_turn_id(turn_index),
+        item_id: item_id.to_owned(),
+        delta: delta.to_owned(),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_agent_message_completed(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    item_id: &str,
+    text: &str,
+) {
+    let msg = EventMsg::ItemCompleted(ItemCompletedParams {
+        item: TurnItem::AgentMessage { id: item_id.to_owned(), text: text.to_owned() },
+        thread_id: thread_id.to_owned(),
+        turn_id: harness_turn_id(turn_index),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_reasoning_delta_msg(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    item_id: &str,
+    delta: &str,
+) {
+    let msg = EventMsg::ReasoningTextDelta(ReasoningTextDeltaParams {
+        thread_id: thread_id.to_owned(),
+        turn_id: harness_turn_id(turn_index),
+        item_id: item_id.to_owned(),
+        content_index: 0,
+        delta: delta.to_owned(),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_reasoning_completed(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    item_id: &str,
+    text: &str,
+) {
+    let msg = EventMsg::ItemCompleted(ItemCompletedParams {
+        item: TurnItem::Reasoning {
+            id: item_id.to_owned(),
+            summary: ReasoningText::one(text),
+            content: ReasoningText::one(text),
+        },
+        thread_id: thread_id.to_owned(),
+        turn_id: harness_turn_id(turn_index),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
 struct TurnTextDeltaObserver<'a> {
     thread_id: &'a str,
     turn_index: u32,
     notify: &'a dyn AgentNotifyPort,
+    /// Whether the `ItemStarted(AgentMessage)` for this turn's assistant item
+    /// has been emitted. Mirrors the projection's `started_items` dedup: the
+    /// first text delta announces the item, later deltas only carry content.
+    text_started: bool,
 }
 
 #[async_trait]
@@ -796,19 +820,13 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
             return Ok(());
         }
 
-        self.notify
-            .on_turn_event(
-                self.thread_id,
-                &TurnEvent::Response {
-                    turn_index: Some(self.turn_index),
-                    event: AgentEventKind::ResponseOutputTextDelta {
-                        item_id: assistant_item_id(self.turn_index),
-                        output_index: 0,
-                        content_index: 0,
-                        delta: delta.to_owned(),
-                    },
-                },
-            )
+        let item_id = assistant_item_id(self.turn_index);
+        if !self.text_started {
+            self.text_started = true;
+            emit_agent_message_started(self.notify, self.thread_id, self.turn_index, &item_id)
+                .await;
+        }
+        emit_agent_message_delta(self.notify, self.thread_id, self.turn_index, &item_id, delta)
             .await;
         Ok(())
     }
@@ -818,20 +836,14 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
             return Ok(());
         }
 
-        self.notify
-            .on_turn_event(
-                self.thread_id,
-                &TurnEvent::Response {
-                    turn_index: Some(self.turn_index),
-                    event: AgentEventKind::ResponseReasoningTextDelta {
-                        item_id: assistant_item_id(self.turn_index),
-                        output_index: 0,
-                        content_index: 0,
-                        delta: delta.to_owned(),
-                    },
-                },
-            )
-            .await;
+        emit_reasoning_delta_msg(
+            self.notify,
+            self.thread_id,
+            self.turn_index,
+            &assistant_item_id(self.turn_index),
+            delta,
+        )
+        .await;
         Ok(())
     }
 
@@ -840,31 +852,21 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
             return Ok(());
         }
 
-        self.notify
-            .on_turn_event(
-                self.thread_id,
-                &TurnEvent::Response {
-                    turn_index: Some(self.turn_index),
-                    event: AgentEventKind::ResponseReasoningTextDone {
-                        item_id: assistant_item_id(self.turn_index),
-                        output_index: 0,
-                        content_index: 0,
-                        text: text.to_owned(),
-                    },
-                },
-            )
-            .await;
+        emit_reasoning_completed(
+            self.notify,
+            self.thread_id,
+            self.turn_index,
+            &assistant_item_id(self.turn_index),
+            text,
+        )
+        .await;
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use slab_types::{ConversationMessage, ConversationMessageContent};
-
-    use crate::event::AgentArtifactKind;
-
-    use super::{collect_turn_artifact_refs, is_external_tool_name};
+    use super::is_external_tool_name;
 
     #[test]
     fn is_external_tool_name_classifies_offline_droppable_tools() {
@@ -876,63 +878,14 @@ mod tests {
             "write_file",
             "shell",
             "grep",
-            "plan_update",
+            "plan",
+            "update_plan",
+            "present_plan",
             "task.complete",
             "verify",
-            "workspace.open",
         ] {
             assert!(!is_external_tool_name(local), "{local} should stay available offline");
+            assert!(!is_external_tool_name(local), "{local} should stay available offline");
         }
-    }
-
-    fn message(role: &str, content: &str) -> ConversationMessage {
-        ConversationMessage {
-            role: role.to_owned(),
-            content: ConversationMessageContent::Text(content.to_owned()),
-            name: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn collect_turn_artifact_refs_uses_only_latest_tool_block() {
-        let messages = vec![
-            message("tool", r#"{"surface":"workspace","revealPath":"old.rs","opened":true}"#),
-            message("assistant", "older answer"),
-            message("tool", r#"{"surface":"workspace","revealPath":"src\\main.rs","opened":true}"#),
-            message("tool", r#"{"surface":"review","path":"src/lib.rs","opened":true}"#),
-        ];
-
-        let refs = collect_turn_artifact_refs(&messages);
-
-        assert_eq!(refs.len(), 2);
-        assert_eq!(refs[0].path, "src/main.rs");
-        assert_eq!(refs[0].kind, AgentArtifactKind::File);
-        assert_eq!(refs[1].path, "src/lib.rs");
-        assert_eq!(refs[1].kind, AgentArtifactKind::Diff);
-    }
-
-    #[test]
-    fn collect_turn_artifact_refs_drops_unsafe_and_non_path_payloads() {
-        let messages = vec![
-            message(
-                "tool",
-                r#"{"surface":"workspace","revealPath":"C:/Users/example/.ssh/id_rsa","opened":true}"#,
-            ),
-            message(
-                "tool",
-                r#"{"surface":"review","diff":"diff --git a/src/lib.rs b/src/lib.rs","opened":true}"#,
-            ),
-            message("tool", r#"{"surface":"image","prompt":"draw a logo","opened":true}"#),
-            message(
-                "tool",
-                r#"{"surface":"workspace","revealPath":"../outside.rs","opened":true}"#,
-            ),
-        ];
-
-        let refs = collect_turn_artifact_refs(&messages);
-
-        assert!(refs.is_empty());
     }
 }

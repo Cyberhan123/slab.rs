@@ -62,6 +62,8 @@ type InterceptedChannel =
 type GgmlLlamaClient = pb::ggml_llama_service_client::GgmlLlamaServiceClient<InterceptedChannel>;
 type GgmlWhisperClient =
     pb::ggml_whisper_service_client::GgmlWhisperServiceClient<InterceptedChannel>;
+type GgmlParakeetClient =
+    pb::ggml_parakeet_service_client::GgmlParakeetServiceClient<InterceptedChannel>;
 type GgmlDiffusionClient =
     pb::ggml_diffusion_service_client::GgmlDiffusionServiceClient<InterceptedChannel>;
 type CandleTransformersClient =
@@ -86,6 +88,18 @@ fn ggml_whisper_client(channel: Channel) -> (GgmlWhisperClient, String) {
     let interceptor = RequestIdInterceptor::new();
     let request_id = interceptor.id().to_owned();
     let client = pb::ggml_whisper_service_client::GgmlWhisperServiceClient::with_interceptor(
+        channel,
+        interceptor,
+    )
+    .max_decoding_message_size(MAX_MESSAGE_BYTES)
+    .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    (client, request_id)
+}
+
+fn ggml_parakeet_client(channel: Channel) -> (GgmlParakeetClient, String) {
+    let interceptor = RequestIdInterceptor::new();
+    let request_id = interceptor.id().to_owned();
+    let client = pb::ggml_parakeet_service_client::GgmlParakeetServiceClient::with_interceptor(
         channel,
         interceptor,
     )
@@ -319,6 +333,26 @@ pub async fn transcribe(
     Ok(response.into_inner())
 }
 
+pub async fn parakeet_transcribe(
+    channel: Channel,
+    req: pb::GgmlParakeetTranscribeRequest,
+) -> anyhow::Result<pb::GgmlParakeetTranscribeResponse> {
+    let decode_configured = req.decode.is_some();
+    debug!(
+        audio_path = %req.path.as_deref().unwrap_or_default(),
+        decode_configured,
+        "sending gRPC ggml parakeet transcribe request"
+    );
+    let response = call_initial_response_with_retry("transcribe", || {
+        let (mut client, request_id) = ggml_parakeet_client(channel.clone());
+        let request = with_request_timeout(req.clone());
+        (async move { client.transcribe(request).await }, request_id)
+    })
+    .await
+    .map_err(|status| grpc_status_to_anyhow("transcribe", "retry-exhausted", status))?;
+    Ok(response.into_inner())
+}
+
 pub async fn candle_transcribe(
     channel: Channel,
     req: pb::CandleWhisperTranscribeRequest,
@@ -349,6 +383,21 @@ pub async fn generate_image(
     })
     .await
     .map_err(|status| grpc_status_to_anyhow("generate_image", "retry-exhausted", status))?;
+    Ok(response.into_inner())
+}
+
+pub async fn quantize_model(
+    channel: Channel,
+    req: pb::GgmlLlamaQuantizeRequest,
+) -> anyhow::Result<pb::GgmlLlamaQuantizeResponse> {
+    debug!("sending gRPC ggml llama quantize_model request");
+    let response = call_initial_response_with_retry("quantize_model", || {
+        let (mut client, request_id) = ggml_llama_client(channel.clone());
+        let request = with_request_timeout(req.clone());
+        (async move { client.quantize_model(request).await }, request_id)
+    })
+    .await
+    .map_err(|status| grpc_status_to_anyhow("quantize_model", "retry-exhausted", status))?;
     Ok(response.into_inner())
 }
 
@@ -456,6 +505,13 @@ async fn load_model_once(
         }
         ModelLoadRpcRequest::GgmlWhisper(req) => {
             let (mut client, request_id) = ggml_whisper_client(channel);
+            let result = client.load_model(with_request_timeout(req)).await.inspect_err(|status| {
+                log_grpc_error("load_model", &request_id, status);
+            });
+            (result, request_id)
+        }
+        ModelLoadRpcRequest::GgmlParakeet(req) => {
+            let (mut client, request_id) = ggml_parakeet_client(channel);
             let result = client.load_model(with_request_timeout(req)).await.inspect_err(|status| {
                 log_grpc_error("load_model", &request_id, status);
             });
@@ -570,6 +626,14 @@ async fn unload_model_once(
         }
         RuntimeBackendId::GgmlDiffusion => {
             let (mut client, request_id) = ggml_diffusion_client(channel);
+            let result =
+                client.unload_model(with_request_timeout(req)).await.inspect_err(|status| {
+                    log_grpc_error("unload_model", &request_id, status);
+                });
+            (result, request_id)
+        }
+        RuntimeBackendId::GgmlParakeet => {
+            let (mut client, request_id) = ggml_parakeet_client(channel);
             let result =
                 client.unload_model(with_request_timeout(req)).await.inspect_err(|status| {
                     log_grpc_error("unload_model", &request_id, status);

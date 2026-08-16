@@ -20,16 +20,16 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/agents/migrate": {
+    "/v1/agents/harness": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["agent_harness"];
         put?: never;
-        post: operations["migrate_workspace"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -328,6 +328,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/models/quantize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["quantize_model"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/models/switch": {
         parameters: {
             query?: never;
@@ -616,6 +632,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sessions/{id}/agent-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_session_agent_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions/{id}/messages": {
         parameters: {
             query?: never;
@@ -771,6 +803,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["gpu_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/system/gpu/ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["gpu_ledger"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1317,77 +1365,12 @@ export interface components {
             failed_tool_calls: components["schemas"]["FailedToolCallResponse"][];
             threads: components["schemas"]["AgentThreadStatResponse"][];
         };
-        /**
-         * @description Client action acknowledged by `/v1/agents/responses`.
-         * @enum {string}
-         */
-        AgentResponsesAction: "session_restore" | "response_create" | "input" | "approval_resolve" | "interrupt" | "shutdown";
-        /** @description Client message accepted by `GET` WebSocket and `POST /v1/agents/responses`. */
-        AgentResponsesClientMessage: {
-            request_id?: string | null;
-            session_id: string;
-            /** @enum {string} */
-            type: "agent.session.restore";
-        } | {
-            config?: components["schemas"]["AgentConfigInput"];
-            messages?: components["schemas"]["MessageInput"][];
-            request_id?: string | null;
-            session_id: string;
-            /** @enum {string} */
-            type: "agent.response.create";
-        } | {
-            content: string;
-            request_id?: string | null;
-            thread_id: string;
-            /** @enum {string} */
-            type: "agent.input";
-        } | {
-            approved: boolean;
-            call_id: string;
-            request_id?: string | null;
-            thread_id: string;
-            /** @enum {string} */
-            type: "agent.approval.resolve";
-        } | {
-            request_id?: string | null;
-            thread_id: string;
-            /** @enum {string} */
-            type: "agent.interrupt";
-        } | {
-            request_id?: string | null;
-            thread_id: string;
-            /** @enum {string} */
-            type: "agent.shutdown";
-        };
-        /**
-         * @description Server message returned by `POST /v1/agents/responses` and emitted on the
-         *     WebSocket control channel. Agent response events are sent as raw
-         *     `AgentStreamEvent` frames.
-         */
-        AgentResponsesServerMessage: {
-            accepted: boolean;
-            action: components["schemas"]["AgentResponsesAction"];
-            delivered?: boolean | null;
-            request_id?: string | null;
-            status?: null | components["schemas"]["AgentStatusValue"];
-            thread_id?: string | null;
-            /** @enum {string} */
-            type: "agent.ack";
-        } | {
+        /** @description Agent history restored through the sessions API. */
+        AgentHistoryResponse: {
             messages: components["schemas"]["AgentThreadMessageResponse"][];
-            request_id?: string | null;
+            responses?: unknown[];
             session_id: string;
             thread?: null | components["schemas"]["AgentThreadResponse"];
-            /** @enum {string} */
-            type: "agent.session.restored";
-        } | {
-            code: string;
-            i18n?: null | components["schemas"]["I18nPayload"];
-            message: string;
-            request_id?: string | null;
-            thread_id?: string | null;
-            /** @enum {string} */
-            type: "agent.error";
         };
         /**
          * @description Serializable mirror of [`AgentThreadStatus`].
@@ -1962,6 +1945,68 @@ export interface components {
              */
             utilization_percent: number;
         };
+        /** @description Per-device ledger: last-synced gauge + resident model entries. */
+        GpuLedgerDeviceResponse: {
+            gauge?: null | components["schemas"]["GpuLedgerGaugeResponse"];
+            resident: components["schemas"]["GpuLedgerEntryResponse"][];
+            uuid: string;
+        };
+        /**
+         * @description One resident model's ledger entry (diagnostics). The ledger is
+         *     attribution — probe-measured free bytes remain the decision input.
+         */
+        GpuLedgerEntryResponse: {
+            /** @description Backend canonical id, e.g. "ggml.llama". */
+            backend: string;
+            /**
+             * Format: int64
+             * @description Measured free-VRAM delta across the load (probe before vs after).
+             */
+            measured_delta_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Projector file size in bytes (best-effort stat).
+             */
+            mmproj_bytes?: number | null;
+            /** @description Whether a multimodal projector is resident alongside the model. */
+            mmproj_resident: boolean;
+            /** @description Model id when the load was dispatched for a catalog model. */
+            model_id?: string | null;
+            /** @description Model weights file path as loaded. */
+            model_path: string;
+            num_workers: number;
+            /** @description RFC3339 timestamp of the recorded load. */
+            recorded_at: string;
+            /**
+             * Format: int32
+             * @description Engine-resolved `n_ctx` (what `auto` sized to), when reported.
+             */
+            resolved_context_length?: number | null;
+            /**
+             * Format: int64
+             * @description Weights file size in bytes (best-effort stat).
+             */
+            weights_bytes?: number | null;
+        };
+        /**
+         * @description Probe gauge folded into a ledger row. `free = total − used` (all-smi
+         *     reports no free; the scheduler derives it).
+         */
+        GpuLedgerGaugeResponse: {
+            /** Format: int64 */
+            free_bytes: number;
+            /** Format: int64 */
+            total_bytes: number;
+            /** Format: int64 */
+            used_bytes: number;
+        };
+        /**
+         * @description Resident-model memory ledger exposed at `/v1/system/gpu/ledger`
+         *     (diagnostics-only; the `/v1/system/gpu` response shape stays frozen).
+         */
+        GpuLedgerResponse: {
+            devices: components["schemas"]["GpuLedgerDeviceResponse"][];
+        };
         /** @description Aggregated GPU monitor payload for the status bar. */
         GpuStatusResponse: {
             /** @description Whether GPU telemetry is available for this host. */
@@ -2322,6 +2367,43 @@ export interface components {
              */
             training_context_length?: number | null;
         };
+        /**
+         * @description `POST /v1/agents/responses` body as sent by the official `openai` SDK
+         *     (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
+         *     unknown fields are ignored (no `deny_unknown_fields`) so future SDK fields
+         *     don't break the server. `input` is held as a `serde_json::Value` (a string
+         *     or an array of input items) so the type is `ToSchema`-derivable.
+         */
+        OpenAICreateRequest: {
+            input?: unknown;
+            instructions?: string | null;
+            /** Format: int32 */
+            max_output_tokens?: number | null;
+            model?: string | null;
+            previous_response_id?: string | null;
+            reasoning?: null | components["schemas"]["OpenAIReasoningInput"];
+            stream?: boolean | null;
+            /** Format: float */
+            temperature?: number | null;
+            text?: null | components["schemas"]["OpenAITextInput"];
+            tool_choice?: unknown;
+            /**
+             * @description OpenAI Responses `tools` array (function tool definitions). Held as a
+             *     `serde_json::Value` — like `input`/`tool_choice` — so the struct stays
+             *     `ToSchema`-derivable while accepting the canonical Responses shape
+             *     (`[{"type":"function","name":...,"parameters":...}]`). Use
+             *     [`OpenAICreateRequest::function_tools`] to extract the function tools.
+             */
+            tools?: unknown;
+            /** Format: float */
+            top_p?: number | null;
+        };
+        OpenAIReasoningInput: {
+            effort?: string | null;
+        };
+        OpenAITextInput: {
+            format?: unknown;
+        };
         OpenAiError: {
             code?: string | null;
             i18n?: null | components["schemas"]["I18nPayload"];
@@ -2380,7 +2462,7 @@ export interface components {
             status: number;
         };
         /** @enum {string} */
-        PluginCapabilityKind: "tool" | "workflow" | "a2u_surface";
+        PluginCapabilityKind: "tool" | "workflow";
         PluginCapabilityTransport: {
             function: string;
             type: components["schemas"]["PluginCapabilityTransportType"];
@@ -2538,6 +2620,35 @@ export interface components {
             /** Format: double */
             output: number;
         };
+        /** @description Request body for `POST /v1/models/quantize`. */
+        QuantizeModelRequest: {
+            /** @description Allow re-quantizing already-quantized tensors. */
+            allow_requantize?: boolean | null;
+            /** @description Do not write a file — only report what would happen. */
+            dry_run?: boolean | null;
+            /**
+             * Format: int32
+             * @description Target quantization format as a raw `llama_ftype` int (e.g. 15 = Q4_K_M, 36 = TQ1_0).
+             */
+            ftype: number;
+            /** @description Path to the source GGUF model file. */
+            input_path: string;
+            /** @description Keep the model split layout. */
+            keep_split?: boolean | null;
+            /**
+             * Format: int32
+             * @description Number of threads (0 = let llama.cpp decide).
+             */
+            nthread?: number | null;
+            /** @description Only copy tensors instead of quantizing. */
+            only_copy?: boolean | null;
+            /** @description Path to write the quantized GGUF model to. */
+            output_path: string;
+            /** @description Disable mix-and-match of quantization types when not specified. */
+            pure?: boolean | null;
+            /** @description Quantize the `output` tensor (default true). */
+            quantize_output_tensor?: boolean | null;
+        };
         RecentWorkspaceResponse: {
             /** Format: int64 */
             lastOpenedAt: number;
@@ -2616,7 +2727,7 @@ export interface components {
             top_p?: number | null;
         };
         /** @enum {string} */
-        ServerI18nKey: "server.errors.notFound" | "server.errors.badRequest" | "server.errors.forbidden" | "server.errors.conflict" | "server.errors.backendNotReady" | "server.errors.runtimeBusy" | "server.errors.runtimeUnavailable" | "server.errors.runtimeUnsupportedOperation" | "server.errors.runtimeDriverNotRegistered" | "server.errors.runtimeError" | "server.errors.databaseError" | "server.errors.internalError" | "server.errors.notImplemented" | "server.errors.tooManyRequests" | "server.errors.requestValidationFailed" | "server.agent.errors.invalidMessage" | "server.tasks.setup.selectingRuntimePayload" | "server.tasks.setup.usingInstalledRuntimePayload" | "server.tasks.setup.expandingRuntimePayload" | "server.tasks.setup.installingRuntimeLibraries" | "server.tasks.setup.checkingFfmpeg" | "server.tasks.setup.restartingRuntimeWorkers" | "server.tasks.setup.usingCachedPayload" | "server.tasks.setup.downloadingPayload" | "server.tasks.setup.downloadedPayload" | "server.tasks.setup.failedBeforeFinish" | "server.tasks.ffmpeg.audioExtraction" | "server.tasks.ffmpeg.starting" | "server.tasks.ffmpeg.completed" | "server.tasks.ffmpeg.unsupportedOutputFormat" | "server.tasks.ffmpeg.conversionFailed" | "server.tasks.ffmpeg.workerFailed" | "server.tasks.ffmpeg.remuxCompleted" | "server.tasks.ffmpeg.remuxFailed" | "server.tasks.ffmpeg.runtimeInitFailed" | "server.settings.sections.general.title" | "server.settings.sections.general.description" | "server.settings.sections.database.title" | "server.settings.sections.database.description" | "server.settings.sections.logging.title" | "server.settings.sections.logging.description" | "server.settings.sections.telemetry.title" | "server.settings.sections.telemetry.description" | "server.settings.sections.tools.title" | "server.settings.sections.tools.description" | "server.settings.sections.runtime.title" | "server.settings.sections.runtime.description" | "server.settings.sections.providers.title" | "server.settings.sections.providers.description" | "server.settings.sections.models.title" | "server.settings.sections.models.description" | "server.settings.sections.plugin.title" | "server.settings.sections.plugin.description" | "server.settings.sections.agent.title" | "server.settings.sections.agent.description" | "server.settings.sections.guardrails.title" | "server.settings.sections.guardrails.description" | "server.settings.sections.server.title" | "server.settings.sections.server.description" | "server.settings.subsections.general.general.title" | "server.settings.subsections.general.general.description" | "server.settings.subsections.database.general.description" | "server.settings.subsections.logging.general.description" | "server.settings.subsections.telemetry.general.description" | "server.settings.subsections.tools.ffmpeg.title" | "server.settings.subsections.tools.ffmpeg.description" | "server.settings.subsections.runtime.general.description" | "server.settings.subsections.runtime.ggml.title" | "server.settings.subsections.runtime.ggml.description" | "server.settings.subsections.runtime.llama.title" | "server.settings.subsections.runtime.llama.description" | "server.settings.subsections.runtime.whisper.title" | "server.settings.subsections.runtime.whisper.description" | "server.settings.subsections.runtime.diffusion.title" | "server.settings.subsections.runtime.diffusion.description" | "server.settings.subsections.runtime.candle.title" | "server.settings.subsections.runtime.candle.description" | "server.settings.subsections.runtime.onnx.title" | "server.settings.subsections.runtime.onnx.description" | "server.settings.subsections.providers.registry.title" | "server.settings.subsections.providers.registry.description" | "server.settings.subsections.models.general.description" | "server.settings.subsections.models.autoUnload.title" | "server.settings.subsections.models.autoUnload.description" | "server.settings.subsections.plugin.general.description" | "server.settings.subsections.agent.general.description" | "server.settings.subsections.agent.mcp.title" | "server.settings.subsections.agent.mcp.description" | "server.settings.subsections.agent.websearch.title" | "server.settings.subsections.agent.websearch.description" | "server.settings.subsections.agent.hooks.title" | "server.settings.subsections.agent.hooks.description" | "server.settings.subsections.agent.memories.title" | "server.settings.subsections.agent.memories.description" | "server.settings.subsections.guardrails.rollback.title" | "server.settings.subsections.guardrails.rollback.description" | "server.settings.subsections.server.general.description" | "server.settings.subsections.server.cors.title" | "server.settings.subsections.server.cors.description" | "server.settings.subsections.server.admin.title" | "server.settings.subsections.server.admin.description" | "server.settings.subsections.server.swagger.title" | "server.settings.subsections.server.swagger.description" | "server.settings.properties.label.interfaceLanguage" | "server.settings.properties.label.databaseUrl" | "server.settings.properties.label.logLevel" | "server.settings.properties.label.jsonLogs" | "server.settings.properties.label.logDirectory" | "server.settings.properties.label.telemetry" | "server.settings.properties.label.environment" | "server.settings.properties.label.serviceName" | "server.settings.properties.label.serviceVersion" | "server.settings.properties.label.metricsExporter" | "server.settings.properties.label.captureGenaiContent" | "server.settings.properties.label.spanAttributes" | "server.settings.properties.label.traceState" | "server.settings.properties.label.runtimeMode" | "server.settings.properties.label.transport" | "server.settings.properties.label.sessionStateDirectory" | "server.settings.properties.label.agentDebugTrace" | "server.settings.properties.label.externalHooks" | "server.settings.properties.label.legacyHookScripts" | "server.settings.properties.label.agentMemories" | "server.settings.properties.label.memoryRoot" | "server.settings.properties.label.phase1ScanLimit" | "server.settings.properties.label.phase1Concurrency" | "server.settings.properties.label.phase1IdleSeconds" | "server.settings.properties.label.phase1LeaseSeconds" | "server.settings.properties.label.phase1RetrySeconds" | "server.settings.properties.label.phase1MaxAgeDays" | "server.settings.properties.label.phase2Limit" | "server.settings.properties.label.phase2LeaseSeconds" | "server.settings.properties.label.maxUnusedDays" | "server.settings.properties.label.extensionRetentionDays" | "server.settings.properties.label.mcpTools" | "server.settings.properties.label.defaultProvider" | "server.settings.properties.label.webSearchProviders" | "server.settings.properties.label.flashAttention" | "server.settings.properties.label.providerRegistry" | "server.settings.properties.label.modelCacheDirectory" | "server.settings.properties.label.modelConfigDirectory" | "server.settings.properties.label.modelSource" | "server.settings.properties.label.pluginInstallDirectory" | "server.settings.properties.label.jsRuntimeTransport" | "server.settings.properties.label.pythonRuntimeTransport" | "server.settings.properties.label.assistantSseResume" | "server.settings.properties.label.workspaceMonacoLazy" | "server.settings.properties.label.assistantErrorEnvelopeRendering" | "server.settings.properties.label.bindAddress" | "server.settings.properties.label.adminToken" | "server.settings.properties.label.allowedOrigins" | "server.settings.properties.label.cloudHttpTrace" | "server.settings.properties.label.agentMemoryModel" | "server.settings.properties.label.mcpServers" | "server.settings.properties.label.autoUnloadIdleMinutes" | "server.settings.properties.label.autoUnloadMinFreeSystemMemoryBytes" | "server.settings.properties.label.autoUnloadMinFreeGpuMemoryBytes" | "server.settings.properties.label.autoUnloadMaxPressureEvictionsPerLoad" | "server.settings.properties.label.genericEnabled" | "server.settings.properties.label.genericAutoDownload" | "server.settings.properties.label.genericInstallDirectory" | "server.settings.properties.label.genericLogLevel" | "server.settings.properties.label.genericJsonLogs" | "server.settings.properties.label.genericPath" | "server.settings.properties.label.genericQueue" | "server.settings.properties.label.genericConcurrentRequests" | "server.settings.properties.label.genericAddress" | "server.settings.properties.label.genericIpcPath" | "server.settings.properties.label.genericVersion" | "server.settings.properties.label.genericArtifact" | "server.settings.properties.label.genericContextLength" | "server.settings.properties.description.interfaceLanguage" | "server.settings.properties.description.databaseUrl" | "server.settings.properties.description.logLevel" | "server.settings.properties.description.jsonLogs" | "server.settings.properties.description.logDirectory" | "server.settings.properties.description.telemetry" | "server.settings.properties.description.environment" | "server.settings.properties.description.serviceName" | "server.settings.properties.description.serviceVersion" | "server.settings.properties.description.metricsExporter" | "server.settings.properties.description.captureGenaiContent" | "server.settings.properties.description.spanAttributes" | "server.settings.properties.description.traceState" | "server.settings.properties.description.ffmpegEnabled" | "server.settings.properties.description.ffmpegAutoDownload" | "server.settings.properties.description.ffmpegInstallDir" | "server.settings.properties.description.agentDebugTrace" | "server.settings.properties.description.externalHooks" | "server.settings.properties.description.legacyHookScripts" | "server.settings.properties.description.agentMemories" | "server.settings.properties.description.agentMemoryModel" | "server.settings.properties.description.memoryRoot" | "server.settings.properties.description.phase1ScanLimit" | "server.settings.properties.description.phase1Concurrency" | "server.settings.properties.description.phase1IdleSeconds" | "server.settings.properties.description.phase1LeaseSeconds" | "server.settings.properties.description.phase1RetrySeconds" | "server.settings.properties.description.phase1MaxAgeDays" | "server.settings.properties.description.phase2Limit" | "server.settings.properties.description.phase2LeaseSeconds" | "server.settings.properties.description.maxUnusedDays" | "server.settings.properties.description.extensionRetentionDays" | "server.settings.properties.description.mcpTools" | "server.settings.properties.description.mcpServers" | "server.settings.properties.description.defaultProvider" | "server.settings.properties.description.webSearchProviders" | "server.settings.properties.description.runtimeMode" | "server.settings.properties.description.runtimeTransport" | "server.settings.properties.description.sessionStateDirectory" | "server.settings.properties.description.providerRegistry" | "server.settings.properties.description.modelCacheDirectory" | "server.settings.properties.description.modelConfigDirectory" | "server.settings.properties.description.modelSource" | "server.settings.properties.description.pluginInstallDirectory" | "server.settings.properties.description.jsRuntimeTransport" | "server.settings.properties.description.pythonRuntimeTransport" | "server.settings.properties.description.assistantSseResume" | "server.settings.properties.description.workspaceMonacoLazy" | "server.settings.properties.description.assistantErrorEnvelopeRendering" | "server.settings.properties.description.autoUnloadEnabled" | "server.settings.properties.description.autoUnloadIdleMinutes" | "server.settings.properties.description.autoUnloadMinFreeSystemMemoryBytes" | "server.settings.properties.description.autoUnloadMinFreeGpuMemoryBytes" | "server.settings.properties.description.autoUnloadMaxPressureEvictionsPerLoad" | "server.settings.properties.description.serverAddress" | "server.settings.properties.description.adminToken" | "server.settings.properties.description.allowedOrigins" | "server.settings.properties.description.swaggerEnabled" | "server.settings.properties.description.cloudHttpTrace" | "server.settings.properties.description.genericEnabled" | "server.settings.properties.description.genericFlashAttention" | "server.settings.properties.description.genericInstallDirectory" | "server.settings.properties.description.genericLogLevel" | "server.settings.properties.description.genericJsonLogs" | "server.settings.properties.description.genericPath" | "server.settings.properties.description.genericQueue" | "server.settings.properties.description.genericConcurrentRequests" | "server.settings.properties.description.genericAddress" | "server.settings.properties.description.genericIpcPath" | "server.settings.properties.description.genericVersion" | "server.settings.properties.description.genericArtifact" | "server.settings.properties.description.genericContextLength" | "server.settings.schemas.provider.entry.title" | "server.settings.schemas.provider.id.title" | "server.settings.schemas.provider.id.description" | "server.settings.schemas.provider.family.title" | "server.settings.schemas.provider.displayName.title" | "server.settings.schemas.provider.apiBase.title" | "server.settings.schemas.provider.auth.title" | "server.settings.schemas.provider.apiKey.title" | "server.settings.schemas.provider.apiKeyEnv.title" | "server.settings.schemas.provider.requestDefaults.title" | "server.settings.schemas.provider.headers.title" | "server.settings.schemas.provider.query.title" | "server.settings.schemas.webSearch.baseUrl.title" | "server.settings.schemas.webSearch.userAgent.title" | "server.settings.schemas.webSearch.useLite.title" | "server.settings.schemas.webSearch.searchEngineId.title" | "server.settings.schemas.webSearch.searchDepth.title" | "server.settings.schemas.webSearch.includeAnswer.title" | "server.settings.schemas.webSearch.includeImages.title" | "server.settings.schemas.webSearch.includeRawContent.title" | "server.settings.schemas.webSearch.includeContents.title" | "server.settings.schemas.webSearch.engine.title" | "server.settings.schemas.webSearch.model.title" | "server.settings.schemas.mcp.server.title" | "server.settings.schemas.mcp.enabled.title" | "server.settings.schemas.mcp.name.title" | "server.settings.schemas.mcp.name.description" | "server.settings.schemas.mcp.command.title" | "server.settings.schemas.mcp.command.description" | "server.settings.schemas.mcp.args.title" | "server.settings.schemas.mcp.cwd.title" | "server.settings.schemas.mcp.env.title" | "server.settings.schemas.mcp.env.description" | "server.settings.schemas.mcp.envReference.title" | "server.settings.schemas.mcp.envVar.title" | "server.settings.schemas.stringEntry.title" | "server.modelConfig.sections.summary.label" | "server.modelConfig.sections.summary.description" | "server.modelConfig.sections.source.label" | "server.modelConfig.sections.source.description" | "server.modelConfig.sections.load.label" | "server.modelConfig.sections.load.description" | "server.modelConfig.sections.load.nonRuntimeDescription" | "server.modelConfig.sections.inference.label" | "server.modelConfig.sections.inference.description" | "server.modelConfig.sections.advanced.label" | "server.modelConfig.sections.advanced.description" | "server.modelConfig.sections.advanced.nonRuntimeDescription" | "server.modelConfig.fields.modelId.label" | "server.modelConfig.fields.modelId.description" | "server.modelConfig.fields.displayName.label" | "server.modelConfig.fields.displayName.description" | "server.modelConfig.fields.backend.label" | "server.modelConfig.fields.backend.runtimeDescription" | "server.modelConfig.fields.backend.productDescription" | "server.modelConfig.fields.catalogStatus.label" | "server.modelConfig.fields.catalogStatus.description" | "server.modelConfig.fields.capabilities.label" | "server.modelConfig.fields.capabilities.description" | "server.modelConfig.fields.sourceKind.label" | "server.modelConfig.fields.sourceKind.description" | "server.modelConfig.fields.repoId.label" | "server.modelConfig.fields.repoId.description" | "server.modelConfig.fields.primaryArtifact.label" | "server.modelConfig.fields.primaryArtifact.description" | "server.modelConfig.fields.localPath.label" | "server.modelConfig.fields.localPath.description" | "server.modelConfig.fields.artifactPath.description" | "server.modelConfig.fields.temperature.label" | "server.modelConfig.fields.temperature.description" | "server.modelConfig.fields.topP.label" | "server.modelConfig.fields.topP.description" | "server.modelConfig.fields.workers.label" | "server.modelConfig.fields.workers.description" | "server.modelConfig.fields.contextLength.label" | "server.modelConfig.fields.contextLength.description" | "server.modelConfig.fields.chatTemplate.label" | "server.modelConfig.fields.chatTemplate.description" | "server.modelConfig.fields.gbnf.label" | "server.modelConfig.fields.gbnf.description" | "server.modelConfig.fields.diffusionAsset.label" | "server.modelConfig.fields.diffusionAsset.description" | "server.modelConfig.fields.flashAttention.label" | "server.modelConfig.fields.diffusionPerformance.description" | "server.modelConfig.fields.offloadParamsToCpu.label" | "server.modelConfig.fields.diffusionDevice.description" | "server.modelConfig.fields.vaeDevice.label" | "server.modelConfig.fields.clipDevice.label" | "server.modelConfig.fields.runtimeLoadSupported.label" | "server.modelConfig.fields.runtimeLoadSupported.description" | "server.modelConfig.fields.nonRuntimeProjection.label" | "server.modelConfig.fields.nonRuntimeProjection.description" | "server.modelConfig.fields.resolvedLoadJson.label" | "server.modelConfig.fields.resolvedLoadJson.description" | "server.modelConfig.fields.resolvedInferenceJson.label" | "server.modelConfig.fields.resolvedInferenceJson.description" | "server.modelConfig.fields.resolvedInferenceJson.nonRuntimeDescription";
+        ServerI18nKey: "server.errors.notFound" | "server.errors.badRequest" | "server.errors.forbidden" | "server.errors.conflict" | "server.errors.backendNotReady" | "server.errors.runtimeBusy" | "server.errors.runtimeUnavailable" | "server.errors.runtimeUnsupportedOperation" | "server.errors.runtimeDriverNotRegistered" | "server.errors.runtimeError" | "server.errors.databaseError" | "server.errors.internalError" | "server.errors.notImplemented" | "server.errors.tooManyRequests" | "server.errors.requestValidationFailed" | "server.agent.errors.invalidMessage" | "server.tasks.setup.selectingRuntimePayload" | "server.tasks.setup.usingInstalledRuntimePayload" | "server.tasks.setup.expandingRuntimePayload" | "server.tasks.setup.installingRuntimeLibraries" | "server.tasks.setup.checkingFfmpeg" | "server.tasks.setup.restartingRuntimeWorkers" | "server.tasks.setup.usingCachedPayload" | "server.tasks.setup.downloadingPayload" | "server.tasks.setup.downloadedPayload" | "server.tasks.setup.failedBeforeFinish" | "server.tasks.ffmpeg.audioExtraction" | "server.tasks.ffmpeg.starting" | "server.tasks.ffmpeg.completed" | "server.tasks.ffmpeg.unsupportedOutputFormat" | "server.tasks.ffmpeg.conversionFailed" | "server.tasks.ffmpeg.workerFailed" | "server.tasks.ffmpeg.remuxCompleted" | "server.tasks.ffmpeg.remuxFailed" | "server.tasks.ffmpeg.runtimeInitFailed" | "server.settings.sections.general.title" | "server.settings.sections.general.description" | "server.settings.sections.database.title" | "server.settings.sections.database.description" | "server.settings.sections.logging.title" | "server.settings.sections.logging.description" | "server.settings.sections.telemetry.title" | "server.settings.sections.telemetry.description" | "server.settings.sections.tools.title" | "server.settings.sections.tools.description" | "server.settings.sections.runtime.title" | "server.settings.sections.runtime.description" | "server.settings.sections.providers.title" | "server.settings.sections.providers.description" | "server.settings.sections.models.title" | "server.settings.sections.models.description" | "server.settings.sections.plugin.title" | "server.settings.sections.plugin.description" | "server.settings.sections.agent.title" | "server.settings.sections.agent.description" | "server.settings.sections.guardrails.title" | "server.settings.sections.guardrails.description" | "server.settings.sections.server.title" | "server.settings.sections.server.description" | "server.settings.subsections.general.general.title" | "server.settings.subsections.general.general.description" | "server.settings.subsections.database.general.description" | "server.settings.subsections.logging.general.description" | "server.settings.subsections.telemetry.general.description" | "server.settings.subsections.tools.ffmpeg.title" | "server.settings.subsections.tools.ffmpeg.description" | "server.settings.subsections.runtime.general.description" | "server.settings.subsections.runtime.ggml.title" | "server.settings.subsections.runtime.ggml.description" | "server.settings.subsections.runtime.llama.title" | "server.settings.subsections.runtime.llama.description" | "server.settings.subsections.runtime.whisper.title" | "server.settings.subsections.runtime.whisper.description" | "server.settings.subsections.runtime.diffusion.title" | "server.settings.subsections.runtime.diffusion.description" | "server.settings.subsections.runtime.candle.title" | "server.settings.subsections.runtime.candle.description" | "server.settings.subsections.runtime.onnx.title" | "server.settings.subsections.runtime.onnx.description" | "server.settings.subsections.providers.registry.title" | "server.settings.subsections.providers.registry.description" | "server.settings.subsections.models.general.description" | "server.settings.subsections.models.autoUnload.title" | "server.settings.subsections.models.autoUnload.description" | "server.settings.subsections.plugin.general.description" | "server.settings.subsections.agent.general.description" | "server.settings.subsections.agent.mcp.title" | "server.settings.subsections.agent.mcp.description" | "server.settings.subsections.agent.websearch.title" | "server.settings.subsections.agent.websearch.description" | "server.settings.subsections.agent.hooks.title" | "server.settings.subsections.agent.hooks.description" | "server.settings.subsections.agent.memories.title" | "server.settings.subsections.agent.memories.description" | "server.settings.subsections.guardrails.rollback.title" | "server.settings.subsections.guardrails.rollback.description" | "server.settings.subsections.server.general.description" | "server.settings.subsections.server.cors.title" | "server.settings.subsections.server.cors.description" | "server.settings.subsections.server.admin.title" | "server.settings.subsections.server.admin.description" | "server.settings.subsections.server.swagger.title" | "server.settings.subsections.server.swagger.description" | "server.settings.properties.label.interfaceLanguage" | "server.settings.properties.label.databaseUrl" | "server.settings.properties.label.logLevel" | "server.settings.properties.label.jsonLogs" | "server.settings.properties.label.logDirectory" | "server.settings.properties.label.telemetry" | "server.settings.properties.label.environment" | "server.settings.properties.label.serviceName" | "server.settings.properties.label.serviceVersion" | "server.settings.properties.label.metricsExporter" | "server.settings.properties.label.captureGenaiContent" | "server.settings.properties.label.spanAttributes" | "server.settings.properties.label.traceState" | "server.settings.properties.label.runtimeMode" | "server.settings.properties.label.transport" | "server.settings.properties.label.sessionStateDirectory" | "server.settings.properties.label.agentDebugTrace" | "server.settings.properties.label.agentSleepInhibitor" | "server.settings.properties.label.externalHooks" | "server.settings.properties.label.legacyHookScripts" | "server.settings.properties.label.agentMemories" | "server.settings.properties.label.memoryRoot" | "server.settings.properties.label.phase1ScanLimit" | "server.settings.properties.label.phase1Concurrency" | "server.settings.properties.label.phase1IdleSeconds" | "server.settings.properties.label.phase1LeaseSeconds" | "server.settings.properties.label.phase1RetrySeconds" | "server.settings.properties.label.phase1MaxAgeDays" | "server.settings.properties.label.phase2Limit" | "server.settings.properties.label.phase2LeaseSeconds" | "server.settings.properties.label.maxUnusedDays" | "server.settings.properties.label.extensionRetentionDays" | "server.settings.properties.label.mcpTools" | "server.settings.properties.label.defaultProvider" | "server.settings.properties.label.webSearchProviders" | "server.settings.properties.label.flashAttention" | "server.settings.properties.label.providerRegistry" | "server.settings.properties.label.modelCacheDirectory" | "server.settings.properties.label.modelConfigDirectory" | "server.settings.properties.label.modelSource" | "server.settings.properties.label.pluginInstallDirectory" | "server.settings.properties.label.jsRuntimeTransport" | "server.settings.properties.label.pythonRuntimeTransport" | "server.settings.properties.label.assistantSseResume" | "server.settings.properties.label.workspaceMonacoLazy" | "server.settings.properties.label.assistantErrorEnvelopeRendering" | "server.settings.properties.label.bindAddress" | "server.settings.properties.label.adminToken" | "server.settings.properties.label.allowedOrigins" | "server.settings.properties.label.cloudHttpTrace" | "server.settings.properties.label.agentMemoryModel" | "server.settings.properties.label.mcpServers" | "server.settings.properties.label.autoUnloadIdleMinutes" | "server.settings.properties.label.autoUnloadMinFreeSystemMemoryBytes" | "server.settings.properties.label.autoUnloadMinFreeGpuMemoryBytes" | "server.settings.properties.label.autoUnloadMaxPressureEvictionsPerLoad" | "server.settings.properties.label.genericEnabled" | "server.settings.properties.label.genericAutoDownload" | "server.settings.properties.label.genericInstallDirectory" | "server.settings.properties.label.genericLogLevel" | "server.settings.properties.label.genericJsonLogs" | "server.settings.properties.label.genericPath" | "server.settings.properties.label.genericQueue" | "server.settings.properties.label.genericConcurrentRequests" | "server.settings.properties.label.genericAddress" | "server.settings.properties.label.genericIpcPath" | "server.settings.properties.label.genericVersion" | "server.settings.properties.label.genericArtifact" | "server.settings.properties.label.genericContextLength" | "server.settings.properties.description.interfaceLanguage" | "server.settings.properties.description.databaseUrl" | "server.settings.properties.description.logLevel" | "server.settings.properties.description.jsonLogs" | "server.settings.properties.description.logDirectory" | "server.settings.properties.description.telemetry" | "server.settings.properties.description.environment" | "server.settings.properties.description.serviceName" | "server.settings.properties.description.serviceVersion" | "server.settings.properties.description.metricsExporter" | "server.settings.properties.description.captureGenaiContent" | "server.settings.properties.description.spanAttributes" | "server.settings.properties.description.traceState" | "server.settings.properties.description.ffmpegEnabled" | "server.settings.properties.description.ffmpegAutoDownload" | "server.settings.properties.description.ffmpegInstallDir" | "server.settings.properties.description.agentDebugTrace" | "server.settings.properties.description.agentSleepInhibitor" | "server.settings.properties.description.externalHooks" | "server.settings.properties.description.legacyHookScripts" | "server.settings.properties.description.agentMemories" | "server.settings.properties.description.agentMemoryModel" | "server.settings.properties.description.memoryRoot" | "server.settings.properties.description.phase1ScanLimit" | "server.settings.properties.description.phase1Concurrency" | "server.settings.properties.description.phase1IdleSeconds" | "server.settings.properties.description.phase1LeaseSeconds" | "server.settings.properties.description.phase1RetrySeconds" | "server.settings.properties.description.phase1MaxAgeDays" | "server.settings.properties.description.phase2Limit" | "server.settings.properties.description.phase2LeaseSeconds" | "server.settings.properties.description.maxUnusedDays" | "server.settings.properties.description.extensionRetentionDays" | "server.settings.properties.description.mcpTools" | "server.settings.properties.description.mcpServers" | "server.settings.properties.description.defaultProvider" | "server.settings.properties.description.webSearchProviders" | "server.settings.properties.description.runtimeMode" | "server.settings.properties.description.runtimeTransport" | "server.settings.properties.description.sessionStateDirectory" | "server.settings.properties.description.providerRegistry" | "server.settings.properties.description.modelCacheDirectory" | "server.settings.properties.description.modelConfigDirectory" | "server.settings.properties.description.modelSource" | "server.settings.properties.description.pluginInstallDirectory" | "server.settings.properties.description.jsRuntimeTransport" | "server.settings.properties.description.pythonRuntimeTransport" | "server.settings.properties.description.assistantSseResume" | "server.settings.properties.description.workspaceMonacoLazy" | "server.settings.properties.description.assistantErrorEnvelopeRendering" | "server.settings.properties.description.autoUnloadEnabled" | "server.settings.properties.description.autoUnloadIdleMinutes" | "server.settings.properties.description.autoUnloadMinFreeSystemMemoryBytes" | "server.settings.properties.description.autoUnloadMinFreeGpuMemoryBytes" | "server.settings.properties.description.autoUnloadMaxPressureEvictionsPerLoad" | "server.settings.properties.description.serverAddress" | "server.settings.properties.description.adminToken" | "server.settings.properties.description.allowedOrigins" | "server.settings.properties.description.swaggerEnabled" | "server.settings.properties.description.cloudHttpTrace" | "server.settings.properties.description.genericEnabled" | "server.settings.properties.description.genericFlashAttention" | "server.settings.properties.description.genericInstallDirectory" | "server.settings.properties.description.genericLogLevel" | "server.settings.properties.description.genericJsonLogs" | "server.settings.properties.description.genericPath" | "server.settings.properties.description.genericQueue" | "server.settings.properties.description.genericConcurrentRequests" | "server.settings.properties.description.genericAddress" | "server.settings.properties.description.genericIpcPath" | "server.settings.properties.description.genericVersion" | "server.settings.properties.description.genericArtifact" | "server.settings.properties.description.genericContextLength" | "server.settings.schemas.provider.entry.title" | "server.settings.schemas.provider.id.title" | "server.settings.schemas.provider.id.description" | "server.settings.schemas.provider.family.title" | "server.settings.schemas.provider.displayName.title" | "server.settings.schemas.provider.apiBase.title" | "server.settings.schemas.provider.auth.title" | "server.settings.schemas.provider.apiKey.title" | "server.settings.schemas.provider.apiKeyEnv.title" | "server.settings.schemas.provider.requestDefaults.title" | "server.settings.schemas.provider.headers.title" | "server.settings.schemas.provider.query.title" | "server.settings.schemas.webSearch.baseUrl.title" | "server.settings.schemas.webSearch.userAgent.title" | "server.settings.schemas.webSearch.useLite.title" | "server.settings.schemas.webSearch.searchEngineId.title" | "server.settings.schemas.webSearch.searchDepth.title" | "server.settings.schemas.webSearch.includeAnswer.title" | "server.settings.schemas.webSearch.includeImages.title" | "server.settings.schemas.webSearch.includeRawContent.title" | "server.settings.schemas.webSearch.includeContents.title" | "server.settings.schemas.webSearch.engine.title" | "server.settings.schemas.webSearch.model.title" | "server.settings.schemas.mcp.server.title" | "server.settings.schemas.mcp.enabled.title" | "server.settings.schemas.mcp.name.title" | "server.settings.schemas.mcp.name.description" | "server.settings.schemas.mcp.command.title" | "server.settings.schemas.mcp.command.description" | "server.settings.schemas.mcp.args.title" | "server.settings.schemas.mcp.cwd.title" | "server.settings.schemas.mcp.env.title" | "server.settings.schemas.mcp.env.description" | "server.settings.schemas.mcp.envReference.title" | "server.settings.schemas.mcp.envVar.title" | "server.settings.schemas.stringEntry.title" | "server.modelConfig.sections.summary.label" | "server.modelConfig.sections.summary.description" | "server.modelConfig.sections.source.label" | "server.modelConfig.sections.source.description" | "server.modelConfig.sections.load.label" | "server.modelConfig.sections.load.description" | "server.modelConfig.sections.load.nonRuntimeDescription" | "server.modelConfig.sections.inference.label" | "server.modelConfig.sections.inference.description" | "server.modelConfig.sections.advanced.label" | "server.modelConfig.sections.advanced.description" | "server.modelConfig.sections.advanced.nonRuntimeDescription" | "server.modelConfig.fields.modelId.label" | "server.modelConfig.fields.modelId.description" | "server.modelConfig.fields.displayName.label" | "server.modelConfig.fields.displayName.description" | "server.modelConfig.fields.backend.label" | "server.modelConfig.fields.backend.runtimeDescription" | "server.modelConfig.fields.backend.productDescription" | "server.modelConfig.fields.catalogStatus.label" | "server.modelConfig.fields.catalogStatus.description" | "server.modelConfig.fields.capabilities.label" | "server.modelConfig.fields.capabilities.description" | "server.modelConfig.fields.sourceKind.label" | "server.modelConfig.fields.sourceKind.description" | "server.modelConfig.fields.repoId.label" | "server.modelConfig.fields.repoId.description" | "server.modelConfig.fields.primaryArtifact.label" | "server.modelConfig.fields.primaryArtifact.description" | "server.modelConfig.fields.localPath.label" | "server.modelConfig.fields.localPath.description" | "server.modelConfig.fields.artifactPath.description" | "server.modelConfig.fields.temperature.label" | "server.modelConfig.fields.temperature.description" | "server.modelConfig.fields.topP.label" | "server.modelConfig.fields.topP.description" | "server.modelConfig.fields.workers.label" | "server.modelConfig.fields.workers.description" | "server.modelConfig.fields.contextLength.label" | "server.modelConfig.fields.contextLength.description" | "server.modelConfig.fields.chatTemplate.label" | "server.modelConfig.fields.chatTemplate.description" | "server.modelConfig.fields.gbnf.label" | "server.modelConfig.fields.gbnf.description" | "server.modelConfig.fields.diffusionAsset.label" | "server.modelConfig.fields.diffusionAsset.description" | "server.modelConfig.fields.flashAttention.label" | "server.modelConfig.fields.diffusionPerformance.description" | "server.modelConfig.fields.offloadParamsToCpu.label" | "server.modelConfig.fields.diffusionDevice.description" | "server.modelConfig.fields.vaeDevice.label" | "server.modelConfig.fields.clipDevice.label" | "server.modelConfig.fields.runtimeLoadSupported.label" | "server.modelConfig.fields.runtimeLoadSupported.description" | "server.modelConfig.fields.nonRuntimeProjection.label" | "server.modelConfig.fields.nonRuntimeProjection.description" | "server.modelConfig.fields.resolvedLoadJson.label" | "server.modelConfig.fields.resolvedLoadJson.description" | "server.modelConfig.fields.resolvedInferenceJson.label" | "server.modelConfig.fields.resolvedInferenceJson.description" | "server.modelConfig.fields.resolvedInferenceJson.nonRuntimeDescription";
         SessionIdPath: {
             id: string;
         };
@@ -3018,6 +3129,16 @@ export interface components {
         };
         /** @description Request body for `PUT /v1/models/{id}/config-selection`. */
         UpdateModelConfigSelectionRequest: {
+            /**
+             * @description Inference parameter overrides (JSON object, e.g.
+             *     `{"temperature":0.6}`). Same semantics as `load_overrides`.
+             */
+            inference_overrides?: unknown;
+            /**
+             * @description Load parameter overrides (JSON object, e.g. `{"num_workers":4}`). Omit
+             *     to keep stored overrides; `{}` clears them back to pack defaults.
+             */
+            load_overrides?: unknown;
             selected_preset_id?: string | null;
             selected_variant_id?: string | null;
         };
@@ -3280,13 +3401,13 @@ export interface components {
             slabDir: string;
         };
         /**
-         * @description Outcome of a workspace migration preparation (B-8 / INFRA-01): the project
-         *     id the snapshot was scoped to + how many agent threads were suspended.
+         * @description Summary of the migration folded into a [`WorkspaceStateResponse`] when a
+         *     workspace switch interrupted + snapshotted the originating workspace.
          */
-        WorkspaceMigrationResponse: {
-            project_id: string;
+        WorkspaceMigrationSummary: {
+            projectId: string;
             /** Format: int32 */
-            suspended_count: number;
+            suspendedCount: number;
         };
         WorkspaceOpenCommand: {
             rootPath: string;
@@ -3317,6 +3438,7 @@ export interface components {
         WorkspaceStateResponse: {
             config?: null | components["schemas"]["WorkspaceConfigResponse"];
             current?: null | components["schemas"]["WorkspaceInfoResponse"];
+            migrated?: null | components["schemas"]["WorkspaceMigrationSummary"];
             recent: components["schemas"]["RecentWorkspaceResponse"][];
         };
         WorkspaceTextSearchFileMatch: {
@@ -3386,33 +3508,20 @@ export interface operations {
             };
         };
     };
-    migrate_workspace: {
+    agent_harness: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Slab session id (browsers cannot set WS headers) */
+                token?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Active threads interrupted + project-scoped snapshot written */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkspaceMigrationResponse"];
-                };
-            };
-            /** @description No active workspace to migrate */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Backend error */
-            500: {
+            /** @description WebSocket upgrade for the JSON-RPC 2.0 harness protocol */
+            101: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3441,7 +3550,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description SSE fallback stream of agent response events */
+            /** @description SSE fallback stream of canonical Responses server events */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3453,7 +3562,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
         };
     };
@@ -3466,46 +3577,52 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentResponsesClientMessage"];
+                "application/json": components["schemas"]["OpenAICreateRequest"];
             };
         };
         responses: {
-            /** @description Agent response command accepted */
+            /** @description OpenAI Responses-canonical Response object; an SSE stream of ResponseStreamEvent when `stream: true` */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["AgentResponsesServerMessage"];
-                };
+                content?: never;
             };
             /** @description Bad request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
             /** @description Thread not found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
             /** @description Thread is already running */
             429: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
             /** @description Internal error */
             500: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
         };
     };
@@ -4231,6 +4348,44 @@ export interface operations {
             };
         };
     };
+    quantize_model: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuantizeModelRequest"];
+            };
+        };
+        responses: {
+            /** @description Quantize task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     switch_model: {
         parameters: {
             query?: never;
@@ -4934,6 +5089,42 @@ export interface operations {
             };
         };
     };
+    get_session_agent_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session agent history retrieved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentHistoryResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_session_messages: {
         parameters: {
             query?: never;
@@ -5280,6 +5471,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GpuStatusResponse"];
+                };
+            };
+        };
+    };
+    gpu_ledger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resident model memory ledger (diagnostics) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GpuLedgerResponse"];
                 };
             };
         };

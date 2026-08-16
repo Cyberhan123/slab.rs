@@ -23,8 +23,6 @@ pub struct ModelPackManifest {
     #[serde(default)]
     pub capabilities: Vec<Capability>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_window: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pricing: Option<PackPricing>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,

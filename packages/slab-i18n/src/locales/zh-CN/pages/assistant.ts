@@ -3,9 +3,23 @@ export const assistant = {
     approve: '批准',
     reject: '拒绝',
   },
+  approval: {
+    title: '需要审批',
+    command: '命令',
+    fileChange: '文件变更',
+    plan: '计划',
+    runOnce: '仅本次允许',
+    alwaysInWorkspace: '当前工作区总是允许',
+    always: '总是允许',
+  },
+  planMode: {
+    banner: '计划模式已开启 —— 助手正在只读探索并起草计划。',
+    exit: '退出',
+  },
   header: {
     title: '助手',
     subtitle: '持续运行的 AI Agent 助手',
+    newSession: '新建会话',
   },
   runtime: {
     requestAborted: '请求已中止',
@@ -31,6 +45,26 @@ export const assistant = {
   loading: {
     title: '正在加载此会话...',
     description: '继续之前，正在恢复已保存的对话历史。',
+  },
+  history: {
+    restored: '历史消息已经恢复',
+  },
+  compaction: {
+    autoCompacting: '正在自动压缩上下文',
+    autoCompacted: '已自动压缩上下文',
+    manuallyCompacting: '正在压缩上下文',
+    manuallyCompacted: '已压缩上下文',
+  },
+  modelLoad: {
+    downloading: '下载模型...',
+    loading: '加载模型...',
+  },
+  usage: {
+    prompt: '输入 {{formatted}}',
+    completion: '输出 {{formatted}}',
+    cached: '缓存 {{formatted}}',
+    used: '已使用 {{percent}}%',
+    total: '{{formatted}} tokens',
   },
   emptyState: {
     title: '开始一个新的助手线程，让上下文保持聚焦。',
@@ -132,6 +166,18 @@ export const assistant = {
     commandMcpDescription: '连接工具与上下文',
     commandWebSearch: '网页搜索',
     commandWebSearchDescription: '使用可用网页搜索工具',
+    permission: {
+      title: '权限模式',
+      requestApproval: '请求批准',
+      approveForMe: '替我审批',
+      fullControl: '完全控制',
+      custom: '自定义',
+    },
+    interaction: {
+      title: '交互模式',
+      default: '默认',
+      plan: '计划',
+    },
     stopGeneratingResponse: '停止生成回复',
     sendMessage: '发送消息',
     deepThink: '深度思考',
@@ -173,6 +219,8 @@ export const assistant = {
     loadingModel: '正在加载模型...',
     copy: '复制',
     copied: '已复制',
+    rollback: '撤回',
+    confirmRollback: '撤回此消息及其后的所有内容？',
     continue: '继续',
     edit: '编辑',
     saveEdit: '发送编辑',
@@ -224,6 +272,8 @@ export const assistant = {
     failedToUpdateSession: '更新助手会话失败。',
     failedToDeleteSession: '删除助手会话失败。',
     interruptFailed: '中断助手线程失败',
+    compactFailed: '压缩会话失败。',
+    forkFailed: '分叉会话失败。',
     eventStreamInterrupted: '助手连接已中断，请准备好后重试本次回复。',
     unknownError: '未知错误',
   },

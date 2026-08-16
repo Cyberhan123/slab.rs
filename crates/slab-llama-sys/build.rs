@@ -3,6 +3,6 @@
 use slab_build_utils::generate_vendor_sys_bindings;
 
 fn main() {
-    generate_vendor_sys_bindings("llama", &["ggml"], "LlamaLib", &[])
+    generate_vendor_sys_bindings("llama", &["ggml"], "LlamaLib", &[], None, None, None)
         .expect("failed to prepare llama bindings");
 }

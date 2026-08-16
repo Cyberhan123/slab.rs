@@ -501,7 +501,6 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
         label: config.display_name.clone(),
         family,
         capabilities: config.capabilities.clone(),
-        context_window: config.spec.context_window,
         pricing: config
             .spec
             .pricing
@@ -657,6 +656,7 @@ fn infer_artifact_format_from_config(config: &StoredModelConfig) -> ArtifactForm
 
     match config.backend_id {
         Some(ManagedModelBackendId::GgmlWhisper) => ArtifactFormat::Ggml,
+        Some(ManagedModelBackendId::GgmlParakeet) => ArtifactFormat::Gguf,
         Some(ManagedModelBackendId::GgmlDiffusion) => ArtifactFormat::Ckpt,
         Some(ManagedModelBackendId::CandleLlama)
         | Some(ManagedModelBackendId::CandleWhisper)
@@ -674,9 +674,9 @@ fn infer_model_family(
     };
 
     match backend_id {
-        ManagedModelBackendId::GgmlWhisper | ManagedModelBackendId::CandleWhisper => {
-            ModelFamily::Whisper
-        }
+        ManagedModelBackendId::GgmlWhisper
+        | ManagedModelBackendId::GgmlParakeet
+        | ManagedModelBackendId::CandleWhisper => ModelFamily::Whisper,
         ManagedModelBackendId::GgmlDiffusion | ManagedModelBackendId::CandleDiffusion => {
             ModelFamily::Diffusion
         }

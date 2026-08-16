@@ -17,7 +17,7 @@ use super::protocol::{
 #[derive(Debug, Clone)]
 pub struct Input<T>(pub T);
 
-/// Typed options extracted from [`BackendRequest::op.options`] for event handlers.
+/// Typed options extracted from `BackendRequest::op.options` for event handlers.
 #[derive(Debug, Clone)]
 pub struct Options<T>(pub T);
 

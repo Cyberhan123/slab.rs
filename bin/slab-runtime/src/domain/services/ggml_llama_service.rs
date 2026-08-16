@@ -5,7 +5,10 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::application::dtos as dto;
-use crate::domain::models::{GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, TextGenerationOptions};
+use crate::domain::models::{
+    GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, GgmlLlamaQuantizeInput, GgmlLlamaQuantizeOutput,
+    TextGenerationImagePart, TextGenerationOptions,
+};
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
@@ -40,9 +43,14 @@ impl GgmlLlamaService {
             engine_workers: usize::try_from(num_workers)
                 .map_err(|_| invalid_model("ggml_llama.num_workers", "exceeds usize range"))?,
             context_length: request.context_length,
+            free_vram_bytes: request.free_vram_bytes,
             flash_attn,
             chat_template: request.chat_template,
             gbnf: request.gbnf,
+            mmproj_path: request.mmproj_path,
+            vram_buffer_bytes: request.vram_buffer_bytes,
+            auto_context_quantum: request.auto_context_quantum,
+            auto_context_fallback: request.auto_context_fallback,
         };
 
         Ok(Self {
@@ -124,6 +132,38 @@ impl GgmlLlamaService {
 
         Ok(ReceiverStream::new(rx).boxed())
     }
+
+    pub(crate) async fn quantize(
+        &self,
+        request: dto::GgmlLlamaQuantizeRequest,
+    ) -> Result<dto::GgmlLlamaQuantizeResult, CoreError> {
+        let input = GgmlLlamaQuantizeInput {
+            input_path: request.input_path,
+            output_path: request.output_path,
+            ftype: request.ftype,
+            nthread: request.nthread,
+            allow_requantize: request.allow_requantize.unwrap_or(false),
+            // Mirrors `llama_model_quantize_default_params()`: quantize the
+            // output tensor by default unless the caller explicitly disables it.
+            quantize_output_tensor: request.quantize_output_tensor.unwrap_or(true),
+            only_copy: request.only_copy.unwrap_or(false),
+            pure: request.pure.unwrap_or(false),
+            keep_split: request.keep_split.unwrap_or(false),
+            dry_run: request.dry_run.unwrap_or(false),
+        };
+        let output = self
+            .runtime
+            .invoke_without_options::<GgmlLlamaQuantizeInput, GgmlLlamaQuantizeOutput>(
+                RequestRoute::Quantize,
+                input,
+                Vec::new(),
+            )
+            .await?;
+        Ok(dto::GgmlLlamaQuantizeResult {
+            layers_processed: output.layers_processed,
+            output_path: output.output_path,
+        })
+    }
 }
 
 fn build_inference_params(
@@ -157,6 +197,11 @@ fn build_inference_params(
         stop_sequences: request.stop_sequences.unwrap_or_default(),
         agent_trace: request.agent_trace,
         stream: false,
+        image_parts: request
+            .image_parts
+            .into_iter()
+            .map(|part| TextGenerationImagePart { data: part.data, mime_type: part.mime_type })
+            .collect(),
     })
 }
 

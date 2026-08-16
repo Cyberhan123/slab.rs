@@ -217,9 +217,6 @@ impl McpListToolsTool {
 use super::core::SubmitToolOutputsRunRequestToolOutputsInnerConnectorId as ConnectorId;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct McpTool {
-    /// The type of the MCP tool. Always `mcp`.
-    #[serde(rename = "type")]
-    pub r#type: McpToolType,
     /// A label for this MCP server, used to identify it in tool calls.
     #[serde(rename = "server_label")]
     pub server_label: String,
@@ -264,9 +261,8 @@ pub struct McpTool {
 
 impl McpTool {
     /// Give the model access to additional tools via remote Model Context Protocol (MCP) servers. [Learn more about MCP](/docs/guides/tools-remote-mcp).
-    pub fn new(r#type: McpToolType, server_label: String) -> McpTool {
+    pub fn new(server_label: String) -> McpTool {
         McpTool {
-            r#type,
             server_label,
             server_url: None,
             connector_id: None,
@@ -278,15 +274,6 @@ impl McpTool {
             defer_loading: None,
         }
     }
-}
-/// The type of the MCP tool. Always `mcp`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum McpToolType {
-    #[serde(rename = "mcp")]
-    #[default]
-    Mcp,
 }
 
 // Identifier for service connectors, like those available in ChatGPT. One of `server_url` or `connector_id` must be provided. Learn more about service connectors [here](/docs/guides/tools-remote-mcp#connectors).  Currently supported `connector_id` values are:  - Dropbox: `connector_dropbox` - Gmail: `connector_gmail` - Google Calendar: `connector_googlecalendar` - Google Drive: `connector_googledrive` - Microsoft Teams: `connector_microsoftteams` - Outlook Calendar: `connector_outlookcalendar` - Outlook Email: `connector_outlookemail` - SharePoint: `connector_sharepoint`

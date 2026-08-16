@@ -2,19 +2,15 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest"
 import type { components } from "@slab/api/v1"
 
+import type { E2eRuntimeEndpoints } from "./support/e2e-global-setup"
 import {
-  cleanupFullstackDevEnvironment,
   completeSetup,
-  createFullstackDevEnvironment,
   eventually,
   requestJson,
-  startFullstackDev,
-  type FullstackDevEnvironment,
-  type ManagedDevProcess,
-} from "./support/fullstack-dev"
+} from "./support/e2e-runtime"
 import {
   clickExplorerPath,
   expandWorkspaceExplorerRoot,
@@ -34,12 +30,11 @@ type WorkspaceEditorDebugState = {
 
 type Schema = components["schemas"]
 
-let env: FullstackDevEnvironment | undefined
+let env: E2eRuntimeEndpoints | undefined
 
 describe.sequential("workspace e2e", () => {
   let browser: Browser | undefined
   let context: BrowserContext | undefined
-  let dev: ManagedDevProcess | undefined
   let page: Page
   let browserErrors: string[] = []
   let workspaceFailures: string[] = []
@@ -54,11 +49,10 @@ describe.sequential("workspace e2e", () => {
   let project: WorkspaceProjectFixture
 
   beforeAll(async () => {
-    env = await createFullstackDevEnvironment()
+    env = inject("e2e-runtime")
     workspaceRoot = join(env.rootDir, "browser-workspace")
     project = prepareWorkspaceProject(workspaceRoot, "Browser Workspace")
 
-    dev = await startFullstackDev(env)
     await completeSetup(env.serverBaseUrl)
     await requestJson<Schema["WorkspaceStateResponse"]>(env.serverBaseUrl, "/v1/workspace/close", {
       method: "POST",
@@ -126,8 +120,6 @@ describe.sequential("workspace e2e", () => {
   afterAll(async () => {
     await context?.close().catch(() => {})
     await browser?.close().catch(() => {})
-    await dev?.stop().catch(() => {})
-    cleanupFullstackDevEnvironment(env)
   })
 
   it("opens a workspace from the UI, expands deep files, edits, saves, runs terminal, and reopens from recents", async () => {
@@ -296,7 +288,7 @@ describe.sequential("workspace e2e", () => {
       const lspSession = await readWorkspaceLspSessionDebug(page)
       const runtime = await workspaceRuntimeDiagnostics(editor)
       throw new Error(
-        `workspace TypeScript LSP session did not start. LSP session: ${JSON.stringify(lspSession)}. LSP client: ${JSON.stringify(lspClient)}. Runtime: ${runtime}. Dev logs: ${JSON.stringify(dev?.logs.slice(-80) ?? [])}. Cause: ${error instanceof Error ? error.message : String(error)}`,
+        `workspace TypeScript LSP session did not start. LSP session: ${JSON.stringify(lspSession)}. LSP client: ${JSON.stringify(lspClient)}. Runtime: ${runtime}. Dev logs: ${"<shared-server logs unavailable>"}. Cause: ${error instanceof Error ? error.message : String(error)}`,
       )
     })
 
@@ -311,7 +303,7 @@ describe.sequential("workspace e2e", () => {
       const lspClient = await readWorkspaceLspClientDebug(page)
       const lspSession = await readWorkspaceLspSessionDebug(page)
       throw new Error(
-        `workspace TypeScript suggestions did not render. LSP session: ${JSON.stringify(lspSession)}. LSP client: ${JSON.stringify(lspClient)}. Dev logs: ${JSON.stringify(dev?.logs.slice(-80) ?? [])}. Cause: ${error instanceof Error ? error.message : String(error)}`,
+        `workspace TypeScript suggestions did not render. LSP session: ${JSON.stringify(lspSession)}. LSP client: ${JSON.stringify(lspClient)}. Dev logs: ${"<shared-server logs unavailable>"}. Cause: ${error instanceof Error ? error.message : String(error)}`,
       )
     })
     await page.keyboard.press("Escape")
@@ -324,7 +316,7 @@ describe.sequential("workspace e2e", () => {
       const lspClient = await readWorkspaceLspClientDebug(page)
       const lspSession = await readWorkspaceLspSessionDebug(page)
       throw new Error(
-        `workspace TypeScript hover did not render. LSP session: ${JSON.stringify(lspSession)}. LSP client: ${JSON.stringify(lspClient)}. Dev logs: ${JSON.stringify(dev?.logs.slice(-80) ?? [])}. Cause: ${error instanceof Error ? error.message : String(error)}`,
+        `workspace TypeScript hover did not render. LSP session: ${JSON.stringify(lspSession)}. LSP client: ${JSON.stringify(lspClient)}. Dev logs: ${"<shared-server logs unavailable>"}. Cause: ${error instanceof Error ? error.message : String(error)}`,
       )
     })
 
@@ -339,7 +331,7 @@ describe.sequential("workspace e2e", () => {
       const debugState = await readWorkspaceEditorDebugState(page)
       const lspClient = await readWorkspaceLspClientDebug(page)
       throw new Error(
-        `workspace go-to-definition did not open math.ts. Definition target: ${JSON.stringify(definitionTarget)}. Editor state: ${JSON.stringify(debugState)}. LSP client: ${JSON.stringify(lspClient)}. Dev logs: ${JSON.stringify(dev?.logs.slice(-80) ?? [])}. Cause: ${error instanceof Error ? error.message : String(error)}`,
+        `workspace go-to-definition did not open math.ts. Definition target: ${JSON.stringify(definitionTarget)}. Editor state: ${JSON.stringify(debugState)}. LSP client: ${JSON.stringify(lspClient)}. Dev logs: ${"<shared-server logs unavailable>"}. Cause: ${error instanceof Error ? error.message : String(error)}`,
       )
     })
     await eventually("workspace definition target is rendered", async () =>
@@ -463,16 +455,16 @@ describe.sequential("workspace e2e", () => {
   })
 })
 
-function requireEnv(): FullstackDevEnvironment {
+function requireEnv(): E2eRuntimeEndpoints {
   if (!env) {
-    throw new Error("Fullstack dev environment was not initialized.")
+    throw new Error("e2e shared runtime endpoints were not provided.")
   }
 
   return env
 }
 
 async function openWorkspaceFromUi(
-  testEnv: FullstackDevEnvironment,
+  testEnv: E2eRuntimeEndpoints,
   page: Page,
   root: string,
 ) {
@@ -481,8 +473,12 @@ async function openWorkspaceFromUi(
     timeout: 60_000,
   })
   await page.getByTestId("workspace-open-screen").waitFor({ state: "visible", timeout: 60_000 })
-  expect(await page.getByRole("button", { name: "Open folder" }).count()).toBe(1)
+  const openFolderButton = page.getByRole("button", { name: "Open folder" })
+  expect(await openFolderButton.count()).toBe(1)
 
+  // Browser fallback: the path input now lives inside a popover revealed by the
+  // single "Open folder" button (the native dialog only exists in the Tauri shell).
+  await openFolderButton.click()
   await page.getByTestId("workspace-path-input").fill(root)
   await page.getByTestId("workspace-open-path-button").click()
   await page.getByTestId("workspace-active-screen").waitFor({ state: "visible", timeout: 60_000 })
@@ -651,7 +647,7 @@ async function runWorkspaceVscodeCommand(page: Page, commandId: string) {
   await page.evaluate(async (nextCommandId) => {
     const workspaceEditor = await (0, eval)(
       'import("/src/pages/workspace/lib/workspace-editor.ts")',
-    ) as typeof import("../../src/pages/workspace/lib/workspace-editor")
+    ) as typeof import("@slab/ui/pages/workspace/lib/workspace-editor")
     const lspState = (window as typeof window & {
       __SLAB_WORKSPACE_LSP_SESSION__?: { workspaceRoot?: string }
     })["__SLAB_WORKSPACE_LSP_SESSION__"]

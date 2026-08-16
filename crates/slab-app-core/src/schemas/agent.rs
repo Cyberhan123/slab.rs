@@ -5,9 +5,10 @@ use slab_agent::config::{
     AgentConfig, AgentToolChoice, MAX_INVALID_TOOL_CALL_RETRIES, MAX_TOOL_CONCURRENCY,
 };
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot};
-use slab_types::{I18nPayload, agent::AgentThreadStatus};
+use slab_types::agent::AgentThreadStatus;
 use utoipa::ToSchema;
-use validator::{Validate, ValidationError, ValidationErrors};
+#[cfg(test)]
+use validator::{ValidationError, ValidationErrors};
 
 use crate::domain::models::{
     StructuredOutput as DomainStructuredOutput,
@@ -70,6 +71,7 @@ impl From<AgentConfigInput> for AgentConfig {
                 .clamp(0, MAX_INVALID_TOOL_CALL_RETRIES),
             structured_output: v.structured_output.map(Into::into),
             transient: v.transient.unwrap_or(defaults.transient),
+            agent_type: None,
         }
     }
 }
@@ -126,7 +128,7 @@ impl From<AgentStructuredOutputInput> for DomainStructuredOutput {
 }
 
 /// A single message in the initial conversation.
-#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 pub struct MessageInput {
     pub role: String,
     pub content: String,
@@ -150,110 +152,289 @@ impl From<MessageInput> for slab_types::ConversationMessage {
     }
 }
 
-/// Client message accepted by `GET` WebSocket and `POST /v1/agents/responses`.
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(tag = "type")]
-pub enum AgentResponsesClientMessage {
-    #[serde(rename = "agent.session.restore")]
-    SessionRestore {
-        #[serde(default)]
-        request_id: Option<String>,
-        session_id: String,
-    },
-    #[serde(rename = "agent.response.create")]
-    ResponseCreate {
-        #[serde(default)]
-        request_id: Option<String>,
-        session_id: String,
-        #[serde(default)]
-        config: Box<AgentConfigInput>,
-        #[serde(default)]
-        messages: Vec<MessageInput>,
-    },
-    #[serde(rename = "agent.input")]
-    Input {
-        #[serde(default)]
-        request_id: Option<String>,
-        thread_id: String,
-        content: String,
-    },
-    #[serde(rename = "agent.approval.resolve")]
-    ApprovalResolve {
-        #[serde(default)]
-        request_id: Option<String>,
-        thread_id: String,
-        call_id: String,
-        approved: bool,
-    },
-    #[serde(rename = "agent.interrupt")]
-    Interrupt {
-        #[serde(default)]
-        request_id: Option<String>,
-        thread_id: String,
-    },
-    #[serde(rename = "agent.shutdown")]
-    Shutdown {
-        #[serde(default)]
-        request_id: Option<String>,
-        thread_id: String,
-    },
+// ──────────────────────────────────────────────────────────────────────────
+// OpenAI-Responses-canonical request body (`client.responses.create({...})`)
+// ──────────────────────────────────────────────────────────────────────────
+
+/// `POST /v1/agents/responses` body as sent by the official `openai` SDK
+/// (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
+/// unknown fields are ignored (no `deny_unknown_fields`) so future SDK fields
+/// don't break the server. `input` is held as a `serde_json::Value` (a string
+/// or an array of input items) so the type is `ToSchema`-derivable.
+#[derive(Debug, Clone, Deserialize, Default, ToSchema)]
+pub struct OpenAICreateRequest {
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub input: serde_json::Value,
+    #[serde(default)]
+    pub instructions: Option<String>,
+    #[serde(default)]
+    pub stream: Option<bool>,
+    #[serde(default)]
+    pub previous_response_id: Option<String>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub top_p: Option<f32>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
+    #[serde(default)]
+    pub tool_choice: Option<serde_json::Value>,
+    #[serde(default)]
+    pub reasoning: Option<OpenAIReasoningInput>,
+    #[serde(default)]
+    pub text: Option<OpenAITextInput>,
+    /// OpenAI Responses `tools` array (function tool definitions). Held as a
+    /// `serde_json::Value` — like `input`/`tool_choice` — so the struct stays
+    /// `ToSchema`-derivable while accepting the canonical Responses shape
+    /// (`[{"type":"function","name":...,"parameters":...}]`). Use
+    /// [`OpenAICreateRequest::function_tools`] to extract the function tools.
+    #[serde(default)]
+    pub tools: Option<serde_json::Value>,
 }
 
-impl AgentResponsesClientMessage {
-    pub fn action(&self) -> AgentResponsesAction {
-        match self {
-            Self::SessionRestore { .. } => AgentResponsesAction::SessionRestore,
-            Self::ResponseCreate { .. } => AgentResponsesAction::ResponseCreate,
-            Self::Input { .. } => AgentResponsesAction::Input,
-            Self::ApprovalResolve { .. } => AgentResponsesAction::ApprovalResolve,
-            Self::Interrupt { .. } => AgentResponsesAction::Interrupt,
-            Self::Shutdown { .. } => AgentResponsesAction::Shutdown,
+#[derive(Debug, Clone, Deserialize, Default, ToSchema)]
+pub struct OpenAIReasoningInput {
+    #[serde(default)]
+    pub effort: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, ToSchema)]
+pub struct OpenAITextInput {
+    #[serde(default)]
+    pub format: Option<serde_json::Value>,
+}
+
+impl OpenAICreateRequest {
+    /// Translate the OpenAI `input` into slab `MessageInput`s.
+    pub fn to_messages(&self) -> Vec<MessageInput> {
+        openai_input_to_messages(&self.input)
+    }
+
+    /// Translate the OpenAI request into slab's `AgentConfigInput`
+    /// (then `AgentConfig::from(...)`).
+    pub fn to_config_input(&self) -> AgentConfigInput {
+        AgentConfigInput {
+            model: self.model.clone(),
+            system_prompt: self.instructions.clone(),
+            max_tokens: self.max_output_tokens,
+            temperature: self.temperature,
+            top_p: self.top_p,
+            reasoning_effort: self
+                .reasoning
+                .as_ref()
+                .and_then(|r| r.effort.as_deref())
+                .and_then(parse_reasoning_effort),
+            tool_choice: self.tool_choice.as_ref().and_then(parse_tool_choice),
+            structured_output: self
+                .text
+                .as_ref()
+                .and_then(|t| t.format.as_ref())
+                .and_then(parse_text_format),
+            ..Default::default()
         }
     }
 
-    pub fn request_id(&self) -> Option<&str> {
-        match self {
-            Self::SessionRestore { request_id, .. }
-            | Self::ResponseCreate { request_id, .. }
-            | Self::Input { request_id, .. }
-            | Self::ApprovalResolve { request_id, .. }
-            | Self::Interrupt { request_id, .. }
-            | Self::Shutdown { request_id, .. } => request_id.as_deref(),
-        }
+    /// Extract the `function` tool definitions to feed the LLM.
+    ///
+    /// The Responses `tools` array may carry other tool types (file_search,
+    /// web_search, …); only `function` tools reach the chat completion, since
+    /// the client-side tool loop only implements function calls. Items are built
+    /// leniently via `function_tool_from_json` (the canonical Responses shape
+    /// omits `strict`/`parameters`); a non-array `tools` value or an item
+    /// without a `name` is dropped.
+    pub fn function_tools(&self) -> Vec<slab_proto::openai::FunctionTool> {
+        let Some(value) = self.tools.as_ref() else {
+            return Vec::new();
+        };
+        let Some(items) = value.as_array() else {
+            return Vec::new();
+        };
+        items
+            .iter()
+            .filter(|item| item.get("type").and_then(|v| v.as_str()) == Some("function"))
+            .filter_map(function_tool_from_json)
+            .collect()
     }
 }
 
-impl Validate for AgentResponsesClientMessage {
-    fn validate(&self) -> Result<(), ValidationErrors> {
-        let mut errors = ValidationErrors::new();
-        match self {
-            Self::SessionRestore { session_id, .. } => {
-                add_non_blank(&mut errors, "session_id", session_id);
-            }
-            Self::ResponseCreate { session_id, config, messages, .. } => {
-                add_non_blank(&mut errors, "session_id", session_id);
-                validate_agent_config(&mut errors, config);
-                for message in messages {
-                    add_non_blank(&mut errors, "role", &message.role);
+/// Leniently build a [`FunctionTool`] from one Responses `function` tool JSON
+/// object. `slab-proto`'s `FunctionTool` marks `strict`/`parameters` as
+/// deserialize-required (`deserialize_with` without `default`), but the
+/// canonical Responses shape omits them — so deserialize the fields manually.
+/// Only `name` is truly required; an item without a name is dropped.
+fn function_tool_from_json(item: &serde_json::Value) -> Option<slab_proto::openai::FunctionTool> {
+    let name = item.get("name")?.as_str()?.to_owned();
+    let parameters = item.get("parameters").and_then(|v| {
+        serde_json::from_value::<std::collections::HashMap<String, serde_json::Value>>(v.clone())
+            .ok()
+    });
+    let strict = item.get("strict").and_then(|v| v.as_bool());
+    let description = item.get("description").and_then(|v| match v {
+        serde_json::Value::Null => Some(None),
+        serde_json::Value::String(s) => Some(Some(s.clone())),
+        _ => None,
+    });
+    Some(slab_proto::openai::FunctionTool {
+        name,
+        parameters,
+        strict,
+        description,
+        defer_loading: None,
+    })
+}
+
+fn openai_input_to_messages(input: &serde_json::Value) -> Vec<MessageInput> {
+    match input {
+        serde_json::Value::String(text) => {
+            vec![MessageInput {
+                role: "user".to_owned(),
+                content: text.clone(),
+                ..Default::default()
+            }]
+        }
+        serde_json::Value::Array(items) => {
+            let mut messages: Vec<MessageInput> = Vec::new();
+            for item in items {
+                let kind = item.get("type").and_then(|v| v.as_str()).unwrap_or("message");
+                match kind {
+                    "message" => {
+                        let role =
+                            item.get("role").and_then(|v| v.as_str()).unwrap_or("user").to_owned();
+                        let content = render_message_content(item.get("content"));
+                        // Skip empty assistant turns (a bare function_call follows it).
+                        if !(role == "assistant" && content.trim().is_empty()) {
+                            messages.push(MessageInput { role, content, ..Default::default() });
+                        }
+                    }
+                    "function_call" => {
+                        let call = ChatToolCall {
+                            id: item.get("call_id").and_then(|v| v.as_str()).map(str::to_owned),
+                            r#type: "function".to_owned(),
+                            function: crate::schemas::chat::ChatToolFunction {
+                                name: item
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_owned(),
+                                arguments: item
+                                    .get("arguments")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_owned(),
+                            },
+                        };
+                        fold_tool_call(&mut messages, call);
+                    }
+                    "function_call_output" => {
+                        let call_id =
+                            item.get("call_id").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+                        let output = item.get("output").map(render_output).unwrap_or_default();
+                        messages.push(MessageInput {
+                            role: "tool".to_owned(),
+                            content: output,
+                            tool_call_id: Some(call_id),
+                            ..Default::default()
+                        });
+                    }
+                    // reasoning / computer / file_search / mcp / shell / apply_patch / etc.:
+                    // slab has no carrier today; dropped.
+                    _ => {}
                 }
             }
-            Self::Input { thread_id, content, .. } => {
-                add_non_blank(&mut errors, "thread_id", thread_id);
-                add_non_blank(&mut errors, "content", content);
-            }
-            Self::ApprovalResolve { thread_id, call_id, .. } => {
-                add_non_blank(&mut errors, "thread_id", thread_id);
-                add_non_blank(&mut errors, "call_id", call_id);
-            }
-            Self::Interrupt { thread_id, .. } | Self::Shutdown { thread_id, .. } => {
-                add_non_blank(&mut errors, "thread_id", thread_id);
-            }
+            messages
         }
-
-        if errors.is_empty() { Ok(()) } else { Err(errors) }
+        _ => Vec::new(),
     }
 }
 
+/// Concatenate the `text` of `input_text` / `output_text` / `refusal` parts, or
+/// return the bare string content.
+fn render_message_content(content: Option<&serde_json::Value>) -> String {
+    let Some(value) = content else {
+        return String::new();
+    };
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| {
+                let t = part.get("type").and_then(|v| v.as_str())?;
+                let text = part.get("text").and_then(|v| v.as_str())?;
+                matches!(t, "input_text" | "output_text" | "refusal").then_some(text.to_owned())
+            })
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
+}
+
+fn render_output(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// OpenAI represents an assistant turn as `[message, function_call, ...]` items;
+/// slab models tool calls as fields on the assistant `MessageInput`. Fold a call
+/// onto the most recent assistant message (creating one if absent).
+fn fold_tool_call(messages: &mut Vec<MessageInput>, call: ChatToolCall) {
+    let needs_new = messages.last().map(|m| m.role != "assistant").unwrap_or(true);
+    if needs_new {
+        messages.push(MessageInput {
+            role: "assistant".to_owned(),
+            content: String::new(),
+            ..Default::default()
+        });
+    }
+    messages.last_mut().expect("assistant message").tool_calls.push(call);
+}
+
+fn parse_reasoning_effort(raw: &str) -> Option<ChatReasoningEffort> {
+    Some(match raw {
+        "none" => ChatReasoningEffort::None,
+        "low" => ChatReasoningEffort::Low,
+        "medium" => ChatReasoningEffort::Medium,
+        "high" => ChatReasoningEffort::High,
+        "minimal" => ChatReasoningEffort::Minimal,
+        _ => return None,
+    })
+}
+
+fn parse_tool_choice(value: &serde_json::Value) -> Option<AgentToolChoiceInput> {
+    match value {
+        serde_json::Value::String(s) => match s.as_str() {
+            "auto" => Some(AgentToolChoiceInput::Auto),
+            "none" => Some(AgentToolChoiceInput::None),
+            "required" => Some(AgentToolChoiceInput::Required),
+            _ => None,
+        },
+        serde_json::Value::Object(obj) => {
+            let name = obj.get("name").and_then(|v| v.as_str()).map(str::to_owned)?;
+            Some(AgentToolChoiceInput::Tool { name })
+        }
+        _ => None,
+    }
+}
+
+fn parse_text_format(value: &serde_json::Value) -> Option<AgentStructuredOutputInput> {
+    let obj = value.as_object()?;
+    let kind = obj.get("type").and_then(|v| v.as_str())?;
+    match kind {
+        "json_object" => Some(AgentStructuredOutputInput::JsonObject),
+        "json_schema" => Some(AgentStructuredOutputInput::JsonSchema {
+            name: obj.get("name").and_then(|v| v.as_str()).map(str::to_owned),
+            description: obj.get("description").and_then(|v| v.as_str()).map(str::to_owned),
+            strict: obj.get("strict").and_then(|v| v.as_bool()),
+            schema: obj.get("schema").cloned().unwrap_or(serde_json::Value::Null),
+        }),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
 fn add_non_blank(errors: &mut ValidationErrors, field: &'static str, value: &str) {
     if !value.trim().is_empty() {
         return;
@@ -264,6 +445,7 @@ fn add_non_blank(errors: &mut ValidationErrors, field: &'static str, value: &str
     errors.add(field, error);
 }
 
+#[cfg(test)]
 fn validate_agent_config(errors: &mut ValidationErrors, config: &AgentConfigInput) {
     if let Some(0) = config.tool_concurrency {
         add_field_error(errors, "tool_concurrency", "tool_concurrency must be at least 1");
@@ -288,63 +470,11 @@ fn validate_agent_config(errors: &mut ValidationErrors, config: &AgentConfigInpu
     }
 }
 
+#[cfg(test)]
 fn add_field_error(errors: &mut ValidationErrors, field: &'static str, message: &'static str) {
     let mut error = ValidationError::new("range");
     error.message = Some(message.into());
     errors.add(field, error);
-}
-
-/// Client action acknowledged by `/v1/agents/responses`.
-#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentResponsesAction {
-    SessionRestore,
-    ResponseCreate,
-    Input,
-    ApprovalResolve,
-    Interrupt,
-    Shutdown,
-}
-
-/// Server message returned by `POST /v1/agents/responses` and emitted on the
-/// WebSocket control channel. Agent response events are sent as raw
-/// `AgentStreamEvent` frames.
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(tag = "type")]
-pub enum AgentResponsesServerMessage {
-    #[serde(rename = "agent.ack")]
-    Ack {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        request_id: Option<String>,
-        action: AgentResponsesAction,
-        accepted: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        thread_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        status: Option<AgentStatusValue>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        delivered: Option<bool>,
-    },
-    #[serde(rename = "agent.session.restored")]
-    SessionRestored {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        request_id: Option<String>,
-        session_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        thread: Option<AgentThreadResponse>,
-        messages: Vec<AgentThreadMessageResponse>,
-    },
-    #[serde(rename = "agent.error")]
-    Error {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        request_id: Option<String>,
-        code: String,
-        message: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        i18n: Option<I18nPayload>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        thread_id: Option<String>,
-    },
 }
 
 /// Persisted agent thread summary.
@@ -440,24 +570,9 @@ impl From<AgentThreadStatus> for AgentStatusValue {
     }
 }
 
-/// Outcome of a workspace migration preparation (B-8 / INFRA-01): the project
-/// id the snapshot was scoped to + how many agent threads were suspended.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct WorkspaceMigrationResponse {
-    pub project_id: String,
-    pub suspended_count: u32,
-}
-
-impl From<crate::domain::services::agent::WorkspaceMigrationOutcome>
-    for WorkspaceMigrationResponse
-{
-    fn from(outcome: crate::domain::services::agent::WorkspaceMigrationOutcome) -> Self {
-        Self { project_id: outcome.project_id, suspended_count: outcome.suspended_count as u32 }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::*;
     use slab_agent::{
         config::{AgentConfig, AgentToolChoice},
         port::ThreadMessageRecord,
@@ -466,13 +581,99 @@ mod tests {
         ConversationMessage, ConversationMessageContent, ConversationToolCall,
         ConversationToolFunction, StructuredOutput,
     };
-    use validator::Validate;
+
+    #[test]
+    fn openai_input_string_translates_to_single_user_message() {
+        let req: OpenAICreateRequest =
+            serde_json::from_str(r#"{"model":"m","input":"hello"}"#).unwrap();
+        let messages = req.to_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "hello");
+    }
+
+    #[test]
+    fn function_tools_extracts_function_definitions_and_drops_others() {
+        let req: OpenAICreateRequest = serde_json::from_str(
+            r#"{"input":"hi","tools":[
+                {"type":"function","name":"get_weather","description":"Get weather","parameters":{"type":"object"}},
+                {"type":"web_search"}
+            ]}"#,
+        )
+        .unwrap();
+        let tools = req.function_tools();
+        assert_eq!(tools.len(), 1, "non-function tools are dropped");
+        assert_eq!(tools[0].name, "get_weather");
+        assert_eq!(tools[0].description, Some(Some("Get weather".to_owned())));
+        // Canonical shape omits strict/parameters — both default leniently.
+        let req: OpenAICreateRequest =
+            serde_json::from_str(r#"{"input":"hi","tools":[{"type":"function","name":"noop"}]}"#)
+                .unwrap();
+        let tools = req.function_tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "noop");
+        assert!(tools[0].strict.is_none() && tools[0].parameters.is_none());
+    }
+
+    #[test]
+    fn function_tools_empty_when_absent_or_malformed() {
+        let req: OpenAICreateRequest = serde_json::from_str(r#"{"input":"hi"}"#).unwrap();
+        assert!(req.function_tools().is_empty());
+
+        // A non-array `tools` value is dropped leniently.
+        let req: OpenAICreateRequest =
+            serde_json::from_str(r#"{"input":"hi","tools":"not-an-array"}"#).unwrap();
+        assert!(req.function_tools().is_empty());
+    }
+
+    #[test]
+    fn openai_input_array_groups_function_calls_into_assistant_message() {
+        let req: OpenAICreateRequest = serde_json::from_str(
+            r#"{"input":[
+                {"type":"message","role":"user","content":"hi"},
+                {"type":"message","role":"assistant","content":[{"type":"output_text","text":"thinking"}]},
+                {"type":"function_call","call_id":"c1","name":"search","arguments":"{\"q\":\"x\"}"},
+                {"type":"function_call_output","call_id":"c1","output":"result"}
+            ]}"#,
+        )
+        .unwrap();
+        let messages = req.to_messages();
+        // user, assistant (with folded tool call), tool
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "hi");
+        assert_eq!(messages[1].role, "assistant");
+        assert_eq!(messages[1].content, "thinking");
+        assert_eq!(messages[1].tool_calls.len(), 1);
+        assert_eq!(messages[1].tool_calls[0].function.name, "search");
+        assert_eq!(messages[2].role, "tool");
+        assert_eq!(messages[2].tool_call_id.as_deref(), Some("c1"));
+        assert_eq!(messages[2].content, "result");
+    }
+
+    #[test]
+    fn openai_request_maps_to_agent_config_input() {
+        let req: OpenAICreateRequest = serde_json::from_str(
+            r#"{"model":"gpt-x","instructions":"be brief","max_output_tokens":128,
+               "temperature":0.5,"reasoning":{"effort":"high"},
+               "tool_choice":"required","text":{"format":{"type":"json_object"}}}"#,
+        )
+        .unwrap();
+        let config = AgentConfig::from(req.to_config_input());
+        assert_eq!(config.model, "gpt-x");
+        assert_eq!(config.system_prompt.as_deref(), Some("be brief"));
+        assert_eq!(config.max_tokens, Some(128));
+        assert_eq!(config.temperature, Some(0.5));
+        assert!(config.reasoning_effort.is_some());
+        assert!(matches!(config.tool_choice, AgentToolChoice::Required));
+        assert!(config.structured_output.is_some());
+    }
 
     use crate::schemas::chat::{ChatToolCall, ChatToolFunction};
 
     use super::{
-        AgentConfigInput, AgentResponsesClientMessage, AgentStructuredOutputInput,
-        AgentThreadMessageResponse, AgentToolChoiceInput, MessageInput,
+        AgentConfigInput, AgentStructuredOutputInput, AgentThreadMessageResponse,
+        AgentToolChoiceInput, MessageInput,
     };
 
     #[test]
@@ -496,19 +697,15 @@ mod tests {
 
     #[test]
     fn agent_config_input_rejects_out_of_range_tool_controls() {
-        let message = AgentResponsesClientMessage::ResponseCreate {
-            request_id: None,
-            session_id: "session-1".into(),
-            config: Box::new(AgentConfigInput {
-                tool_concurrency: Some(5),
-                invalid_tool_call_retries: Some(4),
-                tool_choice: Some(AgentToolChoiceInput::Tool { name: " ".into() }),
-                ..AgentConfigInput::default()
-            }),
-            messages: Vec::new(),
+        let config = AgentConfigInput {
+            tool_concurrency: Some(5),
+            invalid_tool_call_retries: Some(4),
+            tool_choice: Some(AgentToolChoiceInput::Tool { name: " ".into() }),
+            ..AgentConfigInput::default()
         };
+        let mut errors = ValidationErrors::new();
+        validate_agent_config(&mut errors, &config);
 
-        let errors = message.validate().expect_err("invalid config");
         assert!(errors.field_errors().contains_key("tool_concurrency"));
         assert!(errors.field_errors().contains_key("invalid_tool_call_retries"));
         assert!(errors.field_errors().contains_key("tool_choice.name"));

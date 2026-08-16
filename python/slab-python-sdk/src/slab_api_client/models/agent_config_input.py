@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
+from typing_extensions import Self
 
 from ..models.chat_reasoning_effort import ChatReasoningEffort
 from ..models.chat_verbosity import ChatVerbosity
@@ -157,9 +158,9 @@ class AgentConfigInput:
         structured_output: dict[str, Any] | None | Unset
         if isinstance(self.structured_output, Unset):
             structured_output = UNSET
-        elif isinstance(self.structured_output, AgentStructuredOutputInputType0):
-            structured_output = self.structured_output.to_dict()
-        elif isinstance(self.structured_output, AgentStructuredOutputInputType1):
+        elif isinstance(
+            self.structured_output, AgentStructuredOutputInputType0
+        ) or isinstance(self.structured_output, AgentStructuredOutputInputType1):
             structured_output = self.structured_output.to_dict()
         else:
             structured_output = self.structured_output
@@ -185,13 +186,12 @@ class AgentConfigInput:
         tool_choice: dict[str, Any] | None | Unset
         if isinstance(self.tool_choice, Unset):
             tool_choice = UNSET
-        elif isinstance(self.tool_choice, AgentToolChoiceInputType0):
-            tool_choice = self.tool_choice.to_dict()
-        elif isinstance(self.tool_choice, AgentToolChoiceInputType1):
-            tool_choice = self.tool_choice.to_dict()
-        elif isinstance(self.tool_choice, AgentToolChoiceInputType2):
-            tool_choice = self.tool_choice.to_dict()
-        elif isinstance(self.tool_choice, AgentToolChoiceInputType3):
+        elif (
+            isinstance(self.tool_choice, AgentToolChoiceInputType0)
+            or isinstance(self.tool_choice, AgentToolChoiceInputType1)
+            or isinstance(self.tool_choice, AgentToolChoiceInputType2)
+            or isinstance(self.tool_choice, AgentToolChoiceInputType3)
+        ):
             tool_choice = self.tool_choice.to_dict()
         else:
             tool_choice = self.tool_choice
@@ -273,7 +273,7 @@ class AgentConfigInput:
         return field_dict
 
     @classmethod
-    def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+    def from_dict(cls, src_dict: Mapping[str, Any]) -> Self:
         from ..models.agent_structured_output_input_type_0 import (
             AgentStructuredOutputInputType0,
         )

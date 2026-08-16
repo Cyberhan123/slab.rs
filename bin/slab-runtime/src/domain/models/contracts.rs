@@ -9,12 +9,28 @@ pub(crate) struct GgmlLlamaLoadConfig {
     pub engine_workers: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
+    /// Free GPU VRAM (bytes) snapshot; used to size an `auto` context
+    /// (`context_length == None`). `None` when no VRAM signal is available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free_vram_bytes: Option<u64>,
     #[serde(default)]
     pub flash_attn: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gbnf: Option<String>,
+    /// Optional multimodal vision/audio projector (mmproj) GGUF path. When set,
+    /// the engine loads an mtmd context bound to the text model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mmproj_path: Option<PathBuf>,
+    /// Scheduler sizing tunables forwarded by the server; unset fields fall
+    /// back per-field to `SchedulerParams::default()` in the engine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vram_buffer_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_context_quantum: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_context_fallback: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -23,6 +39,40 @@ pub(crate) struct GgmlLlamaLoadMetadata {
     pub context_length: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub training_context_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_template: Option<String>,
+}
+
+/// Typed quantize request payload that flows through the driver to the engine.
+/// `ftype` is the raw `llama_ftype` int (e.g. 15 = Q4_K_M, 36 = TQ1_0).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct GgmlLlamaQuantizeInput {
+    pub input_path: String,
+    pub output_path: String,
+    #[serde(default)]
+    pub ftype: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nthread: Option<i32>,
+    #[serde(default)]
+    pub allow_requantize: bool,
+    #[serde(default)]
+    pub quantize_output_tensor: bool,
+    #[serde(default)]
+    pub only_copy: bool,
+    #[serde(default)]
+    pub pure: bool,
+    #[serde(default)]
+    pub keep_split: bool,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct GgmlLlamaQuantizeOutput {
+    #[serde(default)]
+    pub layers_processed: u32,
+    #[serde(default)]
+    pub output_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -30,6 +80,11 @@ pub(crate) struct GgmlWhisperLoadConfig {
     pub model_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flash_attn: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct GgmlParakeetLoadConfig {
+    pub model_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -142,6 +197,18 @@ pub(crate) struct TextGenerationOptions {
     pub stop_sequences: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
+    /// Encoded image bytes for a multimodal (mtmd) turn. Empty for text-only.
+    #[serde(default)]
+    pub image_parts: Vec<TextGenerationImagePart>,
+}
+
+/// An image input accompanying a multimodal text-generation turn.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct TextGenerationImagePart {
+    #[serde(default)]
+    pub data: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

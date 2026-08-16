@@ -1,0 +1,30 @@
+{
+  "name": "@slab/test-utils",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./mocks": "./src/mocks/index.ts",
+    "./providers/render-with-providers": "./src/providers/render-with-providers.tsx",
+    "./fixtures": "./src/fixtures/index.ts"
+  },
+  "scripts": {
+    "lint": "oxlint src",
+    "lint:fix": "oxlint --fix src",
+    "test": "echo skip"
+  },
+  "devDependencies": {
+    "@slab/ui": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "react-router-dom": "catalog:",
+    "sonner": "catalog:",
+    "vitest": "catalog:",
+    "vitest-browser-react": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:react-peer",
+    "react-dom": "catalog:react-peer"
+  },
+  "license": "AGPL-3.0-only"
+}

@@ -5,7 +5,7 @@ use std::{
 
 use serde_json::{Value, json};
 use slab_jsonrpc::{
-    notification_with_optional_params, parse_message, request_with_optional_params,
+    JSONRPC_VERSION, JSONRPCMessage, JSONRPCNotification, JSONRPCRequest, RequestId,
 };
 use thiserror::Error;
 use tokio::{
@@ -40,6 +40,11 @@ pub enum McpClientError {
 
 pub struct StdioMcpClient {
     _child: Mutex<Child>,
+    // Drops AFTER `_child` (field order) — tears the whole server process tree down on client drop
+    // (Windows Job `KILL_ON_JOB_CLOSE` / Unix process-group `SIGKILL`). Fixes the orphan-on-shutdown
+    // bug where the server (and its forks) kept running after the client dropped. `Mutex` so the
+    // `FnOnce` (which is `Send` but not `Sync`) keeps the struct `Send + Sync`.
+    _kill_guard: Mutex<Option<Box<dyn FnOnce() + Send + 'static>>>,
     connection: JsonRpcConnection<tokio::process::ChildStdout, tokio::process::ChildStdin>,
 }
 
@@ -56,11 +61,20 @@ impl StdioMcpClient {
         command.stdin(std::process::Stdio::piped());
         command.stdout(std::process::Stdio::piped());
 
+        // S6c: reliable process-tree containment. `kill_on_drop` kills the direct child; the guard
+        // reaches grandchildren (Job on Windows, process-group on Unix). Network stays allowed —
+        // MCP servers need outbound network.
+        crate::sandbox::pre_spawn(&mut command);
+
         let mut child = command.spawn()?;
+        let kill_guard = crate::sandbox::post_spawn(&child);
         let stdin = child.stdin.take().ok_or(McpClientError::MissingStdin)?;
         let stdout = child.stdout.take().ok_or(McpClientError::MissingStdout)?;
-        let client =
-            Self { _child: Mutex::new(child), connection: JsonRpcConnection::new(stdout, stdin) };
+        let client = Self {
+            _child: Mutex::new(child),
+            _kill_guard: Mutex::new(kill_guard),
+            connection: JsonRpcConnection::new(stdout, stdin),
+        };
         client.initialize().await?;
         Ok(client)
     }
@@ -171,8 +185,15 @@ where
 
     async fn request(&self, method: &str, params: Option<Value>) -> Result<Value, McpClientError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let payload =
-            serde_json::to_string(&request_with_optional_params(Value::from(id), method, params))?;
+        let id = RequestId::Integer(i64::try_from(id).map_err(|_| {
+            McpClientError::Protocol("MCP request id exceeded JSON-RPC integer range".to_string())
+        })?);
+        let payload = serialize_wire_message(&JSONRPCMessage::Request(JSONRPCRequest {
+            id: id.clone(),
+            method: method.to_owned(),
+            params,
+            trace: None,
+        }))?;
         {
             let mut writer = self.writer.lock().await;
             writer.write_all(payload.as_bytes()).await?;
@@ -190,23 +211,51 @@ where
                 "MCP connection closed before response".to_string(),
             ));
         }
-        let response = parse_message(&line)?;
-        if let Some(error) = response.error {
-            return Err(McpClientError::Protocol(error.message));
+        let response = parse_wire_message(&line)?;
+        match response {
+            JSONRPCMessage::Response(response) => {
+                if response.id != id {
+                    return Err(McpClientError::Protocol("response id mismatch".to_string()));
+                }
+                Ok(response.result)
+            }
+            JSONRPCMessage::Error(error) => Err(McpClientError::Protocol(error.error.message)),
+            JSONRPCMessage::Request(_) | JSONRPCMessage::Notification(_) => {
+                Err(McpClientError::Protocol("expected JSON-RPC response".to_string()))
+            }
         }
-        response
-            .result
-            .ok_or_else(|| McpClientError::Protocol("response missing result".to_string()))
     }
 
     async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), McpClientError> {
-        let payload = serde_json::to_string(&notification_with_optional_params(method, params))?;
+        let payload = serialize_wire_message(&JSONRPCMessage::Notification(JSONRPCNotification {
+            method: method.to_owned(),
+            params,
+        }))?;
         let mut writer = self.writer.lock().await;
         writer.write_all(payload.as_bytes()).await?;
         writer.write_all(b"\n").await?;
         writer.flush().await?;
         Ok(())
     }
+}
+
+fn parse_wire_message(line: &str) -> Result<JSONRPCMessage, McpClientError> {
+    let mut value = serde_json::from_str::<Value>(line)?;
+    if value.get("jsonrpc").and_then(Value::as_str) != Some(JSONRPC_VERSION) {
+        return Err(McpClientError::Protocol("jsonrpc must be `2.0`".to_string()));
+    }
+    if let Value::Object(object) = &mut value {
+        object.remove("jsonrpc");
+    }
+    Ok(serde_json::from_value(value)?)
+}
+
+fn serialize_wire_message(message: &JSONRPCMessage) -> Result<String, serde_json::Error> {
+    let mut value = serde_json::to_value(message)?;
+    if let Value::Object(object) = &mut value {
+        object.insert("jsonrpc".to_owned(), Value::String(JSONRPC_VERSION.to_owned()));
+    }
+    serde_json::to_string(&value)
 }
 
 fn parse_tool_result(value: Value) -> Result<McpToolResult, McpClientError> {

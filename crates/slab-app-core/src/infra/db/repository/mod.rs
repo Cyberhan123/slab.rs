@@ -2,16 +2,19 @@ pub mod agent;
 pub mod chat;
 pub mod config;
 pub mod diagnostics;
+pub mod exec_rule;
 pub mod media_task;
 pub mod model;
 pub mod model_config_state;
 pub mod model_download;
 pub mod plugin;
+pub mod rollout_index;
 pub mod session;
 pub mod task;
 pub mod ui_state;
 
 pub use chat::ChatStore;
+pub use exec_rule::ExecRuleWorkspaceStore;
 pub use media_task::MediaTaskStore;
 pub use model::ModelStore;
 pub use model_config_state::ModelConfigStateStore;
@@ -112,7 +115,7 @@ mod tests {
             assert_foreign_key(&pool, table, "task_id", "tasks", "CASCADE").await;
             assert!(!table_columns(&pool, table).await.contains("result_data"));
         }
-        for table in ["agent_turn_states", "agent_memory_phase1_outputs"] {
+        for table in ["agent_memory_phase1_outputs"] {
             assert_foreign_key(&pool, table, "thread_id", "agent_threads", "CASCADE").await;
         }
 
@@ -138,13 +141,79 @@ mod tests {
             "idx_audio_transcription_tasks_created_at",
             "idx_model_config_state_updated_at",
             "idx_agent_threads_session",
-            "idx_agent_turn_states_status",
             "idx_agent_memory_phase1_status",
             "idx_agent_memory_phase2_runs_status",
             "idx_agent_memory_usage_events_thread",
+            // rollout-session L2 index.
+            "idx_rollout_session",
         ] {
             assert_index_exists(&pool, index).await;
         }
+
+        // rollout-session index table FK (rollout_backfill_state
+        // + the legacy conversation tables were dropped).
+        assert_foreign_key(&pool, "rollout_session_index", "thread_id", "agent_threads", "CASCADE")
+            .await;
+        // The default backfill_status is 'completed' (new threads are
+        // rollout-native from birth without an explicit mark).
+        sqlx::query(
+            "INSERT INTO chat_sessions (id, created_at, updated_at) \
+             VALUES ('session-rollout', '2026-06-17T00:00:00Z', '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert session");
+        sqlx::query(
+            "INSERT INTO agent_threads (id, session_id, created_at, updated_at) \
+             VALUES ('thread-rollout', 'session-rollout', '2026-06-17T00:00:00Z', \
+                '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert agent thread for rollout index");
+        sqlx::query(
+            "INSERT INTO rollout_session_index \
+                (thread_id, session_id, file_path, last_updated_at, created_at) \
+             VALUES ('thread-rollout', 'session-rollout', '/x.rollout.jsonl', \
+                '2026-06-17T00:00:00Z', '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert rollout_session_index with default backfill_status");
+        let default_status: String = sqlx::query_scalar(
+            "SELECT backfill_status FROM rollout_session_index WHERE thread_id = 'thread-rollout'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("default backfill_status");
+        assert_eq!(default_status, "completed", "default backfill_status is completed");
+        let invalid_backfill_status = sqlx::query(
+            "INSERT INTO rollout_session_index \
+                (thread_id, session_id, file_path, last_updated_at, backfill_status) \
+             VALUES ('thread-bad-rollout', 'session-rollout', '/x', '2026-06-17T00:00:00Z', 'bogus')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(invalid_backfill_status.is_err(), "CHECK rejects unknown backfill_status");
+        // The legacy conversation tables + agent_tool_calls audit table
+        // + rollout_backfill_state were dropped (rollout is the only source).
+        for table in [
+            "agent_thread_messages",
+            "agent_turn_states",
+            "agent_turn_items",
+            "agent_tool_calls",
+            "rollout_backfill_state",
+        ] {
+            assert_table_absent(&pool, table).await;
+        }
+        for index in
+            ["idx_atm_thread", "idx_agent_turn_states_status", "idx_agent_tool_calls_thread"]
+        {
+            assert_index_absent(&pool, index).await;
+        }
+        // The zombie agent_thread_responses table + its index are dropped.
+        assert_table_absent(&pool, "agent_thread_responses").await;
+        assert_index_absent(&pool, "idx_atr_thread").await;
 
         let invalid_status = sqlx::query(
             "INSERT INTO tasks (id, task_type, status, created_at, updated_at) \
@@ -274,14 +343,6 @@ mod tests {
         .execute(&pool)
         .await;
         assert!(invalid_agent_status.is_err());
-        let invalid_agent_role = sqlx::query(
-            "INSERT INTO agent_thread_messages (id, thread_id, turn_index, role, content, created_at) \
-             VALUES ('message-bad-role', 'thread-defaults', 0, 'moderator', '{}', \
-                '2026-06-17T00:00:00Z')",
-        )
-        .execute(&pool)
-        .await;
-        assert!(invalid_agent_role.is_err());
 
         let invalid_plugin_enabled = sqlx::query(
             "INSERT INTO plugin_states (plugin_id, source_kind, enabled, runtime_status, installed_at, updated_at) \
@@ -437,6 +498,28 @@ mod tests {
         .await
         .expect("index metadata");
         assert_eq!(exists, 1, "missing index {index}");
+    }
+
+    async fn assert_table_absent(pool: &sqlx::SqlitePool, table: &str) {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        )
+        .bind(table)
+        .fetch_one(pool)
+        .await
+        .expect("table metadata");
+        assert_eq!(count, 0, "table {table} should have been dropped");
+    }
+
+    async fn assert_index_absent(pool: &sqlx::SqlitePool, index: &str) {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+        )
+        .bind(index)
+        .fetch_one(pool)
+        .await
+        .expect("index metadata");
+        assert_eq!(count, 0, "index {index} should have been dropped");
     }
 
     async fn row_count(pool: &sqlx::SqlitePool, table: &str) -> i64 {

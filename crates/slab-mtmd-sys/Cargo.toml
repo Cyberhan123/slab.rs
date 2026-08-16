@@ -1,0 +1,15 @@
+[package]
+name = "slab-mtmd-sys"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[build-dependencies]
+slab-build-utils = { workspace = true }
+
+[dependencies]
+libloading = { workspace = true }

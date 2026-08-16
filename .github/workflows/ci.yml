@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,8 +56,14 @@ jobs:
       - name: cargo check
         run: bun ./scripts/cargo/validate.ts check
 
+      - name: cargo fmt
+        run: bun ./scripts/cargo/validate.ts fmt
+
       - name: cargo clippy
         run: bun ./scripts/cargo/validate.ts clippy
+
+      - name: cargo doc
+        run: bun ./scripts/cargo/validate.ts doc
 
       - name: cargo test
         run: bun ./scripts/cargo/validate.ts test

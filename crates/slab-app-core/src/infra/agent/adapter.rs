@@ -15,7 +15,7 @@ use slab_agent::{
     port::{LlmPort, LlmResponse, LlmStreamObserver, LlmUsage, ParsedToolCall, ToolSpec},
 };
 use slab_agent_tracing::{AgentTraceContext, record_json_from_context};
-use slab_proto::openai::{FunctionTool, FunctionToolType};
+use slab_proto::openai::FunctionTool;
 use slab_types::{ConversationMessage, ConversationMessageContent};
 use tracing::warn;
 use uuid::Uuid;
@@ -183,14 +183,13 @@ fn e2e_llm_response(messages: &[ConversationMessage], tools: &[ToolSpec]) -> Llm
         || normalized_prompt.contains("plan_update")
         || normalized_prompt.contains("plan update");
 
-    if wants_plan_loop && !has_tool_result_after_prompt && e2e_tool_available(tools, "plan_update")
-    {
+    if wants_plan_loop && !has_tool_result_after_prompt && e2e_tool_available(tools, "plan") {
         return LlmResponse {
             content: None,
             content_already_streamed: false,
             tool_calls: vec![ParsedToolCall {
-                id: "e2e-plan-update".to_owned(),
-                name: "plan_update".to_owned(),
+                id: "e2e-plan".to_owned(),
+                name: "plan".to_owned(),
                 arguments: serde_json::json!({
                     "summary": "e2e assistant loop",
                     "items": [
@@ -206,7 +205,7 @@ fn e2e_llm_response(messages: &[ConversationMessage], tools: &[ToolSpec]) -> Llm
     }
 
     let content = if wants_plan_loop && has_tool_result_after_prompt {
-        "E2E loop complete after plan_update tool output.".to_owned()
+        "E2E loop complete after plan tool output.".to_owned()
     } else if prompt.trim().is_empty() {
         "E2E assistant persisted reply.".to_owned()
     } else {
@@ -241,6 +240,21 @@ fn e2e_tool_available(tools: &[ToolSpec], tool_name: &str) -> bool {
     tools.iter().any(|tool| tool.name == tool_name)
 }
 
+/// Derive a stable kv-cache session key for the agent path.
+///
+/// Prefers the thread id (stable across all turns of a conversation) and falls
+/// back to the session id. The key lets the local-LLM runtime reuse its
+/// managed-session snapshot between turns so only the new turn is prefilled.
+fn agent_kv_session_key(trace_context: &AgentTraceContext) -> Option<String> {
+    if let Some(thread_id) = trace_context.thread_id.as_ref()
+        && !thread_id.trim().is_empty()
+    {
+        return Some(format!("agent:{thread_id}"));
+    }
+    let session = trace_context.session_id.trim();
+    (!session.is_empty()).then(|| format!("agent:{session}"))
+}
+
 fn chat_command_from_agent_config(
     model: &str,
     messages: Vec<ConversationMessage>,
@@ -269,7 +283,19 @@ fn chat_command_from_agent_config(
             stop: vec![],
             stream_options: ChatStreamOptions::default(),
         },
-        local: LocalChatParams { gbnf: None, structured_output: config.structured_output.clone() },
+        local: LocalChatParams {
+            gbnf: None,
+            structured_output: config.structured_output.clone(),
+            // Stable per-thread key so the local-LLM managed-session snapshot
+            // cache engages and only the new turn is re-prefilled each turn
+            // (incremental prefill). Kept separate from `id` (which stays
+            // `None`) so the chat_messages history/persistence machinery is
+            // not triggered for the agent path.
+            session_key: agent_kv_session_key(trace_context),
+            // The agent context hook already injects a reasoning-effort fragment,
+            // so the local path must not inject its inline policy a second time.
+            reasoning_guidance_in_context: true,
+        },
         cloud: CloudChatParams {
             reasoning_effort: config.reasoning_effort,
             verbosity: config.verbosity,
@@ -288,12 +314,7 @@ fn response_function_tools_from_agent_tools(tools: &[ToolSpec]) -> Vec<FunctionT
                 }
                 _ => None,
             };
-            let mut function_tool = FunctionTool::new(
-                FunctionToolType::Function,
-                tool.name.clone(),
-                parameters,
-                Some(true),
-            );
+            let mut function_tool = FunctionTool::new(tool.name.clone(), parameters, Some(true));
             if !tool.description.trim().is_empty() {
                 function_tool.description = Some(Some(tool.description.clone()));
             }
@@ -517,9 +538,9 @@ mod tests {
         }
     }
 
-    fn plan_update_spec() -> ToolSpec {
+    fn plan_spec() -> ToolSpec {
         ToolSpec {
-            name: "plan_update".to_owned(),
+            name: "plan".to_owned(),
             description: "record a plan".to_owned(),
             parameters_schema: serde_json::json!({ "type": "object" }),
         }
@@ -571,15 +592,13 @@ mod tests {
     }
 
     #[test]
-    fn e2e_llm_requests_plan_update_before_tool_result() {
-        let response = e2e_llm_response(
-            &[text_message("user", "please run the tool loop")],
-            &[plan_update_spec()],
-        );
+    fn e2e_llm_requests_plan_before_tool_result() {
+        let response =
+            e2e_llm_response(&[text_message("user", "please run the tool loop")], &[plan_spec()]);
 
         assert_eq!(response.finish_reason.as_deref(), Some("tool_calls"));
         assert_eq!(response.tool_calls.len(), 1);
-        assert_eq!(response.tool_calls[0].name, "plan_update");
+        assert_eq!(response.tool_calls[0].name, "plan");
         assert!(response.tool_calls[0].arguments.contains("record plan"));
     }
 
@@ -590,13 +609,10 @@ mod tests {
                 text_message("user", "please run the tool loop"),
                 text_message("tool", "{\"summary\":\"e2e assistant loop\"}"),
             ],
-            &[plan_update_spec()],
+            &[plan_spec()],
         );
 
-        assert_eq!(
-            response.content.as_deref(),
-            Some("E2E loop complete after plan_update tool output.")
-        );
+        assert_eq!(response.content.as_deref(), Some("E2E loop complete after plan tool output."));
         assert!(response.tool_calls.is_empty());
         assert_eq!(response.finish_reason.as_deref(), Some("stop"));
     }

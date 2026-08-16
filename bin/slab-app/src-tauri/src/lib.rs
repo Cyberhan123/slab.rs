@@ -1,13 +1,12 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod audio_temp;
 mod diagnostics;
 mod health;
 mod paths;
 mod plugins;
 mod secrets;
 mod setup;
-mod surface_windows;
 mod workspace;
-mod workspace_migration;
 
 use setup::ApiEndpointConfig;
 use tracing_subscriber::layer::SubscriberExt;
@@ -23,8 +22,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(api_endpoint.clone())
-        .manage(secrets::KeyringSecretAdapter::new())
-        .manage(surface_windows::SurfaceWindowManager::default());
+        .manage(secrets::KeyringSecretAdapter::new());
 
     builder = plugins::register_protocol(builder);
 
@@ -45,13 +43,10 @@ pub fn run() {
             plugins::plugin_theme_snapshot,
             diagnostics::export_diagnostics,
             secrets::verify_secret_handle,
-            workspace_migration::switch_workspace_with_migration,
-            surface_windows::open_surface_window,
-            surface_windows::close_surface_window,
-            surface_windows::focus_surface_window,
-            surface_windows::list_surface_windows,
             health::run_first_run_health_check,
             health::bootstrap_slab_directory,
+            audio_temp::write_temp_audio,
+            audio_temp::remove_temp_audio,
         ])
         .setup(move |app| {
             let workspace_bootstrap = workspace::init(app).map_err(|error| {

@@ -1,0 +1,20 @@
+<reasoning_effort>
+{% if effort == "none" -%}
+Answer directly without rehearsing reasoning first.
+{% elif effort == "minimal" -%}
+Think briefly before answering; one short internal step is enough.
+{% elif effort == "low" -%}
+Think briefly before answering: confirm what is asked and pick a direct approach.
+{% elif effort == "medium" -%}
+Reason step by step before answering: state assumptions, work through the problem, then give the answer.
+{% elif effort == "high" -%}
+Reason carefully and thoroughly before answering: lay out the problem, consider edge cases and failure modes, verify your conclusions, then answer.
+{% endif -%}
+{% if verbosity == "low" -%}
+Keep the final answer concise and compact.
+{% elif verbosity == "medium" -%}
+Keep the final answer moderately detailed.
+{% elif verbosity == "high" -%}
+Keep the final answer detailed and thorough.
+{% endif -%}
+</reasoning_effort>

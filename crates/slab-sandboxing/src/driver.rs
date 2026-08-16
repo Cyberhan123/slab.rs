@@ -1,20 +1,52 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::error::SandboxError;
 use crate::policy::SandboxEnvironment;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Which process stream an output chunk came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputStream {
+    Stdout,
+    Stderr,
+}
+
+/// Receiver for incremental process output. While a command runs the driver
+/// forwards each chunk (e.g. to the harness display); it still returns the fully
+/// accumulated output when the process exits.
+pub trait OutputSink: Send + Sync {
+    fn on_output(&self, stream: OutputStream, delta: &str);
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SandboxedCommand {
     pub argv: Vec<String>,
     pub env: HashMap<String, String>,
     pub cwd: Option<PathBuf>,
     pub timeout: Option<Duration>,
+    /// Optional live-output receiver. `#[serde(skip)]` (closures aren't
+    /// serializable); defaults to `None` when deserialized.
+    #[serde(skip)]
+    pub output_sink: Option<Arc<dyn OutputSink>>,
+}
+
+impl std::fmt::Debug for SandboxedCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SandboxedCommand")
+            .field("argv", &self.argv)
+            .field("env", &self.env)
+            .field("cwd", &self.cwd)
+            .field("timeout", &self.timeout)
+            .field("output_sink", &self.output_sink.as_ref().map(|_| "<sink>"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -25,32 +57,103 @@ pub struct SandboxedOutput {
     pub timed_out: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxPlatform {
     Windows,
     Linux,
     Macos,
+    #[default]
     Unsupported,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Coarse isolation level reported by a driver. New variants are additive so
+/// existing discriminants stay stable (the smoke test casts this to `u8`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxIsolation {
     Full,
+    #[default]
     Degraded,
     Passthrough,
     Unsupported,
+    /// Lexical/in-process guard only (no OS enforcement) but stronger than raw
+    /// passthrough — e.g. an allowlist gate before spawn.
+    Guard,
+    /// OS-enforced but partial (e.g. restricted token + ACL on Windows without
+    /// WFP, or firewall-only network blocking).
+    Elevated,
+    /// Kernel-level filtering (landlock, WFP callout, seccomp).
+    KernelFiltered,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// What mechanism actually backs one dimension of isolation — the honest
+/// counterpart to the legacy `filesystem` / `network` booleans on
+/// [`SandboxCapabilities`]. `Lexical` means an in-process text/path check
+/// (`validate_command`) that is defense-in-depth and bypassable; `OsEnforced`
+/// means the OS kernel enforces it. The booleans stay `false` unless a kernel
+/// mechanism is active, so callers cannot be lied to again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IsolationStrength {
+    #[default]
+    None,
+    Lexical,
+    OsEnforced,
+}
+
+/// How the sandbox is (or would be) provisioned. Maps 1:1 to the honest
+/// `capabilities()` report so callers branch on the real mechanism instead of
+/// guessing from booleans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SetupKind {
+    #[default]
+    None,
+    /// Windows: Job Object (tree-kill) + lexical guard only — today's state.
+    JobObject,
+    /// Lexical guard only (no Job Object, no OS isolation).
+    Guard,
+    /// Windows: restricted token + ACL filesystem containment, no WFP.
+    ElevatedAclToken,
+    /// Windows: full — restricted token + ACL + WFP/firewall network blocking.
+    ElevatedAclTokenWfp,
+    /// Linux: bubblewrap for the filesystem view.
+    Bwrap,
+    /// Linux: bubblewrap + seccomp (network syscalls blocked except AF_UNIX).
+    BwrapSeccomp,
+    /// Linux: bubblewrap + landlock fallback.
+    BwrapLandlock,
+    /// macOS: seatbelt (`sandbox-exec`).
+    Seatbelt,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SandboxCapabilities {
     pub platform: SandboxPlatform,
     pub isolation: SandboxIsolation,
+    /// OS-enforced filesystem write containment. `false` unless a kernel
+    /// mechanism (ACL/seatbelt/bwrap bind) actually enforces it — a lexical
+    /// guard alone does NOT set this. See [`IsolationStrength`] for nuance.
+    #[serde(default)]
     pub filesystem: bool,
+    /// OS-enforced network blocking. `false` unless a kernel mechanism
+    /// (WFP/seccomp/`--unshare-net`) actually enforces it.
+    #[serde(default)]
     pub network: bool,
+    #[serde(default)]
     pub process_cleanup: bool,
+    #[serde(default)]
     pub setup_required: bool,
+    /// Honest strength of the filesystem dimension.
+    #[serde(default)]
+    pub filesystem_isolation: IsolationStrength,
+    /// Honest strength of the network dimension.
+    #[serde(default)]
+    pub network_isolation: IsolationStrength,
+    /// The provisioning mechanism in effect.
+    #[serde(default)]
+    pub setup_kind: SetupKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +185,10 @@ impl SandboxedOutput {
     pub fn stderr_str(&self) -> String {
         String::from_utf8_lossy(&self.stderr).into_owned()
     }
+    /// `true` when the process exited cleanly (zero status) without timing out.
+    pub fn success(&self) -> bool {
+        self.exit_code == 0 && !self.timed_out
+    }
 }
 
 #[async_trait]
@@ -94,14 +201,9 @@ pub trait SandboxDriver: Send + Sync {
     }
 
     fn capabilities(&self) -> SandboxCapabilities {
-        SandboxCapabilities {
-            platform: SandboxPlatform::Unsupported,
-            isolation: SandboxIsolation::Degraded,
-            filesystem: false,
-            network: false,
-            process_cleanup: false,
-            setup_required: false,
-        }
+        // Conservative default: no platform, degraded, nothing OS-enforced.
+        // Matches `SandboxCapabilities::default()` exactly.
+        SandboxCapabilities::default()
     }
 
     fn setup_status(&self) -> SandboxSetupStatus {
@@ -131,22 +233,30 @@ impl SandboxDriver for PassThroughDriver {
             child.current_dir(cwd);
         }
         child.kill_on_drop(true);
+        child.stdin(std::process::Stdio::null());
         child.stdout(std::process::Stdio::piped());
         child.stderr(std::process::Stdio::piped());
+        // Run the command in its own process group so a backgrounded child that
+        // inherits the stdout/stderr pipes can be tree-killed after it exits
+        // (otherwise the read tasks wait for pipe EOF forever).
+        #[cfg(unix)]
+        {
+            child.process_group(0);
+        }
 
         let spawned = child.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-        wait_for_child(spawned, cmd.timeout).await
+        // PassThrough has no Windows Job Object: on Unix kill the child's process
+        // group; on Windows the grace-timeout backstop in `wait_for_child` is the
+        // only protection (this driver is dev/test-only).
+        #[cfg(unix)]
+        let kill_tree = unix_kill_tree(spawned.id());
+        #[cfg(not(unix))]
+        let kill_tree: Option<Box<dyn FnOnce() + Send + 'static>> = None;
+        wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone(), kill_tree).await
     }
 
     fn capabilities(&self) -> SandboxCapabilities {
-        SandboxCapabilities {
-            platform: SandboxPlatform::Unsupported,
-            isolation: SandboxIsolation::Passthrough,
-            filesystem: false,
-            network: false,
-            process_cleanup: false,
-            setup_required: false,
-        }
+        SandboxCapabilities { isolation: SandboxIsolation::Passthrough, ..Default::default() }
     }
 }
 
@@ -173,26 +283,42 @@ pub(crate) fn command_env(
     merged
 }
 
+/// After the direct child exits, how long to keep draining its stdout/stderr
+/// pipes before aborting the read tasks. Normally the pipes close immediately
+/// once the process tree is killed; this backstop guards pathological cases
+/// (e.g. a reparented descendant that kept a handle) so the run can never hang.
+const READ_DRAIN_GRACE: Duration = Duration::from_secs(5);
+
+#[allow(clippy::type_complexity)]
 pub(crate) async fn wait_for_child(
     mut child: tokio::process::Child,
     timeout: Option<Duration>,
+    sink: Option<Arc<dyn OutputSink>>,
+    // Invoked once the direct child has exited, to tear down any leftover
+    // descendants so they release the stdout/stderr pipes. `None` when the
+    // caller has no tree-kill mechanism (then the grace backstop below applies).
+    kill_tree: Option<Box<dyn FnOnce() + Send + 'static>>,
 ) -> Result<SandboxedOutput, SandboxError> {
-    let mut stdout = child.stdout.take();
-    let mut stderr = child.stderr.take();
-    let stdout_task = tokio::spawn(async move {
-        let mut bytes = Vec::new();
-        if let Some(stdout) = stdout.as_mut() {
-            stdout.read_to_end(&mut bytes).await?;
-        }
-        Ok::<_, std::io::Error>(bytes)
-    });
-    let stderr_task = tokio::spawn(async move {
-        let mut bytes = Vec::new();
-        if let Some(stderr) = stderr.as_mut() {
-            stderr.read_to_end(&mut bytes).await?;
-        }
-        Ok::<_, std::io::Error>(bytes)
-    });
+    let pid = child.id();
+    tracing::info!(
+        ?pid,
+        ?timeout,
+        has_sink = sink.is_some(),
+        has_kill_tree = kill_tree.is_some(),
+        "wait_for_child: spawned, awaiting child.wait"
+    );
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let stdout_sink = sink.clone();
+    let stderr_sink = sink.clone();
+    // Shared accumulators: read tasks append here as they go, so the partial
+    // output survives even if a task is aborted before EOF (see drain grace).
+    let stdout_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let stderr_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let stdout_task =
+        tokio::spawn(read_stream(stdout, stdout_sink, OutputStream::Stdout, stdout_buf.clone()));
+    let stderr_task =
+        tokio::spawn(read_stream(stderr, stderr_sink, OutputStream::Stderr, stderr_buf.clone()));
 
     let (exit_code, timed_out) = if let Some(timeout) = timeout {
         match tokio::time::timeout(timeout, child.wait()).await {
@@ -208,18 +334,144 @@ pub(crate) async fn wait_for_child(
         let status = child.wait().await.map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
         (status.code().unwrap_or(-1), false)
     };
+    tracing::info!(?pid, exit_code, timed_out, "wait_for_child: child exited, killing tree");
 
-    let stdout = stdout_task
-        .await
-        .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
-        .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-    let mut stderr = stderr_task
-        .await
-        .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
-        .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
+    // The direct child has exited. Kill the entire process tree so any live
+    // grandchildren release the inherited stdout/stderr pipes. Without this the
+    // read tasks below wait for pipe EOF forever — the exact cause of a turn
+    // hanging indefinitely after a shell approval when the command backgrounds a
+    // long-lived process. Must happen BEFORE awaiting the read tasks.
+    if let Some(kill) = kill_tree {
+        kill();
+        tracing::info!(?pid, "wait_for_child: process tree killed");
+    }
+
+    // Drain the pipes within a grace window. If a read still hasn't hit EOF,
+    // abort it and keep whatever reached the shared buffer.
+    drain_with_grace(stdout_task, READ_DRAIN_GRACE).await;
+    drain_with_grace(stderr_task, READ_DRAIN_GRACE).await;
+    tracing::info!(
+        ?pid,
+        stdout_len = stdout_buf.lock().map(|b| b.len()).unwrap_or(0),
+        stderr_len = stderr_buf.lock().map(|b| b.len()).unwrap_or(0),
+        "wait_for_child: read tasks drained, returning"
+    );
+
+    let stdout = stdout_buf.lock().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?.clone();
+    let mut stderr =
+        stderr_buf.lock().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?.clone();
     if timed_out && stderr.is_empty() {
         stderr.extend_from_slice(b"command timed out");
     }
 
     Ok(SandboxedOutput { stdout, stderr, exit_code, timed_out })
+}
+
+/// Await a read task for at most `grace`; on timeout abort it. The shared
+/// accumulator buffer retains whatever was read before the abort.
+pub(crate) async fn drain_with_grace(
+    mut handle: tokio::task::JoinHandle<std::io::Result<()>>,
+    grace: Duration,
+) {
+    if tokio::time::timeout(grace, &mut handle).await.is_err() {
+        handle.abort();
+        let _ = (&mut handle).await;
+    }
+}
+
+/// Elevated-path sibling of [`wait_for_child`]: the child lives in the elevated daemon, so bytes
+/// arrive in pre-filled `Arc<Mutex<Vec<u8>>>` buffers and the exit is an `exit_future`. Mirrors
+/// `wait_for_child`'s semantics: on timeout, fire `kill_tree` (drops the daemon connection ⇒
+/// `KILL_ON_JOB_CLOSE`) then best-effort await; fire `kill_tree` before the final buffer snapshot.
+/// `wait_for_child` itself stays untouched (still the Job-only path).
+#[cfg(target_os = "windows")]
+pub(crate) async fn wait_for_elevated(
+    run: slab_windows_sandbox::ElevatedRun,
+    timeout: Option<Duration>,
+) -> Result<SandboxedOutput, SandboxError> {
+    let slab_windows_sandbox::ElevatedRun { stdout_buf, stderr_buf, mut exit_future, kill_tree } =
+        run;
+    let mut kill_tree = kill_tree;
+
+    let (exit_code, timed_out) = match timeout {
+        Some(t) => match tokio::time::timeout(t, &mut exit_future).await {
+            Ok(Ok(elev)) => (elev.exit_code, elev.timed_out),
+            Ok(Err(_)) => {
+                if let Some(k) = kill_tree.take() {
+                    k();
+                }
+                return Err(SandboxError::SpawnFailed("elevated exit stream errored".into()));
+            }
+            Err(_) => {
+                // Timed out: drop the daemon connection (kills the Job), best-effort await Exited.
+                if let Some(k) = kill_tree.take() {
+                    k();
+                }
+                match tokio::time::timeout(Duration::from_secs(3), &mut exit_future).await {
+                    Ok(Ok(elev)) => (elev.exit_code, true),
+                    _ => (1, true),
+                }
+            }
+        },
+        None => {
+            let elev = exit_future.await.map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
+            (elev.exit_code, elev.timed_out)
+        }
+    };
+
+    // Free the daemon connection now that we have the exit (the child already exited in the
+    // non-timeout path; in the timeout path it was already fired above).
+    if let Some(k) = kill_tree.take() {
+        k();
+    }
+
+    let stdout = stdout_buf.lock().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?.clone();
+    let mut stderr =
+        stderr_buf.lock().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?.clone();
+    if timed_out && stderr.is_empty() {
+        stderr.extend_from_slice(b"command timed out");
+    }
+
+    Ok(SandboxedOutput { stdout, stderr, exit_code, timed_out })
+}
+
+/// Read a child pipe to EOF. When a sink is present, forward each chunk
+/// incrementally (lossy UTF-8); chunks are always accumulated into the shared
+/// `buffer` so the final output is available even if this task is aborted.
+async fn read_stream<R: AsyncRead + Unpin>(
+    reader: Option<R>,
+    sink: Option<Arc<dyn OutputSink>>,
+    stream: OutputStream,
+    buffer: Arc<Mutex<Vec<u8>>>,
+) -> std::io::Result<()> {
+    let Some(mut reader) = reader else { return Ok(()) };
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = reader.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        if let Some(sink) = sink.as_ref() {
+            let delta = String::from_utf8_lossy(&buf[..n]);
+            sink.on_output(stream, &delta);
+        }
+        if let Ok(mut guard) = buffer.lock() {
+            guard.extend_from_slice(&buf[..n]);
+        }
+    }
+    Ok(())
+}
+
+/// Build a tree-kill closure for a Unix child: send `SIGKILL` to the child's
+/// process group so backgrounded descendants die and release the pipes. `pgid`
+/// is the spawned child's id (it must be a group leader — ensured by a new
+/// session or `process_group(0)`).
+#[cfg(unix)]
+pub(crate) fn unix_kill_tree(pgid: Option<u32>) -> Option<Box<dyn FnOnce() + Send + 'static>> {
+    pgid.map(|p| {
+        Box::new(move || {
+            // A negative pid targets the whole process group.
+            let _ = unsafe { libc::kill(-(p as i32), libc::SIGKILL) };
+        }) as Box<dyn FnOnce() + Send + 'static>
+    })
 }

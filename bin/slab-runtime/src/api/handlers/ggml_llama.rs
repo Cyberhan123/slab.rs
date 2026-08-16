@@ -103,4 +103,21 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
         )
         .await
     }
+
+    #[instrument(skip_all, fields(request_id, backend = "ggml.llama"))]
+    async fn quantize_model(
+        &self,
+        request: Request<pb::GgmlLlamaQuantizeRequest>,
+    ) -> Result<Response<pb::GgmlLlamaQuantizeResponse>, Status> {
+        let request_id = extract_request_id(request.metadata());
+        tracing::Span::current().record("request_id", &request_id);
+        forward(
+            request,
+            dto::decode_ggml_llama_quantize_request,
+            || self.application.ggml_llama(),
+            |service, dto| async move { service.quantize_model(dto).await },
+            dto::encode_ggml_llama_quantize_response,
+        )
+        .await
+    }
 }

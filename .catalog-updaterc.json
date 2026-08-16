@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/brandhaug/catalog-update-action/master/schema.json",
+  "branchPrefix": "catalog-update",
+  "defaultBranch": "main",
+  "maxOpenPrs": 20,
+  "concurrency": 10,
+  "packageManager": "bun",
+  "minReleaseAgeDays": 3,
+  "groups": [
+    { "name": "monaco", "patterns": ["@codingame/*", "monaco-editor", "@shikijs/monaco", "vscode"] },
+    { "name": "vite-vitest", "patterns": ["vite", "vitepress", "vitest", "vitest-browser-react", "@vitejs/*", "@vitest/*"] },
+    { "name": "tauri", "patterns": ["@tauri-apps/*"] },
+    { "name": "xterm", "patterns": ["@xterm/*"] },
+    { "name": "streamdown", "patterns": ["streamdown", "@streamdown/*"] },
+    { "name": "all-patch-updates", "patterns": ["*"], "updateTypes": ["patch"] }
+  ],
+  "audit": {
+    "enabled": true,
+    "minimumSeverity": "moderate"
+  }
+}

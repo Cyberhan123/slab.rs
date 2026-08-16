@@ -16,7 +16,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use slab_agent::{AgentError, PluginToolPort, ToolContext, ToolHandler, ToolOutput, ToolRouter};
+use slab_agent::{
+    AgentError, PluginToolPort, ToolContext, ToolHandler, ToolNamespace, ToolOutput, ToolRouter,
+    ToolVisibility,
+};
 use slab_types::{
     PluginCapabilityKind, PluginManifest,
     plugin_capability::{CapabilityEffectTrust, infer_effect_trust, plugin_agent_tool_name},
@@ -44,8 +47,8 @@ struct CapabilityDescriptor {
 
 impl CapabilityDescriptor {
     /// Build one descriptor per `Tool`-kind capability declared by `source`.
-    /// `Workflow` / `A2uSurface` capabilities are not callable agent tools and
-    /// are skipped. Trust is derived once from the plugin's runtime kind.
+    /// `Workflow` capabilities are not callable agent tools and are skipped.
+    /// Trust is derived once from the plugin's runtime kind.
     fn for_source(source: &PluginCapabilitySource) -> Vec<Self> {
         let plugin_id = source.manifest.id.clone();
         let has_js = source.manifest.runtime.js.is_some();
@@ -103,6 +106,18 @@ impl ToolHandler for PluginCapabilityProxyTool {
             return json!({ "type": "object", "properties": {} });
         }
         self.descriptor.input_schema.clone()
+    }
+
+    fn namespace(&self) -> ToolNamespace {
+        // Wire form is `plugin__<id>__<cap>`; structured namespace is `plugin`.
+        ToolNamespace::new("plugin")
+    }
+
+    fn visibility(&self) -> ToolVisibility {
+        // Plugin capabilities are Deferred: kept out of the base tool list until
+        // discovered via `tool_search`, so many plugin tools don't bloat the
+        // model-facing tool table (mirrors the MCP proxy default).
+        ToolVisibility::Deferred
     }
 
     async fn execute(
@@ -382,19 +397,14 @@ mod tests {
         let port: Arc<dyn PluginToolPort> = Arc::new(CapturingPort::new(json!({})));
         let src = source(
             "team-plugin",
-            vec![
-                tool_cap("search", None),
-                tool_cap("render", Some(r#"{"type":"object"}"#)),
-                json!({ "id": "surf", "kind": "a2u_surface", "transport": { "type": "pluginCall", "function": "do_surf" } }),
-            ],
+            vec![tool_cap("search", None), tool_cap("render", Some(r#"{"type":"object"}"#))],
             false,
         );
         super::register_plugin_capability_tools(&router, port, std::slice::from_ref(&src));
 
         assert!(router.get("plugin__team_plugin__search").is_some());
         assert!(router.get("plugin__team_plugin__render").is_some());
-        // a2u_surface (non-tool) and unknown capabilities get no proxy.
-        assert!(router.get("plugin__team_plugin__surf").is_none());
+        // Unknown capabilities get no proxy.
         assert!(router.get("plugin__team_plugin__missing").is_none());
     }
 }

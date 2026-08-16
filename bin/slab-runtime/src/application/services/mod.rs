@@ -2,6 +2,7 @@ mod candle_diffusion_service;
 mod candle_transformers_service;
 mod ggml_diffusion_service;
 mod ggml_llama_service;
+mod ggml_parakeet_service;
 mod ggml_whisper_service;
 mod onnx_service;
 mod runtime_service;
@@ -17,6 +18,7 @@ pub(crate) use candle_diffusion_service::CandleDiffusionService;
 pub(crate) use candle_transformers_service::CandleTransformersService;
 pub(crate) use ggml_diffusion_service::GgmlDiffusionService;
 pub(crate) use ggml_llama_service::GgmlLlamaService;
+pub(crate) use ggml_parakeet_service::GgmlParakeetService;
 pub(crate) use ggml_whisper_service::GgmlWhisperService;
 pub(crate) use onnx_service::OnnxService;
 pub use runtime_service::RuntimeApplication;
@@ -60,6 +62,7 @@ pub(crate) fn model_status(backend: &str, status: &str) -> dto::ModelStatus {
         status: status.to_owned(),
         context_length: None,
         training_context_length: None,
+        chat_template: None,
     }
 }
 

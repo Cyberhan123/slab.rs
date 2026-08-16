@@ -10,14 +10,10 @@ import type { components } from "@slab/api/v1"
 
 type Schema = components["schemas"]
 type AgentConfigInput = Schema["AgentConfigInput"]
-type AgentResponsesServerMessage = Schema["AgentResponsesServerMessage"]
-type AgentAck = Extract<AgentResponsesServerMessage, { type: "agent.ack" }>
-type AgentSessionRestored = Extract<
-  AgentResponsesServerMessage,
-  { type: "agent.session.restored" }
->
+type AgentSessionRestored = Schema["AgentHistoryResponse"]
 type AgentThreadMessageResponse = Schema["AgentThreadMessageResponse"]
 type ChatToolCall = Schema["ChatToolCall"]
+type OpenAICreateRequest = Schema["OpenAICreateRequest"]
 type SessionResponse = Schema["SessionResponse"]
 type SetupStatusResponse = Schema["SetupStatusResponse"]
 type SystemDiagnosticsResponse = Schema["SystemDiagnosticsResponse"]
@@ -56,7 +52,7 @@ type ToolName =
   | "fs_watch"
   | "grep"
   | "list_dir"
-  | "plan_update"
+  | "update_plan"
   | "read_file"
   | "shell"
   | "web_search"
@@ -162,7 +158,7 @@ describe.sequential("assistant real-dev e2e fuzzing", () => {
     await expectPageText(page, visibleNeedle(normalReply.text))
 
     const loopPrompt =
-      `${marker} tool loop: use the plan_update tool once with a concise two-step plan, ` +
+      `${marker} tool loop: use the update_plan tool once with a concise two-step plan, ` +
       "then continue and provide a final non-empty answer."
     await sendAssistantMessage(page, loopPrompt)
     await expectPageText(page, loopPrompt)
@@ -453,51 +449,54 @@ async function createAgentResponse(
   sessionId: string,
   prompt: string,
   configOverrides: Partial<AgentConfigInput> = {}
-): Promise<AgentAck & { thread_id: string }> {
-  const response = await requestJson<AgentResponsesServerMessage>("/v1/agents/responses", {
-    json: {
-      config: {
-        model: assistantModelId,
-        temperature: 0,
-        ...configOverrides,
-      },
-      messages: [{ content: prompt, role: "user" }],
-      request_id: `create-${Date.now()}`,
-      session_id: sessionId,
-      type: "agent.response.create",
-    } satisfies Schema["AgentResponsesClientMessage"],
+): Promise<{ thread_id: string }> {
+  const body = {
+    input: prompt,
+    instructions: configOverrides.system_prompt,
+    max_output_tokens: configOverrides.max_tokens,
+    metadata: { session_id: sessionId },
+    model: configOverrides.model ?? assistantModelId,
+    reasoning: configOverrides.reasoning_effort
+      ? { effort: configOverrides.reasoning_effort }
+      : undefined,
+    stream: false,
+    temperature: configOverrides.temperature ?? 0,
+    tool_choice: configOverrides.tool_choice,
+    top_p: configOverrides.top_p,
+  } satisfies OpenAICreateRequest & { metadata: { session_id: string } }
+  const response = await requestJson<unknown>("/v1/agents/responses", {
+    json: body,
     method: "POST",
   })
-
-  if (response.type !== "agent.ack") {
-    throw new Error(`Expected agent.ack, received ${response.type}`)
-  }
-  if (!response.accepted || !response.thread_id) {
-    throw new Error(`Agent response create was not accepted: ${JSON.stringify(response)}`)
+  const responseId = responseIdFromCreateResponse(response)
+  if (!responseId) {
+    throw new Error(`OpenAI response create did not return an id: ${JSON.stringify(response)}`)
   }
 
-  return response as AgentAck & { thread_id: string }
+  return { thread_id: responseId }
 }
 
-async function sendAgentInput(threadId: string, content: string): Promise<AgentAck> {
-  const response = await requestJson<AgentResponsesServerMessage>("/v1/agents/responses", {
+async function sendAgentInput(threadId: string, content: string): Promise<void> {
+  const response = await requestJson<unknown>("/v1/agents/responses", {
     json: {
-      content,
-      request_id: `input-${Date.now()}`,
-      thread_id: threadId,
-      type: "agent.input",
-    } satisfies Schema["AgentResponsesClientMessage"],
+      input: content,
+      model: assistantModelId,
+      previous_response_id: threadId,
+      stream: false,
+    } satisfies OpenAICreateRequest,
     method: "POST",
   })
-
-  if (response.type !== "agent.ack") {
-    throw new Error(`Expected agent.ack for agent.input, received ${response.type}`)
+  if (!responseIdFromCreateResponse(response)) {
+    throw new Error(`OpenAI response input did not return an id: ${JSON.stringify(response)}`)
   }
-  if (!response.accepted) {
-    throw new Error(`Agent input was not accepted: ${JSON.stringify(response)}`)
-  }
+}
 
-  return response
+function responseIdFromCreateResponse(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+  const id = (value as { id?: unknown }).id
+  return typeof id === "string" && id.length > 0 ? id : null
 }
 
 async function waitForCompletedAssistantReply(
@@ -525,7 +524,7 @@ async function waitForCompletedAssistantReply(
 
 async function waitForPlanUpdateLoop(sessionId: string, prompt: string): Promise<AgentSessionRestored> {
   return eventually(
-    `plan_update tool loop for '${prompt}'`,
+    `update_plan tool loop for '${prompt}'`,
     async () => {
       const restore = await restoreSession(sessionId)
       if (restore.thread?.status === "errored") {
@@ -546,7 +545,7 @@ async function waitForPlanUpdateLoop(sessionId: string, prompt: string): Promise
       const planCallIds = afterPrompt.flatMap((message) =>
         message.role === "assistant"
           ? (message.tool_calls ?? [])
-              .filter((toolCall) => toolCall.function.name === "plan_update")
+              .filter((toolCall) => toolCall.function.name === "update_plan")
               .map((toolCall) => toolCall.id)
               .filter((id): id is string => typeof id === "string" && id.length > 0)
           : []
@@ -705,20 +704,13 @@ async function approveMatchingToolRequest(
 }
 
 async function resolveApproval(threadId: string, callId: string, approved: boolean): Promise<void> {
-  const response = await requestJson<AgentResponsesServerMessage>("/v1/agents/responses", {
-    json: {
-      approved,
-      call_id: callId,
-      request_id: `approval-${Date.now()}`,
-      thread_id: threadId,
-      type: "agent.approval.resolve",
-    } satisfies Schema["AgentResponsesClientMessage"],
-    method: "POST",
-  })
-
-  if (response.type !== "agent.ack" || !response.accepted) {
-    throw new Error(`Approval resolve failed: ${JSON.stringify(response)}`)
-  }
+  // The legacy POST /v1/agents/control/approval endpoint was removed; approval
+  // resolution now lives behind the harness `approval/resolve` JSON-RPC method.
+  // This manual fuzzing test drives the `/v1/agents/responses` SSE transport,
+  // which has no approval channel — resolve the approval manually in the app.
+  throw new Error(
+    `resolveApproval(${threadId}, ${callId}, ${approved}) is no longer wired: the control endpoint was removed in favor of the harness approval/resolve JSON-RPC method. Resolve the approval manually in the running app.`
+  )
 }
 
 async function cleanupMarkedSessions(): Promise<void> {
@@ -769,20 +761,7 @@ async function restoreUiState(): Promise<void> {
 }
 
 async function restoreSession(sessionId: string): Promise<AgentSessionRestored> {
-  const response = await requestJson<AgentResponsesServerMessage>("/v1/agents/responses", {
-    json: {
-      request_id: `restore-${Date.now()}`,
-      session_id: sessionId,
-      type: "agent.session.restore",
-    } satisfies Schema["AgentResponsesClientMessage"],
-    method: "POST",
-  })
-
-  if (response.type !== "agent.session.restored") {
-    throw new Error(`Expected agent.session.restored, received ${response.type}`)
-  }
-
-  return response
+  return requestJson<AgentSessionRestored>(`/v1/sessions/${encodeURIComponent(sessionId)}/agent-history`)
 }
 
 async function listSessions(): Promise<SessionResponse[]> {
@@ -896,13 +875,17 @@ function toolFuzzCases(): ToolFuzzCase[] {
   const grepNeedle = `${marker} grep needle`
   const patchPath = markerRelativePath("patch", "apply-patch.txt")
   const patchReplacement = `${marker} patched`
+  // The apply_patch tool drives the `slab-apply-patch` engine, which only
+  // accepts the `*** Begin Patch` dialect — a unified diff is rejected at the
+  // parser. Hand the model a correct `*** Begin Patch` patch so the case does
+  // not depend on the model translating a unified diff.
   const patch = [
-    `--- a/${patchPath}`,
-    `+++ b/${patchPath}`,
-    "@@ -1,2 +1,2 @@",
-    " one",
+    "*** Begin Patch",
+    `*** Update File: ${patchPath}`,
+    "@@",
     "-two",
     `+${patchReplacement}`,
+    "*** End Patch",
     "",
   ].join("\n")
   const shellNeedle = `${marker}-shell-ok`
@@ -917,7 +900,7 @@ function toolFuzzCases(): ToolFuzzCase[] {
         ],
         summary: `${marker} plan`,
       },
-      name: "plan_update",
+      name: "update_plan",
       validate: ({ toolMessages }) => {
         const output = parseToolJson(toolMessages[0].content)
         expect(output.summary).toBe(`${marker} plan`)
@@ -1042,7 +1025,7 @@ function toolFuzzCases(): ToolFuzzCase[] {
     },
     {
       args: {
-        allowed_tools: ["plan_update"],
+        allowed_tools: ["update_plan"],
         max_turns: 1,
         model: assistantModelId,
         system_prompt: "Reply with the exact requested marker only. Do not call tools.",

@@ -2,8 +2,8 @@ import { createMemoryRouter } from 'react-router-dom';
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createDesktopRoutes } from '@/router';
-import type { SettingsDocumentResponse } from '@/pages/settings/types';
+import { createDesktopRoutes } from '@slab/ui/routes';
+import type { SettingsDocumentResponse } from '@slab/ui/pages/settings/types';
 import { renderDesktopScene } from '../test-utils';
 
 const {
@@ -57,6 +57,20 @@ vi.mock('@slab/api', async () => {
   const { createSlabApiMock } = await import('../support/mock-slab-api');
 
   return createSlabApiMock({
+    apiClient: {
+      DELETE: vi.fn<() => Promise<unknown>>().mockResolvedValue({
+        data: {},
+        response: { ok: true, status: 200 },
+      }),
+      GET: vi.fn<() => Promise<unknown>>().mockResolvedValue({
+        data: { entries: [] },
+        response: { ok: true, status: 200 },
+      }),
+      PUT: vi.fn<() => Promise<unknown>>().mockResolvedValue({
+        data: {},
+        response: { ok: true, status: 200 },
+      }),
+    },
     defaultExport: {
       useMutation: vi.fn<() => unknown>(() => ({
         isPending: false,
@@ -67,7 +81,7 @@ vi.mock('@slab/api', async () => {
   });
 });
 
-vi.mock('@/lib/workspace-bridge', () => ({
+vi.mock('@slab/core/workspace/bridge', () => ({
   WORKSPACE_STATE_QUERY_KEY: ['workspace-state'],
   workspaceState: () => Promise.resolve({ config: null, current: null, recent: [] }),
 }));
@@ -133,7 +147,7 @@ describe('settings router integration', () => {
     await renderDesktopScene(null, { router });
 
     await expect.element(page.getByRole('heading', { name: 'Runtime' })).toBeVisible();
-    expect(document.querySelector('header.shell-topbar')).not.toBeNull();
+    expect(document.querySelector('header[data-slot="shell-topbar"]')).not.toBeNull();
     await expect.element(page.getByTestId('sidebar-link-settings')).toHaveAttribute(
       'aria-current',
       'page',

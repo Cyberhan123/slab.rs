@@ -97,22 +97,6 @@ impl DriverRuntime {
         ))
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn submit_typed<TInput, TOptions>(
-        &self,
-        route: RequestRoute,
-        input: TInput,
-        preprocess_stages: Vec<CpuStage>,
-        op_options: TOptions,
-    ) -> Result<TaskHandle<Payload, StreamChunk>, CoreError>
-    where
-        TInput: Send + Sync + 'static,
-        TOptions: Send + Sync + 'static,
-    {
-        self.submit(route, Payload::typed(input), preprocess_stages, Payload::typed(op_options))
-            .await
-    }
-
     pub(crate) async fn submit_payload<TOptions>(
         &self,
         route: RequestRoute,
@@ -150,33 +134,6 @@ impl DriverRuntime {
         self.submit(route, Payload::typed(input), preprocess_stages, Payload::None).await
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn submit_preprocessed_without_options(
-        &self,
-        route: RequestRoute,
-        preprocess_stages: Vec<CpuStage>,
-    ) -> Result<TaskHandle<Payload, StreamChunk>, CoreError> {
-        self.submit(route, Payload::None, preprocess_stages, Payload::None).await
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn invoke_typed<TInput, TOptions, TOutput>(
-        &self,
-        route: RequestRoute,
-        input: TInput,
-        preprocess_stages: Vec<CpuStage>,
-        op_options: TOptions,
-    ) -> Result<TOutput, CoreError>
-    where
-        TInput: Send + Sync + 'static,
-        TOptions: Send + Sync + 'static,
-        TOutput: DeserializeOwned + Clone + Send + Sync + 'static,
-    {
-        let payload =
-            self.submit_typed(route, input, preprocess_stages, op_options).await?.result().await?;
-        decode_typed_output(payload, self.capability_id.as_ref())
-    }
-
     pub(crate) async fn invoke_preprocessed_typed<TOptions, TOutput>(
         &self,
         route: RequestRoute,
@@ -204,23 +161,6 @@ impl DriverRuntime {
     {
         let payload =
             self.submit_without_options(route, input, preprocess_stages).await?.result().await?;
-        decode_typed_output(payload, self.capability_id.as_ref())
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn invoke_preprocessed_without_options<TOutput>(
-        &self,
-        route: RequestRoute,
-        preprocess_stages: Vec<CpuStage>,
-    ) -> Result<TOutput, CoreError>
-    where
-        TOutput: DeserializeOwned + Clone + Send + Sync + 'static,
-    {
-        let payload = self
-            .submit_preprocessed_without_options(route, preprocess_stages)
-            .await?
-            .result()
-            .await?;
         decode_typed_output(payload, self.capability_id.as_ref())
     }
 

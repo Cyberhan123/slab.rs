@@ -202,7 +202,7 @@ impl WhisperState {
     /// * `n_threads`: How many threads to use. Defaults to 1. Must be at least 1, returns an error otherwise.
     ///
     /// # Returns
-    /// `Ok((i32, Vec<f32>))` on success where the i32 is detected language id and Vec<f32>
+    /// `Ok((i32, Vec<f32>))` on success where the i32 is detected language id and `Vec<f32>`
     /// is array with the probabilities of all languages, `Err(WhisperError)` on failure.
     ///
     /// # C++ equivalent

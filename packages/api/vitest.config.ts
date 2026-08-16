@@ -1,9 +1,13 @@
-import { defineConfig } from "vitest/config";
+import { defineProject, mergeConfig } from "vitest/config";
 
-export default defineConfig({
-  test: {
-    name: "api",
-    environment: "jsdom",
-    include: ["src/**/*.test.ts"],
-  },
-});
+import { vitestBase } from "../../vitest.base";
+
+export default defineProject(
+  mergeConfig(vitestBase, {
+    test: {
+      name: "api",
+      environment: "jsdom",
+      include: ["src/**/*.test.ts"],
+    },
+  }),
+);

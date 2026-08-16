@@ -1,27 +1,23 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import VideoPage from '@/pages/video';
+import VideoPage from '@slab/ui/pages/video';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseVideoGeneration } = vi.hoisted(() => ({
   mockUseVideoGeneration: vi.fn<() => unknown>(),
 }));
 
-vi.mock('@/pages/video/hooks/use-video-generation', () => ({
+vi.mock('@slab/ui/pages/video/hooks/use-video-generation', () => ({
   useVideoGeneration: mockUseVideoGeneration,
 }));
 
-vi.mock('@/hooks/use-persisted-header-select', () => ({
-  usePersistedHeaderSelect: vi.fn<() => unknown>(() => ({
-    value: 'model-1',
-    setValue: vi.fn<() => void>(),
+vi.mock('@slab/ui/hooks/use-header', () => ({
+  useHeader: vi.fn<() => unknown>(() => ({
+    meta: { title: 'Video', subtitle: 'Video', icon: vi.fn(), contextLabel: null },
+    search: null,
+    select: null,
   })),
-}));
-
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderControl: vi.fn<() => void>(),
 }));
 
 const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();

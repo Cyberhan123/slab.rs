@@ -9,6 +9,9 @@ service GgmlLlamaService {
   rpc ChatStream(GgmlLlamaChatRequest) returns (stream GgmlLlamaChatStreamChunk);
   rpc LoadModel(GgmlLlamaLoadRequest) returns (ModelStatusResponse);
   rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
+  // Quantize a GGUF model on disk (goal #4). Requires the ggml.llama backend to
+  // be loaded so the engine's llama library handle is initialised.
+  rpc QuantizeModel(GgmlLlamaQuantizeRequest) returns (GgmlLlamaQuantizeResponse);
 }
 
 message GgmlLlamaLoadRequest {
@@ -18,6 +21,20 @@ message GgmlLlamaLoadRequest {
   optional string chat_template = 4;
   optional string gbnf = 5;
   optional bool flash_attn = 6;
+  // Path to the multimodal vision/audio projector (mmproj) GGUF. When set, the
+  // engine loads an mtmd context bound to the text model and enables image
+  // inputs on chat requests.
+  optional string mmproj_path = 7;
+  // Free GPU VRAM (bytes) snapshot from the server, used to size an `auto`
+  // context (context_length unset). `null` when no VRAM signal is available.
+  optional uint64 free_vram_bytes = 8;
+  // Scheduler sizing tunables forwarded from the server so `auto` context
+  // sizing uses host policy instead of the engine's local defaults. Unset
+  // fields fall back per-field to slab-gpu-memory-scheduler's
+  // `SchedulerParams::default()` (2 GiB buffer, 512 quantum, 8192 fallback).
+  optional uint64 vram_buffer_bytes = 9;
+  optional uint32 auto_context_quantum = 10;
+  optional uint32 auto_context_fallback = 11;
 }
 
 message GgmlLlamaChatRequest {
@@ -35,6 +52,17 @@ message GgmlLlamaChatRequest {
   optional bool ignore_eos = 12;
   optional bytes logit_bias_json = 13;
   optional string agent_trace_json = 14;
+  // Encoded image bytes (PNG/JPEG/…) accompanying the prompt for multimodal
+  // (mtmd) inference. The prompt must contain one media marker per image; the
+  // runtime substitutes the projector's marker before tokenizing. Ignored when
+  // no mmproj is loaded.
+  repeated LlamaChatImagePart image_parts = 15;
+}
+
+// A single image input for multimodal chat.
+message LlamaChatImagePart {
+  bytes data = 1;
+  optional string mime_type = 2;
 }
 
 message GgmlLlamaChatResponse {
@@ -55,4 +83,23 @@ message GgmlLlamaChatStreamChunk {
   // Deprecated: use metadata.reasoning_content.
   optional string reasoning_content = 5;
   ChatMetadata metadata = 6;
+}
+
+message GgmlLlamaQuantizeRequest {
+  optional string input_path = 1;
+  optional string output_path = 2;
+  // Target llama.cpp file type (LlamaFtype raw int, e.g. 15 = Q4_K_M, 36 = TQ1_0).
+  optional int32 ftype = 3;
+  optional int32 nthread = 4;
+  optional bool allow_requantize = 5;
+  optional bool quantize_output_tensor = 6;
+  optional bool only_copy = 7;
+  optional bool pure = 8;
+  optional bool keep_split = 9;
+  optional bool dry_run = 10;
+}
+
+message GgmlLlamaQuantizeResponse {
+  optional uint32 layers_processed = 1;
+  optional string output_path = 2;
 }

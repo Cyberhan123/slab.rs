@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::event::{ToolRiskAssessment, ToolRiskLevel};
+use crate::port::{ToolRiskAssessment, ToolRiskLevel};
 
 /// Approval decision derived from a risk assessment + the configured policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,7 +16,7 @@ pub enum ToolApprovalDecision {
 /// model); the host/app-core supplies this policy.
 ///
 /// Full sandbox execution (`Sandbox` tier for dangerous/external-network tools)
-/// is a separate slice; until then such tools map to [`ToolApprovalDecision::Ask`].
+/// is not yet wired up; until then such tools map to [`ToolApprovalDecision::Ask`].
 #[derive(Debug, Clone, Copy)]
 pub struct ToolApprovalPolicy {
     /// Risk at or above this tier requires approval (unless the tool supplies
@@ -102,12 +102,11 @@ impl ToolRiskAnalyzer for BasicToolRiskAnalyzer {
                 labels: vec!["external_capability".to_owned(), "mcp_proxy".to_owned()],
                 reason: Some("tool calls a proxied MCP capability".to_owned()),
             },
-            // Read-only tools, deterministic control tools, and trusted a2u
-            // surface openers are safe to allow without approval (ADR-008).
+            // Read-only tools and deterministic control tools are safe to allow
+            // without approval (ADR-008).
             "read_file" | "list_dir" | "file_glob" | "grep" | "web_search" | "mcp_list_tools"
-            | "git_status" | "git_diff" | "fs_watch" | "plan_update" | "task.complete"
-            | "verify" | "workspace.open" | "review.show" | "image.edit" | "hub.browse"
-            | "plugin.launch" => {
+            | "git_status" | "git_diff" | "fs_watch" | "plan" | "update_plan" | "present_plan"
+            | "task.complete" | "verify" => {
                 ToolRiskAssessment { level: ToolRiskLevel::Low, labels: Vec::new(), reason: None }
             }
             _ => ToolRiskAssessment {
@@ -155,7 +154,7 @@ mod tests {
     use super::{
         BasicToolRiskAnalyzer, ToolApprovalDecision, ToolApprovalPolicy, ToolRiskAnalyzer,
     };
-    use crate::event::ToolRiskLevel;
+    use crate::port::ToolRiskLevel;
 
     async fn analyze_shell(command: &str) -> crate::ToolRiskAssessment {
         BasicToolRiskAnalyzer::new().analyze("shell", &json!({ "command": command })).await
@@ -197,13 +196,11 @@ mod tests {
             "git_status",
             "git_diff",
             "fs_watch",
-            "plan_update",
+            "plan",
+            "update_plan",
+            "present_plan",
             "task.complete",
             "verify",
-            "workspace.open",
-            "review.show",
-            "image.edit",
-            "hub.browse",
         ] {
             let risk = BasicToolRiskAnalyzer::new().analyze(tool_name, &json!({})).await;
 
@@ -253,7 +250,7 @@ mod tests {
                 "{tool} should require approval"
             );
         }
-        for tool in ["read_file", "grep", "task.complete", "verify", "workspace.open"] {
+        for tool in ["read_file", "grep", "task.complete", "verify"] {
             let risk = analyzer.analyze(tool, &json!({})).await;
             assert_eq!(
                 analyzer.approval_decision(&risk),

@@ -18,6 +18,7 @@ pub mod asset_ref;
 pub mod backend;
 pub mod chat;
 pub mod common;
+pub mod context_length;
 mod defaults;
 pub mod desktop_api;
 pub mod device;
@@ -39,6 +40,7 @@ pub use chat::{
     ConversationToolFunction, StructuredOutput, StructuredOutputJsonSchema,
 };
 pub use common::{Id, JsonOptions, Timestamp};
+pub use context_length::ContextLengthSpec;
 pub use desktop_api::{
     DESKTOP_API_BIND, DESKTOP_API_HOST, DESKTOP_API_ORIGIN, DESKTOP_API_PORT,
     DESKTOP_DEV_ALLOWED_ORIGINS, desktop_api_bind, desktop_api_host, desktop_api_origin,
@@ -50,7 +52,7 @@ pub use i18n::{I18nMessageRef, I18nPayload, ServerI18nKey};
 pub use load_config::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlLlamaLoadDefaultsConfig,
-    GgmlWhisperLoadConfig, OnnxLoadConfig, RuntimeBackendLoadSpec,
+    GgmlParakeetLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig, RuntimeBackendLoadSpec,
 };
 pub use plugin::{
     PluginAgentCapabilityContribution, PluginAgentHookContribution, PluginAgentHookLifecycleEvent,

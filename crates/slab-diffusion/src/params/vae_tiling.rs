@@ -17,11 +17,13 @@ impl From<TilingParams> for sd_tiling_params_t {
     fn from(value: TilingParams) -> Self {
         Self {
             enabled: value.enabled,
+            temporal_tiling: false,
             tile_size_x: value.tile_size_x,
             tile_size_y: value.tile_size_y,
             target_overlap: value.target_overlap,
             rel_size_x: value.rel_size_x,
             rel_size_y: value.rel_size_y,
+            extra_tiling_args: std::ptr::null(),
         }
     }
 }

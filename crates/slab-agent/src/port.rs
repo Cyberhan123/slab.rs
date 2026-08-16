@@ -4,15 +4,17 @@
 //! Instead, the host (`slab-server`) provides concrete adapters that implement
 //! these traits and are injected at construction time.
 
+use serde::{Deserialize, Serialize};
+
 use async_trait::async_trait;
 
 use slab_agent_tracing::AgentTraceContext;
 use slab_types::ConversationMessage;
-use slab_types::agent::ToolCallStatus;
 
 use crate::config::AgentConfig;
 use crate::error::AgentError;
-use crate::event::{AgentEventKind, ToolRiskAssessment};
+use crate::plan::Plan;
+use crate::protocol::EventMsg;
 
 /// Thread lifecycle status, re-exported from `slab_types` for convenience.
 pub type ThreadStatus = slab_types::agent::AgentThreadStatus;
@@ -83,22 +85,10 @@ pub struct ThreadSnapshot {
     pub created_at: String,
     /// RFC 3339 last-updated timestamp.
     pub updated_at: String,
-}
-
-/// Audit record for a single tool call within an agent thread.
-#[derive(Debug, Clone)]
-pub struct ToolCallRecord {
-    pub id: String,
-    pub thread_id: String,
-    pub tool_name: String,
-    /// JSON-encoded arguments string.
-    pub arguments: String,
-    pub output: Option<String>,
-    pub status: ToolCallStatus,
-    /// RFC 3339 creation timestamp.
-    pub created_at: String,
-    /// RFC 3339 completion timestamp, if finished.
-    pub completed_at: Option<String>,
+    /// RFC 3339 timestamp the thread was archived, or `None` for a live thread.
+    /// Archived threads are excluded from `list_session_threads_filtered`
+    /// unless the filter opts in via `include_archived`.
+    pub archived_at: Option<String>,
 }
 
 /// Persisted conversation message for an agent thread.
@@ -126,20 +116,60 @@ pub struct TurnStateRecord {
     pub completed_at: Option<String>,
 }
 
-/// A streaming event emitted during a single LLM turn.
+/// Persisted full-fidelity harness `TurnItem` snapshot (one finalized item).
+///
+/// `item_json` is the serialized `slab_proto::harness::item::TurnItem`. The
+/// store layer treats it as opaque JSON so `slab-agent` stays free of the
+/// harness proto; decoding back to `TurnItem` happens in the application layer.
+/// `seq` orders items within `(thread_id, turn_index)` for deterministic replay.
 #[derive(Debug, Clone)]
-pub enum TurnEvent {
-    Response { turn_index: Option<u32>, event: AgentEventKind },
+pub struct TurnItemRecord {
+    pub id: String,
+    pub thread_id: String,
+    pub turn_index: u32,
+    pub seq: u32,
+    pub item_json: String,
+    /// RFC 3339 creation timestamp.
+    pub created_at: String,
+}
+
+/// Risk level assigned to a tool call by the risk analyzer.
+///
+/// Relocated from `event.rs` — `event.rs` was deleted when the
+/// OpenAI-Responses wire vocabulary (`AgentEventKind`) left the crate. Risk
+/// assessment stays in slab-agent because it is part of the `ApprovalPort`
+/// surface and the `risk` analyzer, not the response wire.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolRiskLevel {
+    Low,
+    Medium,
+    High,
+}
+
+/// Structured risk assessment for a tool call.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolRiskAssessment {
+    pub level: ToolRiskLevel,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 // ── Approval ──────────────────────────────────────────────────────────────────
 
-/// Decision returned by an [`ApprovalPort`] implementation.
+/// Decision returned by an [`ApprovalPort`] implementation. An approval carries
+/// the user-chosen [`slab_exec_policy::ApprovalScope`] so the kernel can persist the rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalDecision {
-    Approved,
+    Approved(slab_exec_policy::ApprovalScope),
     Rejected,
 }
+
+/// Re-export the unified exec-policy port so the kernel can hold
+/// `Arc<dyn ExecPolicyPort>` without a separate import.
+pub use slab_exec_policy::ExecPolicyPort;
 
 /// Port that lets the host review and approve sensitive tool calls before they
 /// are executed.
@@ -151,13 +181,14 @@ pub trait ApprovalPort: Send + Sync {
     /// Request approval for a pending tool call.
     ///
     /// The call blocks until the host sends a decision (or the implementation
-    /// chooses to auto-approve / auto-reject after a timeout).
+    /// chooses to auto-approve / auto-reject after a timeout). The returned
+    /// [`ApprovalDecision`] carries the user's persistence scope.
     async fn request_approval(
         &self,
         thread_id: &str,
         call_id: &str,
         tool_name: &str,
-        command: &str,
+        descriptor: &slab_exec_policy::OperationDescriptor,
         risk: Option<ToolRiskAssessment>,
     ) -> ApprovalDecision;
 }
@@ -223,6 +254,18 @@ pub trait LlmStreamObserver: Send {
     }
 }
 
+/// Filter / pagination parameters for [`AgentStorePort::list_session_threads_filtered`].
+#[derive(Debug, Clone, Default)]
+pub struct ThreadListFilter {
+    /// Maximum number of threads to return.
+    pub limit: Option<u32>,
+    /// Cursor: only return threads whose `updated_at` sorts strictly before this
+    /// RFC 3339 timestamp (enables `next_cursor`-style pagination).
+    pub before_updated_at: Option<String>,
+    /// Include archived threads in the result (default excludes them).
+    pub include_archived: bool,
+}
+
 /// Port for persisting agent state.
 ///
 /// The host provides an adapter that wraps its SQLx-backed store.
@@ -240,6 +283,19 @@ pub trait AgentStorePort: Send + Sync {
         session_id: &str,
     ) -> Result<Vec<ThreadSnapshot>, AgentError>;
 
+    /// Return root thread snapshots for a session, honoring a [`ThreadListFilter`]
+    /// (limit + cursor pagination, archived inclusion). Hosts that do not support
+    /// filtering fall back to the unfiltered [`Self::list_session_threads`].
+    async fn list_session_threads_filtered(
+        &self,
+        session_id: &str,
+        filter: &ThreadListFilter,
+    ) -> Result<Vec<ThreadSnapshot>, AgentError> {
+        // Default ignores the filter so existing adapters keep compiling.
+        let _ = filter;
+        self.list_session_threads(session_id).await
+    }
+
     /// Update only the status (and optional completion text) of an existing thread.
     async fn update_thread_status(
         &self,
@@ -248,38 +304,14 @@ pub trait AgentStorePort: Send + Sync {
         completion_text: Option<&str>,
     ) -> Result<(), AgentError>;
 
-    /// Insert a new tool call audit record.
-    async fn insert_tool_call(&self, record: &ToolCallRecord) -> Result<(), AgentError>;
-
-    /// Update only the status of an existing tool call audit record.
-    async fn update_tool_call_status(
-        &self,
-        id: &str,
-        status: ToolCallStatus,
-    ) -> Result<(), AgentError>;
-
-    /// Update an existing tool call record with its output and final status.
-    async fn update_tool_call(
-        &self,
-        id: &str,
-        output: Option<&str>,
-        status: ToolCallStatus,
-        completed_at: &str,
-    ) -> Result<(), AgentError>;
-
-    /// Insert a conversation message for a thread.
-    async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError>;
-
-    /// Return persisted conversation messages for a thread in replay order.
-    async fn list_thread_messages(
-        &self,
-        thread_id: &str,
-    ) -> Result<Vec<ThreadMessageRecord>, AgentError>;
-
-    /// Insert or update detailed state for a single agent turn.
+    /// Mark a thread archived (`Some`) or restore it (`None`).
     ///
-    /// Hosts that do not need turn-level state can keep this default no-op.
-    async fn upsert_turn_state(&self, _record: &TurnStateRecord) -> Result<(), AgentError> {
+    /// Hosts that do not support archiving can keep this default no-op.
+    async fn archive_thread(
+        &self,
+        _id: &str,
+        _archived_at: Option<&str>,
+    ) -> Result<(), AgentError> {
         Ok(())
     }
 }
@@ -337,7 +369,43 @@ pub trait PluginToolPort: Send + Sync {
     ) -> Result<String, AgentError>;
 }
 
-/// Port for status-change and turn-event notifications.
+/// Port for the per-thread plan store backing Plan interaction mode.
+///
+/// Keeps `slab-agent` free of storage concerns: the host (app-core) provides an
+/// in-memory per-thread map. The store is the single source of truth for the
+/// durable plan a thread authors with the `plan` / `update_plan` tools and
+/// presents via `present_plan`. Keyed by thread id so plans are isolated per
+/// thread and cleared on teardown (alongside the exec-policy per-thread state).
+#[async_trait]
+pub trait PlanStorePort: Send + Sync {
+    /// Replace the thread's current plan (creates or overwrites).
+    async fn replace_plan(&self, thread_id: &str, plan: Plan) -> Result<(), AgentError>;
+
+    /// Read the thread's current plan, if any.
+    async fn current_plan(&self, thread_id: &str) -> Option<Plan>;
+
+    /// Drop the thread's plan (called on thread teardown).
+    async fn clear(&self, thread_id: &str);
+}
+
+/// [`PlanStorePort`] that stores nothing — the default for [`crate::ToolContext`]
+/// in tests and legacy paths so existing tool tests keep compiling without a
+/// concrete store wired.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopPlanStore;
+
+#[async_trait]
+impl PlanStorePort for NoopPlanStore {
+    async fn replace_plan(&self, _thread_id: &str, _plan: Plan) -> Result<(), AgentError> {
+        Ok(())
+    }
+    async fn current_plan(&self, _thread_id: &str) -> Option<Plan> {
+        None
+    }
+    async fn clear(&self, _thread_id: &str) {}
+}
+
+/// Port for status-change and harness-protocol notifications.
 ///
 /// The host provides an adapter that fans out to SSE streams, WebSockets, etc.
 #[async_trait]
@@ -345,9 +413,10 @@ pub trait AgentNotifyPort: Send + Sync {
     /// Called whenever a thread transitions to a new [`ThreadStatus`].
     async fn on_status_change(&self, thread_id: &str, status: ThreadStatus);
 
-    /// Called for each [`TurnEvent`] emitted during an LLM turn.
+    /// Called for each harness-protocol [`EventMsg`] the agent emits directly.
     ///
-    /// The default implementation is a no-op so existing adapters that only
-    /// care about status changes do not need to be updated.
-    async fn on_turn_event(&self, _thread_id: &str, _event: &TurnEvent) {}
+    /// This is the harness surface (`slab-agent::protocol`): turn lifecycle,
+    /// assistant text/reasoning, and tool items. Adapters that fan harness
+    /// events out to a client override this; the default is a no-op.
+    async fn on_event_msg(&self, _thread_id: &str, _msg: &EventMsg) {}
 }

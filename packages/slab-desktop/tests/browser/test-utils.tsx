@@ -7,16 +7,20 @@ import { render } from 'vitest-browser-react';
 
 import { Toaster } from '@slab/components/sonner';
 import { TooltipProvider } from '@slab/components/tooltip';
-import { GlobalHeaderProvider } from '@/layouts/global-header-provider';
+import { HeaderProvider } from '@slab/ui/layouts/header-provider';
+import { SlabProvider } from '@slab/ui/provider/slab-provider';
+import { createTestSlabPorts, type TestSlabPortsOverrides } from '@slab/ui/provider/test-ports';
 
 type DesktopSceneOptions = {
   route?: string;
   router?: Parameters<typeof RouterProvider>[0]['router'];
+  /** Port overrides threaded into {@link createTestSlabPorts} (e.g. platformInfo). */
+  portsOverrides?: TestSlabPortsOverrides;
 };
 
 export async function renderDesktopScene(
   ui: ReactNode,
-  { route = '/setup', router }: DesktopSceneOptions = {},
+  { route = '/setup', router, portsOverrides }: DesktopSceneOptions = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -33,15 +37,17 @@ export async function renderDesktopScene(
       <main
         aria-label="Slab desktop scene"
         data-testid="desktop-browser-scene"
-        className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
+        className="min-h-screen bg-background px-6 py-8 text-foreground"
       >
         <QueryClientProvider client={queryClient}>
-          <TooltipProvider>
-            <GlobalHeaderProvider>
-              <RouterProvider router={router} />
-              <Toaster />
-            </GlobalHeaderProvider>
-          </TooltipProvider>
+          <SlabProvider deps={{ ports: createTestSlabPorts(portsOverrides), queryClient }}>
+            <TooltipProvider>
+              <HeaderProvider>
+                <RouterProvider router={router} />
+                <Toaster />
+              </HeaderProvider>
+            </TooltipProvider>
+          </SlabProvider>
         </QueryClientProvider>
       </main>,
     );
@@ -55,15 +61,17 @@ export async function renderDesktopScene(
           <main
             aria-label="Slab desktop scene"
             data-testid="desktop-browser-scene"
-            className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
+            className="min-h-screen bg-background px-6 py-8 text-foreground"
           >
             <QueryClientProvider client={queryClient}>
-              <TooltipProvider>
-                <GlobalHeaderProvider>
-                  {ui}
-                  <Toaster />
-                </GlobalHeaderProvider>
-              </TooltipProvider>
+              <SlabProvider deps={{ ports: createTestSlabPorts(portsOverrides), queryClient }}>
+                <TooltipProvider>
+                  <HeaderProvider>
+                    {ui}
+                    <Toaster />
+                  </HeaderProvider>
+                </TooltipProvider>
+              </SlabProvider>
             </QueryClientProvider>
           </main>
         ),

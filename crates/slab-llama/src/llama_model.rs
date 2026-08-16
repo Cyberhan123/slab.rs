@@ -136,6 +136,15 @@ impl LlamaModel {
         unsafe { self.inner.lib.llama_model_get_vocab(self.inner.model.unwrap().as_ptr()) }
     }
 
+    /// Return the raw `llama_model*` pointer for FFI interop with sibling
+    /// `-sys` crates (e.g. `slab-mtmd`'s `mtmd_init_from_file`).
+    ///
+    /// The pointer is valid for the lifetime of this [`LlamaModel`]; callers
+    /// must not free it (the wrapper owns it).
+    pub fn as_ptr(&self) -> *mut slab_llama_sys::llama_model {
+        self.inner.model.expect("model pointer valid until Drop").as_ptr()
+    }
+
     /// Create an inference context for this model.
     ///
     /// # Arguments
@@ -572,6 +581,74 @@ impl LlamaModel {
         }
         buf.truncate(n as usize);
         String::from_utf8(buf).map_err(|e| LlamaError::from(e.utf8_error()))
+    }
+
+    /// Retrieve a metadata value by key, growing the buffer until the full
+    /// value fits.
+    ///
+    /// Unlike [`Self::meta_val_str`] (which uses a fixed 512-byte buffer and can
+    /// silently truncate long values such as `tokenizer.chat_template`), this
+    /// keeps doubling the buffer until llama.cpp reports a length that fits.
+    ///
+    /// # Returns
+    /// `Ok(Some(String))` if the key exists, `Ok(None)` if it is absent.
+    pub fn meta_string(&self, key: &str) -> Result<Option<String>, LlamaError> {
+        let c_key = CString::new(key)?;
+        let mut buf: Vec<u8> = vec![0u8; 512];
+        loop {
+            let n = unsafe {
+                self.inner.lib.llama_model_meta_val_str(
+                    self.inner.model.unwrap().as_ptr(),
+                    c_key.as_ptr(),
+                    buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                    buf.len(),
+                )
+            };
+            if n < 0 {
+                return Ok(None);
+            }
+            let n = n as usize;
+            // If the reported length could have filled the buffer, the value may
+            // be truncated — grow and retry.
+            if n + 1 >= buf.len() {
+                if buf.len() >= 1024 * 1024 {
+                    return Err(LlamaError::NullPointer);
+                }
+                buf.resize(buf.len().saturating_mul(2).max(n + 2), 0);
+                continue;
+            }
+            buf.truncate(n);
+            return String::from_utf8(buf).map(Some).map_err(|e| LlamaError::from(e.utf8_error()));
+        }
+    }
+
+    /// Read the model's `tokenizer.chat_template` GGUF metadata, if present.
+    ///
+    /// This is the default chat-template source for models that do not ship a
+    /// dedicated template asset in their model-pack. Returns `Ok(None)` when
+    /// the model has no embedded template.
+    pub fn chat_template(&self) -> Result<Option<String>, LlamaError> {
+        let value = self.meta_string("tokenizer.chat_template")?;
+        Ok(value.filter(|text| !text.trim().is_empty()))
+    }
+
+    /// Apply a chat template via the llama.cpp FFI.
+    ///
+    /// **Only builtin templates are supported** (ChatML, Llama-2/3, Vicuna, …);
+    /// for custom jinja use the Rust minijinja renderer. `tmpl` = `None` lets
+    /// llama.cpp pick its default builtin.
+    pub fn apply_chat_template(
+        &self,
+        tmpl: Option<&str>,
+        messages: &[crate::chat_template::LlamaChatMessage],
+        add_ass: bool,
+    ) -> Result<String, LlamaError> {
+        crate::chat_template::apply_chat_template(&self.inner.lib, tmpl, messages, add_ass)
+    }
+
+    /// Names of the builtin chat templates known to this llama.cpp build.
+    pub fn chat_builtin_templates(&self) -> Result<Vec<String>, LlamaError> {
+        crate::chat_template::chat_builtin_templates(&self.inner.lib)
     }
 }
 

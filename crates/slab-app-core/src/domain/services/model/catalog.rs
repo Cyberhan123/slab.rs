@@ -11,8 +11,9 @@ use crate::domain::models::{
     AvailableModelsQuery, AvailableModelsView, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
     CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION, ChatModelCapabilities, ChatModelOption,
     ChatModelSource, CreateModelCommand, DeletedModelView, ListModelsFilter, ManagedModelBackendId,
-    ModelPackSelection, ModelSpec, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
-    UpdateModelCommand, UpdateModelConfigSelectionCommand, normalize_model_capabilities,
+    ModelPackSelection, ModelSpec, RuntimePresets, UnifiedModel, UnifiedModelKind,
+    UnifiedModelStatus, UpdateModelCommand, UpdateModelConfigSelectionCommand,
+    normalize_model_capabilities,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{
@@ -123,10 +124,47 @@ impl ModelService {
             &explicit_selection,
             &selected_preset,
         );
+
+        // Whitelist + type-check overrides up front so bad requests fail before
+        // any state mutation. `None` means "leave stored overrides unchanged".
+        let validated_load_overrides = validate_load_overrides(req.load_overrides)?;
+        let validated_inference_overrides = validate_inference_overrides(req.inference_overrides)?;
+
+        // Existing state is needed both to re-apply stored inference overrides
+        // (in case the request omits them) and to preserve `selected_engine_id`.
+        let existing_state = self.model_state.store().get_model_config_state(id).await?;
+
         let mut command = pack::build_model_command_from_pack_context(&context, &selected_preset)?;
         command.id = Some(current_model.id.clone());
 
-        if pack::same_model_download_source(&current_model.spec, &command.spec) {
+        // Inference overrides drive sampling live via `runtime_presets` (no model
+        // reload). Re-derive from pack defaults each call, then apply either the
+        // request's overrides or — when omitted — the previously stored ones.
+        let inference_for_presets = validated_inference_overrides.clone().or_else(|| {
+            pack::parse_overrides_map(
+                existing_state.as_ref().and_then(|state| state.inference_overrides.as_deref()),
+            )
+        });
+        merge_inference_overrides_into_runtime_presets(
+            &mut command.runtime_presets,
+            inference_for_presets.as_ref(),
+        );
+
+        // `command.spec` is built via `apply_persisted_projection_state`, which
+        // re-applies the stored `selected_download_source` (so its hub_provider
+        // reflects the provider actually used at download time — e.g. models_cat
+        // when the pack declares hf_hub but the fetch fell back). `current_model.spec`
+        // still carries the pack-declared provider, so re-apply the same source
+        // before comparing. Otherwise a provider mismatch wrongly clears
+        // local_path and forces a re-download even though the file is cached.
+        let mut materialized_spec = current_model.spec.clone();
+        if let Some(selected_download_source) = current_model.selected_download_source.as_ref() {
+            pack::apply_selected_download_source_to_spec(
+                &mut materialized_spec,
+                selected_download_source,
+            );
+        }
+        if pack::same_model_download_source(&materialized_spec, &command.spec) {
             command.spec.local_path = current_model.spec.local_path.clone();
             command.status = Some(current_model.status.clone());
         } else if command.spec.repo_id.is_some() {
@@ -135,14 +173,27 @@ impl ModelService {
         }
 
         let next_model = self.build_model_definition(command).await?;
-        let stored_selection = pack::selection_state_record_for_storage(
+
+        let stored_load_overrides = resolve_stored_override_json(
+            validated_load_overrides,
+            existing_state.as_ref().and_then(|state| state.load_overrides.as_deref()),
+        )?;
+        let stored_inference_overrides = resolve_stored_override_json(
+            validated_inference_overrides,
+            existing_state.as_ref().and_then(|state| state.inference_overrides.as_deref()),
+        )?;
+        let config_state = build_config_state_record(
             id,
             &context.resolved,
             &explicit_selection,
             &effective_selection,
+            existing_state.as_ref(),
+            stored_load_overrides,
+            stored_inference_overrides,
         );
+
         let stored_model =
-            self.store_model_definition_with_config_state(next_model, stored_selection).await?;
+            self.store_model_definition_with_config_state(next_model, config_state).await?;
 
         Ok(stored_model)
     }
@@ -298,6 +349,137 @@ impl ModelService {
     }
 }
 
+/// Validates load overrides against the whitelist and expected value types.
+/// `None` input means "leave stored overrides unchanged" and returns `None`;
+/// `Some(object)` returns the map (an empty map clears stored overrides).
+fn validate_load_overrides(
+    value: Option<serde_json::Value>,
+) -> Result<Option<serde_json::Map<String, serde_json::Value>>, AppCoreError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let map = value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| AppCoreError::BadRequest("load_overrides must be a JSON object".into()))?;
+    for (key, val) in &map {
+        let valid = match key.as_str() {
+            "num_workers" => val.as_u64().is_some_and(|n| n >= 1),
+            "context_length" => val.as_u64().is_some(),
+            "diffusion_model_path"
+            | "vae_path"
+            | "taesd_path"
+            | "clip_l_path"
+            | "clip_g_path"
+            | "t5xxl_path"
+            | "vae_device"
+            | "clip_device" => val.is_string(),
+            "flash_attn" | "offload_params_to_cpu" => val.is_boolean(),
+            unknown => {
+                return Err(AppCoreError::BadRequest(format!(
+                    "unknown load_overrides key '{unknown}'"
+                )));
+            }
+        };
+        if !valid {
+            return Err(AppCoreError::BadRequest(format!(
+                "load_overrides '{key}' has an invalid value type"
+            )));
+        }
+    }
+    Ok(Some(map))
+}
+
+/// Validates inference overrides (`temperature` / `top_p` as numbers).
+fn validate_inference_overrides(
+    value: Option<serde_json::Value>,
+) -> Result<Option<serde_json::Map<String, serde_json::Value>>, AppCoreError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let map = value.as_object().cloned().ok_or_else(|| {
+        AppCoreError::BadRequest("inference_overrides must be a JSON object".into())
+    })?;
+    for (key, val) in &map {
+        let valid = match key.as_str() {
+            "temperature" | "top_p" => val.as_f64().is_some(),
+            unknown => {
+                return Err(AppCoreError::BadRequest(format!(
+                    "unknown inference_overrides key '{unknown}'"
+                )));
+            }
+        };
+        if !valid {
+            return Err(AppCoreError::BadRequest(format!(
+                "inference_overrides '{key}' has an invalid value type"
+            )));
+        }
+    }
+    Ok(Some(map))
+}
+
+/// Resolves the JSON string to persist for an overrides column. `Some(map)`
+/// replaces the stored value (empty map clears to `None`); `None` preserves the
+/// existing stored value.
+fn resolve_stored_override_json(
+    validated: Option<serde_json::Map<String, serde_json::Value>>,
+    existing: Option<&str>,
+) -> Result<Option<String>, AppCoreError> {
+    Ok(match validated {
+        Some(map) if map.is_empty() => None,
+        Some(map) => Some(serde_json::to_string(&map).map_err(|error| {
+            AppCoreError::Internal(format!("failed to serialize overrides: {error}"))
+        })?),
+        None => existing.map(str::to_owned),
+    })
+}
+
+/// Merges inference overrides into `runtime_presets`, the live sampling source.
+fn merge_inference_overrides_into_runtime_presets(
+    runtime_presets: &mut Option<RuntimePresets>,
+    overrides: Option<&serde_json::Map<String, serde_json::Value>>,
+) {
+    let Some(overrides) = overrides else {
+        return;
+    };
+    let mut presets = runtime_presets.take().unwrap_or_default();
+    if let Some(temperature) = overrides.get("temperature").and_then(serde_json::Value::as_f64) {
+        presets.temperature = Some(temperature as f32);
+    }
+    if let Some(top_p) = overrides.get("top_p").and_then(serde_json::Value::as_f64) {
+        presets.top_p = Some(top_p as f32);
+    }
+    *runtime_presets = presets.into_non_empty();
+}
+
+/// Builds the config-state record to persist, preserving the existing
+/// `selected_engine_id` and writing whenever the selection changed or any
+/// overrides are present.
+fn build_config_state_record(
+    model_id: &str,
+    resolved: &slab_model_pack::ResolvedModelPack,
+    explicit_selection: &ModelPackSelection,
+    effective_selection: &ModelPackSelection,
+    existing: Option<&ModelConfigStateRecord>,
+    load_overrides: Option<String>,
+    inference_overrides: Option<String>,
+) -> Option<ModelConfigStateRecord> {
+    let selection_changed = effective_selection != &pack::default_model_pack_selection(resolved);
+    let has_overrides = load_overrides.is_some() || inference_overrides.is_some();
+    if !selection_changed && !has_overrides {
+        return None;
+    }
+    Some(ModelConfigStateRecord {
+        model_id: model_id.to_owned(),
+        selected_preset_id: explicit_selection.preset_id.clone(),
+        selected_variant_id: explicit_selection.variant_id.clone(),
+        selected_engine_id: existing.and_then(|state| state.selected_engine_id.clone()),
+        load_overrides,
+        inference_overrides,
+        updated_at: Utc::now(),
+    })
+}
+
 pub(super) async fn load_models_from_state(
     state: &ModelState,
     query: ListModelsFilter,
@@ -357,6 +539,19 @@ pub(crate) async fn list_chat_models_from_state(
     });
 
     Ok(items)
+}
+
+/// Best-effort lookup of a model's advertised context window (in tokens) by id.
+///
+/// Used by the summarizing compaction policy to decide when auto-compaction
+/// should fire. Returns `None` when the model is unknown or has no recorded
+/// window — the caller then falls back to a fixed threshold.
+pub(crate) async fn context_window_for(state: &ModelState, model_id: &str) -> Option<u32> {
+    let models = load_models_from_state(state, ListModelsFilter { capability: None }).await.ok()?;
+    models
+        .into_iter()
+        .find(|model| model.id == model_id)
+        .and_then(|model| model.spec.context_window)
 }
 
 async fn load_cloud_provider_map_for_chat(
@@ -588,10 +783,31 @@ pub(super) fn build_hub_client(
 ) -> Result<HubClient, AppCoreError> {
     let (provider_preference, _) = normalized_hub_provider_preference(hub_provider)?;
     let mut client = HubClient::new().with_provider_preference(provider_preference);
-    if let Some(dir) = model_cache_dir.map(str::trim).filter(|value| !value.is_empty()) {
-        client = client.with_cache_dir(PathBuf::from(dir));
+    // Resolve the cache dir explicitly rather than letting hf-hub infer it.
+    // hf-hub's `resolve_cache_dir` falls back to `/tmp` when `HOME` is unset —
+    // the norm for Windows-native processes (PowerShell/cmd don't export HOME
+    // to children; only USERPROFILE is set). That mismatch makes slab download
+    // into `C:\tmp\.cache\huggingface\hub` while the user's already-downloaded
+    // files live in `C:\Users\<user>\.cache\huggingface\hub`, so cache lookups
+    // miss and the model re-downloads (and worse, via xet which stalls).
+    // Prefer USERPROFILE (Windows) then HOME to share the standard global cache.
+    let cache_dir = model_cache_dir
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(default_hf_hub_cache_dir);
+    if let Some(dir) = cache_dir {
+        client = client.with_cache_dir(dir);
     }
     Ok(client)
+}
+
+/// Standard global Hugging Face hub cache dir, Windows-safe. Uses USERPROFILE
+/// on Windows (where HOME is usually absent), then HOME — mirroring the location
+/// the hf CLI / transformers use (`~/.cache/huggingface/hub`).
+fn default_hf_hub_cache_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    Some(PathBuf::from(home).join(".cache").join("huggingface").join("hub"))
 }
 
 pub(super) fn map_hub_client_error(

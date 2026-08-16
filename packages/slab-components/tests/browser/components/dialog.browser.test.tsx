@@ -14,7 +14,7 @@ import { renderComponentScene } from "../test-utils"
 
 function DialogGallery() {
   return (
-    <div data-testid="dialog-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="dialog-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Dialog>
         <DialogTrigger asChild>
           <Button data-testid="dialog-trigger">Open Dialog</Button>

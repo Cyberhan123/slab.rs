@@ -1,0 +1,32 @@
+{
+  "name": "@slab/h5",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "oxlint src",
+    "lint:fix": "oxlint --fix src"
+  },
+  "dependencies": {
+    "@slab/api": "workspace:*",
+    "@slab/components": "workspace:*",
+    "@slab/core": "workspace:*",
+    "@slab/i18n": "workspace:*",
+    "@slab/ui": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "@types/node": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  },
+  "license": "AGPL-3.0-only"
+}

@@ -32,6 +32,14 @@ pub enum RuntimeBackendId {
     )]
     GgmlWhisper,
     #[strum(
+        to_string = "ggml.parakeet",
+        serialize = "ggml.parakeet",
+        serialize = "ggml-parakeet",
+        serialize = "parakeet",
+        ascii_case_insensitive
+    )]
+    GgmlParakeet,
+    #[strum(
         to_string = "ggml.diffusion",
         serialize = "ggml.diffusion",
         serialize = "ggml-diffusion",
@@ -69,13 +77,15 @@ impl RuntimeBackendId {
     ///
     /// Candle and ONNX identifiers remain parseable for compatibility, but they are not included
     /// here because those runtimes are not available in the current desktop distribution.
-    pub const ALL: [Self; 3] = [Self::GgmlLlama, Self::GgmlWhisper, Self::GgmlDiffusion];
+    pub const ALL: [Self; 4] =
+        [Self::GgmlLlama, Self::GgmlWhisper, Self::GgmlParakeet, Self::GgmlDiffusion];
 
     /// Return the canonical backend identifier used by runtime and server wiring.
     pub const fn canonical_id(self) -> &'static str {
         match self {
             Self::GgmlLlama => "ggml.llama",
             Self::GgmlWhisper => "ggml.whisper",
+            Self::GgmlParakeet => "ggml.parakeet",
             Self::GgmlDiffusion => "ggml.diffusion",
             Self::CandleLlama => "candle.llama",
             Self::CandleWhisper => "candle.whisper",
@@ -89,6 +99,7 @@ impl RuntimeBackendId {
         match self {
             Self::GgmlLlama => "ggml-llama",
             Self::GgmlWhisper => "ggml-whisper",
+            Self::GgmlParakeet => "ggml-parakeet",
             Self::GgmlDiffusion => "ggml-diffusion",
             Self::CandleLlama => "candle-llama",
             Self::CandleWhisper => "candle-whisper",
@@ -102,6 +113,7 @@ impl RuntimeBackendId {
             self,
             Self::GgmlLlama
                 | Self::GgmlWhisper
+                | Self::GgmlParakeet
                 | Self::GgmlDiffusion
                 | Self::CandleLlama
                 | Self::CandleWhisper
@@ -126,6 +138,10 @@ mod tests {
         assert_eq!(
             RuntimeBackendId::from_str("ggml.whisper").unwrap(),
             RuntimeBackendId::GgmlWhisper
+        );
+        assert_eq!(
+            RuntimeBackendId::from_str("ggml.parakeet").unwrap(),
+            RuntimeBackendId::GgmlParakeet
         );
         assert_eq!(
             RuntimeBackendId::from_str("ggml.diffusion").unwrap(),
@@ -154,6 +170,10 @@ mod tests {
             RuntimeBackendId::GgmlWhisper
         );
         assert_eq!(
+            RuntimeBackendId::from_str("ggml-parakeet").unwrap(),
+            RuntimeBackendId::GgmlParakeet
+        );
+        assert_eq!(
             RuntimeBackendId::from_str("ggml-diffusion").unwrap(),
             RuntimeBackendId::GgmlDiffusion
         );
@@ -176,6 +196,7 @@ mod tests {
         // Legacy aliases map to GGML variants for backward compatibility.
         assert_eq!(RuntimeBackendId::from_str("llama").unwrap(), RuntimeBackendId::GgmlLlama);
         assert_eq!(RuntimeBackendId::from_str("whisper").unwrap(), RuntimeBackendId::GgmlWhisper);
+        assert_eq!(RuntimeBackendId::from_str("parakeet").unwrap(), RuntimeBackendId::GgmlParakeet);
         assert_eq!(
             RuntimeBackendId::from_str("diffusion").unwrap(),
             RuntimeBackendId::GgmlDiffusion
@@ -189,6 +210,7 @@ mod tests {
             [
                 RuntimeBackendId::GgmlLlama,
                 RuntimeBackendId::GgmlWhisper,
+                RuntimeBackendId::GgmlParakeet,
                 RuntimeBackendId::GgmlDiffusion,
             ]
         );

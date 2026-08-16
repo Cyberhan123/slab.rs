@@ -73,12 +73,16 @@ impl RawConPty {
     }
 
     pub fn pseudoconsole_handle(&self) -> RawHandle {
-        self.con.raw_handle()
+        self.con.raw_handle() as RawHandle
     }
 
     pub fn into_raw_handles(self) -> (RawHandle, RawHandle, RawHandle) {
         let me = ManuallyDrop::new(self);
-        (me.con.raw_handle(), me.input_write.as_raw_handle(), me.output_read.as_raw_handle())
+        (
+            me.con.raw_handle() as RawHandle,
+            me.input_write.as_raw_handle(),
+            me.output_read.as_raw_handle(),
+        )
     }
 }
 

@@ -6,8 +6,8 @@ import useEmblaCarousel, {
 } from "embla-carousel-react"
 import { ArrowLeft, ArrowRight } from "lucide-react"
 
+import { cn } from "@/lib/utils"
 import { Button } from "./button"
-import { cn } from "./lib/utils"
 
 type CarouselApi = UseEmblaCarouselType[1]
 type UseCarouselParameters = Parameters<typeof useEmblaCarousel>
@@ -61,10 +61,10 @@ function Carousel({
   const [canScrollPrev, setCanScrollPrev] = React.useState(false)
   const [canScrollNext, setCanScrollNext] = React.useState(false)
 
-  const onSelect = React.useCallback((carouselApi: CarouselApi) => {
-    if (!carouselApi) return
-    setCanScrollPrev(carouselApi.canScrollPrev())
-    setCanScrollNext(carouselApi.canScrollNext())
+  const onSelect = React.useCallback((api: CarouselApi) => {
+    if (!api) return
+    setCanScrollPrev(api.canScrollPrev())
+    setCanScrollNext(api.canScrollNext())
   }, [])
 
   const scrollPrev = React.useCallback(() => {
@@ -104,34 +104,30 @@ function Carousel({
     }
   }, [api, onSelect])
 
-  const contextValue = React.useMemo(
-    () => ({
-      carouselRef,
-      api: api,
-      opts,
-      orientation:
-        orientation || (opts?.axis === "y" ? "vertical" : "horizontal"),
-      scrollPrev,
-      scrollNext,
-      canScrollPrev,
-      canScrollNext,
-    }),
-    [api, canScrollNext, canScrollPrev, carouselRef, opts, orientation, scrollNext, scrollPrev]
-  )
-
   return (
     <CarouselContext.Provider
-      value={contextValue}
+      value={{
+        carouselRef,
+        api: api,
+        opts,
+        orientation:
+          orientation || (opts?.axis === "y" ? "vertical" : "horizontal"),
+        scrollPrev,
+        scrollNext,
+        canScrollPrev,
+        canScrollNext,
+      }}
     >
-      <section
+      <div
         onKeyDownCapture={handleKeyDown}
         className={cn("relative", className)}
+        role="region"
         aria-roledescription="carousel"
         data-slot="carousel"
         {...props}
       >
         {children}
-      </section>
+      </div>
     </CarouselContext.Provider>
   )
 }
@@ -162,7 +158,6 @@ function CarouselItem({ className, ...props }: React.ComponentProps<"div">) {
 
   return (
     <div
-      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- Carousel slides use the WAI carousel group pattern with aria-roledescription.
       role="group"
       aria-roledescription="slide"
       data-slot="carousel-item"

@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, protocol::TurnItem,
+};
 use slab_config::secret_port::{EnvSecretAdapter, resolve_secret_or_plain};
 use slab_config::{
     AgentWebSearchConfig, ProviderAuthConfig, WebSearchDuckDuckGoProviderConfig,
@@ -119,6 +121,22 @@ impl ToolHandler for WebSearchTool {
             },
             "required": ["query"]
         })
+    }
+
+    fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
+        let query = arguments.get("query").and_then(Value::as_str)?.to_string();
+        Some(slab_agent::OperationDescriptor::network(query))
+    }
+
+    fn category(&self) -> slab_agent::OperationCategory {
+        slab_agent::OperationCategory::Network
+    }
+
+    fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+        TurnItem::WebSearch {
+            id: render.call.id.clone(),
+            query: render.args.get("query").and_then(Value::as_str).unwrap_or("").to_owned(),
+        }
     }
 
     async fn execute(

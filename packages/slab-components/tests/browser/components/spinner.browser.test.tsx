@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function SpinnerGallery() {
   return (
-    <div data-testid="spinner-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="spinner-gallery" className="flex flex-wrap items-center gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Spinner />
       <Spinner className="size-6" />
       <Spinner className="size-8" />

@@ -34,6 +34,17 @@ pub use invocation::verify_apply_patch_args;
 use crate::invocation::ExtractHeredocError;
 pub(crate) use local_fs::LOCAL_FS;
 
+/// Returns the process-local [`ExecutorFileSystem`] adapter used by the
+/// standalone `apply_patch` binary. Writes are confined to the
+/// `workspace_root` configured on the [`FileSystemSandboxContext`] passed to
+/// [`apply_patch`] (paths outside the workspace are rejected via
+/// [`slab_file::resolve_path`]). This is the same confinement level that
+/// `WriteFileTool` applies, making it suitable for host-side tools that want
+/// to drive the engine against the real filesystem.
+pub fn local_file_system() -> &'static dyn ExecutorFileSystem {
+    LOCAL_FS.as_ref()
+}
+
 /// Detailed instructions for gpt-4.1 on how to use the `apply_patch` tool.
 pub const APPLY_PATCH_TOOL_INSTRUCTIONS: &str = include_str!("../apply_patch_tool_instructions.md");
 
@@ -414,14 +425,39 @@ async fn get_metadata_from_fs(
     fs.get_metadata(context, &path).await.map_err(file_system_error_to_io)
 }
 
-/// Applies the patch and prints the result to stdout/stderr.
-pub async fn apply_patch(
+/// Kind of file change reported by [`PatchProgressSink`] as a patch is applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatchProgressKind {
+    Add,
+    Modify,
+    Delete,
+}
+
+/// A single file change committed while applying a patch, reported live to a
+/// [`PatchProgressSink`]. `path` preserves the spelling from the patch.
+#[derive(Debug, Clone, Copy)]
+pub struct PatchProgress<'a> {
+    pub path: &'a Path,
+    pub kind: PatchProgressKind,
+}
+
+/// Receiver for per-file progress as a patch is applied. Each call follows a
+/// successful commit, so hosts can surface "file applied" updates while the
+/// patch runs.
+pub trait PatchProgressSink: Send + Sync {
+    fn on_progress(&self, progress: PatchProgress<'_>);
+}
+
+/// Applies the patch and prints the result to stdout/stderr, optionally
+/// reporting each committed file to `progress`.
+pub async fn apply_patch_with_progress(
     patch: &str,
     cwd: &AbsolutePathBuf,
     stdout: &mut impl std::io::Write,
     stderr: &mut impl std::io::Write,
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
+    progress: Option<&dyn PatchProgressSink>,
 ) -> Result<AppliedPatchDelta, ApplyPatchFailure> {
     let hunks = match parse_patch(patch) {
         Ok(source) => source.hunks,
@@ -442,20 +478,34 @@ pub async fn apply_patch(
         }
     };
 
-    apply_hunks(&hunks, cwd, stdout, stderr, fs, sandbox).await
+    apply_hunks_with_progress(&hunks, cwd, stdout, stderr, fs, sandbox, progress).await
 }
 
-/// Applies hunks and continues to update stdout/stderr
-pub async fn apply_hunks(
-    hunks: &[Hunk],
+/// Applies the patch and prints the result to stdout/stderr.
+pub async fn apply_patch(
+    patch: &str,
     cwd: &AbsolutePathBuf,
     stdout: &mut impl std::io::Write,
     stderr: &mut impl std::io::Write,
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> Result<AppliedPatchDelta, ApplyPatchFailure> {
+    apply_patch_with_progress(patch, cwd, stdout, stderr, fs, sandbox, None).await
+}
+
+/// Applies hunks and continues to update stdout/stderr, optionally reporting
+/// each committed file to `progress`.
+pub async fn apply_hunks_with_progress(
+    hunks: &[Hunk],
+    cwd: &AbsolutePathBuf,
+    stdout: &mut impl std::io::Write,
+    stderr: &mut impl std::io::Write,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+    progress: Option<&dyn PatchProgressSink>,
+) -> Result<AppliedPatchDelta, ApplyPatchFailure> {
     let mut delta = AppliedPatchDelta::empty();
-    match apply_hunks_to_files(hunks, cwd, fs, sandbox, &mut delta).await {
+    match apply_hunks_to_files(hunks, cwd, fs, sandbox, &mut delta, progress).await {
         Ok(affected_paths) => {
             print_summary(&affected_paths, stdout).map_err(|error| {
                 ApplyPatchFailure::new(ApplyPatchError::from(error), delta.clone())
@@ -480,6 +530,18 @@ pub async fn apply_hunks(
     }
 }
 
+/// Applies hunks and continues to update stdout/stderr.
+pub async fn apply_hunks(
+    hunks: &[Hunk],
+    cwd: &AbsolutePathBuf,
+    stdout: &mut impl std::io::Write,
+    stderr: &mut impl std::io::Write,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> Result<AppliedPatchDelta, ApplyPatchFailure> {
+    apply_hunks_with_progress(hunks, cwd, stdout, stderr, fs, sandbox, None).await
+}
+
 /// Applies each parsed patch hunk to the filesystem.
 /// Returns an error if any of the changes could not be applied.
 /// Tracks file paths affected by applying a patch, preserving the path spelling
@@ -498,6 +560,7 @@ async fn apply_hunks_to_files(
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
     delta: &mut AppliedPatchDelta,
+    progress: Option<&dyn PatchProgressSink>,
 ) -> anyhow::Result<AffectedPaths> {
     if hunks.is_empty() {
         anyhow::bail!("No files were modified.");
@@ -545,6 +608,12 @@ async fn apply_hunks_to_files(
                         overwritten_content,
                     },
                 });
+                if let Some(sink) = progress {
+                    sink.on_progress(PatchProgress {
+                        path: &affected_path,
+                        kind: PatchProgressKind::Add,
+                    });
+                }
                 added.push(affected_path);
             }
             Hunk::DeleteFile { .. } => {
@@ -576,6 +645,12 @@ async fn apply_hunks_to_files(
                     delta.changes.push(AppliedPatchChange {
                         path: path_abs.into_path_buf(),
                         change: AppliedPatchFileChange::Delete { content },
+                    });
+                }
+                if let Some(sink) = progress {
+                    sink.on_progress(PatchProgress {
+                        path: &affected_path,
+                        kind: PatchProgressKind::Delete,
                     });
                 }
                 deleted.push(affected_path);
@@ -640,6 +715,12 @@ async fn apply_hunks_to_files(
                             new_content: new_contents,
                         },
                     };
+                    if let Some(sink) = progress {
+                        sink.on_progress(PatchProgress {
+                            path: &affected_path,
+                            kind: PatchProgressKind::Modify,
+                        });
+                    }
                     modified.push(affected_path);
                 } else {
                     try_write!(
@@ -659,6 +740,12 @@ async fn apply_hunks_to_files(
                             new_content: new_contents,
                         },
                     });
+                    if let Some(sink) = progress {
+                        sink.on_progress(PatchProgress {
+                            path: &affected_path,
+                            kind: PatchProgressKind::Modify,
+                        });
+                    }
                     modified.push(affected_path);
                 }
             }

@@ -4,35 +4,35 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Tool {
-    #[serde(rename = "FunctionTool")]
+    #[serde(rename = "function")]
     FunctionTool(Box<models::FunctionTool>),
-    #[serde(rename = "FileSearchTool")]
+    #[serde(rename = "file_search")]
     FileSearchTool(Box<models::FileSearchTool>),
-    #[serde(rename = "ComputerTool")]
+    #[serde(rename = "computer")]
     ComputerTool(Box<models::ComputerTool>),
-    #[serde(rename = "ComputerUsePreviewTool")]
+    #[serde(rename = "computer_use_preview")]
     ComputerUsePreviewTool(Box<models::ComputerUsePreviewTool>),
-    #[serde(rename = "WebSearchTool")]
+    #[serde(rename = "web_search")]
     WebSearchTool(Box<models::WebSearchTool>),
-    #[serde(rename = "MCPTool")]
+    #[serde(rename = "mcp")]
     McpTool(Box<models::McpTool>),
-    #[serde(rename = "CodeInterpreterTool")]
+    #[serde(rename = "code_interpreter")]
     CodeInterpreterTool(Box<models::CodeInterpreterTool>),
-    #[serde(rename = "ImageGenTool")]
+    #[serde(rename = "image_generation")]
     ImageGenTool(Box<models::ImageGenTool>),
-    #[serde(rename = "LocalShellToolParam")]
+    #[serde(rename = "local_shell")]
     LocalShellToolParam(Box<models::LocalShellToolParam>),
-    #[serde(rename = "FunctionShellToolParam")]
+    #[serde(rename = "shell")]
     FunctionShellToolParam(Box<models::FunctionShellToolParam>),
-    #[serde(rename = "CustomToolParam")]
+    #[serde(rename = "custom")]
     CustomToolParam(Box<models::CustomToolParam>),
-    #[serde(rename = "NamespaceToolParam")]
+    #[serde(rename = "namespace")]
     NamespaceToolParam(Box<models::NamespaceToolParam>),
-    #[serde(rename = "ToolSearchToolParam")]
+    #[serde(rename = "tool_search")]
     ToolSearchToolParam(Box<models::ToolSearchToolParam>),
-    #[serde(rename = "WebSearchPreviewTool")]
+    #[serde(rename = "web_search_preview")]
     WebSearchPreviewTool(Box<models::WebSearchPreviewTool>),
-    #[serde(rename = "ApplyPatchToolParam")]
+    #[serde(rename = "apply_patch")]
     ApplyPatchToolParam(Box<models::ApplyPatchToolParam>),
 }
 
@@ -83,9 +83,6 @@ pub enum SubmitToolOutputsRunRequestToolOutputsInnerConnectorId {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NamespaceToolParam {
-    /// The type of the tool. Always `namespace`.
-    #[serde(rename = "type")]
-    pub r#type: ToolCoreType,
     /// The namespace name used in tool calls (for example, `crm`).
     #[serde(rename = "name")]
     pub name: String,
@@ -100,30 +97,20 @@ pub struct NamespaceToolParam {
 impl NamespaceToolParam {
     /// Groups function/custom tools under a shared namespace.
     pub fn new(
-        r#type: ToolCoreType,
         name: String,
         description: String,
         tools: Vec<models::NamespaceToolParamToolsInner>,
     ) -> NamespaceToolParam {
-        NamespaceToolParam { r#type, name, description, tools }
+        NamespaceToolParam { name, description, tools }
     }
-}
-/// The type of the tool. Always `namespace`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum ToolCoreType {
-    #[serde(rename = "namespace")]
-    #[default]
-    Namespace,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum NamespaceToolParamToolsInner {
-    #[serde(rename = "FunctionToolParam")]
+    #[serde(rename = "function")]
     FunctionToolParam(Box<models::FunctionToolParam>),
-    #[serde(rename = "CustomToolParam")]
+    #[serde(rename = "custom")]
     CustomToolParam(Box<models::CustomToolParam>),
 }
 

@@ -3,8 +3,6 @@
 
 mod api;
 mod error;
-mod log_redaction;
-mod size_rotating_log;
 
 use std::io::ErrorKind;
 use std::net::SocketAddr;
@@ -22,9 +20,6 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{Layer, fmt};
 
-use size_rotating_log::{
-    DEFAULT_MAX_LOG_BYTES, DEFAULT_MAX_LOG_FILES, RedactingSizeRotatingWriter,
-};
 use slab_app_core::config::{
     Config, default_model_config_dir_for_settings_path, seed_settings_document_from_env_if_missing,
 };
@@ -306,8 +301,11 @@ fn init_console_tracing(env_filter: tracing_subscriber::EnvFilter, log_json: boo
 }
 
 fn init_file_logging(path: PathBuf) -> anyhow::Result<FileLogging> {
-    let writer =
-        RedactingSizeRotatingWriter::new(path, DEFAULT_MAX_LOG_BYTES, DEFAULT_MAX_LOG_FILES)?;
+    let writer = slab_utils::log::RedactingSizeRotatingWriter::new(
+        path,
+        slab_utils::log::DEFAULT_MAX_LOG_BYTES,
+        slab_utils::log::DEFAULT_MAX_LOG_FILES,
+    )?;
     let (writer, guard) = tracing_appender::non_blocking(writer);
     Ok(FileLogging { writer, guard })
 }

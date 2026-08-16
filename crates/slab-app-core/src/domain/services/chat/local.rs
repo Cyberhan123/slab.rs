@@ -4,17 +4,19 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use slab_agent_tracing::record_json_from_context;
+use slab_types::RuntimeBackendId;
 use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
-    StructuredOutput, TextGenerationChunk, TextGenerationResponse, TextGenerationUsage,
-    TextPromptTokensDetails,
+    ChatReasoningEffort, ChatVerbosity, ConversationContentPart,
+    ConversationMessage as DomainConversationMessage, ConversationMessageContent, StructuredOutput,
+    TextGenerationResponse, TextGenerationUsage,
 };
-use crate::domain::ports::{
-    RuntimeTextGenerationChunk, RuntimeTextGenerationRequest, RuntimeTextGenerationResponse,
-    RuntimeTextGenerationUsage,
+use crate::domain::ports::{RuntimeChatImagePart, RuntimeTextGenerationRequest};
+use crate::domain::services::llm::local::{
+    local_chat, local_chat_stream, runtime_chunk_payload, runtime_request_payload,
+    runtime_response_payload, text_chunk_from_runtime, text_response_from_runtime,
 };
 use crate::domain::services::model;
 use crate::error::AppCoreError;
@@ -37,24 +39,25 @@ struct LocalStreamTerminalMetadata {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct LocalChatRequestConfig {
-    pub(super) session_id: Option<String>,
-    pub(super) max_tokens: u32,
-    pub(super) temperature: f32,
-    pub(super) top_p: Option<f32>,
-    pub(super) top_k: Option<i32>,
-    pub(super) min_p: Option<f32>,
-    pub(super) presence_penalty: Option<f32>,
-    pub(super) repetition_penalty: Option<f32>,
-    pub(super) reasoning_effort: Option<ChatReasoningEffort>,
-    pub(super) verbosity: Option<ChatVerbosity>,
-    pub(super) gbnf: Option<String>,
-    pub(super) structured_output: Option<StructuredOutput>,
-    pub(super) tools: Vec<slab_proto::openai::FunctionTool>,
-    pub(super) stop: Vec<String>,
-    pub(super) agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
-    pub(super) stream: bool,
-    pub(super) include_usage: bool,
+pub(crate) struct LocalChatRequestConfig {
+    pub(crate) session_id: Option<String>,
+    pub(crate) max_tokens: u32,
+    pub(crate) temperature: f32,
+    pub(crate) top_p: Option<f32>,
+    pub(crate) top_k: Option<i32>,
+    pub(crate) min_p: Option<f32>,
+    pub(crate) presence_penalty: Option<f32>,
+    pub(crate) repetition_penalty: Option<f32>,
+    pub(crate) reasoning_effort: Option<ChatReasoningEffort>,
+    pub(crate) verbosity: Option<ChatVerbosity>,
+    pub(crate) reasoning_guidance_in_context: bool,
+    pub(crate) gbnf: Option<String>,
+    pub(crate) structured_output: Option<StructuredOutput>,
+    pub(crate) tools: Vec<slab_proto::openai::FunctionTool>,
+    pub(crate) stop: Vec<String>,
+    pub(crate) agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
+    pub(crate) stream: bool,
+    pub(crate) include_usage: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -72,32 +75,128 @@ pub(super) struct LocalTextRequestConfig {
     pub(super) structured_output: Option<StructuredOutput>,
 }
 
-pub(super) async fn create_chat_completion(
+/// A resolved local runtime request plus the prompt-engineering byproducts the
+/// chat streaming layer still needs (stop sequences + trailing markers for
+/// output trimming / usage estimation). Shared between
+/// [`create_chat_completion`] and the `/responses` single-shot path.
+#[derive(Debug, Clone)]
+pub(crate) struct LocalRuntimeRequest {
+    pub(crate) backend_id: RuntimeBackendId,
+    pub(crate) request: RuntimeTextGenerationRequest,
+    pub(crate) prompt: String,
+    pub(crate) effective_stop: Vec<String>,
+    pub(crate) trailing_stop_markers: Vec<String>,
+}
+
+/// Stable sentinel substituted for each image part in the rendered prompt. The
+/// runtime replaces every occurrence with the loaded projector's real media
+/// marker before handing the prompt to `mtmd_tokenize` (which requires one
+/// marker per image, in order).
+pub(super) const MTMD_MEDIA_SENTINEL: &str = "<<SLAB_MTMD_MEDIA>>";
+
+/// Decode an image `image_url` payload into raw encoded bytes (PNG/JPEG/…).
+///
+/// Handles OpenAI-style `data:<mediatype>;base64,<…>` data URIs (the common
+/// local-inference case where the frontend embeds the image inline), bare
+/// base64 strings, and local file paths. Remote `http(s)://` URLs return `None`
+/// (local inference does not fetch them synchronously).
+fn decode_image_url(url: &str) -> Option<(Vec<u8>, Option<String>)> {
+    use base64::Engine as _;
+    if let Some(rest) = url.strip_prefix("data:") {
+        let comma = rest.find(',')?;
+        let meta = &rest[..comma];
+        let payload = &rest[comma + 1..];
+        let mediatype = meta.split(';').next().filter(|s| s.contains('/')).map(str::to_owned);
+        let bytes = if meta.contains("base64") {
+            base64::engine::general_purpose::STANDARD.decode(payload).ok()?
+        } else {
+            payload.as_bytes().to_vec()
+        };
+        return Some((bytes, mediatype));
+    }
+    if url.starts_with("http://") || url.starts_with("https://") {
+        return None;
+    }
+    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(url) {
+        return Some((bytes, None));
+    }
+    std::fs::read(url).ok().map(|bytes| (bytes, None))
+}
+
+/// Walk `messages` in place, replacing each `Image` content part with the
+/// [`MTMD_MEDIA_SENTINEL`] text marker and collecting the decoded image bytes
+/// (in order). Unresolvable images fall back to a `[image]` text placeholder and
+/// contribute no bitmap, keeping the sentinel/bitmap counts aligned. Messages
+/// without image parts are untouched — the text-only path is byte-identical to
+/// before this call.
+pub(super) fn extract_image_parts(
+    messages: &mut [DomainConversationMessage],
+) -> Vec<RuntimeChatImagePart> {
+    let mut images = Vec::new();
+    for message in messages.iter_mut() {
+        let ConversationMessageContent::Parts(parts) = &mut message.content else {
+            continue;
+        };
+        for part in parts.iter_mut() {
+            if let ConversationContentPart::Image { image_url, mime_type, .. } = part {
+                let resolved = image_url.as_deref().and_then(decode_image_url);
+                match resolved {
+                    Some((data, mime)) => {
+                        images.push(RuntimeChatImagePart {
+                            data,
+                            mime_type: mime_type.clone().or(mime),
+                        });
+                        *part =
+                            ConversationContentPart::Text { text: MTMD_MEDIA_SENTINEL.to_owned() };
+                    }
+                    None => {
+                        *part = ConversationContentPart::Text { text: "[image]".to_owned() };
+                    }
+                }
+            }
+        }
+    }
+    images
+}
+
+/// Render the local chat prompt (template + reasoning controls + gbnf) and
+/// assemble the [`RuntimeTextGenerationRequest`]. Shared by the chat streaming
+/// layer ([`create_chat_completion`]) and the `/responses` single-shot path so
+/// the local prompt engineering is not duplicated. Records the same agent-trace
+/// payloads as the inline path did.
+pub(crate) async fn build_local_runtime_request(
     state: &ModelState,
     model: &str,
     messages: &[DomainConversationMessage],
-    config: LocalChatRequestConfig,
-) -> Result<GeneratedChatOutput, AppCoreError> {
+    config: &LocalChatRequestConfig,
+) -> Result<LocalRuntimeRequest, AppCoreError> {
     let prompt_profile = model::resolve_local_chat_prompt_profile(state, model).await?;
     let backend_id = prompt_profile.backend_id;
 
-    // When the Jinja chat template natively references `enable_thinking` (e.g.
-    // Qwen3, DeepSeek-R1), it already controls thinking behaviour via the
-    // template variable.  Skip injecting an extra system-level reasoning
-    // guidance message; it can confuse smaller models and conflict with the
-    // template's own thinking protocol.
+    // Skip the inline local reasoning-policy injection when:
+    //  - the Jinja chat template natively references `enable_thinking` (e.g.
+    //    Qwen3, DeepSeek-R1) and already controls thinking via its template
+    //    variable; or
+    //  - the caller already injected a reasoning-effort fragment via the agent
+    //    context hook (`reasoning_guidance_in_context`) — the agent path would
+    //    otherwise be guided twice.
     let native_thinking =
         super::template::template_supports_thinking(prompt_profile.chat_template_source.as_deref());
-    let injected_guidance = if native_thinking {
+    let skip_inline = native_thinking || config.reasoning_guidance_in_context;
+    let injected_guidance = if skip_inline {
         None
     } else {
         local_reasoning_guidance(config.reasoning_effort, config.verbosity)
     };
-    let request_messages = if native_thinking {
+    let mut request_messages = if skip_inline {
         messages.to_vec()
     } else {
         apply_local_reasoning_controls(messages, config.reasoning_effort, config.verbosity)
     };
+    // Pull image parts out of the message content BEFORE the template flattens
+    // them to text, substituting a sentinel marker at each image's position.
+    // No-op (empty) for text-only turns.
+    let image_parts = extract_image_parts(&mut request_messages);
     if let Some(trace_context) = config.agent_trace.as_ref() {
         record_json_from_context(
             trace_context,
@@ -105,6 +204,7 @@ pub(super) async fn create_chat_completion(
             "local_reasoning_policy_injected",
             serde_json::json!({
                 "native_thinking": native_thinking,
+                "guidance_in_context": config.reasoning_guidance_in_context,
                 "injected": injected_guidance.is_some(),
                 "guidance": injected_guidance,
                 "reasoning_effort": config.reasoning_effort,
@@ -171,6 +271,7 @@ pub(super) async fn create_chat_completion(
         gbnf,
         stop_sequences: effective_stop.clone(),
         agent_trace: config.agent_trace.clone(),
+        image_parts,
     };
     if let Some(trace_context) = config.agent_trace.as_ref() {
         record_json_from_context(
@@ -181,16 +282,20 @@ pub(super) async fn create_chat_completion(
         );
     }
 
-    if config.stream {
-        let usage_guard =
-            state.auto_unload().acquire_for_inference(backend_id).await.map_err(|error| {
-                AppCoreError::BackendNotReady(format!(
-                    "{} backend not ready: {error}",
-                    backend_id.canonical_id()
-                ))
-            })?;
+    Ok(LocalRuntimeRequest { backend_id, request, prompt, effective_stop, trailing_stop_markers })
+}
 
-        let backend_stream = state.runtime().chat_stream(request.clone()).await?;
+pub(super) async fn create_chat_completion(
+    state: &ModelState,
+    model: &str,
+    messages: &[DomainConversationMessage],
+    config: LocalChatRequestConfig,
+) -> Result<GeneratedChatOutput, AppCoreError> {
+    let LocalRuntimeRequest { backend_id, request, prompt, effective_stop, trailing_stop_markers } =
+        build_local_runtime_request(state, model, messages, &config).await?;
+
+    if config.stream {
+        let (backend_stream, usage_guard) = local_chat_stream(state, backend_id, request).await?;
 
         let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
         let created_ts = Utc::now().timestamp();
@@ -471,15 +576,7 @@ pub(super) async fn create_chat_completion(
         return Ok(GeneratedChatOutput::Stream(Box::pin(sse_stream)));
     }
 
-    let _usage_guard =
-        state.auto_unload().acquire_for_inference(backend_id).await.map_err(|error| {
-            AppCoreError::BackendNotReady(format!(
-                "{} backend not ready: {error}",
-                backend_id.canonical_id()
-            ))
-        })?;
-
-    let runtime_response = state.runtime().chat(request).await?;
+    let runtime_response = local_chat(state, backend_id, request).await?;
     if let Some(trace_context) = config.agent_trace.as_ref() {
         record_json_from_context(
             trace_context,
@@ -561,17 +658,10 @@ pub(super) async fn create_text_completion(
         gbnf,
         stop_sequences: Vec::new(),
         agent_trace: None,
+        image_parts: Vec::new(),
     };
 
-    let _usage_guard =
-        state.auto_unload().acquire_for_inference(backend_id).await.map_err(|error| {
-            AppCoreError::BackendNotReady(format!(
-                "{} backend not ready: {error}",
-                backend_id.canonical_id()
-            ))
-        })?;
-
-    let mut response = text_response_from_runtime(state.runtime().chat(request).await?);
+    let mut response = text_response_from_runtime(local_chat(state, backend_id, request).await?);
 
     let usage = response.usage.clone().unwrap_or_else(|| {
         super::build_estimated_usage(&prompt, &response.text, response.tokens_used)
@@ -585,87 +675,88 @@ pub(super) async fn create_text_completion(
     Ok(response)
 }
 
-fn text_usage_from_runtime(usage: RuntimeTextGenerationUsage) -> TextGenerationUsage {
-    TextGenerationUsage {
-        prompt_tokens: usage.prompt_tokens,
-        completion_tokens: usage.completion_tokens,
-        total_tokens: usage.total_tokens,
-        prompt_tokens_details: TextPromptTokensDetails {
-            cached_tokens: usage.prompt_tokens_details.cached_tokens,
-        },
-        estimated: usage.estimated,
+// runtime exec + RuntimeTextGeneration* -> TextGeneration* conversion + trace payloads
+// have been pushed down to `domain::services::llm::local`, shared by chat and the future
+// response service.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::models::{ConversationContentPart, ConversationMessageContent};
+
+    fn text_msg(role: &str, text: &str) -> DomainConversationMessage {
+        DomainConversationMessage {
+            role: role.to_owned(),
+            content: ConversationMessageContent::Text(text.to_owned()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }
     }
-}
 
-fn runtime_request_payload(request: &RuntimeTextGenerationRequest) -> serde_json::Value {
-    serde_json::json!({
-        "model": request.model,
-        "backend_id": request.backend_id.map(|backend| backend.canonical_id()),
-        "prompt": request.prompt,
-        "system_prompt": request.system_prompt,
-        "max_tokens": request.max_tokens,
-        "temperature": request.temperature,
-        "top_p": request.top_p,
-        "top_k": request.top_k,
-        "min_p": request.min_p,
-        "presence_penalty": request.presence_penalty,
-        "repetition_penalty": request.repetition_penalty,
-        "session_key": request.session_key,
-        "stream": request.stream,
-        "gbnf": request.gbnf,
-        "stop_sequences": request.stop_sequences,
-    })
-}
-
-fn runtime_response_payload(response: &RuntimeTextGenerationResponse) -> serde_json::Value {
-    serde_json::json!({
-        "text": response.text,
-        "finish_reason": response.finish_reason,
-        "tokens_used": response.tokens_used,
-        "usage": response.usage.as_ref().map(runtime_usage_payload),
-        "metadata": response.metadata,
-    })
-}
-
-fn runtime_chunk_payload(chunk: &RuntimeTextGenerationChunk) -> serde_json::Value {
-    serde_json::json!({
-        "delta": chunk.delta,
-        "done": chunk.done,
-        "finish_reason": chunk.finish_reason,
-        "usage": chunk.usage.as_ref().map(runtime_usage_payload),
-        "metadata": chunk.metadata,
-    })
-}
-
-fn runtime_usage_payload(usage: &RuntimeTextGenerationUsage) -> serde_json::Value {
-    serde_json::json!({
-        "prompt_tokens": usage.prompt_tokens,
-        "completion_tokens": usage.completion_tokens,
-        "total_tokens": usage.total_tokens,
-        "prompt_tokens_details": {
-            "cached_tokens": usage.prompt_tokens_details.cached_tokens,
-        },
-        "estimated": usage.estimated,
-    })
-}
-
-fn text_response_from_runtime(response: RuntimeTextGenerationResponse) -> TextGenerationResponse {
-    TextGenerationResponse {
-        text: response.text,
-        finish_reason: response.finish_reason,
-        tokens_used: response.tokens_used,
-        usage: response.usage.map(text_usage_from_runtime),
-        metadata: response.metadata,
-        tool_calls: Vec::new(),
+    #[test]
+    fn extract_image_parts_replaces_image_with_sentinel() {
+        // 1x1 PNG as a base64 data URI (the common local-inference encoding).
+        let data_uri = format!(
+            "data:image/png;base64,{}",
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        );
+        let mut messages = vec![
+            text_msg("user", "hello"),
+            DomainConversationMessage {
+                role: "user".to_owned(),
+                content: ConversationMessageContent::Parts(vec![
+                    ConversationContentPart::Text { text: "what is this? ".to_owned() },
+                    ConversationContentPart::Image {
+                        image_url: Some(data_uri),
+                        mime_type: None,
+                        detail: None,
+                    },
+                ]),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            },
+        ];
+        let images = extract_image_parts(&mut messages);
+        assert_eq!(images.len(), 1);
+        assert!(!images[0].data.is_empty());
+        assert_eq!(images[0].mime_type.as_deref(), Some("image/png"));
+        // The image part is replaced by the sentinel marker; text part untouched.
+        let ConversationMessageContent::Parts(parts) = &messages[1].content else {
+            panic!("content should still be Parts");
+        };
+        assert_eq!(parts.len(), 2);
+        let ConversationContentPart::Text { text } = &parts[1] else {
+            panic!("image part should have been replaced by a Text sentinel");
+        };
+        assert_eq!(text, MTMD_MEDIA_SENTINEL);
     }
-}
 
-fn text_chunk_from_runtime(chunk: RuntimeTextGenerationChunk) -> TextGenerationChunk {
-    TextGenerationChunk {
-        delta: chunk.delta,
-        done: chunk.done,
-        finish_reason: chunk.finish_reason,
-        usage: chunk.usage.map(text_usage_from_runtime),
-        metadata: chunk.metadata,
+    #[test]
+    fn extract_image_parts_is_noop_for_text_only() {
+        let mut messages = vec![text_msg("user", "plain text"), text_msg("assistant", "reply")];
+        let images = extract_image_parts(&mut messages);
+        assert!(images.is_empty());
+        assert_eq!(messages[0].content, ConversationMessageContent::Text("plain text".to_owned()));
+        assert_eq!(messages[1].content, ConversationMessageContent::Text("reply".to_owned()));
+    }
+
+    #[test]
+    fn extract_image_parts_drops_unresolvable_http_url() {
+        let mut messages = vec![DomainConversationMessage {
+            role: "user".to_owned(),
+            content: ConversationMessageContent::Parts(vec![ConversationContentPart::Image {
+                image_url: Some("https://example.com/cat.png".to_owned()),
+                mime_type: None,
+                detail: None,
+            }]),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }];
+        let images = extract_image_parts(&mut messages);
+        // Remote URLs are not fetched for local inference → no bitmap, fallback text.
+        assert!(images.is_empty());
     }
 }

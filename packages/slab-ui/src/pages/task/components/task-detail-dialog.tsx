@@ -1,0 +1,219 @@
+import { Link } from 'react-router-dom';
+import { useClipboard } from '@mantine/hooks';
+import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
+import { Button } from '@slab/components/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@slab/components/dialog';
+import { Spinner } from '@slab/components/spinner';
+import { SoftPanel } from '@slab/components/workspace';
+import { toast } from 'sonner';
+import { translateServerField, useTranslation } from '@slab/i18n';
+import type { Task, TaskResult } from '../const';
+import {
+  canRestartTaskType,
+  formatDateTime,
+  getTaskDeepLink,
+  getTaskTypeMeta,
+  isMediaTaskType,
+} from '../utils';
+import { renderStatusPill } from './task-status-pill';
+
+type TaskDetailDialogProps = {
+  task: Task;
+  selectedTask: Task | null;
+  taskResult: TaskResult | null;
+  cancelTaskMutation: { isPending: boolean };
+  restartTaskMutation: { isPending: boolean };
+  onOpen: (id: string) => void;
+  onCancel: (id: string) => void;
+  onRestart: (id: string) => void;
+};
+
+export function TaskDetailDialog({
+  task,
+  selectedTask,
+  taskResult,
+  cancelTaskMutation,
+  restartTaskMutation,
+  onOpen,
+  onCancel,
+  onRestart,
+}: TaskDetailDialogProps) {
+  const { t, i18n } = useTranslation();
+  const clipboard = useClipboard();
+  const locale = i18n.resolvedLanguage ?? i18n.language;
+  const taskDetail = selectedTask ?? task;
+  const taskMeta = getTaskTypeMeta(taskDetail.task_type, t);
+  const mediaTask = isMediaTaskType(taskDetail.task_type);
+  const canRestart = canRestartTaskType(taskDetail.task_type);
+  const deepLink = getTaskDeepLink(taskDetail.task_type, taskDetail.id);
+  const resultText = taskResult?.text;
+  const failureReason = translateServerField(
+    selectedTask?.i18n,
+    'error_msg',
+    selectedTask?.error_msg,
+    t,
+  );
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button
+          variant="quiet"
+          size="sm"
+          className="h-auto rounded-xl px-2 py-1 text-sm font-semibold text-primary hover:bg-primary/5 hover:text-primary"
+          onClick={() => {
+            onOpen(task.id);
+          }}
+          data-testid={`task-details-open-${task.id}`}
+        >
+          {t('pages.task.dialog.detailsButton')}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-3xl" data-testid={`task-details-${task.id}`}>
+        <DialogHeader>
+          <DialogTitle>{t('pages.task.dialog.title')}</DialogTitle>
+          <DialogDescription>
+            {t('pages.task.dialog.taskId', { id: taskDetail.id })}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          {selectedTask ? (
+            <>
+              <SoftPanel className="space-y-3 rounded-[20px]">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-eyebrow text-muted-foreground">
+                      {t('pages.task.dialog.fields.type')}
+                    </p>
+                    <p className="mt-1 text-sm font-medium">{taskMeta.label}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-eyebrow text-muted-foreground">
+                      {t('pages.task.dialog.fields.status')}
+                    </p>
+                    <div className="mt-1">{renderStatusPill(selectedTask.status, t)}</div>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-eyebrow text-muted-foreground">
+                      {t('pages.task.dialog.fields.created')}
+                    </p>
+                    <p className="mt-1 text-sm font-medium">
+                      {formatDateTime(selectedTask.created_at, locale)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-eyebrow text-muted-foreground">
+                      {t('pages.task.dialog.fields.updated')}
+                    </p>
+                    <p className="mt-1 text-sm font-medium">
+                      {formatDateTime(selectedTask.updated_at, locale)}
+                    </p>
+                  </div>
+                </div>
+              </SoftPanel>
+
+              {selectedTask.status === 'failed' && failureReason ? (
+                <Alert variant="destructive">
+                  <AlertTitle>{t('pages.task.dialog.failureReason')}</AlertTitle>
+                  <AlertDescription className="whitespace-pre-wrap break-words">
+                    {failureReason}
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+
+              {mediaTask && deepLink ? (
+                <SoftPanel className="space-y-3 rounded-[20px]">
+                  <h4 className="text-sm font-semibold uppercase tracking-eyebrow text-muted-foreground">
+                    {t('pages.task.dialog.domainDetail')}
+                  </h4>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {t('pages.task.dialog.domainDetailDescription')}
+                  </p>
+                  <div>
+                    <Button asChild variant="pill" size="sm">
+                      <Link to={deepLink}>{t('pages.task.dialog.openDomainDetail')}</Link>
+                    </Button>
+                  </div>
+                </SoftPanel>
+              ) : null}
+
+              {!mediaTask && selectedTask.status === 'succeeded' && taskResult ? (
+                <SoftPanel className="space-y-3 rounded-[20px]">
+                  <h4 className="text-sm font-semibold uppercase tracking-eyebrow text-muted-foreground">
+                    {t('pages.task.dialog.taskResult')}
+                  </h4>
+                  {resultText ? (
+                    <div className="space-y-3">
+                      <p className="whitespace-pre-wrap text-sm leading-6">{resultText}</p>
+                      <Button
+                        variant="pill"
+                        size="sm"
+                        onClick={() => {
+                          clipboard.copy(resultText);
+                          toast.success(t('pages.task.dialog.copied'));
+                        }}
+                      >
+                        {t('pages.task.dialog.copyResult')}
+                      </Button>
+                    </div>
+                  ) : (
+                    <pre className="overflow-x-auto rounded-xl bg-card p-3 text-xs">
+                      {JSON.stringify(taskResult, null, 2)}
+                    </pre>
+                  )}
+                </SoftPanel>
+              ) : null}
+
+              <div className="flex flex-wrap gap-2">
+                {selectedTask.status === 'running' ? (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => void onCancel(selectedTask.id)}
+                    disabled={cancelTaskMutation.isPending}
+                    data-testid={`task-cancel-${selectedTask.id}`}
+                  >
+                    {cancelTaskMutation.isPending
+                      ? t('pages.task.dialog.cancelling')
+                      : t('pages.task.dialog.cancelTask')}
+                  </Button>
+                ) : null}
+                {!mediaTask &&
+                canRestart &&
+                (selectedTask.status === 'failed' ||
+                selectedTask.status === 'cancelled' ||
+                selectedTask.status === 'succeeded') ? (
+                  <Button
+                    variant="pill"
+                    size="sm"
+                    onClick={() => {
+                      // Defensive guard: the backend rejects restart for any task type
+                      // other than model_download (400 "does not support restart"). The
+                      // render condition already hides this button otherwise, but keep a
+                      // client-side check so a stale `selectedTask` can never fire a
+                      // request the server is guaranteed to reject.
+                      if (!canRestartTaskType(selectedTask.task_type)) {
+                        return;
+                      }
+                      void onRestart(selectedTask.id);
+                    }}
+                    disabled={restartTaskMutation.isPending}
+                    data-testid={`task-restart-${selectedTask.id}`}
+                  >
+                    {restartTaskMutation.isPending
+                      ? t('pages.task.dialog.restarting')
+                      : t('pages.task.dialog.restartTask')}
+                  </Button>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <div className="flex justify-center py-10">
+              <Spinner className="h-8 w-8" />
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

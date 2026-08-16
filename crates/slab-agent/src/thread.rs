@@ -1,6 +1,7 @@
 //! Single agent thread lifecycle.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Utc;
 use tokio::sync::watch;
@@ -13,21 +14,97 @@ use slab_types::{ConversationMessage, ConversationMessageContent};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    compact::{CompactOutcome, CompactPort, compact_skipped_event},
+    compact::{CompactContext, CompactOutcome, CompactPort, CompactProgress},
     config::AgentConfig,
     error::AgentError,
-    event::{AgentEventKind, AgentMetrics, AgentResponseRef},
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
-        AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadSnapshot, ThreadStatus,
-        TurnEvent,
+        AgentNotifyPort, AgentStorePort, ApprovalPort, ExecPolicyPort, LlmPort, PlanStorePort,
+        ThreadSnapshot, ThreadStatus,
+    },
+    protocol::{
+        ContextCompactedParams, ContextCompactingParams, ErrorEvent, EventMsg, Turn,
+        TurnAbortedParams, TurnCompletedParams, TurnStartedParams, TurnUsage,
     },
     repetition_guard::{RepetitionDetected, RepetitionGuard},
     risk::ToolRiskAnalyzer,
     state::ThreadStateMachine,
-    tool::{AgentThreadContext, ToolRouter},
-    turn::{TurnExecutionContext, TurnOutcome, execute_turn, persist_thread_message},
+    tool::{AgentThreadContext, ToolDiscoveryState, ToolRouter},
+    turn::{TurnExecutionContext, TurnOutcome, emit_message_appended, execute_turn},
 };
+
+// ── Harness-protocol (EventMsg) lifecycle emits ───────────────────────────────
+//
+// The harness turn lifecycle emits. slab-agent speaks `EventMsg` (its harness
+// protocol) exclusively — the legacy `AgentEventKind`/`/responses` wire left
+// this crate. These mirror what `HarnessProjection` used to derive.
+
+fn harness_turn(id: String, status: &str) -> Turn {
+    Turn { id, items: Vec::new(), status: status.to_owned(), error: None }
+}
+
+async fn emit_turn_started(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, turn_index: u32) {
+    let msg = EventMsg::TurnStarted(TurnStartedParams {
+        thread_id: thread_id.to_owned(),
+        turn: harness_turn(turn_index.to_string(), "inProgress"),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_turn_completed(
+    notify: &Arc<dyn AgentNotifyPort>,
+    thread_id: &str,
+    turn_index: u32,
+    usage: Option<TurnUsage>,
+) {
+    let msg = EventMsg::TurnCompleted(TurnCompletedParams {
+        thread_id: thread_id.to_owned(),
+        turn: harness_turn(turn_index.to_string(), "completed"),
+        usage,
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_turn_aborted(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, turn_index: u32) {
+    let msg = EventMsg::TurnAborted(TurnAbortedParams {
+        thread_id: thread_id.to_owned(),
+        turn: harness_turn(turn_index.to_string(), "interrupted"),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_turn_error(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, message: &str) {
+    let msg = EventMsg::Error(ErrorEvent::new(message.to_owned()));
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+/// [`CompactProgress`] impl that surfaces the auto-compaction lifecycle as
+/// harness events. `on_compacting` emits `ContextCompacting` and arms `fired`;
+/// the caller (`AgentThread::maybe_compact`) reads `fired` after `compact()`
+/// returns so it can emit a terminal `ContextCompacted` even on the rare
+/// summarize-fails→fallback-skips path (no dangling "compacting" indicator).
+struct NotifyingCompactProgress {
+    notify: Arc<dyn AgentNotifyPort>,
+    thread_id: String,
+    fired: Arc<AtomicBool>,
+}
+
+impl CompactProgress for NotifyingCompactProgress {
+    fn on_compacting<'a>(
+        &'a self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        let notify = self.notify.clone();
+        let thread_id = self.thread_id.clone();
+        let fired = self.fired.clone();
+        Box::pin(async move {
+            fired.store(true, Ordering::SeqCst);
+            let msg = EventMsg::ContextCompacting(ContextCompactingParams {
+                thread_id: thread_id.clone(),
+            });
+            notify.on_event_msg(&thread_id, &msg).await;
+        })
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 enum TerminationReason {
@@ -48,7 +125,7 @@ impl TerminationReason {
 
 /// A single agent conversation thread.
 ///
-/// Created by [`crate::control::AgentControl`] and consumed by [`AgentThread::run`].
+/// Created by [`crate::control::AgentControl`] and consumed by `AgentThread::run`.
 pub struct AgentThread {
     /// Unique thread identifier.
     pub id: String,
@@ -69,7 +146,11 @@ pub(crate) struct AgentThreadRuntime {
     pub store: Arc<dyn AgentStorePort>,
     pub notify: Arc<dyn AgentNotifyPort>,
     pub approval: Arc<dyn ApprovalPort>,
+    pub exec_policy: Arc<dyn ExecPolicyPort>,
+    pub agent_registry: Arc<dyn crate::agent::AgentRegistry>,
+    pub plan_store: Arc<dyn PlanStorePort>,
     pub tools: Arc<ToolRouter>,
+    pub tool_discovery: ToolDiscoveryState,
     pub hooks: AgentHookRegistry,
     pub compact: Arc<dyn CompactPort>,
     pub risk: Arc<dyn ToolRiskAnalyzer>,
@@ -120,14 +201,18 @@ impl AgentThread {
         mut messages: Vec<ConversationMessage>,
         runtime: AgentThreadRuntime,
         starting_turn_index: u32,
-        persist_messages_from: Option<usize>,
+        emit_from: Option<usize>,
     ) -> Result<String, AgentError> {
         let AgentThreadRuntime {
             llm,
             store,
             notify,
             approval,
+            exec_policy,
+            agent_registry,
+            plan_store,
             tools,
+            tool_discovery,
             hooks,
             compact,
             risk,
@@ -142,13 +227,27 @@ impl AgentThread {
         // INFRA-09: tag subagent events with the delegating parent's span id so
         // the parent→child tree can be reconstructed from the trace JSONL.
         if let Some(parent) = self.parent_id.clone() {
-            trace_context = trace_context.with_parent_span_id(parent);
+            trace_context = trace_context.with_parent_span_id(parent.clone());
+            // Trace-bundle grouping: a child thread correlates back to
+            // its ROOT thread's bundle (not its immediate parent). The root is
+            // resolved by walking the persisted parent chain up to the ancestor
+            // with no parent. depth-1 children resolve in one hop; depth-N
+            // grandchild spawn chains (DelegateSubagentTool nesting, default
+            // max_depth 4) resolve through the full chain so every descendant
+            // groups under the SAME root bundle and remains reachable from the
+            // rollout via the root thread's SessionMeta.trace_path. If the chain
+            // cannot be walked (a parent snapshot is not yet persisted — a
+            // diagnostic race), we fall back to the nearest ancestor id so the
+            // event is still grouped deterministically rather than dropped.
+            let root = resolve_root_thread_id(store.as_ref(), &parent).await.unwrap_or(parent);
+            trace_context = trace_context.with_root_thread_id(root);
+        } else {
+            trace_context = trace_context.with_root_thread_id(thread_id.clone());
         }
         if let Some(trace_dir) = trace_dir {
             trace_context = trace_context.with_trace_dir(trace_dir);
         }
         let now = Utc::now().to_rfc3339();
-        let started_at = std::time::Instant::now();
         record_json(
             trace.as_ref(),
             &trace_context,
@@ -160,7 +259,7 @@ impl AgentThread {
                 "parent_id": self.parent_id,
                 "depth": self.depth,
                 "starting_turn_index": starting_turn_index,
-                "persist_messages_from": persist_messages_from,
+                "emit_from": emit_from,
                 "config": self.config,
                 "initial_messages": messages,
             }),
@@ -183,6 +282,7 @@ impl AgentThread {
             completion_text: None,
             created_at: now.clone(),
             updated_at: now,
+            archived_at: None,
         };
         if let Err(e) = store.upsert_thread(&snapshot).await {
             error!(thread_id, error = %e, "failed to persist thread snapshot");
@@ -248,9 +348,9 @@ impl AgentThread {
             hook_observation_messages(start_effects.observations),
         );
 
-        if let Some(start) = persist_messages_from {
+        if let Some(start) = emit_from {
             for message in messages.iter().skip(start) {
-                persist_thread_message(store.as_ref(), &thread_id, starting_turn_index, message)
+                emit_message_appended(notify.as_ref(), &thread_id, starting_turn_index, message)
                     .await;
                 record_json(
                     trace.as_ref(),
@@ -272,6 +372,7 @@ impl AgentThread {
         let mut termination_reason: Option<TerminationReason> = None;
         let mut repetition_guard = RepetitionGuard::default();
         let mut consumed_tokens = 0u32;
+        let mut last_turn_usage: Option<TurnUsage> = None;
         let mut reached_final_turn = false;
 
         'turns: for turn_offset in 0..self.config.max_turns {
@@ -281,25 +382,14 @@ impl AgentThread {
             }
             let turn_index = starting_turn_index + turn_offset;
             debug!(thread_id, turn_index, "starting turn");
-            self.emit_response_event(
-                &notify,
-                turn_index,
-                AgentEventKind::ResponseInProgress {
-                    response: AgentResponseRef {
-                        id: thread_id.clone(),
-                        status: ThreadStatus::Running,
-                    },
-                },
-            )
-            .await;
+            emit_turn_started(&notify, &thread_id, turn_index).await;
             let turn_trace_context = trace_context.clone().with_turn(turn_index);
             self.maybe_compact(
-                &notify,
                 compact.as_ref(),
                 &mut messages,
-                turn_index,
                 trace.as_ref(),
                 &turn_trace_context,
+                &notify,
             )
             .await;
             match execute_turn(
@@ -311,9 +401,12 @@ impl AgentThread {
                     config: &self.config,
                     llm: llm.as_ref(),
                     tools: tools.as_ref(),
-                    store: store.as_ref(),
+                    tool_discovery: &tool_discovery,
                     notify: notify.as_ref(),
                     approval: approval.as_ref(),
+                    exec_policy: exec_policy.as_ref(),
+                    agent_registry: agent_registry.as_ref(),
+                    plan_store: Arc::clone(&plan_store),
                     hooks: &hooks,
                     risk: risk.as_ref(),
                     trace: trace.as_ref(),
@@ -327,8 +420,10 @@ impl AgentThread {
             .await
             {
                 Ok(outcome) => match outcome {
-                    TurnOutcome::Final { token_usage } => {
-                        consumed_tokens = consumed_tokens.saturating_add(token_usage);
+                    TurnOutcome::Final { usage } => {
+                        let total = usage.as_ref().map(|u| u.total_tokens).unwrap_or_default();
+                        consumed_tokens = consumed_tokens.saturating_add(total);
+                        last_turn_usage = usage.map(TurnUsage::from);
                         // Extract the final assistant text.
                         reached_final_turn = true;
                         completion_text = messages.iter().rev().find_map(|m| {
@@ -342,13 +437,17 @@ impl AgentThread {
                         });
                         break 'turns;
                     }
-                    TurnOutcome::BudgetExceeded { token_usage } => {
-                        consumed_tokens = consumed_tokens.saturating_add(token_usage);
+                    TurnOutcome::BudgetExceeded { usage } => {
+                        let total = usage.as_ref().map(|u| u.total_tokens).unwrap_or_default();
+                        consumed_tokens = consumed_tokens.saturating_add(total);
+                        last_turn_usage = usage.map(TurnUsage::from);
                         termination_reason = Some(TerminationReason::BudgetExhausted);
                         break 'turns;
                     }
-                    TurnOutcome::ToolCalls { invalid_tool_calls, signatures, token_usage } => {
-                        consumed_tokens = consumed_tokens.saturating_add(token_usage);
+                    TurnOutcome::ToolCalls { invalid_tool_calls, signatures, usage } => {
+                        let total = usage.as_ref().map(|u| u.total_tokens).unwrap_or_default();
+                        consumed_tokens = consumed_tokens.saturating_add(total);
+                        last_turn_usage = usage.map(TurnUsage::from);
                         if invalid_tool_calls == 0 {
                             invalid_tool_call_retries = 0;
                         } else {
@@ -387,19 +486,6 @@ impl AgentThread {
         }
 
         if interrupted {
-            self.emit_response_event(
-                &notify,
-                starting_turn_index,
-                AgentEventKind::ResponseCancelled {
-                    response: AgentResponseRef {
-                        id: thread_id.clone(),
-                        status: ThreadStatus::Interrupted,
-                    },
-                    reason: "interrupted".to_owned(),
-                },
-            )
-            .await;
-            self.emit_metrics(&notify, started_at, false).await;
             self.set_status(ThreadStatus::Interrupted, &notify).await?;
             record_json(
                 trace.as_ref(),
@@ -426,22 +512,7 @@ impl AgentThread {
         }
 
         if let Some(err) = last_error {
-            notify
-                .on_turn_event(
-                    &thread_id,
-                    &TurnEvent::Response {
-                        turn_index: Some(starting_turn_index),
-                        event: AgentEventKind::ResponseFailed {
-                            response: AgentResponseRef {
-                                id: thread_id.clone(),
-                                status: ThreadStatus::Errored,
-                            },
-                            error: err.to_string(),
-                        },
-                    },
-                )
-                .await;
-            self.emit_metrics(&notify, started_at, false).await;
+            emit_turn_error(&notify, &thread_id, &err.to_string()).await;
             self.set_status(ThreadStatus::Errored, &notify).await?;
             record_json(
                 trace.as_ref(),
@@ -473,19 +544,7 @@ impl AgentThread {
         if !reached_final_turn {
             let termination_reason = termination_reason.unwrap_or(TerminationReason::MaxTurns);
             let reason = termination_reason.as_str();
-            self.emit_response_event(
-                &notify,
-                starting_turn_index,
-                AgentEventKind::ResponseCancelled {
-                    response: AgentResponseRef {
-                        id: thread_id.clone(),
-                        status: ThreadStatus::Interrupted,
-                    },
-                    reason: reason.to_owned(),
-                },
-            )
-            .await;
-            self.emit_metrics(&notify, started_at, false).await;
+            emit_turn_aborted(&notify, &thread_id, starting_turn_index).await;
             self.set_status(ThreadStatus::Interrupted, &notify).await?;
             record_json(
                 trace.as_ref(),
@@ -518,18 +577,8 @@ impl AgentThread {
         }
 
         info!(thread_id, "thread completed");
-        self.emit_response_event(
-            &notify,
-            starting_turn_index,
-            AgentEventKind::ResponseCompleted {
-                response: AgentResponseRef {
-                    id: thread_id.clone(),
-                    status: ThreadStatus::Completed,
-                },
-            },
-        )
-        .await;
-        self.emit_metrics(&notify, started_at, true).await;
+        emit_turn_completed(&notify, &thread_id, starting_turn_index, last_turn_usage.clone())
+            .await;
         self.set_status(ThreadStatus::Completed, &notify).await?;
         record_json(
             trace.as_ref(),
@@ -573,25 +622,13 @@ impl AgentThread {
         Ok(())
     }
 
-    async fn emit_response_event(
-        &self,
-        notify: &Arc<dyn AgentNotifyPort>,
-        turn_index: u32,
-        event: AgentEventKind,
-    ) {
-        notify
-            .on_turn_event(&self.id, &TurnEvent::Response { turn_index: Some(turn_index), event })
-            .await;
-    }
-
     async fn maybe_compact(
         &self,
-        notify: &Arc<dyn AgentNotifyPort>,
         compact: &dyn CompactPort,
         messages: &mut Vec<ConversationMessage>,
-        turn_index: u32,
         trace: &dyn AgentTraceSink,
         trace_context: &AgentTraceContext,
+        notify: &Arc<dyn AgentNotifyPort>,
     ) {
         let input_tokens = compact.estimate_tokens(messages);
         let threshold_tokens = compact.threshold_tokens();
@@ -606,58 +643,28 @@ impl AgentThread {
                 "threshold_tokens": threshold_tokens,
             }),
         );
-        if input_tokens < threshold_tokens {
-            record_json(
-                trace,
-                trace_context,
-                "slab-agent",
-                "context_compaction_skipped",
-                serde_json::json!({
-                    "input_tokens": input_tokens,
-                    "threshold_tokens": threshold_tokens,
-                    "reason": "below threshold",
-                }),
-            );
-            notify
-                .on_turn_event(
-                    &self.id,
-                    &TurnEvent::Response {
-                        turn_index: Some(turn_index),
-                        event: compact_skipped_event(
-                            input_tokens,
-                            threshold_tokens,
-                            "below threshold".to_owned(),
-                        ),
-                    },
-                )
-                .await;
-            return;
-        }
 
-        notify
-            .on_turn_event(
-                &self.id,
-                &TurnEvent::Response {
-                    turn_index: Some(turn_index),
-                    event: AgentEventKind::ResponseContextCompactStarted {
-                        input_tokens,
-                        threshold_tokens,
-                    },
-                },
-            )
-            .await;
-        record_json(
-            trace,
-            trace_context,
-            "slab-agent",
-            "context_compaction_started",
-            serde_json::json!({
-                "input_tokens": input_tokens,
-                "threshold_tokens": threshold_tokens,
-                "message_count": messages.len(),
-            }),
-        );
-        match compact.compact(messages).await {
+        // The threshold gate lives inside each `CompactPort` implementation
+        // (context-length-aware policies need the model id; pure-local ones use
+        // their fixed threshold). Auto-compaction from the turn loop never
+        // forces — manual `/compact` sets `force` at its own call site. The
+        // progress callback fires (emitting `ContextCompacting`) only once a
+        // summarization actually begins, after every skip gate has passed.
+        let fired = Arc::new(AtomicBool::new(false));
+        let ctx = CompactContext {
+            model_id: &self.config.model,
+            summary_instructions: None,
+            force: false,
+            // The host policy self-queries the scheduler (slab-agent stays
+            // pure); the hint stays `None` on the turn-loop path.
+            memory_pressure_hint: None,
+            progress: Some(Arc::new(NotifyingCompactProgress {
+                notify: notify.clone(),
+                thread_id: self.id.clone(),
+                fired: fired.clone(),
+            })),
+        };
+        match compact.compact(messages, &ctx).await {
             Ok(CompactOutcome::Replaced {
                 messages: compacted,
                 output_tokens,
@@ -677,16 +684,14 @@ impl AgentThread {
                     }),
                 );
                 notify
-                    .on_turn_event(
+                    .on_event_msg(
                         &self.id,
-                        &TurnEvent::Response {
-                            turn_index: Some(turn_index),
-                            event: AgentEventKind::ResponseContextCompactCompleted {
-                                input_tokens,
-                                output_tokens,
-                                replaced_messages,
-                            },
-                        },
+                        &EventMsg::ContextCompacted(ContextCompactedParams {
+                            thread_id: self.id.clone(),
+                            status: Some("compacted".to_owned()),
+                            removed_messages: Some(replaced_messages as u32),
+                            output_tokens: Some(output_tokens as u32),
+                        }),
                     )
                     .await;
             }
@@ -702,15 +707,9 @@ impl AgentThread {
                         "reason": reason,
                     }),
                 );
-                notify
-                    .on_turn_event(
-                        &self.id,
-                        &TurnEvent::Response {
-                            turn_index: Some(turn_index),
-                            event: compact_skipped_event(input_tokens, threshold_tokens, reason),
-                        },
-                    )
-                    .await;
+                // Clear a previously-shown "compacting" indicator on the rare
+                // path where a summarization started but ultimately skipped.
+                Self::emit_compacted_skipped(notify, &self.id, fired).await;
             }
             Err(error) => {
                 record_json(
@@ -724,42 +723,31 @@ impl AgentThread {
                         "reason": error.to_string(),
                     }),
                 );
-                notify
-                    .on_turn_event(
-                        &self.id,
-                        &TurnEvent::Response {
-                            turn_index: Some(turn_index),
-                            event: compact_skipped_event(
-                                input_tokens,
-                                threshold_tokens,
-                                error.to_string(),
-                            ),
-                        },
-                    )
-                    .await;
+                Self::emit_compacted_skipped(notify, &self.id, fired).await;
             }
         }
     }
 
-    async fn emit_metrics(
-        &self,
+    /// Emit a terminal `ContextCompacted { status: "skipped" }` so the client
+    /// clears its in-progress indicator — but only if `ContextCompacting` was
+    /// actually emitted (the progress callback ran).
+    async fn emit_compacted_skipped(
         notify: &Arc<dyn AgentNotifyPort>,
-        started_at: std::time::Instant,
-        success: bool,
+        thread_id: &str,
+        fired: Arc<AtomicBool>,
     ) {
+        if !fired.load(Ordering::SeqCst) {
+            return;
+        }
         notify
-            .on_turn_event(
-                &self.id,
-                &TurnEvent::Response {
-                    turn_index: None,
-                    event: AgentEventKind::ResponseMetrics {
-                        metrics: AgentMetrics {
-                            name: "agent_thread".to_owned(),
-                            duration_ms: started_at.elapsed().as_millis(),
-                            success: Some(success),
-                        },
-                    },
-                },
+            .on_event_msg(
+                thread_id,
+                &EventMsg::ContextCompacted(ContextCompactedParams {
+                    thread_id: thread_id.to_owned(),
+                    status: Some("skipped".to_owned()),
+                    removed_messages: None,
+                    output_tokens: None,
+                }),
             )
             .await;
     }
@@ -783,6 +771,38 @@ impl AgentThread {
             }),
         );
     }
+}
+
+/// Resolve the ROOT thread id for a non-root thread by walking the persisted
+/// parent chain up to the ancestor with no `parent_id` (the root).
+///
+/// Used by [`AgentThread::run`] to stamp `root_thread_id` on the trace context
+/// so every descendant of a root (depth-1 children AND depth>=2 grandchildren
+/// produced by nested `DelegateSubagentTool` delegation, bounded by
+/// `max_depth`) groups into the SAME root bundle — keeping the grandchild
+/// bundle reachable from the rollout via the root thread's
+/// `SessionMeta.trace_path` (`build_session_meta` only stamps `trace_path` on
+/// the true root).
+///
+/// Returns `None` when the chain cannot be walked (a parent snapshot is not yet
+/// persisted, e.g. a diagnostic race right after spawn); the caller then falls
+/// back to the nearest ancestor id so the event is still grouped
+/// deterministically rather than dropped. Bounded by the spawn `max_depth`,
+/// so at most `max_depth` store lookups.
+pub(crate) async fn resolve_root_thread_id(
+    store: &dyn AgentStorePort,
+    parent_id: &str,
+) -> Option<String> {
+    let mut current = parent_id.to_owned();
+    // Bounded by max_depth; guard against a malformed/cyclic chain defensively.
+    for _ in 0..crate::control::MAX_SPAWN_DEPTH_GUARD {
+        let snapshot = store.get_thread(&current).await.ok()??;
+        match snapshot.parent_id {
+            Some(grandparent) => current = grandparent,
+            None => return Some(snapshot.id),
+        }
+    }
+    None
 }
 
 impl TerminationReason {

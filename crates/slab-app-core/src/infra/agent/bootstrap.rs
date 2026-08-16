@@ -2,33 +2,124 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use slab_agent::{AgentControl, AgentThreadContext, ToolRouter, WorkspaceRef};
-use slab_agent_tools::{ShellPolicy, ShellRuleSet};
-use slab_agent_tracing::{AgentTraceSink, FileAgentTraceSink, NoopAgentTraceSink};
-use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
+use slab_agent::{
+    AgentControl, AgentRuntime, AgentThreadContext, PlanStorePort, ToolRouter, WorkspaceRef,
+};
+use slab_agent_tracing::{AgentTraceSink, BundleAgentTraceSink, NoopAgentTraceSink};
+use slab_sandboxing::{
+    SandboxEnvironment, SandboxPermissions, SandboxPlatformConfig, create_platform_driver,
+};
 
 use crate::context::AppContext;
-use crate::domain::services::{AgentService, PluginService, WorkspaceLspService};
+use crate::domain::services::agent::AgentCore;
+use crate::domain::services::{
+    HarnessService, ImageService, PluginService, ResponseService, WorkspaceLspService,
+};
 use crate::infra::db::AnyStore;
 
 use super::event_hub::AgentEventHub;
 use super::runtime::AgentRuntimeReloader;
 
 pub(crate) struct AgentBootstrap {
-    pub(crate) service: AgentService,
+    pub(crate) harness: HarnessService,
+    pub(crate) response: ResponseService,
     pub(crate) runtime: AgentRuntimeReloader,
 }
 
 pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> AgentBootstrap {
+    let settings = ctx.pmid.config();
+    // Compute the trace directory ONCE from `agent.debug`. The
+    // trace sink + (future) trace bundle depend on `agent.debug` ALONE (no
+    // longer on `telemetry.enabled`); OTel provider assembly is a separate
+    // switch still gated by `telemetry.enabled` in the binary init. This dir is
+    // also threaded into the rollout store so a root thread's SessionMeta carries
+    // it as `trace_path` (rollout ↔ trace coordination).
+    //
+    // The decision goes through the pure `agent_trace_enabled` gate so the
+    // independence contract (agent.debug alone, telemetry.enabled ignored) is
+    // unit-tested — see `agent_trace_gate_is_independent_of_telemetry_enabled`.
+    let trace_dir: Option<PathBuf> =
+        if agent_trace_enabled(settings.agent.debug, settings.telemetry.enabled) {
+            Some(agent_trace_log_dir(ctx))
+        } else {
+            None
+        };
+    // Rollout JSONL true source. One shared file store for the whole
+    // process; one recorder per thread, files under <app_home>/sessions in the
+    // date-partitioned layout `YYYY/MM/DD/rollout-<ts>-<thread_id>.jsonl`.
+    let rollout =
+        Arc::new(slab_agent_rollout::RolloutFileStore::new(slab_utils::app_home::sessions_dir()));
+    // One-shot startup migration of pre-migration FLAT rollout
+    // files (`<thread_id>.rollout.jsonl` at the sessions root) into the new
+    // date-partitioned layout. Runs synchronously BEFORE any recorder is spawned
+    // (the adapter below spawns recorders lazily on first write), so there is no
+    // race between a live writer and the rename. Idempotent + crash-safe: a
+    // second boot finds no flat files; a crash mid-rename leaves the file at one
+    // of the two paths and the next boot picks it up.
+    let migrated = rollout.migrate_flat_rollouts();
+    if migrated > 0 {
+        tracing::info!(migrated, "rollout flat files migrated to date-partitioned layout");
+    }
+    // The ONLY AgentStorePort wired into the runtime: rollout-backed, with
+    // metadata delegated to the SQL store. The same SQL store also backs the
+    // rollout-session index (list ghost-gate + new-thread mark). The legacy
+    // conversation + audit tables and the startup backfill were dropped:
+    // rollout is the sole conversation/turn-state/item source, so there is no
+    // backfill to schedule.
+    let rollout_store = Arc::new(super::rollout_store::RolloutBackedAgentStore::new(
+        Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>,
+        Arc::clone(&store) as Arc<dyn crate::infra::db::repository::rollout_index::RolloutIndex>,
+        Arc::clone(&rollout),
+        trace_dir.clone(),
+    ));
     let store_for_agent: Arc<dyn slab_agent::port::AgentStorePort> =
-        Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>;
+        rollout_store.clone() as Arc<dyn slab_agent::port::AgentStorePort>;
     let event_hub = Arc::new(AgentEventHub::new());
-    let control = build_agent_control(ctx, Arc::clone(&store), Arc::clone(&event_hub));
-    let service = AgentService::new(control, store_for_agent, Arc::clone(&event_hub));
-    let runtime = AgentRuntimeReloader::new((*ctx.model_state).clone(), service.control());
+    // Only the event hub is wired as a notify port now. response_json
+    // persistence was removed — the rollout true source plus SQL metadata
+    // remain the store of record (see AgentCore / AgentStorePort).
+    let composite_notify: Arc<dyn slab_agent::AgentNotifyPort> =
+        Arc::new(super::event_hub::CompositeNotifyPort::new(vec![
+            Arc::clone(&event_hub) as Arc<dyn slab_agent::AgentNotifyPort>
+        ]));
+    // One shared compaction policy (LLM-summarizing + trim fallback) for the
+    // harness turn loop, manual `thread/compact/start`, and the HTTP paths.
+    let compact: Arc<dyn slab_agent::CompactPort> = Arc::new(
+        crate::domain::services::agent::SummarizingCompactPort::new((*ctx.model_state).clone()),
+    );
+    let control = build_agent_control(
+        ctx,
+        Arc::clone(&store),
+        Arc::clone(&event_hub),
+        composite_notify,
+        Arc::clone(&compact),
+        rollout_store.clone() as Arc<dyn slab_agent::port::AgentStorePort>,
+        Arc::clone(&rollout),
+        Arc::clone(&rollout_store),
+        trace_dir.clone(),
+    );
+    let agent_runtime = AgentRuntime::new(control);
+    let core = AgentCore::new(
+        agent_runtime.clone(),
+        store_for_agent,
+        Arc::clone(&event_hub),
+        compact,
+        Arc::clone(&rollout),
+        Arc::clone(&rollout_store)
+            as Arc<dyn crate::domain::services::agent::RolloutConversationStore>,
+        trace_dir,
+    );
+    let runtime = AgentRuntimeReloader::new(
+        (*ctx.model_state).clone(),
+        core.runtime(),
+        rollout,
+        rollout_store,
+    );
     schedule_agent_runtime_reload(runtime.clone());
+    let harness = HarnessService::new(core.clone());
+    let response = ResponseService::new(core, (*ctx.model_state).clone());
 
-    AgentBootstrap { service, runtime }
+    AgentBootstrap { harness, response, runtime }
 }
 
 fn schedule_agent_runtime_reload(agent_runtime: AgentRuntimeReloader) {
@@ -44,17 +135,51 @@ fn schedule_agent_runtime_reload(agent_runtime: AgentRuntimeReloader) {
 
 /// Construct the [`slab_agent::AgentControl`] singleton, wiring up the port
 /// adapters and registering built-in tools.
+#[allow(clippy::too_many_arguments)]
 fn build_agent_control(
     ctx: &AppContext,
     store: Arc<AnyStore>,
-    notify: Arc<AgentEventHub>,
+    event_hub: Arc<AgentEventHub>,
+    notify_port: Arc<dyn slab_agent::AgentNotifyPort>,
+    compact: Arc<dyn slab_agent::CompactPort>,
+    store_adapter: Arc<dyn slab_agent::port::AgentStorePort>,
+    rollout: Arc<slab_agent_rollout::RolloutFileStore>,
+    rollout_store: Arc<super::rollout_store::RolloutBackedAgentStore>,
+    trace_dir: Option<PathBuf>,
 ) -> Arc<AgentControl> {
     let llm = Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
+    // memory_store / exec_db stay on the original SQL store (metadata +
+    // memory pipeline); only the conversation/turn-state/item surface is backed
+    // by rollout via store_adapter.
     let memory_store = Arc::clone(&store);
-    let store_adapter: Arc<dyn slab_agent::port::AgentStorePort> = store;
+    let exec_db = Arc::clone(&store);
     let workspace_root = crate::domain::services::workspace_root_from_config(&ctx.config);
+    // Derive the sandbox policy from the configured permission baseline so the
+    // two guardrail systems agree (a ReadOnly baseline yields a ReadOnly
+    // sandbox). Previously this was hardcoded to `WorkspaceWrite`, which left the
+    // sandbox permissive even when the baseline was `ReadOnly`.
+    let exec_baseline =
+        super::exec_policy::baseline_from_config(ctx.pmid.config().agent.permissions.baseline);
+    let sandbox_policy = exec_baseline.to_sandbox_policy();
+    // Mirror the platform-specific sandbox knobs (e.g. `windows_setup_required`) into the
+    // runtime `SandboxPermissions`. The fail-closed gate in `available_sandbox_driver` then
+    // blocks the shell when elevation is required but not yet provisioned.
+    let platform_cfg = &ctx.pmid.config().agent.permissions.platform;
+    let sandbox_permissions = SandboxPermissions {
+        platform: SandboxPlatformConfig {
+            windows_setup_required: platform_cfg.windows_setup_required,
+            linux_allow_landlock_fallback: platform_cfg.linux_allow_landlock_fallback,
+            macos_use_sandbox_exec: platform_cfg.macos_use_sandbox_exec,
+            windows_use_conpty: platform_cfg.windows_use_conpty,
+        },
+        ..SandboxPermissions::default()
+    };
     let sandbox_driver = workspace_root.clone().and_then(|root| {
-        let env = SandboxEnvironment::new(Some(root), SandboxPolicy::WorkspaceWrite);
+        let env = SandboxEnvironment::with_permissions(
+            Some(root),
+            sandbox_policy,
+            sandbox_permissions.clone(),
+        );
         match create_platform_driver(env) {
             Ok(driver) => available_sandbox_driver(driver),
             Err(error) => {
@@ -63,54 +188,57 @@ fn build_agent_control(
             }
         }
     });
-    let mut shell_policy =
-        if sandbox_driver.is_some() { ShellPolicy::Allow } else { ShellPolicy::Block };
-    let shell_rules_dir = ctx.config.exec_rules_dir.clone();
-    let shell_rules = match ShellRuleSet::from_dir(&shell_rules_dir) {
-        Ok(rules) => rules,
-        Err(error) => {
-            tracing::warn!(
-                rules_dir = %shell_rules_dir.display(),
-                error = %error,
-                "failed to load shell exec rules; shell tool will stay blocked"
-            );
-            shell_policy = ShellPolicy::Block;
-            ShellRuleSet::default()
-        }
-    };
-
     let mut tool_router = ToolRouter::new();
     let web_search_config = ctx.pmid.config().agent.tools.websearch;
+    let shell_config = ctx.pmid.config().agent.tools.shell;
+    let shell_launcher = match shell_config.launcher {
+        slab_config::ShellLauncherKind::Auto => slab_agent_tools::ShellLauncher::Auto,
+        slab_config::ShellLauncherKind::Bash => slab_agent_tools::ShellLauncher::Bash,
+        slab_config::ShellLauncherKind::PowerShell => slab_agent_tools::ShellLauncher::PowerShell,
+        slab_config::ShellLauncherKind::Cmd => slab_agent_tools::ShellLauncher::Cmd,
+    };
     let mcp_client = build_agent_mcp_client(ctx);
-    slab_agent_tools::register_all_tools_with_shell_rules(
+    slab_agent_tools::register_all_tools(
         &mut tool_router,
-        shell_policy,
         sandbox_driver,
         workspace_root.clone(),
         mcp_client,
         false,
         web_search_config,
-        shell_rules,
+        shell_launcher,
+        shell_config.bash_path.clone(),
     );
-    super::a2u_tools::register_builtin_a2u_tools(&tool_router);
     tool_router.register(Box::new(super::code_tools::CodeLspStatusTool::new(
         WorkspaceLspService::new(
             Arc::clone(&ctx.config),
             PluginService::new((*ctx.model_state).clone()),
         ),
     )));
+    tool_router.register(Box::new(super::image_tool::GenerateImageTool::new(ImageService::new(
+        (*ctx.worker_state).clone(),
+    ))));
 
     let tool_router = Arc::new(tool_router);
-    let notify_port: Arc<dyn slab_agent::AgentNotifyPort> = notify.clone();
-    let approval_port: Arc<dyn slab_agent::ApprovalPort> = notify;
+    let approval_port: Arc<dyn slab_agent::ApprovalPort> = event_hub;
     let settings = ctx.pmid.config();
-    let (trace, trace_dir): (Arc<dyn AgentTraceSink>, Option<PathBuf>) =
-        if settings.agent.debug && settings.telemetry.enabled {
-            let dir = agent_trace_log_dir(ctx);
-            (FileAgentTraceSink::shared(dir.clone()), Some(dir))
-        } else {
-            (Arc::new(NoopAgentTraceSink), None)
-        };
+    // Trace sink decouple: the trace sink gate is `agent.debug` ONLY (computed
+    // upstream in `build_agent_bootstrap`, which is why `trace_dir` is already
+    // an Option here). Two INDEPENDENT diagnostic switches:
+    //   - `agent.debug`       → this trace sink + trace bundle (`slab-agent-tracing`,
+    //                           decoupled from `slab-otel`). When on,
+    //                           a `BundleAgentTraceSink` records every slab-agent
+    //                           event into a per-root-thread bundle AND keeps the
+    //                           legacy per-session JSONL + `slab_otel::session`
+    //                           telemetry wire alive (the sink composes a
+    //                           `FileAgentTraceSink` internally).
+    //   - `telemetry.enabled` → OTel PROVIDER assembly + export, gated separately
+    //                           in the server/app/runtime init (intentionally
+    //                           untouched here). On `agent.debug` alone the user
+    //                           now gets the trace bundle even with OTel off.
+    let (trace, trace_dir): (Arc<dyn AgentTraceSink>, Option<PathBuf>) = match trace_dir {
+        Some(dir) => (BundleAgentTraceSink::shared(dir.clone()), Some(dir)),
+        None => (Arc::new(NoopAgentTraceSink), None),
+    };
 
     let memory_config = ctx.pmid.config().agent.memories.clone();
     let memory_root = memory_config
@@ -143,17 +271,36 @@ fn build_agent_control(
     }
     let memory_pipeline = super::memory::AgentMemoryPipeline::new(
         memory_store,
+        Arc::clone(&rollout),
+        Arc::clone(&rollout_store),
+        workspace_root.clone(),
         Arc::clone(&ctx.model_state),
         memory_config.clone(),
         memory_root.clone(),
     );
+    let exec_policy = super::exec_policy::build_exec_policy_engine(
+        exec_baseline,
+        ctx.config.exec_rules_dir.clone(),
+        exec_db,
+        workspace_root.clone(),
+    );
+    // The memory read-side instruction is now folded into the context hook
+    // (AppContextSources::memory_context); only the write-side pipeline stays.
     let mut hooks: Vec<Arc<dyn slab_agent::AgentHook>> = vec![
-        Arc::new(slab_agent_memories::hooks::MemoryInstructionHook::new(
-            memory_config.enabled,
-            memory_root,
-        )),
         Arc::new(super::memory::AgentMemoryStartupHook::new(memory_pipeline.clone())),
+        Arc::new(slab_agent_context::ContextInstructionHook::new(Arc::new(
+            super::context::AppContextSources::new(
+                (*ctx.model_state).clone(),
+                super::context::shell_kind(shell_config.launcher),
+                Arc::clone(&exec_policy),
+                memory_config.enabled,
+                memory_root.clone(),
+            ),
+        ))),
     ];
+    hooks.push(Arc::new(super::sleep_inhibitor_hook::SleepInhibitorHook::new(Arc::clone(
+        &ctx.pmid,
+    ))));
     if let Some(script_hook) =
         super::hooks::registered_script_hook(&ctx.pmid.config().agent.hooks, &ctx.config)
     {
@@ -185,8 +332,21 @@ fn build_agent_control(
         trace_dir,
     )
     .with_thread_context(thread_context)
+    .with_exec_policy(exec_policy)
+    // Plan agent: disk-backed plan store (durable JSON under `<app_home>/plans`,
+    // hot in-memory copy for live queries) — the source of truth for the
+    // `plan` / `update_plan` / `present_plan` tools.
+    .with_plan_store(
+        Arc::new(super::plan_store::DiskBackedPlanStore::default()) as Arc<dyn PlanStorePort>
+    )
+    // Slice 4: built-in agent registry (claude-style fixed agents). Hosts the
+    // showcase read-only `plan` agent; `delegate_subagent` resolves agent_type
+    // here and `allowed_tool_specs` applies each definition's tool constraint.
+    .with_agent_registry(Arc::new(super::agent_registry::BuiltinAgentRegistry::with_builtins())
+        as Arc<dyn slab_agent::AgentRegistry>)
     // INFRA-05: FIFO wait queue for agent spawns (0 ⇒ legacy reject-at-cap).
-    .with_queue_capacity(runtime_limits.queue_capacity as usize);
+    .with_queue_capacity(runtime_limits.queue_capacity as usize)
+    .with_compact(compact);
     // INFRA-05: optional memory circuit breaker. When an RSS threshold is
     // configured, sample the host process and pause spawns while tripped.
     let control = if let Some(threshold_mb) = runtime_limits.rss_threshold_mb {
@@ -206,6 +366,17 @@ fn build_agent_control(
         .register(Box::new(slab_agent_tools::DelegateSubagentTool::new(Arc::clone(&control))));
     memory_pipeline.set_control(Arc::clone(&control));
     control
+}
+
+/// Decouple contract: the agent trace directory (and therefore the
+/// trace sink + trace bundle) is gated by `agent.debug` ALONE. `telemetry_enabled`
+/// is accepted as an explicit parameter purely so the independence is
+/// unit-testable. Returning `agent_debug` and intentionally ignoring
+/// `telemetry_enabled` IS the contract — do not AND the two here: the bundle
+/// must be recorded even when the OTel provider/export is off.
+fn agent_trace_enabled(agent_debug: bool, telemetry_enabled: bool) -> bool {
+    let _ = telemetry_enabled;
+    agent_debug
 }
 
 fn agent_trace_log_dir(ctx: &AppContext) -> PathBuf {
@@ -344,6 +515,19 @@ fn available_sandbox_driver(
         );
         return None;
     }
+    // Fail-closed: when the platform requires elevated sandbox setup
+    // (`capabilities().setup_required`, e.g. `windows_setup_required`) but the
+    // driver only reached `degraded` (setup not actually achieved), do NOT
+    // silently accept it — block the shell rather than run unisolated. Until
+    // elevation is provisioned (later phases) the driver stays `degraded`, so an
+    // opt-in `setup_required` blocks the shell rather than degrading quietly.
+    if driver.capabilities().setup_required && status.degraded {
+        tracing::warn!(
+            details = %status.details,
+            "sandbox setup is required but not achieved; shell tool stays blocked (fail-closed)"
+        );
+        return None;
+    }
     if status.degraded {
         tracing::warn!(details = %status.details, "sandbox driver is degraded");
     }
@@ -357,12 +541,15 @@ mod tests {
 
     use async_trait::async_trait;
     use slab_config::{AgentMcpConfig, AgentMcpEnvValueConfig, AgentMcpServerConfig};
-    use slab_sandboxing::{SandboxDriver, SandboxError, SandboxSetupStatus, SandboxedCommand};
+    use slab_sandboxing::{
+        SandboxCapabilities, SandboxDriver, SandboxError, SandboxSetupStatus, SandboxedCommand,
+    };
 
-    use super::{agent_mcp_client_config_with_env, available_sandbox_driver};
+    use super::{agent_mcp_client_config_with_env, agent_trace_enabled, available_sandbox_driver};
 
     struct StatusDriver {
         status: SandboxSetupStatus,
+        setup_required: bool,
     }
 
     #[async_trait]
@@ -381,23 +568,66 @@ mod tests {
         fn setup_status(&self) -> SandboxSetupStatus {
             self.status.clone()
         }
+
+        fn capabilities(&self) -> SandboxCapabilities {
+            SandboxCapabilities { setup_required: self.setup_required, ..Default::default() }
+        }
+    }
+
+    #[test]
+    fn agent_trace_gate_is_independent_of_telemetry_enabled() {
+        // The critical independence assertion: `agent.debug` alone must enable the
+        // trace directory/sink/bundle even when `telemetry.enabled` is OFF. If a
+        // future change re-couples the gate to `agent.debug && telemetry.enabled`,
+        // this case flips to false and the assertion fails.
+        assert!(
+            agent_trace_enabled(true, false),
+            "agent.debug must enable the trace bundle even when telemetry.enabled is off"
+        );
+        assert!(agent_trace_enabled(true, true));
+        // `telemetry.enabled` alone must NOT enable the agent trace bundle.
+        assert!(
+            !agent_trace_enabled(false, true),
+            "telemetry.enabled must not enable the agent trace bundle"
+        );
+        assert!(!agent_trace_enabled(false, false));
     }
 
     #[test]
     fn unavailable_sandbox_driver_is_rejected() {
         let driver = Arc::new(StatusDriver {
             status: SandboxSetupStatus::unavailable("missing sandbox runtime"),
+            setup_required: false,
         });
 
         assert!(available_sandbox_driver(driver).is_none());
     }
 
     #[test]
-    fn degraded_available_sandbox_driver_is_allowed() {
-        let driver =
-            Arc::new(StatusDriver { status: SandboxSetupStatus::degraded("guard-only mode") });
+    fn degraded_available_sandbox_driver_is_allowed_when_setup_not_required() {
+        // Degraded (e.g. Windows lexical+Job mode) is acceptable as long as the
+        // user has not required elevated setup — this is the default path.
+        let driver = Arc::new(StatusDriver {
+            status: SandboxSetupStatus::degraded("guard-only mode"),
+            setup_required: false,
+        });
 
         assert!(available_sandbox_driver(driver).is_some());
+    }
+
+    #[test]
+    fn degraded_sandbox_driver_is_rejected_when_setup_required() {
+        // Fail-closed: setup is required but only degraded was reached → block
+        // the shell instead of silently accepting an unisolated driver.
+        let driver = Arc::new(StatusDriver {
+            status: SandboxSetupStatus::degraded("elevation not provisioned"),
+            setup_required: true,
+        });
+
+        assert!(
+            available_sandbox_driver(driver).is_none(),
+            "required-but-undeclined setup must block the shell"
+        );
     }
 
     #[test]

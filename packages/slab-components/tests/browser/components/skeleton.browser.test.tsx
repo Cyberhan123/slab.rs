@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function SkeletonGallery() {
   return (
-    <div data-testid="skeleton-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="skeleton-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <div className="space-y-2">
         <Skeleton className="h-4 w-3/4" data-testid="skeleton" />
         <Skeleton className="h-4 w-full" />
@@ -39,6 +39,6 @@ describe("Skeleton browser coverage", () => {
     )
     const skeleton = page.getByTestId("custom-skeleton")
     await expect.element(skeleton).toBeVisible()
-    await expect.element(skeleton).toHaveClass(/skeleton-shimmer/)
+    await expect.element(skeleton).toHaveClass(/animate-pulse/)
   })
 })

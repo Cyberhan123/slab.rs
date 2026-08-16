@@ -1,5 +1,4 @@
-use hf_hub::api::sync::Api;
-use hf_hub::{Repo, RepoType};
+use hf_hub::{HFClientSync, split_id};
 use slab_diffusion::{ContextParams, Diffusion, ImgParams, SampleMethod, SampleParams};
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
@@ -94,11 +93,14 @@ fn load_vendored_diffusion() -> Diffusion {
 }
 
 fn resolve_minisd_model_path() -> PathBuf {
-    let api = Api::new().expect("failed to init hf-hub api");
-    let repo = Repo::with_revision(MINI_SD_REPO_ID.to_owned(), RepoType::Model, "main".to_owned());
+    let client = HFClientSync::new().expect("failed to init hf-hub client");
+    let (owner, name) = split_id(MINI_SD_REPO_ID);
 
-    api.repo(repo)
-        .get(MINI_SD_FILENAME)
+    client
+        .model(owner.to_owned(), name.to_owned())
+        .download_file()
+        .filename(MINI_SD_FILENAME.to_owned())
+        .send()
         .unwrap_or_else(|error| panic!("failed to resolve miniSD model via hf-hub: {error}"))
 }
 

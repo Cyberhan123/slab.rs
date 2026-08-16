@@ -11,7 +11,7 @@ license.workspace = true
 [features]
 default = ["gpu-telemetry", "ffmpeg-next-static"]
 axum = ["dep:axum"]
-gpu-telemetry = ["dep:all-smi"]
+gpu-telemetry = ["slab-gpu-memory-scheduler/gpu-telemetry"]
 ffmpeg-next-runtime = ["dep:ffmpeg-next"]
 ffmpeg-next-static = ["ffmpeg-next-runtime", "ffmpeg-next/static"]
 ffmpeg-next-build = ["ffmpeg-next-static", "ffmpeg-next/build"]
@@ -25,7 +25,9 @@ slab-utils = { workspace = true }
 # Internal workspace deps
 slab-runtime-core = { workspace = true }
 slab-agent        = { workspace = true }
+slab-agent-context = { workspace = true }
 slab-agent-memories = { workspace = true }
+slab-agent-rollout = { workspace = true }
 slab-agent-tracing = { workspace = true }
 slab-agent-tools  = { workspace = true }
 slab-mcp          = { workspace = true }
@@ -43,7 +45,9 @@ slab-subtitle     = { workspace = true }
 slab-git          = { workspace = true }
 slab-file         = { workspace = true }
 slab-sandboxing   = { workspace = true }
+slab-exec-policy  = { workspace = true }
 slab-plugin       = { workspace = true }
+slab-gpu-memory-scheduler = { workspace = true }
 
 # Async runtime
 tokio   = { workspace = true }
@@ -91,7 +95,6 @@ image       = { workspace = true }
 zip         = { workspace = true }
 jsonschema  = { workspace = true }
 ffmpeg-next = { workspace = true, optional = true }
-all-smi = { workspace = true, optional = true }
 sysinfo = { workspace = true }
 validator = { workspace = true, features = ["derive"] }
 dashmap = { workspace = true }

@@ -23,3 +23,15 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true , features = ["json"] }
 serde_repr = { workspace = true }
+# Harness protocol contracts (thread/turn/item model). Transport-agnostic:
+# the JSON-RPC envelope types live in `slab-jsonrpc` and are applied by the
+# server dispatcher, so this crate does NOT depend on `slab-jsonrpc`.
+schemars = { workspace = true }
+strum = { workspace = true }
+# The harness semantic types (TurnItem/EventMsg/Turn/Thread + notification
+# params) now live in `slab-agent::protocol`; this crate re-exports them so the
+# historical `slab_proto::harness::*` paths keep resolving. The JSON-RPC wire
+# envelope (`ServerNotification`, method constants, request/response DTOs) stays
+# defined here and references the slab-agent semantic types via this edge.
+slab-agent = { workspace = true }
+ts-rs = { workspace = true, features = ["serde-json-impl", "no-serde-warnings"] }

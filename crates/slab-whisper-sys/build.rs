@@ -8,6 +8,9 @@ fn main() {
         &["ggml"],
         "WhisperLib",
         &["../../vendor/whisper/include/whisper.h"],
+        None,
+        None,
+        None,
     )
     .expect("failed to prepare whisper bindings");
 }

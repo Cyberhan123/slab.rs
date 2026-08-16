@@ -31,7 +31,8 @@ use tokio::sync::broadcast;
 use super::engine::{GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest};
 use super::error::GGMLLlamaWorkerError;
 use crate::domain::models::{
-    GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, TextGenerationOptions, TextGenerationResponse,
+    GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, GgmlLlamaQuantizeInput, GgmlLlamaQuantizeOutput,
+    TextGenerationOptions, TextGenerationResponse,
 };
 use slab_runtime_core::backend::{
     CancelRx, ControlOpId, Input, Options, StreamHandle, Typed, WorkerCommand,
@@ -55,6 +56,7 @@ struct InferenceOptions {
     logit_bias: Option<serde_json::Value>,
     stop_sequences: Vec<String>,
     agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
+    image_parts: Vec<crate::domain::models::TextGenerationImagePart>,
 }
 
 impl InferenceOptions {
@@ -77,6 +79,7 @@ impl InferenceOptions {
             logit_bias: params.logit_bias,
             stop_sequences: params.stop_sequences,
             agent_trace: params.agent_trace,
+            image_parts: params.image_parts,
         }
     }
 }
@@ -129,6 +132,14 @@ impl LlamaWorker {
     ) -> Result<StreamHandle, GGMLLlamaWorkerError> {
         let options = InferenceOptions::from_options(options.0);
         self.handle_inference_stream(prompt, options, cancel).await
+    }
+
+    #[on_event(Quantize)]
+    async fn on_quantize(
+        &mut self,
+        input: Input<GgmlLlamaQuantizeInput>,
+    ) -> Result<Typed<GgmlLlamaQuantizeOutput>, GGMLLlamaWorkerError> {
+        self.handle_quantize(input.0).await
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -214,6 +225,7 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
             agent_trace,
+            image_parts,
         } = options;
         let engine = self
             .engine
@@ -235,12 +247,31 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
             agent_trace,
+            image_parts,
         };
         let LlamaDispatchOutput { text, usage, finish_reason, metadata } = engine
             .dispatch_inference(request)
             .await
             .map_err(|error| GGMLLlamaWorkerError::inference(error.to_string()))?;
         Ok(Typed(TextGenerationResponse { text, finish_reason, usage, metadata }))
+    }
+
+    // ── quantize ──────────────────────────────────────────────────────────────
+
+    async fn handle_quantize(
+        &mut self,
+        input: GgmlLlamaQuantizeInput,
+    ) -> Result<Typed<GgmlLlamaQuantizeOutput>, GGMLLlamaWorkerError> {
+        let engine = self
+            .engine
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(|| GGMLLlamaWorkerError::internal("engine not initialized"))?;
+        let output = engine
+            .quantize(input)
+            .await
+            .map_err(|error| GGMLLlamaWorkerError::internal(error.to_string()))?;
+        Ok(Typed(output))
     }
 
     // ── inference.stream ──────────────────────────────────────────────────────
@@ -265,6 +296,7 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
             agent_trace,
+            image_parts,
         } = options;
         let engine = self
             .engine
@@ -286,6 +318,7 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
             agent_trace,
+            image_parts,
         };
         engine.dispatch_inference_stream(request, cancel.0).await.map_err(
             |error: crate::infra::backends::ggml::EngineError| {

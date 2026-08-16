@@ -10,17 +10,18 @@ use crate::{
     SettingsDocument,
 };
 
-const RUNTIME_BACKEND_SLOTS: [(RuntimeBackendId, &str, u32); 3] = [
+const RUNTIME_BACKEND_SLOTS: [(RuntimeBackendId, &str, u32); 4] = [
     (RuntimeBackendId::GgmlWhisper, "whisper", 0),
     (RuntimeBackendId::GgmlLlama, "llama", 1),
     (RuntimeBackendId::GgmlDiffusion, "diffusion", 2),
+    (RuntimeBackendId::GgmlParakeet, "parakeet", 3),
 ];
 const CANDLE_BACKENDS: [RuntimeBackendId; 3] = [
     RuntimeBackendId::CandleLlama,
     RuntimeBackendId::CandleWhisper,
     RuntimeBackendId::CandleDiffusion,
 ];
-const CANDLE_BACKEND_SLOT: u32 = 3;
+const CANDLE_BACKEND_SLOT: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LaunchProfile {
@@ -108,6 +109,7 @@ impl ResolvedRuntimeChildSpec {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvedRuntimeEndpoints {
     pub whisper: Option<String>,
+    pub parakeet: Option<String>,
     pub llama: Option<String>,
     pub diffusion: Option<String>,
     pub candle_whisper: Option<String>,
@@ -119,6 +121,7 @@ impl ResolvedRuntimeEndpoints {
     pub fn backend_endpoint(&self, backend: RuntimeBackendId) -> Option<&str> {
         match backend {
             RuntimeBackendId::GgmlWhisper => self.whisper.as_deref(),
+            RuntimeBackendId::GgmlParakeet => self.parakeet.as_deref(),
             RuntimeBackendId::GgmlLlama => self.llama.as_deref(),
             RuntimeBackendId::GgmlDiffusion => self.diffusion.as_deref(),
             RuntimeBackendId::CandleWhisper => self.candle_whisper.as_deref(),
@@ -132,6 +135,7 @@ impl ResolvedRuntimeEndpoints {
     pub fn apply_to_config(&self, config: &mut Config, transport: RuntimeTransportMode) {
         config.transport_mode = transport.as_str().to_owned();
         config.whisper_grpc_endpoint = self.whisper.clone();
+        config.parakeet_grpc_endpoint = self.parakeet.clone();
         config.llama_grpc_endpoint = self.llama.clone();
         config.diffusion_grpc_endpoint = self.diffusion.clone();
         config.candle_whisper_grpc_endpoint = self.candle_whisper.clone();
@@ -272,6 +276,7 @@ fn resolve_managed_launch_spec(
 
         match backend {
             RuntimeBackendId::GgmlWhisper => endpoints.whisper = Some(endpoint.clone()),
+            RuntimeBackendId::GgmlParakeet => endpoints.parakeet = Some(endpoint.clone()),
             RuntimeBackendId::GgmlLlama => endpoints.llama = Some(endpoint.clone()),
             RuntimeBackendId::GgmlDiffusion => endpoints.diffusion = Some(endpoint.clone()),
             RuntimeBackendId::CandleLlama
@@ -384,6 +389,7 @@ fn resolve_external_launch_spec(
 
         match backend {
             RuntimeBackendId::GgmlWhisper => endpoints.whisper = Some(endpoint),
+            RuntimeBackendId::GgmlParakeet => endpoints.parakeet = Some(endpoint),
             RuntimeBackendId::GgmlLlama => endpoints.llama = Some(endpoint),
             RuntimeBackendId::GgmlDiffusion => endpoints.diffusion = Some(endpoint),
             RuntimeBackendId::CandleLlama
@@ -424,6 +430,7 @@ fn backend_enabled(settings: &SettingsDocument, backend: RuntimeBackendId) -> bo
     match backend {
         RuntimeBackendId::GgmlLlama => settings.runtime.ggml.backends.llama.enabled,
         RuntimeBackendId::GgmlWhisper => settings.runtime.ggml.backends.whisper.enabled,
+        RuntimeBackendId::GgmlParakeet => settings.runtime.ggml.backends.parakeet.enabled,
         RuntimeBackendId::GgmlDiffusion => settings.runtime.ggml.backends.diffusion.enabled,
         _ => false,
     }
@@ -527,6 +534,7 @@ fn resolve_backend_capacity(
     let leaf = match backend {
         RuntimeBackendId::GgmlLlama => &settings.runtime.ggml.backends.llama.capacity,
         RuntimeBackendId::GgmlWhisper => &settings.runtime.ggml.backends.whisper.capacity,
+        RuntimeBackendId::GgmlParakeet => &settings.runtime.ggml.backends.parakeet.capacity,
         RuntimeBackendId::GgmlDiffusion => &settings.runtime.ggml.backends.diffusion.capacity,
         _ => {
             return Err(ConfigError::Internal(format!(
@@ -590,6 +598,7 @@ fn resolve_backend_logging(
     let leaf = match backend {
         RuntimeBackendId::GgmlLlama => &settings.runtime.ggml.backends.llama.logging,
         RuntimeBackendId::GgmlWhisper => &settings.runtime.ggml.backends.whisper.logging,
+        RuntimeBackendId::GgmlParakeet => &settings.runtime.ggml.backends.parakeet.logging,
         RuntimeBackendId::GgmlDiffusion => &settings.runtime.ggml.backends.diffusion.logging,
         _ => &LoggingOverrideConfig::default(),
     };
@@ -669,6 +678,9 @@ fn explicit_leaf_endpoint(
         (RuntimeBackendId::GgmlWhisper, RuntimeTransportMode::Http) => {
             settings.runtime.ggml.backends.whisper.endpoint.http.address.as_deref()
         }
+        (RuntimeBackendId::GgmlParakeet, RuntimeTransportMode::Http) => {
+            settings.runtime.ggml.backends.parakeet.endpoint.http.address.as_deref()
+        }
         (RuntimeBackendId::GgmlDiffusion, RuntimeTransportMode::Http) => {
             settings.runtime.ggml.backends.diffusion.endpoint.http.address.as_deref()
         }
@@ -677,6 +689,9 @@ fn explicit_leaf_endpoint(
         }
         (RuntimeBackendId::GgmlWhisper, RuntimeTransportMode::Ipc) => {
             settings.runtime.ggml.backends.whisper.endpoint.ipc.path.as_deref()
+        }
+        (RuntimeBackendId::GgmlParakeet, RuntimeTransportMode::Ipc) => {
+            settings.runtime.ggml.backends.parakeet.endpoint.ipc.path.as_deref()
         }
         (RuntimeBackendId::GgmlDiffusion, RuntimeTransportMode::Ipc) => {
             settings.runtime.ggml.backends.diffusion.endpoint.ipc.path.as_deref()
@@ -875,6 +890,7 @@ mod tests {
         settings.runtime.ggml.backends.llama.capacity.concurrent_requests = Some(1);
         settings.runtime.ggml.backends.whisper.enabled = false;
         settings.runtime.ggml.backends.diffusion.enabled = false;
+        settings.runtime.ggml.backends.parakeet.enabled = false;
         settings.runtime.transport = RuntimeTransportMode::Http;
         settings.runtime.ggml.install_dir = Some("D:/settings/backend-libs".to_owned());
         settings.runtime.ggml.backends.llama.endpoint.http.address =
@@ -914,6 +930,7 @@ mod tests {
         settings.runtime.ggml.backends.llama.enabled = false;
         settings.runtime.ggml.backends.whisper.enabled = false;
         settings.runtime.ggml.backends.diffusion.enabled = false;
+        settings.runtime.ggml.backends.parakeet.enabled = false;
 
         let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap();
 
@@ -938,7 +955,7 @@ mod tests {
 
         let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths).unwrap();
 
-        assert_eq!(spec.children.len(), 3);
+        assert_eq!(spec.children.len(), 4);
         for child in &spec.children {
             let path =
                 child.grpc_bind_address.strip_prefix("ipc://").expect("managed IPC endpoint");
@@ -957,6 +974,7 @@ mod tests {
         settings.runtime.ggml.backends.llama.enabled = false;
         settings.runtime.ggml.backends.whisper.enabled = false;
         settings.runtime.ggml.backends.diffusion.enabled = false;
+        settings.runtime.ggml.backends.parakeet.enabled = false;
         settings.runtime.candle.enabled = true;
         settings.runtime.transport = RuntimeTransportMode::Http;
         settings.runtime.candle.endpoint.http.address = Some("127.0.0.1:4200".to_owned());
@@ -1001,6 +1019,7 @@ mod tests {
             Some("127.0.0.1:9102".to_owned());
         settings.runtime.ggml.backends.diffusion.endpoint.http.address =
             Some("127.0.0.1:9103".to_owned());
+        settings.runtime.ggml.backends.parakeet.enabled = false;
 
         let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap();
 
@@ -1017,6 +1036,7 @@ mod tests {
         settings.runtime.ggml.backends.llama.enabled = false;
         settings.runtime.ggml.backends.whisper.enabled = false;
         settings.runtime.ggml.backends.diffusion.enabled = false;
+        settings.runtime.ggml.backends.parakeet.enabled = false;
 
         let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap();
 

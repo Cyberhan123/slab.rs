@@ -1,0 +1,556 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { clamp, orderBy } from 'lodash-es';
+import { toast } from 'sonner';
+import { useTranslation } from '@slab/i18n';
+import { useNavigate } from 'react-router-dom';
+
+import { useAiModel } from '@slab/ui/hooks/use-ai-model';
+import { useHeader } from '@slab/ui/hooks/use-header';
+
+import api, { getErrorMessage } from '@slab/api';
+import type { components } from '@slab/api/v1';
+import {
+  deriveProgress,
+  getVideoGeneration,
+  listVideoGenerations,
+  resolveMediaUrl,
+  type GenerationProgress,
+  type VideoGenerationTask,
+} from '@slab/core/media/task-api';
+import { useMediaTaskPolling } from '@slab/ui/pages/task/hooks/use-media-task-polling';
+import { useWorkspaceHandoffStore } from '@slab/ui/store/useWorkspaceHandoffStore';
+import { HEADER_SELECT_KEYS } from '@slab/ui/layouts/header';
+import {
+  DEFAULT_GENERATION_SIZE,
+  MAX_RANDOM_SEED,
+  POLL_INTERVAL_MS,
+  type ModelOption,
+} from '../const';
+
+type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
+type VideoGenerationRequest = components['schemas']['VideoGenerationRequest'];
+
+async function fileToDataUri(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result as string));
+    reader.addEventListener("error", reject);
+    reader.readAsDataURL(file);
+  });
+}
+
+export function useVideoGeneration() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [prompt, setPrompt] = useState('');
+  const [negativePrompt, setNegativePrompt] = useState('');
+  const [widthStr, setWidthStr] = useState('512');
+  const [heightStr, setHeightStr] = useState('512');
+  const [frames, setFrames] = useState(16);
+  const [fps, setFps] = useState(8);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [cfgScale, setCfgScale] = useState(7);
+  const [guidance, setGuidance] = useState(3.5);
+  const [steps, setSteps] = useState(20);
+  const [seed, setSeed] = useState(-1);
+  const [sampleMethod, setSampleMethod] = useState('auto');
+  const [scheduler, setScheduler] = useState('auto');
+  const [strength, setStrength] = useState(0.75);
+  const [initImageDataUri, setInitImageDataUri] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [generationPhase, setGenerationPhase] = useState<GenerationPhase>('idle');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [videoPath, setVideoPath] = useState<string | null>(null);
+  const [immersivePreview, setImmersivePreview] = useState(false);
+  const [history, setHistory] = useState<VideoGenerationTask[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [selectedHistoryTask, setSelectedHistoryTask] = useState<VideoGenerationTask | null>(null);
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null);
+  const [comparisonTasks, setComparisonTasks] = useState<VideoGenerationTask[]>([]);
+
+  const initImageInputRef = useRef<HTMLInputElement>(null);
+  const generationProgressRef = useRef<GenerationProgress | null>(null);
+
+  const videoModels = useAiModel({
+    capability: 'video_generation',
+    storageKey: HEADER_SELECT_KEYS.videoModel,
+    localOnly: true,
+    isOptionDisabled: (model) => !model.local_path,
+  });
+  const catalogLoading = videoModels.loading;
+  const selectedModelId = videoModels.selectedId;
+  const setSelectedModelId = videoModels.setSelectedId;
+  const modelOptions = useMemo<ModelOption[]>(
+    () =>
+      videoModels.localModels.map((model) => ({
+        id: model.id,
+        label: model.display_name,
+        downloaded: Boolean(model.local_path),
+        local_path: model.local_path ?? null,
+      })),
+    [videoModels.localModels],
+  );
+
+  const selectedModel = useMemo(
+    () => modelOptions.find((model) => model.id === selectedModelId),
+    [modelOptions, selectedModelId],
+  );
+  const generateVideoMutation = api.useMutation('post', '/v1/video/generations', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const isPolling = generationPhase === 'polling';
+  const isFetchingResult = generationPhase === 'fetchingResult';
+  const toPollingErrorMessage = useCallback(
+    (message: string) => t('pages.video.toast.pollingError', { message }),
+    [t],
+  );
+  const {
+    taskStatus,
+    taskStatusUpdatedAt,
+  } = useMediaTaskPolling({
+    enabled: isPolling,
+    intervalMs: POLL_INTERVAL_MS,
+    pollingErrorToastId: 'video-generation-polling-error',
+    taskId,
+    toPollingErrorMessage,
+  });
+  const isGenerating = isSubmitting || generationPhase !== 'idle';
+  const headerModelPicker = useMemo(
+    () => ({
+      value: selectedModelId,
+      options: modelOptions.map((model) => ({
+        id: model.id,
+        label: model.downloaded
+          ? model.label
+          : t('pages.video.modelPicker.optionDownloadInHub', { model: model.label }),
+        disabled: !model.downloaded,
+      })),
+      onChange: setSelectedModelId,
+      groupLabel: t('pages.video.modelPicker.groupLabel'),
+      placeholder: t('pages.video.modelPicker.placeholder'),
+      loading: catalogLoading,
+      disabled: catalogLoading || isGenerating || !modelOptions.some((model) => model.downloaded),
+      emptyLabel: t('pages.video.modelPicker.emptyLabel'),
+    }),
+    [catalogLoading, isGenerating, modelOptions, selectedModelId, setSelectedModelId, t],
+  );
+
+  useHeader({ select: headerModelPicker });
+
+  const clearGenerationTask = useCallback(() => {
+    generationProgressRef.current = null;
+    setGenerationProgress(null);
+    setGenerationPhase('idle');
+    setTaskId(null);
+  }, []);
+
+  const mergeHistoryTask = useCallback((task: VideoGenerationTask) => {
+    setHistory((previous) => {
+      const next = [task, ...previous.filter((entry) => entry.task_id !== task.task_id)];
+      return orderBy(next, (entry) => Date.parse(entry.created_at), 'desc');
+    });
+  }, []);
+
+  const refreshHistory = useCallback(async () => {
+    try {
+      setHistoryLoading(true);
+      setHistoryError(null);
+      const items = await listVideoGenerations();
+      setHistory(items);
+    } catch (error) {
+      setHistoryError(getErrorMessage(error));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  const openHistoryDetail = useCallback(async (taskIdToOpen: string) => {
+    try {
+      const detail = await getVideoGeneration(taskIdToOpen);
+      setSelectedHistoryTask(detail);
+      setHistoryDialogOpen(true);
+      mergeHistoryTask(detail);
+      setVideoPath(resolveMediaUrl(detail.video_url));
+    } catch (error) {
+      const message = getErrorMessage(error);
+      toast.error(t('pages.video.toast.historyDetailFailed', { message }));
+    }
+  }, [mergeHistoryTask, t]);
+
+  useEffect(() => {
+    void refreshHistory();
+  }, [refreshHistory]);
+
+  const loadInitImageFile = useCallback(async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error(t('pages.video.error.chooseImageFile'));
+      return;
+    }
+    try {
+      const dataUri = await fileToDataUri(file);
+      setInitImageDataUri(dataUri);
+    } catch {
+      toast.error(t('pages.video.error.readImageFileFailed'));
+    }
+  }, [t]);
+
+  const handleInitImageChange = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) {
+        return;
+      }
+      await loadInitImageFile(file);
+    },
+    [loadInitImageFile],
+  );
+
+  const handleInitImageDrop = useCallback(
+    async (event: React.DragEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      const file = event.dataTransfer.files?.[0];
+      if (!file) {
+        return;
+      }
+      await loadInitImageFile(file);
+    },
+    [loadInitImageFile],
+  );
+
+  const handleSubmit = useCallback(async () => {
+    if (!prompt.trim()) {
+      toast.error(t('pages.video.error.enterPrompt'));
+      return;
+    }
+
+    if (!selectedModel?.local_path) {
+      toast.error(t('pages.video.error.selectDownloadedModel'));
+      return;
+    }
+
+    setIsSubmitting(true);
+    setVideoPath(null);
+
+    try {
+      const width = Number.parseInt(widthStr, 10) || DEFAULT_GENERATION_SIZE;
+      const height = Number.parseInt(heightStr, 10) || DEFAULT_GENERATION_SIZE;
+      const body: VideoGenerationRequest = {
+        model_id: selectedModelId || undefined,
+        model: selectedModel.local_path,
+        prompt,
+        negative_prompt: negativePrompt || undefined,
+        width,
+        height,
+        video_frames: frames,
+        fps,
+        cfg_scale: cfgScale,
+        guidance,
+        steps,
+        seed: seed < 0 ? Math.floor(Math.random() * MAX_RANDOM_SEED) : seed,
+        sample_method: sampleMethod === 'auto' ? undefined : sampleMethod,
+        scheduler: scheduler === 'auto' ? undefined : scheduler,
+        strength: initImageDataUri ? strength : undefined,
+        init_image: initImageDataUri ?? undefined,
+      };
+
+      const { operation_id } = await generateVideoMutation.mutateAsync({
+        body,
+      });
+      setTaskId(operation_id);
+      setGenerationPhase('polling');
+      toast.info(t('pages.video.toast.started', { frames, fps }));
+    } catch (error) {
+      const message = getErrorMessage(error);
+      toast.error(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [
+    cfgScale,
+    fps,
+    frames,
+    guidance,
+    heightStr,
+    initImageDataUri,
+    negativePrompt,
+    prompt,
+    sampleMethod,
+    scheduler,
+    seed,
+    selectedModelId,
+    selectedModel,
+    steps,
+    strength,
+    t,
+    widthStr,
+    generateVideoMutation,
+  ]);
+
+  useEffect(() => {
+    if (!isPolling || !taskId || taskStatusUpdatedAt === 0) {
+      return;
+    }
+
+    const nextProgress = deriveProgress(
+      taskStatus?.progress ?? null,
+      generationProgressRef.current,
+      taskStatusUpdatedAt,
+    );
+    generationProgressRef.current = nextProgress;
+    setGenerationProgress(nextProgress);
+
+    if (!taskStatus) {
+      return;
+    }
+
+    if (taskStatus.status === 'failed') {
+      toast.error(taskStatus.error_msg ?? t('pages.video.error.generationFailed'));
+      clearGenerationTask();
+      return;
+    }
+
+    if (taskStatus.status === 'succeeded') {
+      setGenerationPhase('fetchingResult');
+      return;
+    }
+
+    if (taskStatus.status === 'cancelled' || taskStatus.status === 'interrupted') {
+      clearGenerationTask();
+      void refreshHistory();
+    }
+  }, [clearGenerationTask, isPolling, refreshHistory, taskId, taskStatus, taskStatusUpdatedAt, t]);
+
+  useEffect(() => {
+    if (!isFetchingResult || !taskId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadResult = async () => {
+      try {
+        const detail = await getVideoGeneration(taskId);
+        if (cancelled) {
+          return;
+        }
+
+        const videoUrl = resolveMediaUrl(detail.video_url);
+        mergeHistoryTask(detail);
+        setSelectedHistoryTask(detail);
+        setHistoryDialogOpen(true);
+
+        if (videoUrl) {
+          setVideoPath(videoUrl);
+          toast.success(t('pages.video.toast.generated'));
+        } else {
+          toast.error(t('pages.video.toast.completedWithoutPath'));
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        const message = getErrorMessage(error);
+        toast.error(t('pages.video.toast.resultFetchFailed', { message }));
+      } finally {
+        if (!cancelled) {
+          clearGenerationTask();
+          void refreshHistory();
+        }
+      }
+    };
+
+    void loadResult();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clearGenerationTask, isFetchingResult, mergeHistoryTask, refreshHistory, t, taskId]);
+
+  const handleCancel = useCallback(async () => {
+    if (!taskId) {
+      clearGenerationTask();
+      return;
+    }
+
+    try {
+      await cancelTaskMutation.mutateAsync({
+        params: {
+          path: { id: taskId },
+        },
+      });
+    } catch (error) {
+      toast.error(t('pages.task.toast.cancelTaskFailed', { message: getErrorMessage(error) }), {
+        id: `video-cancel-${taskId}`,
+      });
+    }
+  }, [cancelTaskMutation, clearGenerationTask, t, taskId]);
+
+  const handleDownload = useCallback(() => {
+    if (!videoPath) {
+      return;
+    }
+    const anchor = document.createElement('a');
+    anchor.href = videoPath;
+    anchor.download = 'generated-video.mp4';
+    anchor.click();
+  }, [videoPath]);
+
+  const refillFromHistory = useCallback((task: VideoGenerationTask) => {
+    const request = task.request_data;
+    setPrompt(request.prompt ?? task.prompt ?? '');
+    setNegativePrompt(request.negative_prompt ?? '');
+    setWidthStr(String(request.width ?? task.width ?? DEFAULT_GENERATION_SIZE));
+    setHeightStr(String(request.height ?? task.height ?? DEFAULT_GENERATION_SIZE));
+    setFrames(request.video_frames ?? task.frames);
+    setFps(request.fps ?? task.fps);
+    setCfgScale(request.cfg_scale ?? cfgScale);
+    setGuidance(request.guidance ?? guidance);
+    setSteps(request.steps ?? steps);
+    setSeed(request.seed ?? seed);
+    setSampleMethod(request.sample_method ?? 'auto');
+    setScheduler(request.scheduler ?? 'auto');
+    setStrength(request.strength ?? strength);
+    setInitImageDataUri(null);
+    setHistoryDialogOpen(false);
+    toast.success(t('pages.video.history.refilled'));
+  }, [cfgScale, guidance, seed, steps, strength, t]);
+
+  const toggleHistoryComparison = useCallback((task: VideoGenerationTask) => {
+    setComparisonTasks((current) => {
+      if (current.some((item) => item.task_id === task.task_id)) {
+        return current.filter((item) => item.task_id !== task.task_id);
+      }
+
+      return [...current, task].slice(-2);
+    });
+  }, []);
+
+  const openHistoryVideoInWorkspace = useCallback((task: VideoGenerationTask) => {
+    const localPath = task.result_data?.video_path?.trim();
+    if (localPath) {
+      useWorkspaceHandoffStore.getState().setPendingWorkspaceReveal({
+        type: 'workspace',
+        payload: {
+          revealPath: localPath,
+        },
+      });
+      navigate('/workspace');
+      return;
+    }
+
+    const artifactUrl = resolveMediaUrl(task.video_url);
+    if (artifactUrl) {
+      window.open(artifactUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    toast.error(t('pages.video.history.noArtifact'));
+  }, [navigate, t]);
+
+  const widthValue = Number.parseInt(widthStr, 10) || DEFAULT_GENERATION_SIZE;
+  const heightValue = Number.parseInt(heightStr, 10) || DEFAULT_GENERATION_SIZE;
+  const clipDurationSeconds = frames / clamp(fps, 1, Number.POSITIVE_INFINITY);
+
+  const stageTitle = videoPath
+    ? t('pages.video.stage.title.ready')
+    : isGenerating
+      ? t('pages.video.stage.title.rendering')
+      : t('pages.video.stage.title.idle');
+
+  const stageDescription = videoPath
+    ? t('pages.video.stage.description.ready')
+    : isGenerating
+      ? t('pages.video.stage.description.rendering', { frames, fps })
+      : t('pages.video.stage.description.idle');
+
+  const stageStatus = videoPath
+    ? t('pages.video.stage.status.ready')
+    : isGenerating
+      ? t('pages.video.stage.status.rendering')
+      : prompt.trim()
+        ? t('pages.video.stage.status.queued')
+        : t('pages.video.stage.status.awaitingPrompt');
+
+  const footerHint = selectedModel?.local_path
+    ? videoPath
+      ? t('pages.video.stage.footerHint.ready')
+      : isGenerating
+        ? t('pages.video.stage.footerHint.polling', { seconds: POLL_INTERVAL_MS / 1000 })
+        : t('pages.video.stage.footerHint.estimate', {
+            seconds: clipDurationSeconds.toFixed(1),
+          })
+    : t('pages.video.stage.footerHint.downloadFirst');
+
+  return {
+    advancedOpen,
+    cfgScale,
+    comparisonTasks,
+    footerHint,
+    fps,
+    frames,
+    guidance,
+    handleCancel,
+    handleDownload,
+    handleInitImageChange,
+    handleInitImageDrop,
+    handleSubmit,
+    heightStr,
+    heightValue,
+    hasSelectedModel: Boolean(selectedModel?.local_path),
+    history,
+    historyDialogOpen,
+    historyError,
+    historyLoading,
+    immersivePreview,
+    initImageDataUri,
+    initImageInputRef,
+    isGenerating,
+    negativePrompt,
+    prompt,
+    sampleMethod,
+    scheduler,
+    seed,
+    selectedHistoryTask,
+    generationProgress,
+    setAdvancedOpen,
+    setCfgScale,
+    setFps,
+    setFrames,
+    setGuidance,
+    setHeightStr,
+    setHistoryDialogOpen,
+    setImmersivePreview,
+    setInitImageDataUri,
+    setNegativePrompt,
+    setPrompt,
+    setSampleMethod,
+    setScheduler,
+    setSelectedHistoryTask,
+    setSeed,
+    setSteps,
+    setStrength,
+    setWidthStr,
+    stageDescription,
+    stageStatus,
+    stageTitle,
+    steps,
+    strength,
+    videoPath,
+    widthStr,
+    widthValue,
+    openHistoryDetail,
+    openHistoryVideoInWorkspace,
+    refillFromHistory,
+    toggleHistoryComparison,
+  };
+}

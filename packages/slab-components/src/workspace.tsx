@@ -49,7 +49,7 @@ export function MetricCard({
           </CardTitle>
         </div>
         {Icon ? (
-          <div className="flex size-11 items-center justify-center rounded-2xl bg-[var(--surface-soft)] text-muted-foreground">
+          <div className="flex size-11 items-center justify-center rounded-2xl bg-secondary text-muted-foreground">
             <Icon className="size-5" />
           </div>
         ) : null}
@@ -141,7 +141,7 @@ export function UploadDropzone({
     <button
       type={type}
       className={cn(
-        "focus-ring workspace-soft-panel flex w-full flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-border/70 px-5 py-8 text-center transition duration-[var(--dur-180)] ease-out-expo hover:border-[color:var(--brand-teal)] hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_5%,var(--surface-soft))] disabled:pointer-events-none disabled:opacity-60",
+        "focus-ring workspace-soft-panel flex w-full flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-border/70 px-5 py-8 text-center transition duration-180 ease-out-expo hover:border-primary hover:bg-primary/5 disabled:pointer-events-none disabled:opacity-60",
         className
       )}
       {...props}
@@ -149,7 +149,7 @@ export function UploadDropzone({
       {preview ? (
         <div className="w-full overflow-hidden rounded-xl">{preview}</div>
       ) : (
-        <div className="flex size-14 items-center justify-center rounded-2xl bg-[var(--surface-1)] text-muted-foreground">
+        <div className="flex size-14 items-center justify-center rounded-2xl bg-card text-muted-foreground">
           <UploadCloud className="size-6" />
         </div>
       )}
@@ -220,7 +220,7 @@ export function CompactConfigSummary({
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {items.map((item) => (
-          <div key={item.label} className="space-y-1 rounded-2xl bg-[var(--surface-1)] px-4 py-3">
+          <div key={item.label} className="space-y-1 rounded-2xl bg-card px-4 py-3">
             <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
               {item.label}
             </p>

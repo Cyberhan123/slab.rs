@@ -1,0 +1,27 @@
+[package]
+name = "slab-exec-policy"
+version.workspace = true
+edition.workspace = true
+description = "Unified permission decision engine for slab agent tools"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+slab-sandboxing = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+ts-rs = { workspace = true, features = ["serde-json-impl", "no-serde-warnings"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+dashmap = { workspace = true }
+ring = { workspace = true }
+dunce = { workspace = true }
+globset = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }

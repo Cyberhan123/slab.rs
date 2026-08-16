@@ -1,4 +1,5 @@
 export const header = {
+  history: '打开对话历史',
   select: {
     loadingOptions: '正在加载选项...',
     selectOption: '选择选项',

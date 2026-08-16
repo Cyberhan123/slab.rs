@@ -206,24 +206,11 @@ pub enum ApplyPatchToolCallType {
 
 /// ApplyPatchToolParam : Allows the assistant to create, delete, or update files using unified diffs.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ApplyPatchToolParam {
-    /// The type of the tool. Always `apply_patch`.
-    #[serde(rename = "type")]
-    pub r#type: ApplyPatchToolParamType,
-}
+pub struct ApplyPatchToolParam {}
 
 impl ApplyPatchToolParam {
     /// Allows the assistant to create, delete, or update files using unified diffs.
-    pub fn new(r#type: ApplyPatchToolParamType) -> ApplyPatchToolParam {
-        ApplyPatchToolParam { r#type }
+    pub fn new() -> ApplyPatchToolParam {
+        ApplyPatchToolParam {}
     }
-}
-/// The type of the tool. Always `apply_patch`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum ApplyPatchToolParamType {
-    #[serde(rename = "apply_patch")]
-    #[default]
-    ApplyPatch,
 }

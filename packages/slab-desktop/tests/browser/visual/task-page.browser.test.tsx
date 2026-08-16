@@ -1,21 +1,16 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import TaskPage from '@/pages/task';
-import type { Task } from '@/pages/task/const';
+import TaskPage from '@slab/ui/pages/task';
+import type { Task } from '@slab/ui/pages/task/const';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseTaskList } = vi.hoisted(() => ({
   mockUseTaskList: vi.fn<() => unknown>(),
 }));
 
-vi.mock('@/pages/task/hooks/use-task-list', () => ({
+vi.mock('@slab/ui/pages/task/hooks/use-task-list', () => ({
   useTaskList: mockUseTaskList,
-}));
-
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderControl: vi.fn<() => void>(),
 }));
 
 vi.mock('@slab/i18n', () => ({

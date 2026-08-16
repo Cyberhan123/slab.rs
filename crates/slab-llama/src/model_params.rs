@@ -49,8 +49,14 @@ impl LlamaModelParams {
         let mut params = unsafe { lib.llama_model_default_params() };
         params.n_gpu_layers = self.n_gpu_layers;
         params.vocab_only = self.vocab_only;
-        params.use_mmap = self.use_mmap;
-        params.use_mlock = self.use_mlock;
+        // Upstream replaced the `use_mmap`/`use_mlock` booleans with a single
+        // `llama_load_mode` enum; translate the legacy flags to the closest mode.
+        params.load_mode = match (self.use_mmap, self.use_mlock) {
+            (true, true) => slab_llama_sys::llama_load_mode_LLAMA_LOAD_MODE_MMAP_MLOCK,
+            (true, false) => slab_llama_sys::llama_load_mode_LLAMA_LOAD_MODE_MMAP,
+            (false, true) => slab_llama_sys::llama_load_mode_LLAMA_LOAD_MODE_MLOCK,
+            (false, false) => slab_llama_sys::llama_load_mode_LLAMA_LOAD_MODE_NONE,
+        };
         params
     }
 }

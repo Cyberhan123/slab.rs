@@ -32,6 +32,16 @@ pub enum LlamaError {
     #[error("decode failed with code {0}")]
     DecodeFailed(i32),
 
+    /// The composed prompt + completion would exceed the model's context window.
+    ///
+    /// Distinct from `DecodeFailed(1)` so callers can react (e.g. compact the
+    /// conversation and retry). Raised proactively before decode once the KV
+    /// cache can no longer hold `n_past + needed` tokens.
+    #[error(
+        "context capacity exceeded: needed {needed} tokens, {n_past} already in cache, context_length={context_length}"
+    )]
+    ContextCapacityExceeded { needed: usize, n_past: usize, context_length: usize },
+
     /// Token-to-piece conversion failed.
     #[error("token to piece conversion failed with code {0}")]
     TokenToPieceFailed(i32),
@@ -39,6 +49,10 @@ pub enum LlamaError {
     /// Chat template application failed.
     #[error("chat template application failed with code {0}")]
     ChatTemplateApplyFailed(i32),
+
+    /// Model quantization failed (llama.cpp processed zero layers).
+    #[error("llama model quantization failed")]
+    QuantizeFailed,
 
     /// Batch is full - cannot add more tokens.
     #[error("batch is full, cannot add more tokens")]

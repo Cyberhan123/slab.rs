@@ -152,6 +152,9 @@ fn load_config(settings: &SettingsDocument) -> PmidConfig {
                 num_workers: resolve_backend_concurrency(settings, RuntimeBackend::Whisper),
                 flash_attn: settings.runtime.ggml.backends.whisper.flash_attn,
             },
+            parakeet: RuntimeWorkerConfig {
+                num_workers: resolve_backend_concurrency(settings, RuntimeBackend::Parakeet),
+            },
             diffusion: RuntimeWorkerConfig {
                 num_workers: resolve_backend_concurrency(settings, RuntimeBackend::Diffusion),
             },
@@ -365,8 +368,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
         SettingsSectionView {
             id: "telemetry".to_owned(),
             title: "Telemetry".to_owned(),
-            description_md: "OpenTelemetry export, local telemetry files, and GenAI content capture."
-                .to_owned(),
+            description_md: "OpenTelemetry provider assembly, local/remote export, and GenAI content capture. The agent trace bundle is controlled separately by agent.debug.".to_owned(),
             i18n: None,
             subsections: vec![SettingsSubsectionView {
                 id: "general".to_owned(),
@@ -509,8 +511,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
         SettingsSectionView {
             id: "agent".to_owned(),
             title: "Agent".to_owned(),
-            description_md: "Agent tool configuration used by built-in deterministic tools."
-                .to_owned(),
+            description_md: "Agent tools, runtime, hooks, and diagnostics. agent.debug also controls the trace bundle written under logs/agent_trace/.".to_owned(),
             i18n: None,
             subsections: vec![
                 SettingsSubsectionView {
@@ -849,6 +850,7 @@ fn section_location(path: &str) -> (&'static str, &'static str) {
         _ if path.starts_with("telemetry.") => ("telemetry", "general"),
         _ if path.starts_with("tools.ffmpeg.") => ("tools", "ffmpeg"),
         "agent.debug" => ("agent", "general"),
+        "agent.sleep_inhibitor" => ("agent", "general"),
         _ if path.starts_with("agent.tools.mcp.") => ("agent", "mcp"),
         _ if path.starts_with("agent.tools.websearch.") => ("agent", "websearch"),
         _ if path.starts_with("agent.hooks.") => ("agent", "hooks"),
@@ -1037,7 +1039,10 @@ fn string_map_json_schema(title: &str, title_key: ServerI18nKey) -> Value {
 }
 
 pub fn change_effect_for(path: &str) -> SettingChangeEffect {
-    if path.starts_with("agent.hooks.") || path.starts_with("agent.memories.") {
+    if path.starts_with("agent.hooks.")
+        || path.starts_with("agent.memories.")
+        || path == "agent.sleep_inhibitor"
+    {
         return SettingChangeEffect::Live;
     }
 
@@ -1417,6 +1422,7 @@ fn property_label(path: &str) -> String {
         "runtime.launch.desktop.bind_host" => "Desktop Runtime Bind Host".to_owned(),
         "runtime.launch.desktop.base_port" => "Desktop Runtime Base Port".to_owned(),
         "agent.debug" => "Agent Debug Trace".to_owned(),
+        "agent.sleep_inhibitor" => "Keep Awake During Turns".to_owned(),
         "agent.hooks.enabled" => "External Hooks".to_owned(),
         "agent.hooks.scripts" => "Legacy Hook Scripts".to_owned(),
         "agent.memories.enabled" => "Agent Memories".to_owned(),
@@ -1466,7 +1472,7 @@ fn property_description(path: &str) -> String {
         "logging.json" => "Emit newline-delimited JSON logs by default.".to_owned(),
         "logging.path" => "Optional directory used for persisted log files.".to_owned(),
         "telemetry.enabled" => {
-            "Enable program-managed local telemetry export and session telemetry.".to_owned()
+            "Assemble and enable the OpenTelemetry provider for local/remote trace, log, and metric export. Independent of the agent trace bundle, which is controlled by agent.debug.".to_owned()
         }
         "telemetry.environment" => "Deployment environment attached to telemetry resources.".to_owned(),
         "telemetry.service_name" => "OpenTelemetry service.name resource value.".to_owned(),
@@ -1485,7 +1491,10 @@ fn property_description(path: &str) -> String {
         "tools.ffmpeg.auto_download" => "Download FFmpeg automatically when it is missing.".to_owned(),
         "tools.ffmpeg.install_dir" => "Optional install directory for the FFmpeg sidecar.".to_owned(),
         "agent.debug" => {
-            "Write full-fidelity per-session agent trace files for prompt, tool, and runtime debugging.".to_owned()
+            "Enable agent diagnostics: full-fidelity per-session agent trace files plus the per-root-thread trace bundle written under logs/agent_trace/. Independent of telemetry.enabled.".to_owned()
+        }
+        "agent.sleep_inhibitor" => {
+            "Prevent the computer from sleeping while an agent turn is in progress.".to_owned()
         }
         "agent.hooks.enabled" => {
             "Enable external agent lifecycle hooks registered by plugins or legacy local script settings. Built-in hooks are unaffected.".to_owned()
@@ -1646,6 +1655,7 @@ fn property_label_key(path: &str) -> Option<ServerI18nKey> {
             Some(ServerI18nKey::SettingsPropertyLabelSessionStateDirectory)
         }
         "agent.debug" => Some(ServerI18nKey::SettingsPropertyLabelAgentDebugTrace),
+        "agent.sleep_inhibitor" => Some(ServerI18nKey::SettingsPropertyLabelAgentSleepInhibitor),
         "agent.hooks.enabled" => Some(ServerI18nKey::SettingsPropertyLabelExternalHooks),
         "agent.hooks.scripts" => Some(ServerI18nKey::SettingsPropertyLabelLegacyHookScripts),
         "agent.memories.enabled" => Some(ServerI18nKey::SettingsPropertyLabelAgentMemories),
@@ -1784,6 +1794,9 @@ fn property_description_key(path: &str) -> Option<ServerI18nKey> {
             Some(ServerI18nKey::SettingsPropertyDescriptionFfmpegInstallDir)
         }
         "agent.debug" => Some(ServerI18nKey::SettingsPropertyDescriptionAgentDebugTrace),
+        "agent.sleep_inhibitor" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionAgentSleepInhibitor)
+        }
         "agent.hooks.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionExternalHooks),
         "agent.hooks.scripts" => Some(ServerI18nKey::SettingsPropertyDescriptionLegacyHookScripts),
         "agent.memories.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionAgentMemories),
@@ -1971,6 +1984,7 @@ fn provider_registry_entry_to_cloud_provider(entry: &ProviderRegistryEntry) -> C
 enum RuntimeBackend {
     Llama,
     Whisper,
+    Parakeet,
     Diffusion,
 }
 
@@ -1980,6 +1994,9 @@ fn resolve_backend_concurrency(settings: &SettingsDocument, backend: RuntimeBack
         RuntimeBackend::Llama => settings.runtime.ggml.backends.llama.capacity.concurrent_requests,
         RuntimeBackend::Whisper => {
             settings.runtime.ggml.backends.whisper.capacity.concurrent_requests
+        }
+        RuntimeBackend::Parakeet => {
+            settings.runtime.ggml.backends.parakeet.capacity.concurrent_requests
         }
         RuntimeBackend::Diffusion => {
             settings.runtime.ggml.backends.diffusion.capacity.concurrent_requests
@@ -2816,5 +2833,56 @@ mod tests {
         assert!(error.to_string().contains("missing.setting"));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn property_descriptions_decouple_agent_debug_from_telemetry() {
+        // Contract: agent.debug and telemetry.enabled are INDEPENDENT
+        // diagnostic switches, and each property description must state that
+        // independence AND cross-reference the other switch so the decoupling is
+        // visible at every surface. A revert to the old non-cross-referencing
+        // wording fails both halves of each assertion.
+        let agent_debug = property_description("agent.debug");
+        assert!(
+            agent_debug.to_lowercase().contains("independent"),
+            "agent.debug description must state independence: {agent_debug}"
+        );
+        assert!(
+            agent_debug.contains("telemetry.enabled"),
+            "agent.debug description must cross-reference telemetry.enabled: {agent_debug}"
+        );
+
+        let telemetry = property_description("telemetry.enabled");
+        assert!(
+            telemetry.to_lowercase().contains("independent"),
+            "telemetry.enabled description must state independence: {telemetry}"
+        );
+        assert!(
+            telemetry.contains("agent.debug"),
+            "telemetry.enabled description must cross-reference agent.debug: {telemetry}"
+        );
+    }
+
+    #[test]
+    fn telemetry_and_agent_section_descriptions_reference_the_other_switch() {
+        // The telemetry/agent section `description_md` must mirror the
+        // en-US i18n wording, which cross-references the other switch (restores
+        // the "description_md == en-US i18n value" invariant the other 8 sections
+        // already satisfy). A revert to the old standalone wording fails here.
+        let sections = empty_sections();
+        let telemetry =
+            sections.iter().find(|section| section.id == "telemetry").expect("telemetry section");
+        assert!(
+            telemetry.description_md.contains("agent.debug"),
+            "telemetry section description must cross-reference agent.debug: {}",
+            telemetry.description_md
+        );
+
+        let agent = sections.iter().find(|section| section.id == "agent").expect("agent section");
+        assert!(
+            agent.description_md.contains("trace bundle"),
+            "agent section description must mention the trace bundle: {}",
+            agent.description_md
+        );
     }
 }

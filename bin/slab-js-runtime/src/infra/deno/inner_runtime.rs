@@ -223,6 +223,14 @@ pub struct InnerRuntime<RT: RuntimeTrait> {
 
     pub cwd: PathBuf,
     pub default_entrypoint: Option<String>,
+    /// Owned tokio runtime, present only when this `InnerRuntime` was created
+    /// outside an ambient tokio context. `deno_core` 0.408 requires a tokio
+    /// runtime context (for V8 delayed tasks) at `JsRuntime` creation, so when
+    /// there is no ambient runtime we create one here, create the `JsRuntime`
+    /// within its context, and hold the runtime for the `InnerRuntime`'s
+    /// lifetime so the handle captured by V8 stays valid.
+    #[allow(dead_code)]
+    _tokio_runtime: Option<tokio::runtime::Runtime>,
 }
 impl<RT: RuntimeTrait> InnerRuntime<RT> {
     pub fn new(
@@ -270,18 +278,31 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
             }
         };
 
-        let mut deno_runtime = RT::try_new(deno_core::RuntimeOptions {
-            module_loader: Some(module_loader.clone()),
+        // deno_core 0.408 requires a tokio runtime context at `JsRuntime`
+        // creation (V8 posts delayed tasks needing a reactor). When there is no
+        // ambient runtime, own a current-thread one and create the isolate in
+        // its context; the runtime is held for the InnerRuntime's lifetime so
+        // V8's captured handle stays valid.
+        let owned_tokio_runtime = if tokio::runtime::Handle::try_current().is_err() {
+            Some(tokio::runtime::Builder::new_current_thread().enable_all().build()?)
+        } else {
+            None
+        };
+        let mut deno_runtime = {
+            let _tokio_guard = owned_tokio_runtime.as_ref().map(tokio::runtime::Runtime::enter);
+            RT::try_new(deno_core::RuntimeOptions {
+                module_loader: Some(module_loader.clone()),
 
-            extension_transpiler: Some(module_loader.as_extension_transpiler()),
-            create_params: isolate_params,
-            shared_array_buffer_store: options.shared_array_buffer_store.clone(),
+                extension_transpiler: Some(module_loader.as_extension_transpiler()),
+                create_params: isolate_params,
+                shared_array_buffer_store: options.shared_array_buffer_store.clone(),
 
-            startup_snapshot: options.startup_snapshot,
-            extensions,
+                startup_snapshot: options.startup_snapshot,
+                extensions,
 
-            ..Default::default()
-        })?;
+                ..Default::default()
+            })?
+        };
 
         deno_runtime
             .rt_mut()
@@ -309,7 +330,13 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
         }
 
         let default_entrypoint = options.default_entrypoint;
-        Ok(Self { module_loader, deno_runtime, cwd, default_entrypoint })
+        Ok(Self {
+            module_loader,
+            deno_runtime,
+            cwd,
+            default_entrypoint,
+            _tokio_runtime: owned_tokio_runtime,
+        })
     }
 
     /// Destroy the `RustyScript` runtime, returning the deno RT instance
@@ -978,64 +1005,71 @@ mod test_inner_runtime {
 
     #[test]
     fn test_register_function() {
-        let mut runtime =
-            InnerRuntime::<JsRuntime>::new(RuntimeOptions::default(), CancellationToken::new())
-                .expect("Could not load runtime");
-        runtime
-            .register_function("test", sync_callback!(|a: i64, b: i64| { Ok::<i64, Error>(a + b) }))
-            .expect("Could not register function");
-
-        run_async_task(|| async move {
-            let v = runtime.eval("rustyscript.functions.test(2, 3)").await.expect("failed to eval");
-            assert_v8!(v, 5, usize, runtime);
-            Ok(())
+        run_async_task(|| {
+            let mut runtime =
+                InnerRuntime::<JsRuntime>::new(RuntimeOptions::default(), CancellationToken::new())
+                    .expect("Could not load runtime");
+            runtime
+                .register_function(
+                    "test",
+                    sync_callback!(|a: i64, b: i64| { Ok::<i64, Error>(a + b) }),
+                )
+                .expect("Could not register function");
+            async move {
+                let v =
+                    runtime.eval("rustyscript.functions.test(2, 3)").await.expect("failed to eval");
+                assert_v8!(v, 5, usize, runtime);
+                Ok(())
+            }
         });
     }
 
     #[cfg(any(feature = "web", feature = "web_stub"))]
     #[test]
     fn test_eval() {
-        let mut runtime =
-            InnerRuntime::<JsRuntime>::new(RuntimeOptions::default(), CancellationToken::new())
-                .expect("Could not load runtime");
+        run_async_task(|| {
+            let mut runtime =
+                InnerRuntime::<JsRuntime>::new(RuntimeOptions::default(), CancellationToken::new())
+                    .expect("Could not load runtime");
+            async move {
+                let v = runtime.eval("2 + 2").await.expect("failed to eval");
+                assert_v8!(v, 4, usize, runtime);
+                let result = runtime
+                    .eval(
+                        "
+                    let sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+                    sleep(500).then(() => 2);
+                ",
+                    )
+                    .await
+                    .expect("failed to eval");
 
-        run_async_task(|| async move {
-            let v = runtime.eval("2 + 2").await.expect("failed to eval");
-            assert_v8!(v, 4, usize, runtime);
-            let result = runtime
-                .eval(
-                    "
-                let sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-                sleep(500).then(() => 2);
-            ",
-                )
-                .await
-                .expect("failed to eval");
+                let result: Promise<u32> =
+                    runtime.decode_value(result).expect("Could not decode promise");
 
-            let result: Promise<u32> =
-                runtime.decode_value(result).expect("Could not decode promise");
-
-            let result: u32 = result.resolve(runtime.deno_runtime()).await?;
-            assert_eq!(result, 2);
-            Ok(())
+                let result: u32 = result.resolve(runtime.deno_runtime()).await?;
+                assert_eq!(result, 2);
+                Ok(())
+            }
         });
     }
 
     #[cfg(feature = "web_stub")]
     #[test]
     fn test_base64() {
-        let mut runtime =
-            InnerRuntime::<JsRuntime>::new(RuntimeOptions::default(), CancellationToken::new())
-                .expect("Could not load runtime");
+        run_async_task(|| {
+            let mut runtime =
+                InnerRuntime::<JsRuntime>::new(RuntimeOptions::default(), CancellationToken::new())
+                    .expect("Could not load runtime");
+            async move {
+                let result = runtime.eval("btoa('foo')").await.expect("failed to eval");
+                assert_v8!(result, "Zm9v", String, runtime);
 
-        run_async_task(|| async move {
-            let result = runtime.eval("btoa('foo')").await.expect("failed to eval");
-            assert_v8!(result, "Zm9v", String, runtime);
+                let result = runtime.eval("atob(btoa('foo'))").await.expect("failed to eval");
+                assert_v8!(result, "foo", String, runtime);
 
-            let result = runtime.eval("atob(btoa('foo'))").await.expect("failed to eval");
-            assert_v8!(result, "foo", String, runtime);
-
-            Ok(())
+                Ok(())
+            }
         });
     }
 
@@ -1296,50 +1330,50 @@ mod test_inner_runtime {
 
     #[test]
     fn test_serialize_deep_fn() {
-        let module = Module::new(
-            "test.js",
-            "
-            let a = 2;
-            export const test = {
-                'name': 'test',
-                'func': (x) => x + a
+        run_async_task(|| {
+            let src_module = Module::new(
+                "test.js",
+                "
+                let a = 2;
+                export const test = {
+                    'name': 'test',
+                    'func': (x) => x + a
+                }
+            ",
+            );
+            let mut runtime =
+                InnerRuntime::<JsRuntime>::new(RuntimeOptions::default(), CancellationToken::new())
+                    .expect("Could not load runtime");
+            async move {
+                let module = runtime.load_modules(Some(&src_module), vec![]).await?;
+
+                #[derive(Deserialize)]
+                #[allow(clippy::items_after_statements)]
+                struct TestStruct {
+                    #[allow(dead_code)]
+                    name: String,
+                    func: Function,
+                }
+
+                let structure = runtime.get_value_ref(Some(&module), "test").unwrap();
+                let structure: TestStruct =
+                    runtime.decode_value(structure).expect("Could not deserialize");
+
+                let isolate = runtime.deno_runtime().v8_isolate();
+                let function = structure.func.as_global(isolate);
+
+                let value = runtime
+                    .call_function_by_ref(Some(&module), &function, json_args!(2))
+                    .expect("could not call function");
+                assert_v8!(value, 4, usize, runtime);
+
+                let value = runtime
+                    .call_function_by_ref(Some(&module), &function, json_args!(3))
+                    .expect("could not call function twice");
+                assert_v8!(value, 5, usize, runtime);
+
+                Ok(())
             }
-        ",
-        );
-
-        let mut runtime =
-            InnerRuntime::<JsRuntime>::new(RuntimeOptions::default(), CancellationToken::new())
-                .expect("Could not load runtime");
-
-        let rt = &mut runtime;
-        let module = run_async_task(|| async move { rt.load_modules(Some(&module), vec![]).await });
-
-        #[derive(Deserialize)]
-        #[allow(clippy::items_after_statements)]
-        struct TestStruct {
-            #[allow(dead_code)]
-            name: String,
-            func: Function,
-        }
-
-        let structure = runtime.get_value_ref(Some(&module), "test").unwrap();
-        let structure: TestStruct = runtime.decode_value(structure).expect("Could not deserialize");
-
-        let isolate = runtime.deno_runtime().v8_isolate();
-        let function = structure.func.as_global(isolate);
-
-        run_async_task(|| async move {
-            let value = runtime
-                .call_function_by_ref(Some(&module), &function, json_args!(2))
-                .expect("could not call function");
-            assert_v8!(value, 4, usize, runtime);
-
-            let value = runtime
-                .call_function_by_ref(Some(&module), &function, json_args!(3))
-                .expect("could not call function twice");
-            assert_v8!(value, 5, usize, runtime);
-
-            Ok(())
         });
     }
 
@@ -1378,35 +1412,35 @@ mod test_inner_runtime {
 
     #[test]
     fn test_serialize_fn() {
-        let module = Module::new(
-            "test.js",
-            "
-            export const test = (x) => 2*x;
-        ",
-        );
+        run_async_task(|| {
+            let src_module = Module::new(
+                "test.js",
+                "
+                export const test = (x) => 2*x;
+            ",
+            );
+            let mut runtime =
+                InnerRuntime::<JsRuntime>::new(RuntimeOptions::default(), CancellationToken::new())
+                    .expect("Could not load runtime");
+            async move {
+                let module = runtime.load_modules(Some(&src_module), vec![]).await?;
 
-        let mut runtime =
-            InnerRuntime::<JsRuntime>::new(RuntimeOptions::default(), CancellationToken::new())
-                .expect("Could not load runtime");
+                let function = runtime
+                    .get_function_by_name(Some(&module), "test")
+                    .expect("Could not get function");
 
-        let rt = &mut runtime;
-        let module = run_async_task(|| async move { rt.load_modules(Some(&module), vec![]).await });
+                let value = runtime
+                    .call_function_by_ref(Some(&module), &function, json_args!(2))
+                    .expect("could not call function");
+                assert_v8!(value, 4, usize, runtime);
 
-        let function =
-            runtime.get_function_by_name(Some(&module), "test").expect("Could not get function");
+                let value = runtime
+                    .call_function_by_ref(None, &function, json_args!(2))
+                    .expect("could not call function");
+                assert_v8!(value, 4, usize, runtime);
 
-        run_async_task(|| async move {
-            let value = runtime
-                .call_function_by_ref(Some(&module), &function, json_args!(2))
-                .expect("could not call function");
-            assert_v8!(value, 4, usize, runtime);
-
-            let value = runtime
-                .call_function_by_ref(None, &function, json_args!(2))
-                .expect("could not call function");
-            assert_v8!(value, 4, usize, runtime);
-
-            Ok(())
+                Ok(())
+            }
         });
     }
 }

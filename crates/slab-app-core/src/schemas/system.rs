@@ -162,3 +162,95 @@ impl From<slab_utils::diagnostics::FailedToolCall> for FailedToolCallResponse {
         Self { tool_name: call.tool_name, error: call.error }
     }
 }
+
+/// One resident model's ledger entry (diagnostics). The ledger is
+/// attribution — probe-measured free bytes remain the decision input.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GpuLedgerEntryResponse {
+    /// Backend canonical id, e.g. "ggml.llama".
+    pub backend: String,
+    /// Model id when the load was dispatched for a catalog model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    /// Model weights file path as loaded.
+    pub model_path: String,
+    pub num_workers: usize,
+    /// Engine-resolved `n_ctx` (what `auto` sized to), when reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_context_length: Option<u32>,
+    /// Whether a multimodal projector is resident alongside the model.
+    pub mmproj_resident: bool,
+    /// Weights file size in bytes (best-effort stat).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weights_bytes: Option<u64>,
+    /// Projector file size in bytes (best-effort stat).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mmproj_bytes: Option<u64>,
+    /// Measured free-VRAM delta across the load (probe before vs after).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measured_delta_bytes: Option<u64>,
+    /// RFC3339 timestamp of the recorded load.
+    pub recorded_at: String,
+}
+
+/// Probe gauge folded into a ledger row. `free = total − used` (all-smi
+/// reports no free; the scheduler derives it).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GpuLedgerGaugeResponse {
+    pub used_bytes: u64,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+}
+
+/// Per-device ledger: last-synced gauge + resident model entries.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GpuLedgerDeviceResponse {
+    pub uuid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gauge: Option<GpuLedgerGaugeResponse>,
+    pub resident: Vec<GpuLedgerEntryResponse>,
+}
+
+/// Resident-model memory ledger exposed at `/v1/system/gpu/ledger`
+/// (diagnostics-only; the `/v1/system/gpu` response shape stays frozen).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GpuLedgerResponse {
+    pub devices: Vec<GpuLedgerDeviceResponse>,
+}
+
+impl From<slab_gpu_memory_scheduler::LedgerEntry> for GpuLedgerEntryResponse {
+    fn from(entry: slab_gpu_memory_scheduler::LedgerEntry) -> Self {
+        Self {
+            backend: entry.backend.to_string(),
+            model_id: entry.model_id,
+            model_path: entry.model_path,
+            num_workers: entry.num_workers,
+            resolved_context_length: entry.resolved_context_length,
+            mmproj_resident: entry.mmproj_resident,
+            weights_bytes: entry.weights_bytes,
+            mmproj_bytes: entry.mmproj_bytes,
+            measured_delta_bytes: entry.measured_delta_bytes,
+            recorded_at: entry.recorded_at.to_rfc3339(),
+        }
+    }
+}
+
+impl From<slab_gpu_memory_scheduler::DeviceMemoryGauge> for GpuLedgerGaugeResponse {
+    fn from(gauge: slab_gpu_memory_scheduler::DeviceMemoryGauge) -> Self {
+        Self {
+            used_bytes: gauge.used_bytes,
+            total_bytes: gauge.total_bytes,
+            free_bytes: gauge.free_bytes(),
+        }
+    }
+}
+
+impl From<slab_gpu_memory_scheduler::DeviceLedger> for GpuLedgerDeviceResponse {
+    fn from(device: slab_gpu_memory_scheduler::DeviceLedger) -> Self {
+        Self {
+            uuid: device.uuid,
+            gauge: device.gauge.map(Into::into),
+            resident: device.resident.into_iter().map(Into::into).collect(),
+        }
+    }
+}

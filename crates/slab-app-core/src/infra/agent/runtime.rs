@@ -1,24 +1,42 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use slab_agent::{AgentControl, AgentHook, ToolRouter};
+use slab_agent::{AgentHook, AgentRuntime, ToolRouter};
+use slab_agent_rollout::RolloutFileStore;
 use slab_config::AgentMemoriesConfig;
 
 use crate::context::ModelState;
 use crate::domain::services::{PluginService, workspace_root_from_config};
 use crate::error::AppCoreError;
 
+use super::rollout_store::RolloutBackedAgentStore;
+
 #[derive(Clone)]
 pub(crate) struct AgentRuntimeReloader {
     state: ModelState,
-    control: Arc<AgentControl>,
+    runtime: AgentRuntime,
     tool_router: Arc<ToolRouter>,
+    /// Shared rollout true source so a reloaded memory pipeline reads
+    /// the SAME rollout files the live agent runtime writes. Retained for
+    /// `rollout_path` stamping; the conversation itself is read via
+    /// `rollout_store` (the production read path).
+    rollout: Arc<RolloutFileStore>,
+    /// Shared rollout-backed store (the production read path). A reloaded memory
+    /// pipeline reads the conversation through this — the SAME
+    /// `read_thread_messages` path the runtime uses — so the memory model and
+    /// the runtime never diverge (closes the G5 orphan window for memory).
+    rollout_store: Arc<RolloutBackedAgentStore>,
 }
 
 impl AgentRuntimeReloader {
-    pub(crate) fn new(state: ModelState, control: Arc<AgentControl>) -> Self {
-        let tool_router = control.tool_router();
-        Self { state, control, tool_router }
+    pub(crate) fn new(
+        state: ModelState,
+        runtime: AgentRuntime,
+        rollout: Arc<RolloutFileStore>,
+        rollout_store: Arc<RolloutBackedAgentStore>,
+    ) -> Self {
+        let tool_router = runtime.tool_router();
+        Self { state, runtime, tool_router, rollout, rollout_store }
     }
 
     pub(crate) async fn reload(&self) -> Result<(), AppCoreError> {
@@ -44,7 +62,7 @@ impl AgentRuntimeReloader {
                 hooks.push(script_hook);
             }
         }
-        self.control.replace_hooks(hooks);
+        self.runtime.replace_hooks(hooks);
 
         // B-7: register a `plugin__<id>__<cap>` proxy for every Tool-kind
         // capability of enabled plugins. Uses a READ-ONLY manifest scan (no
@@ -86,7 +104,6 @@ impl AgentRuntimeReloader {
             workspace_root,
             extra_roots,
         )));
-        super::a2u_tools::register_builtin_a2u_tools(&self.tool_router);
     }
 
     fn internal_memory_hooks(
@@ -94,19 +111,34 @@ impl AgentRuntimeReloader {
         memory_config: AgentMemoriesConfig,
         memory_root: PathBuf,
     ) -> Vec<Arc<dyn AgentHook>> {
+        let workspace_root = workspace_root_from_config(self.state.config());
         let memory_pipeline = crate::infra::agent::memory::AgentMemoryPipeline::new(
             Arc::clone(self.state.store()),
+            Arc::clone(&self.rollout),
+            Arc::clone(&self.rollout_store),
+            workspace_root,
             Arc::new(self.state.clone()),
             memory_config.clone(),
             memory_root.clone(),
         );
-        memory_pipeline.set_control(Arc::clone(&self.control));
+        memory_pipeline.set_control(self.runtime.control());
+        let shell = crate::infra::agent::context::shell_kind(
+            self.state.pmid().config().agent.tools.shell.launcher,
+        );
+        let exec_policy = self.runtime.control().exec_policy();
+        // The memory read-side instruction is folded into the context hook
+        // (AppContextSources::memory_context); only the write-side pipeline stays.
         vec![
-            Arc::new(slab_agent_memories::hooks::MemoryInstructionHook::new(
-                memory_config.enabled,
-                memory_root,
-            )),
             Arc::new(crate::infra::agent::memory::AgentMemoryStartupHook::new(memory_pipeline)),
+            Arc::new(slab_agent_context::ContextInstructionHook::new(Arc::new(
+                crate::infra::agent::context::AppContextSources::new(
+                    self.state.clone(),
+                    shell,
+                    exec_policy,
+                    memory_config.enabled,
+                    memory_root,
+                ),
+            ))),
         ]
     }
 }

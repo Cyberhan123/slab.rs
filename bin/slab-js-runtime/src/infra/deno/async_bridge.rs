@@ -29,8 +29,8 @@ impl TokioRuntime {
     ///
     /// This runs the given future on the current thread, blocking until it is complete, and yielding its resolved result. Any tasks or timers which the future spawns internally will be executed on the runtime.
     ///
-    /// When this is used on a `current_thread` runtime, only the [`Runtime::block_on`] method can drive the IO and timer drivers, but the `Handle::block_on` method cannot drive them.
-    /// This means that, when using this method on a `current_thread` runtime, anything that relies on IO or timers will not work unless there is another thread currently calling [`Runtime::block_on`] on the same runtime.
+    /// When this is used on a `current_thread` runtime, only the `Runtime::block_on` method can drive the IO and timer drivers, but the `Handle::block_on` method cannot drive them.
+    /// This means that, when using this method on a `current_thread` runtime, anything that relies on IO or timers will not work unless there is another thread currently calling `Runtime::block_on` on the same runtime.
     pub fn block_on<F, T>(&self, f: F) -> T
     where
         F: std::future::Future<Output = T>,
@@ -88,6 +88,22 @@ impl AsyncBridge {
     #[must_use]
     pub fn tokio_runtime(&self) -> TokioRuntime {
         self.tokio.clone()
+    }
+
+    /// Enter the owned tokio runtime's context for the duration of the returned
+    /// guard. Returns `None` for the borrowed variant, where the caller is
+    /// already inside a tokio runtime context (that's how the handle was
+    /// obtained).
+    ///
+    /// `deno_core` 0.408 requires a tokio runtime context when a `JsRuntime` is
+    /// created — V8 posts delayed tasks that need a reactor, and creating the
+    /// isolate outside a tokio context fast-fails. The sync `Runtime`
+    /// constructors enter the owned runtime around `JsRuntime` creation.
+    pub fn enter(&self) -> Option<tokio::runtime::EnterGuard<'_>> {
+        match &self.tokio {
+            TokioRuntime::Owned(rt) => Some(rt.enter()),
+            TokioRuntime::Borrowed(_) => None,
+        }
     }
 
     /// Destroy instance, releasing all resources

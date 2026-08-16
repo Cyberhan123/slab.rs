@@ -1,6 +1,10 @@
 import { existsSync } from "node:fs";
 
-export function cargoEnv(options: { disableTauriExternalBins?: boolean; rustWarningsAsErrors?: boolean } = {}) {
+export function cargoEnv(options: {
+  disableTauriExternalBins?: boolean;
+  rustWarningsAsErrors?: boolean;
+  rustdocWarningsAsErrors?: boolean;
+} = {}) {
   const env = { ...process.env };
   if (options.disableTauriExternalBins) {
     env.TAURI_CONFIG = tauriConfigWithDisabledExternalBins(env.TAURI_CONFIG);
@@ -16,11 +20,18 @@ export function cargoEnv(options: { disableTauriExternalBins?: boolean; rustWarn
   if (options.rustWarningsAsErrors) {
     appendRustflags(env, "-D warnings");
   }
+  if (options.rustdocWarningsAsErrors) {
+    appendRustdocflags(env, "-D warnings");
+  }
   return env;
 }
 
 function appendRustflags(env: NodeJS.ProcessEnv, flag: string) {
   env.RUSTFLAGS = env.RUSTFLAGS ? `${env.RUSTFLAGS} ${flag}` : flag;
+}
+
+function appendRustdocflags(env: NodeJS.ProcessEnv, flag: string) {
+  env.RUSTDOCFLAGS = env.RUSTDOCFLAGS ? `${env.RUSTDOCFLAGS} ${flag}` : flag;
 }
 
 function tauriConfigWithDisabledExternalBins(existing: string | undefined) {

@@ -9,21 +9,23 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
+use chrono::Utc;
 use slab_agent_tracing::{AgentTraceSink, NoopAgentTraceSink};
-use slab_types::{ConversationMessage, ConversationMessageContent};
+use slab_types::ConversationMessage;
+use uuid::Uuid;
 
 use crate::{
     compact::{CompactPort, SlidingWindowCompactPort},
     concurrency_gate::ConcurrencyGate,
     config::AgentConfig,
     error::AgentError,
-    event::{AgentEventKind, AgentResponseRef},
     hook::{AgentHook, AgentHookRegistry},
-    port::{AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadStatus},
+    port::{AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadSnapshot, ThreadStatus},
+    protocol::{EventMsg, Turn, TurnAbortedParams},
     risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
     state::ThreadStateMachine,
     thread::{AgentThread, AgentThreadRuntime},
-    tool::{AgentThreadContext, ToolRouter},
+    tool::{AgentThreadContext, ToolDiscoveryState, ToolRouter},
 };
 
 // ── Internal handle stored per active thread ─────────────────────────────────
@@ -42,8 +44,15 @@ struct SpawnRequest {
     config: AgentConfig,
     messages: Vec<ConversationMessage>,
     starting_turn_index: u32,
-    persist_messages_from: Option<usize>,
+    emit_from: Option<usize>,
 }
+
+/// Defensive upper bound on parent-chain walks (e.g. [`crate::thread::resolve_root_thread_id`]).
+/// Well beyond any realistic `max_depth` (default 4, configurable per config) —
+/// the only purpose is to terminate deterministically if a persisted parent
+/// chain were ever cyclic or malformed. Normal walks stop at the root in
+/// `depth` hops.
+pub(crate) const MAX_SPAWN_DEPTH_GUARD: u32 = 64;
 
 // ── AgentControl ─────────────────────────────────────────────────────────────
 
@@ -65,6 +74,9 @@ pub struct AgentControl {
     store: Arc<dyn AgentStorePort>,
     notify: Arc<dyn AgentNotifyPort>,
     approval: Arc<dyn ApprovalPort>,
+    exec_policy: Arc<dyn crate::port::ExecPolicyPort>,
+    agent_registry: Arc<dyn crate::agent::AgentRegistry>,
+    plan_store: Arc<dyn crate::port::PlanStorePort>,
     tool_router: Arc<ToolRouter>,
     hooks: AgentHookRegistry,
     compact: Arc<dyn CompactPort>,
@@ -146,6 +158,9 @@ impl AgentControl {
             store,
             notify,
             approval,
+            exec_policy: Arc::new(slab_exec_policy::AllowAllExecPolicy),
+            plan_store: Arc::new(crate::port::NoopPlanStore),
+            agent_registry: Arc::new(crate::agent::NoopAgentRegistry),
             tool_router,
             hooks: AgentHookRegistry::new(hooks),
             compact: Arc::new(SlidingWindowCompactPort::default()),
@@ -178,6 +193,9 @@ impl AgentControl {
             store,
             notify,
             approval,
+            exec_policy: Arc::new(slab_exec_policy::AllowAllExecPolicy),
+            plan_store: Arc::new(crate::port::NoopPlanStore),
+            agent_registry: Arc::new(crate::agent::NoopAgentRegistry),
             tool_router,
             hooks: AgentHookRegistry::default(),
             compact,
@@ -221,6 +239,45 @@ impl AgentControl {
         self
     }
 
+    /// Attach the unified permission decision engine. When unset, a permissive
+    /// [`slab_exec_policy::AllowAllExecPolicy`] stub is used (every operation
+    /// allowed, nothing persisted) — suitable for tests but not production.
+    pub fn with_exec_policy(mut self, port: Arc<dyn crate::port::ExecPolicyPort>) -> Self {
+        self.exec_policy = port;
+        self
+    }
+
+    /// Attach the context-compaction policy. When unset, a pure trailing-window
+    /// [`SlidingWindowCompactPort`] is used. Hosts that want LLM-summarizing
+    /// compaction inject their own [`CompactPort`] here.
+    pub fn with_compact(mut self, compact: Arc<dyn CompactPort>) -> Self {
+        self.compact = compact;
+        self
+    }
+
+    /// Attach the per-thread plan store backing Plan interaction mode. When
+    /// unset, a [`crate::port::NoopPlanStore`] stub is used (plans are not
+    /// persisted) — suitable for tests but not production. The host (app-core)
+    /// injects an in-memory per-thread store here.
+    pub fn with_plan_store(mut self, plan_store: Arc<dyn crate::port::PlanStorePort>) -> Self {
+        self.plan_store = plan_store;
+        self
+    }
+
+    /// Attach the built-in agent registry. When unset, a
+    /// [`crate::agent::NoopAgentRegistry`] stub is used — suitable for tests.
+    /// The host (app-core) injects a populated registry here.
+    pub fn with_agent_registry(mut self, registry: Arc<dyn crate::agent::AgentRegistry>) -> Self {
+        self.agent_registry = registry;
+        self
+    }
+
+    /// Access the agent registry (used by `delegate_subagent` to resolve
+    /// `agent_type` into a definition).
+    pub fn agent_registry(&self) -> Arc<dyn crate::agent::AgentRegistry> {
+        Arc::clone(&self.agent_registry)
+    }
+
     /// Spawn a root agent thread (depth 0).
     ///
     /// Returns the new thread's unique ID.
@@ -237,7 +294,7 @@ impl AgentControl {
             config,
             messages,
             starting_turn_index: 0,
-            persist_messages_from: Some(0),
+            emit_from: Some(0),
         })
         .await
     }
@@ -264,7 +321,7 @@ impl AgentControl {
             config,
             messages,
             starting_turn_index: 0,
-            persist_messages_from: Some(0),
+            emit_from: Some(0),
         })
         .await
     }
@@ -293,6 +350,109 @@ impl AgentControl {
             });
         }
         self.spawn_child(parent.session_id, parent.id, depth, config, messages).await
+    }
+
+    /// Fork a thread: create a child at `parent.depth + 1` whose persisted
+    /// history (messages + turn states) is cloned from the parent, without
+    /// running a new turn.
+    ///
+    /// The child is persisted with [`ThreadStatus::Pending`] and is not
+    /// registered as a live thread — a later `send_input` / first turn
+    /// materializes it, mirroring the lazy-spawn path. An optional
+    /// `model_override` replaces the parent's model on the cloned config.
+    /// Returns the new child thread id.
+    pub async fn fork_thread(
+        &self,
+        parent_thread_id: &str,
+        model_override: Option<String>,
+    ) -> Result<String, AgentError> {
+        let parent = self
+            .store
+            .get_thread(parent_thread_id)
+            .await?
+            .ok_or_else(|| AgentError::ThreadNotFound(parent_thread_id.to_owned()))?;
+        let mut config = serde_json::from_str::<AgentConfig>(&parent.config_json).map_err(|e| {
+            AgentError::Internal(format!("failed to deserialize parent agent config: {e}"))
+        })?;
+        if let Some(model) = model_override {
+            config.model = model;
+        }
+
+        let depth = parent.depth + 1;
+        if depth > config.max_depth {
+            return Err(AgentError::DepthLimitExceeded { current: depth, max: config.max_depth });
+        }
+
+        let now = Utc::now().to_rfc3339();
+        let child_id = Uuid::new_v4().to_string();
+        let child = ThreadSnapshot {
+            id: child_id.clone(),
+            session_id: parent.session_id.clone(),
+            parent_id: Some(parent.id.clone()),
+            depth,
+            status: ThreadStatus::Pending,
+            role_name: parent.role_name.clone(),
+            config_json: serde_json::to_string(&config).map_err(|e| {
+                AgentError::Internal(format!("failed to serialize fork config: {e}"))
+            })?,
+            completion_text: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            archived_at: None,
+        };
+        self.store.upsert_thread(&child).await?;
+
+        // NOTE: the parent's persisted history is NOT copied per-record here.
+        // Fork production goes through the harness wholesale `rewrite_session`
+        // path (see `HarnessService::fork_thread`), which snapshots the parent
+        // rollout file into the child in correct interleaved order. The previous
+        // per-record copy (messages → turn states → turn items through the store
+        // adapter) was dead: it batched every TurnContext before every TurnItem,
+        // breaking replay attribution, and was unconditionally overwritten by
+        // the wholesale rewrite. The now-unused store methods it depended on
+        // were removed (`list_turn_states` / `list_turn_items` / `insert_turn_item`).
+
+        Ok(child_id)
+    }
+
+    /// Apply (or clear) a built-in agent override for the next turn on a thread.
+    ///
+    /// Resolved from `TurnStartParams.agent_type`. When `def` is `Some`, the
+    /// thread's persisted [`AgentConfig`] is rewritten to carry the agent's
+    /// `agent_type` + `system_prompt` so the next `resume_thread` runs as that
+    /// agent (tool denylist via `allowed_tool_specs`, system prompt at turn 0).
+    /// When `def` is `None`, both are cleared so the thread runs as the default
+    /// agent. Re-applied every `turn_start` — this is the single chokepoint that
+    /// keeps a thread from sticking as the plan agent after a plan is approved.
+    pub async fn apply_agent_override(
+        &self,
+        thread_id: &str,
+        def: Option<&crate::agent::AgentDefinition>,
+    ) -> Result<(), AgentError> {
+        let snapshot = self
+            .store
+            .get_thread(thread_id)
+            .await?
+            .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+        let mut config =
+            serde_json::from_str::<AgentConfig>(&snapshot.config_json).map_err(|e| {
+                AgentError::Internal(format!("failed to deserialize agent config: {e}"))
+            })?;
+        match def {
+            Some(def) => {
+                config.agent_type = Some(def.agent_type.clone());
+                config.system_prompt = Some(def.system_prompt.clone());
+            }
+            None => {
+                config.agent_type = None;
+                config.system_prompt = None;
+            }
+        }
+        let config_json = serde_json::to_string(&config)
+            .map_err(|e| AgentError::Internal(format!("failed to serialize agent config: {e}")))?;
+        let updated = ThreadSnapshot { config_json, ..snapshot };
+        self.store.upsert_thread(&updated).await?;
+        Ok(())
     }
 
     /// Return a persisted thread snapshot.
@@ -327,8 +487,23 @@ impl AgentControl {
         self.wait_for_persisted_terminal_snapshot(thread_id).await
     }
 
-    /// Append user input to a persisted thread and run another agent turn.
-    pub async fn send_input(&self, thread_id: &str, content: String) -> Result<(), AgentError> {
+    /// Resume a persisted thread with a pre-built message history and run the
+    /// next turn.
+    ///
+    /// The conversation read + sort + max-turn + user-content append was hoisted
+    /// into the app-core caller (`AgentCore::send_input`); slab-agent
+    /// no longer reads conversation data (it leaves via the `EventMsg` protocol
+    /// only). This entry point receives the FULL message vec (history + the new
+    /// user message already appended), the `starting_turn_index`, and `emit_from`
+    /// — the index of the first NEW message to emit as `MessageAppended` before
+    /// the turn loop (the M5 within-turn attribution anchor).
+    pub async fn resume_thread(
+        &self,
+        thread_id: &str,
+        messages: Vec<ConversationMessage>,
+        starting_turn_index: u32,
+        emit_from: Option<usize>,
+    ) -> Result<(), AgentError> {
         if self.threads.read().await.contains_key(thread_id) {
             return Err(AgentError::ThreadBusy(thread_id.to_owned()));
         }
@@ -347,24 +522,6 @@ impl AgentControl {
         let config = serde_json::from_str::<AgentConfig>(&snapshot.config_json).map_err(|e| {
             AgentError::Internal(format!("failed to deserialize agent config: {e}"))
         })?;
-        let mut records = self.store.list_thread_messages(thread_id).await?;
-        records.sort_by(|left, right| {
-            left.turn_index
-                .cmp(&right.turn_index)
-                .then_with(|| left.created_at.cmp(&right.created_at))
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        let starting_turn_index =
-            records.iter().map(|record| record.turn_index).max().map_or(0, |index| index + 1);
-        let mut messages = records.into_iter().map(|record| record.message).collect::<Vec<_>>();
-        let persist_from = messages.len();
-        messages.push(ConversationMessage {
-            role: "user".to_owned(),
-            content: ConversationMessageContent::Text(content),
-            name: None,
-            tool_call_id: None,
-            tool_calls: vec![],
-        });
 
         let (thread, status_rx) = AgentThread::new_with_id(
             snapshot.id.clone(),
@@ -373,8 +530,7 @@ impl AgentControl {
             snapshot.depth,
             config,
         );
-        self.start_thread(thread, status_rx, messages, starting_turn_index, Some(persist_from))
-            .await?;
+        self.start_thread(thread, status_rx, messages, starting_turn_index, emit_from).await?;
         Ok(())
     }
 
@@ -428,21 +584,21 @@ impl AgentControl {
         state.transition(ThreadStatus::Interrupting)?;
         cancellation.cancel();
         self.notify.on_status_change(thread_id, ThreadStatus::Interrupting).await;
-        self.notify
-            .on_turn_event(
-                thread_id,
-                &crate::port::TurnEvent::Response {
-                    turn_index: None,
-                    event: AgentEventKind::ResponseCancelled {
-                        response: AgentResponseRef {
-                            id: thread_id.to_owned(),
-                            status: ThreadStatus::Interrupting,
-                        },
-                        reason: "interrupt requested".to_owned(),
-                    },
-                },
-            )
-            .await;
+        // Surface the interrupt on the harness protocol channel. `turn_index`
+        // is unknown here (no active turn context), so the turn id is the
+        // placeholder `"current"` — matching what the legacy projection derived
+        // from a `None` turn index. The authoritative `TurnAborted` is also
+        // emitted by the turn loop when it observes the cancellation.
+        let abort_msg = EventMsg::TurnAborted(TurnAbortedParams {
+            thread_id: thread_id.to_owned(),
+            turn: Turn {
+                id: "current".to_owned(),
+                items: Vec::new(),
+                status: "interrupted".to_owned(),
+                error: None,
+            },
+        });
+        self.notify.on_event_msg(thread_id, &abort_msg).await;
         self.store
             .update_thread_status(thread_id, ThreadStatus::Interrupting, Some("interrupting"))
             .await
@@ -483,6 +639,28 @@ impl AgentControl {
         Arc::clone(&self.tool_router)
     }
 
+    /// Set the per-session permission mode for a thread (flows from
+    /// `ThreadStartParams`/`TurnStartParams`). The engine keys mode by
+    /// `thread_id` so concurrent sessions on the singleton control don't race.
+    pub async fn set_thread_mode(&self, thread_id: &str, mode: slab_exec_policy::PermissionMode) {
+        self.exec_policy.set_thread_mode(thread_id, mode).await;
+    }
+
+    /// Drop per-thread state when the thread ends: the exec-policy permission
+    /// mode and the durable plan (plan store). Both are keyed by `thread_id`;
+    /// clearing here prevents cross-thread leakage on the process-wide singleton.
+    pub async fn clear_thread_mode(&self, thread_id: &str) {
+        self.exec_policy.clear_thread(thread_id).await;
+        self.plan_store.clear(thread_id).await;
+    }
+
+    /// The shared exec-policy handle. Hosts use it to snapshot permission state
+    /// for context rendering (e.g. the `<permissions_instructions>` fragment and
+    /// progressive tool exposure) without re-deriving the engine.
+    pub fn exec_policy(&self) -> Arc<dyn crate::port::ExecPolicyPort> {
+        Arc::clone(&self.exec_policy)
+    }
+
     // ── private helpers ──────────────────────────────────────────────────────
 
     async fn spawn_inner(&self, request: SpawnRequest) -> Result<String, AgentError> {
@@ -493,12 +671,11 @@ impl AgentControl {
             config,
             messages,
             starting_turn_index,
-            persist_messages_from,
+            emit_from,
         } = request;
 
         let (thread, status_rx) = AgentThread::new(session_id, parent_id, depth, config);
-        self.start_thread(thread, status_rx, messages, starting_turn_index, persist_messages_from)
-            .await
+        self.start_thread(thread, status_rx, messages, starting_turn_index, emit_from).await
     }
 
     async fn start_thread(
@@ -507,7 +684,7 @@ impl AgentControl {
         status_rx: watch::Receiver<ThreadStatus>,
         messages: Vec<ConversationMessage>,
         starting_turn_index: u32,
-        persist_messages_from: Option<usize>,
+        emit_from: Option<usize>,
     ) -> Result<String, AgentError> {
         // Memory circuit breaker (INFRA-05): pause spawns while the host reports
         // process RSS above the configured threshold.
@@ -529,6 +706,9 @@ impl AgentControl {
         let store = Arc::clone(&self.store);
         let notify = Arc::clone(&self.notify);
         let approval = Arc::clone(&self.approval);
+        let exec_policy = Arc::clone(&self.exec_policy);
+        let plan_store = Arc::clone(&self.plan_store);
+        let agent_registry = Arc::clone(&self.agent_registry);
         let tools = Arc::clone(&self.tool_router);
         let hooks = self.hooks.clone();
         let compact = Arc::clone(&self.compact);
@@ -544,7 +724,11 @@ impl AgentControl {
             store,
             notify,
             approval,
+            exec_policy,
+            agent_registry,
+            plan_store,
             tools,
+            tool_discovery: ToolDiscoveryState::new(),
             hooks,
             compact,
             risk,
@@ -560,8 +744,7 @@ impl AgentControl {
         // into the task and dropped on completion or abort.
         let join_handle = tokio::spawn(async move {
             let _permit = permit;
-            let result =
-                thread.run(messages, runtime, starting_turn_index, persist_messages_from).await;
+            let result = thread.run(messages, runtime, starting_turn_index, emit_from).await;
             if let Err(ref e) = result {
                 warn!(thread_id = %id_cleanup, error = %e, "agent thread finished with error");
             }

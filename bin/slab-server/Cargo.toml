@@ -17,8 +17,11 @@ path = "src/main.rs"
 
 [dependencies]
 # Core AI runtime
-slab-agent        = { workspace = true }
-slab-app-core     = { workspace = true, features = ["axum"] }
+slab-agent         = { workspace = true }
+slab-agent-context = { workspace = true }
+slab-app-core      = { workspace = true, features = ["axum"] }
+slab-cloud-provider = { workspace = true }
+slab-proto        = { workspace = true }
 slab-runtime-core = { workspace = true }
 slab-types        = { workspace = true }
 slab-jsonrpc      = { workspace = true }

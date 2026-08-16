@@ -13,9 +13,11 @@ pub struct ModelState {
     runtime: Arc<dyn RuntimeInferenceGateway>,
     runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
     model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
+    gpu_scheduler: Arc<slab_gpu_memory_scheduler::GpuMemoryScheduler>,
 }
 
 impl ModelState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Arc<crate::context::AppConfig>,
         pmid: Arc<crate::domain::services::PmidService>,
@@ -24,8 +26,18 @@ impl ModelState {
         runtime: Arc<dyn RuntimeInferenceGateway>,
         runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
+        gpu_scheduler: Arc<slab_gpu_memory_scheduler::GpuMemoryScheduler>,
     ) -> Self {
-        Self { config, pmid, store, grpc, runtime, runtime_status, model_auto_unload }
+        Self {
+            config,
+            pmid,
+            store,
+            grpc,
+            runtime,
+            runtime_status,
+            model_auto_unload,
+            gpu_scheduler,
+        }
     }
 
     pub fn config(&self) -> &Arc<crate::context::AppConfig> {
@@ -54,5 +66,9 @@ impl ModelState {
 
     pub fn auto_unload(&self) -> &Arc<crate::model_auto_unload::ModelAutoUnloadManager> {
         &self.model_auto_unload
+    }
+
+    pub fn gpu_scheduler(&self) -> &Arc<slab_gpu_memory_scheduler::GpuMemoryScheduler> {
+        &self.gpu_scheduler
     }
 }

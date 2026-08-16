@@ -1,0 +1,143 @@
+import { MoreHorizontal, Trash2 } from "lucide-react"
+
+import { Badge } from "@slab/components/badge"
+import { Button } from "@slab/components/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@slab/components/dropdown-menu"
+import { ScrollArea } from "@slab/components/scroll-area"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@slab/components/sheet"
+import { useTranslation } from "@slab/i18n"
+import { cn } from "@slab/ui/lib/utils"
+
+type ConversationItem = {
+  key: string
+  label?: string
+  group?: string
+}
+
+type AssistantSessionSheetProps = {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  conversations: ConversationItem[]
+  currentConversation: string
+  activeConversation?: string
+  busy?: boolean
+  onSelect: (key: string) => void
+  onDelete: (key: string) => void
+}
+
+export function AssistantSessionSheet({
+  open,
+  onOpenChange,
+  conversations,
+  currentConversation,
+  activeConversation,
+  busy = false,
+  onSelect,
+  onDelete,
+}: AssistantSessionSheetProps) {
+  const { t } = useTranslation()
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        data-testid="assistant-session-sheet"
+        className="w-full overflow-hidden border-l border-border/60 bg-card p-0 sm:max-w-xl"
+      >
+        <SheetHeader className="shrink-0 border-b border-border/60 px-6 py-5 pr-14">
+          <div className="space-y-1">
+            <SheetTitle className="text-xl">{t("pages.assistant.sessionSheet.title")}</SheetTitle>
+            <SheetDescription>
+              {t("pages.assistant.sessionSheet.description")}
+            </SheetDescription>
+          </div>
+        </SheetHeader>
+
+        <ScrollArea className="min-h-0 flex-1 overflow-hidden">
+          <div className="space-y-3 px-6 py-5">
+            {conversations.map((conversation) => {
+              const isCurrent = conversation.key === currentConversation
+              const isActive = conversation.key === activeConversation
+
+              return (
+                <div
+                  key={conversation.key}
+                  data-testid={`assistant-session-row-${conversation.key}`}
+                  className={cn(
+                    "workspace-soft-panel flex items-center gap-3 rounded-2xl px-4 py-3",
+                    isCurrent && "border-primary bg-primary/10"
+                  )}
+                >
+                  <button
+                    type="button"
+                    disabled={busy}
+                    data-testid={`assistant-session-select-${conversation.key}`}
+                    className="flex min-w-0 flex-1 flex-col items-start text-left"
+                    onClick={() => onSelect(conversation.key)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <p className="truncate font-medium">
+                        {conversation.label ?? t("pages.assistant.runtime.newChat")}
+                      </p>
+                      {isCurrent ? (
+                        <Badge variant="chip">{t("pages.assistant.sessionSheet.current")}</Badge>
+                      ) : null}
+                      {isActive ? <Badge variant="chip">{t("pages.assistant.sessionSheet.live")}</Badge> : null}
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {conversation.group ?? t("pages.assistant.runtime.workspace")}
+                    </p>
+                  </button>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="quiet"
+                        size="icon-sm"
+                        className="rounded-full"
+                        disabled={busy}
+                        data-testid={`assistant-session-actions-${conversation.key}`}
+                      >
+                        <span className="sr-only">{t("pages.assistant.sessionSheet.open")}</span>
+                        <MoreHorizontal className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="rounded-2xl border-border/70">
+                      <DropdownMenuItem
+                        disabled={busy}
+                        data-testid={`assistant-session-open-${conversation.key}`}
+                        onClick={() => onSelect(conversation.key)}
+                      >
+                        {t("pages.assistant.sessionSheet.open")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={busy}
+                        variant="destructive"
+                        data-testid={`assistant-session-delete-${conversation.key}`}
+                        onClick={() => onDelete(conversation.key)}
+                      >
+                        <Trash2 className="size-4" />
+                        {t("pages.assistant.sessionSheet.delete")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              )
+            })}
+          </div>
+        </ScrollArea>
+      </SheetContent>
+    </Sheet>
+  )
+}

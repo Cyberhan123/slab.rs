@@ -240,9 +240,6 @@ pub enum ToolSearchOutputItemParamType {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchToolParam {
-    /// The type of the tool. Always `tool_search`.
-    #[serde(rename = "type")]
-    pub r#type: ToolSearchToolParamType,
     /// Whether tool search is executed by the server or by the client.
     #[serde(rename = "execution", skip_serializing_if = "Option::is_none")]
     pub execution: Option<models::ToolSearchExecutionType>,
@@ -266,16 +263,7 @@ pub struct ToolSearchToolParam {
 
 impl ToolSearchToolParam {
     /// Hosted or BYOT tool search configuration for deferred tools.
-    pub fn new(r#type: ToolSearchToolParamType) -> ToolSearchToolParam {
-        ToolSearchToolParam { r#type, execution: None, description: None, parameters: None }
+    pub fn new() -> ToolSearchToolParam {
+        ToolSearchToolParam { execution: None, description: None, parameters: None }
     }
-}
-/// The type of the tool. Always `tool_search`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum ToolSearchToolParamType {
-    #[serde(rename = "tool_search")]
-    #[default]
-    ToolSearch,
 }

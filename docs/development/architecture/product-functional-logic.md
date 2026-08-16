@@ -91,7 +91,7 @@
 - React 19 with TypeScript
 - Vite for build tooling
 - TanStack Query for state management
-- Ant Design, @ant-design/x, and shared Slab UI components
+- Shared Slab UI components built from shadcn-style primitives, Tailwind CSS 4, and Radix UI/Base UI
 - openapi-fetch for type-safe API calls
 - sonner for toast notifications
 

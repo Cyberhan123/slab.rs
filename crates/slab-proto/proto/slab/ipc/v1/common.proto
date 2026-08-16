@@ -65,4 +65,5 @@ message ModelStatusResponse {
   string status = 2;
   optional uint32 context_length = 3;
   optional uint32 training_context_length = 4;
+  optional string chat_template = 5;
 }

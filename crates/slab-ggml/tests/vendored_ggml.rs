@@ -96,7 +96,11 @@ fn vendored_ggml_can_load_cpu_backend_directly() {
 
 #[test]
 fn ggml_list_backends() {
-    // let _guard = GGML_TEST_LOCK.lock().unwrap();
+    // Same native-DLL contention guard as the other tests in this file — keeps
+    // `cargo test --workspace` from loading/unloading ggml backends from the
+    // same vendored path concurrently across these tests (the in-process Mutex
+    // serializes them; it does not protect against cross-process parallelism).
+    let _guard = GGML_TEST_LOCK.lock().unwrap();
     let ggml = load_vendored_ggml();
 
     ggml.load_all_backend_from_path(&vendored_runtime_dir().to_string_lossy())

@@ -220,12 +220,9 @@ impl InnerImgParams {
         if let Some(ref_images) = value.ref_images.clone() {
             inner.set_ref_images(ref_images);
         }
-        if let Some(auto_resize_ref_image) = value.auto_resize_ref_image {
-            inner.set_auto_resize_ref_image(auto_resize_ref_image);
-        }
-        if let Some(increase_ref_index) = value.increase_ref_index {
-            inner.set_increase_ref_index(increase_ref_index);
-        }
+        // NOTE: `auto_resize_ref_image` / `increase_ref_index` were removed from
+        // upstream `sd_img_gen_params_t`; the public `ImgParams` options are still
+        // accepted for API stability but no longer map to a native field.
         if value.mask_image.is_some() {
             inner.set_mask_image(value.mask_image.clone());
         }
@@ -369,14 +366,6 @@ impl InnerImgParams {
         self.fp.ref_images_count = self.c_ref_images.len().min(i32::MAX as usize) as i32;
     }
 
-    fn set_auto_resize_ref_image(&mut self, auto_resize: bool) {
-        self.fp.auto_resize_ref_image = auto_resize;
-    }
-
-    fn set_increase_ref_index(&mut self, increase: bool) {
-        self.fp.increase_ref_index = increase;
-    }
-
     fn set_mask_image(&mut self, mask: Option<Image>) {
         self.mask_image = mask;
         self.fp.mask_image = self.mask_image.as_ref().map_or_else(empty_image, image_view);
@@ -430,10 +419,6 @@ impl InnerImgParams {
     fn set_cache(&mut self, cache: InnerCacheParams) {
         self.cache = Some(cache);
         self.sync_cache();
-    }
-
-    pub(crate) fn get_batch_count(&self) -> i32 {
-        self.fp.batch_count
     }
 }
 

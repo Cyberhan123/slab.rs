@@ -204,18 +204,22 @@ impl ModelStore for AnyStore {
             Some(config_state) => {
                 let updated_at = config_state.updated_at.to_rfc3339();
                 sqlx::query(
-                    "INSERT INTO model_config_state (model_id, selected_preset_id, selected_variant_id, selected_engine_id, updated_at) \
-                     VALUES (?1, ?2, ?3, ?4, ?5) \
+                    "INSERT INTO model_config_state (model_id, selected_preset_id, selected_variant_id, selected_engine_id, load_overrides, inference_overrides, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
                      ON CONFLICT(model_id) DO UPDATE SET \
                         selected_preset_id = excluded.selected_preset_id, \
                         selected_variant_id = excluded.selected_variant_id, \
                         selected_engine_id = excluded.selected_engine_id, \
+                        load_overrides = excluded.load_overrides, \
+                        inference_overrides = excluded.inference_overrides, \
                         updated_at = excluded.updated_at",
                 )
                 .bind(&config_state.model_id)
                 .bind(&config_state.selected_preset_id)
                 .bind(&config_state.selected_variant_id)
                 .bind(&config_state.selected_engine_id)
+                .bind(&config_state.load_overrides)
+                .bind(&config_state.inference_overrides)
                 .bind(&updated_at)
                 .execute(&mut *tx)
                 .await?;
@@ -334,8 +338,11 @@ mod tests {
         .await
         .expect("insert model");
 
+        // The `remove_models_provider` migration was folded into the initial
+        // schema by d84606f8; inline the statements so this regression guard no
+        // longer depends on the deleted migration file.
         for statement in
-            include_str!("../../../../migrations/20260530000000_remove_models_provider.sql")
+            "DROP INDEX IF EXISTS idx_models_provider;\n\nALTER TABLE models DROP COLUMN provider;\n"
                 .split(';')
                 .map(str::trim)
                 .filter(|statement| !statement.is_empty())
@@ -515,6 +522,8 @@ mod tests {
             selected_preset_id: Some("preset-a".to_owned()),
             selected_variant_id: Some("variant-a".to_owned()),
             selected_engine_id: None,
+            load_overrides: None,
+            inference_overrides: None,
             updated_at: now,
         };
 

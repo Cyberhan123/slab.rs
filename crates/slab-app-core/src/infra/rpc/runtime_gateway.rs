@@ -10,9 +10,10 @@ use tonic::transport::Channel;
 use crate::domain::ports::{
     RuntimeBackendStatus, RuntimeDiffusionImageRequest, RuntimeDiffusionImageResult,
     RuntimeDiffusionVideoRequest, RuntimeDiffusionVideoResult, RuntimeInferenceGateway,
-    RuntimeTextGenerationChunk, RuntimeTextGenerationRequest, RuntimeTextGenerationResponse,
-    RuntimeTranscriptionDecodeOptions, RuntimeTranscriptionRequest, RuntimeTranscriptionResult,
-    RuntimeTranscriptionVadOptions, RuntimeTranscriptionVadParams,
+    RuntimeQuantizeRequest, RuntimeQuantizeResult, RuntimeTextGenerationChunk,
+    RuntimeTextGenerationRequest, RuntimeTextGenerationResponse, RuntimeTranscriptionDecodeOptions,
+    RuntimeTranscriptionRequest, RuntimeTranscriptionResult, RuntimeTranscriptionVadOptions,
+    RuntimeTranscriptionVadParams,
 };
 use crate::error::AppCoreError;
 use crate::error::AppCoreErrorData;
@@ -60,8 +61,10 @@ impl RuntimeInferenceGateway for GrpcRuntimeInferenceGateway {
             RuntimeBackendId::GgmlLlama => {
                 let channel = self.channel(backend_id)?;
                 let grpc_request = runtime_protocol::encode_chat_request(&request);
-                let response =
-                    client::chat(channel, grpc_request).await.map_err(map_runtime_error("chat"))?;
+                let response = retry_on_session_busy("chat", || {
+                    client::chat(channel.clone(), grpc_request.clone())
+                })
+                .await?;
                 Ok(runtime_protocol::decode_chat_response(&response))
             }
             RuntimeBackendId::CandleLlama => {
@@ -86,9 +89,10 @@ impl RuntimeInferenceGateway for GrpcRuntimeInferenceGateway {
             RuntimeBackendId::GgmlLlama => {
                 let channel = self.channel(backend_id)?;
                 let grpc_request = runtime_protocol::encode_chat_request(&request);
-                let stream = client::chat_stream(channel, grpc_request)
-                    .await
-                    .map_err(map_runtime_error("chat stream"))?;
+                let stream = retry_on_session_busy("chat stream", || {
+                    client::chat_stream(channel.clone(), grpc_request.clone())
+                })
+                .await?;
                 Ok(stream
                     .map(|chunk| {
                         chunk
@@ -128,6 +132,14 @@ impl RuntimeInferenceGateway for GrpcRuntimeInferenceGateway {
                         .await
                         .map_err(map_runtime_error("transcribe"))?;
                 Ok(runtime_protocol::decode_whisper_transcription_response(&response))
+            }
+            RuntimeBackendId::GgmlParakeet => {
+                let channel = self.channel(backend_id)?;
+                let response =
+                    client::parakeet_transcribe(channel, pb_parakeet_request_from_runtime(request))
+                        .await
+                        .map_err(map_runtime_error("transcribe"))?;
+                Ok(runtime_protocol::decode_parakeet_transcription_response(&response))
             }
             RuntimeBackendId::CandleWhisper => {
                 let channel = self.channel(backend_id)?;
@@ -214,6 +226,33 @@ impl RuntimeInferenceGateway for GrpcRuntimeInferenceGateway {
             .map_err(map_runtime_error("unload model"))?;
         runtime_status_from_pb(response)
     }
+
+    async fn quantize_model(
+        &self,
+        request: RuntimeQuantizeRequest,
+    ) -> Result<RuntimeQuantizeResult, AppCoreError> {
+        let backend_id = RuntimeBackendId::GgmlLlama;
+        let channel = self.channel(backend_id)?;
+        let grpc_request = pb::GgmlLlamaQuantizeRequest {
+            input_path: Some(request.input_path),
+            output_path: Some(request.output_path),
+            ftype: Some(request.ftype),
+            nthread: request.nthread,
+            allow_requantize: request.allow_requantize,
+            quantize_output_tensor: request.quantize_output_tensor,
+            only_copy: request.only_copy,
+            pure: request.pure,
+            keep_split: request.keep_split,
+            dry_run: request.dry_run,
+        };
+        let response = client::quantize_model(channel, grpc_request)
+            .await
+            .map_err(map_runtime_error("quantize model"))?;
+        Ok(RuntimeQuantizeResult {
+            layers_processed: response.layers_processed.unwrap_or(0),
+            output_path: response.output_path.unwrap_or_default(),
+        })
+    }
 }
 
 fn map_runtime_error(action: &'static str) -> impl Fn(anyhow::Error) -> AppCoreError {
@@ -238,6 +277,40 @@ fn map_runtime_error(action: &'static str) -> impl Fn(anyhow::Error) -> AppCoreE
             );
         }
         AppCoreError::Internal(format!("grpc {action} failed: {error:#}"))
+    }
+}
+
+/// Run `op`, retrying on transient "session key busy" runtime errors.
+///
+/// The ggml.llama backend keys kv-cache sessions per agent and reports the key
+/// as busy/already-active if a second inference for the same key arrives while
+/// the previous one is still being torn down. This surfaces as rapid
+/// back-to-back inference after an auto-allowed (non-approval-gating) tool such
+/// as `plan` — unlike shell, whose approval gate inserts a delay that masks the
+/// race. The busy state is transient (the prior inference just finished), so a
+/// short bounded exponential backoff retries through it instead of failing the
+/// turn. Non-busy errors are surfaced immediately via [`map_runtime_error`].
+async fn retry_on_session_busy<F, Fut, T>(action: &'static str, op: F) -> Result<T, AppCoreError>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, anyhow::Error>>,
+{
+    const MAX_ATTEMPTS: usize = 5;
+    let mut backoff = std::time::Duration::from_millis(50);
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match op().await {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                if session_busy_detail(&error).is_some() && attempt < MAX_ATTEMPTS {
+                    tokio::time::sleep(backoff).await;
+                    backoff *= 2;
+                    continue;
+                }
+                return Err(map_runtime_error(action)(error));
+            }
+        }
     }
 }
 
@@ -323,21 +396,7 @@ fn is_memory_pressure_error(error: &anyhow::Error) -> bool {
     let Some(status) = error.chain().find_map(|cause| cause.downcast_ref::<tonic::Status>()) else {
         return false;
     };
-    let message = status.message().trim().to_ascii_lowercase();
-    let mentions_memory = [
-        "out of memory",
-        "not enough memory",
-        "insufficient memory",
-        "memory allocation",
-        "memory",
-        "oom",
-        "vram",
-        "cudaerrormemoryallocation",
-    ]
-    .iter()
-    .any(|needle| message.contains(needle));
-
-    mentions_memory
+    slab_gpu_memory_scheduler::is_oom_message(status.message())
         && matches!(
             status.code(),
             tonic::Code::ResourceExhausted | tonic::Code::Internal | tonic::Code::Unknown
@@ -383,6 +442,27 @@ fn pb_candle_whisper_request_from_runtime(
     request: RuntimeTranscriptionRequest,
 ) -> pb::CandleWhisperTranscribeRequest {
     pb::CandleWhisperTranscribeRequest { path: Some(request.path) }
+}
+
+fn pb_parakeet_request_from_runtime(
+    request: RuntimeTranscriptionRequest,
+) -> pb::GgmlParakeetTranscribeRequest {
+    pb::GgmlParakeetTranscribeRequest {
+        path: Some(request.path),
+        decode: request.decode.map(pb_parakeet_decode_options_from_runtime),
+    }
+}
+
+fn pb_parakeet_decode_options_from_runtime(
+    value: RuntimeTranscriptionDecodeOptions,
+) -> pb::GgmlParakeetDecodeOptions {
+    pb::GgmlParakeetDecodeOptions {
+        offset_ms: value.offset_ms,
+        duration_ms: value.duration_ms,
+        no_context: value.no_context,
+        audio_ctx: None,
+        n_threads: None,
+    }
 }
 
 fn pb_whisper_vad_options_from_runtime(
@@ -484,5 +564,62 @@ mod tests {
             matches!(&error, AppCoreError::Conflict(message) if message.contains("session key")),
             "unexpected error: {error}"
         );
+    }
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn session_busy_status() -> anyhow::Error {
+        anyhow::Error::new(tonic::Status::new(
+            tonic::Code::ResourceExhausted,
+            "backend busy: ggml.llama session key 'agent:test' is busy",
+        ))
+    }
+
+    #[tokio::test]
+    async fn retry_on_session_busy_succeeds_after_transient_failures() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_clone = Arc::clone(&attempts);
+        let result: Result<u32, AppCoreError> = retry_on_session_busy("chat", move || {
+            let attempts = Arc::clone(&attempts_clone);
+            async move {
+                let n = attempts.fetch_add(1, Ordering::SeqCst);
+                if n < 2 { Err(session_busy_status()) } else { Ok(7u32) }
+            }
+        })
+        .await;
+        assert_eq!(result.unwrap(), 7);
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn retry_on_session_busy_surfaces_conflict_after_max_attempts() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_clone = Arc::clone(&attempts);
+        let result: Result<u32, AppCoreError> = retry_on_session_busy("chat", move || {
+            let attempts = Arc::clone(&attempts_clone);
+            async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Err(session_busy_status())
+            }
+        })
+        .await;
+        assert!(matches!(result, Err(AppCoreError::Conflict(_))));
+        assert_eq!(attempts.load(Ordering::SeqCst), 5);
+    }
+
+    #[tokio::test]
+    async fn retry_on_session_busy_does_not_retry_non_busy_errors() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_clone = Arc::clone(&attempts);
+        let result: Result<u32, AppCoreError> = retry_on_session_busy("chat", move || {
+            let attempts = Arc::clone(&attempts_clone);
+            async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Err(anyhow::Error::new(tonic::Status::internal("unrelated failure")))
+            }
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 }

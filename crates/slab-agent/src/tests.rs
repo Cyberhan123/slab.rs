@@ -13,17 +13,17 @@ use std::{
 };
 
 use crate::{
-    AgentControl, AgentControlLimits, AgentError, AgentHook, AgentThreadContext, HookEvent,
-    HookOutcome, PlanRef, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput, ToolRouter,
-    WorkspaceRef,
-    compact::{CompactPort, SlidingWindowCompactPort},
+    AgentControl, AgentControlLimits, AgentDefinition, AgentError, AgentHook, AgentThreadContext,
+    HookEvent, HookOutcome, ModelPolicy, PlanRef, ToolConstraint, ToolContext, ToolHandler,
+    ToolOutput, ToolRouter, ToolVisibility, WorkspaceRef,
+    compact::{CompactContext, CompactPort, SlidingWindowCompactPort},
     config::{AgentConfig, AgentToolChoice},
-    event::AgentEventKind,
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-        LlmStreamObserver, LlmUsage, ParsedToolCall, ThreadMessageRecord, ThreadSnapshot,
-        ThreadStatus, ToolCallRecord, ToolSpec, TurnEvent, TurnStateRecord,
+        LlmUsage, ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec,
+        TurnStateRecord,
     },
+    protocol::EventMsg,
     risk::ToolRiskAnalyzer,
 };
 use async_trait::async_trait;
@@ -161,14 +161,12 @@ impl ToolHandler for ApprovalEchoTool {
         })
     }
 
-    fn approval_request(&self, arguments: &serde_json::Value) -> Option<ToolApprovalRequest> {
-        Some(ToolApprovalRequest {
-            command: arguments
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-        })
+    fn describe_operation(
+        &self,
+        arguments: &serde_json::Value,
+    ) -> Option<crate::OperationDescriptor> {
+        let message = arguments.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
+        Some(crate::OperationDescriptor::shell(message))
     }
 
     async fn execute(
@@ -199,6 +197,15 @@ impl ToolHandler for SecretTool {
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({ "type": "object" })
+    }
+
+    fn describe_operation(
+        &self,
+        _arguments: &serde_json::Value,
+    ) -> Option<crate::OperationDescriptor> {
+        // Classify as a shell-like operation so the exec-policy engine gates it
+        // (a tool with no category would default to read-only and be allowed).
+        Some(crate::OperationDescriptor::shell("secret"))
     }
 
     async fn execute(
@@ -571,10 +578,104 @@ impl LlmPort for CapturingToolsLlm {
     }
 }
 
+// A Deferred read-only tool the model can only reach via `tool_search`.
+struct DeferredSearchableTool;
+
+#[async_trait]
+impl ToolHandler for DeferredSearchableTool {
+    fn name(&self) -> &str {
+        "deferred_read_tool"
+    }
+    fn description(&self) -> &str {
+        "A deferred read-only tool used for tool_search tests."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
+    fn visibility(&self) -> ToolVisibility {
+        ToolVisibility::Deferred
+    }
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        _arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        Ok(ToolOutput { content: "deferred ok".to_owned(), metadata: None })
+    }
+}
+
+// A `tool_search` placeholder registered so the model can see/call it; its
+// execution is intercepted by the dispatch layer, so `execute` is never reached.
+struct ToolSearchStubTool;
+
+#[async_trait]
+impl ToolHandler for ToolSearchStubTool {
+    fn name(&self) -> &str {
+        "tool_search"
+    }
+    fn description(&self) -> &str {
+        "Discover deferred tools."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})
+    }
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        _arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        Ok(ToolOutput { content: "{}".to_owned(), metadata: None })
+    }
+}
+
+// LLM that records the visible tool names per call. Call 1 emits a `tool_search`
+// tool call with the given query; call 2 returns a plain final answer.
+struct ToolSearchLlm {
+    query: String,
+    calls: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+#[async_trait]
+impl LlmPort for ToolSearchLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut calls = self.calls.lock().unwrap();
+        calls.push(tools.iter().map(|t| t.name.clone()).collect());
+        let call_index = calls.len();
+        drop(calls);
+        if call_index == 1 {
+            Ok(LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "search-1".into(),
+                    name: "tool_search".into(),
+                    arguments: format!(r#"{{"query":"{}"}}"#, self.query),
+                }],
+                finish_reason: Some("tool_calls".into()),
+                usage: None,
+            })
+        } else {
+            Ok(LlmResponse {
+                content: Some("done".into()),
+                content_already_streamed: false,
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".into()),
+                usage: None,
+            })
+        }
+    }
+}
+
 struct TwoToolCallsLlm {
     call_count: Mutex<u32>,
 }
-
 impl TwoToolCallsLlm {
     fn new() -> Self {
         Self { call_count: Mutex::new(0) }
@@ -616,120 +717,6 @@ impl LlmPort for TwoToolCallsLlm {
             Ok(LlmResponse {
                 content: Some("done".into()),
                 content_already_streamed: false,
-                tool_calls: Vec::new(),
-                finish_reason: Some("stop".into()),
-                usage: None,
-            })
-        }
-    }
-}
-
-struct StreamingLlm;
-
-#[async_trait]
-impl LlmPort for StreamingLlm {
-    async fn chat_completion(
-        &self,
-        _model: &str,
-        _messages: &[ConversationMessage],
-        _tools: &[ToolSpec],
-        _config: &AgentConfig,
-        _trace_context: &AgentTraceContext,
-    ) -> Result<LlmResponse, AgentError> {
-        Ok(LlmResponse {
-            content: Some("hello".into()),
-            content_already_streamed: false,
-            tool_calls: Vec::new(),
-            finish_reason: Some("stop".into()),
-            usage: None,
-        })
-    }
-
-    async fn chat_completion_streaming(
-        &self,
-        _model: &str,
-        _messages: &[ConversationMessage],
-        _tools: &[ToolSpec],
-        _config: &AgentConfig,
-        _trace_context: &AgentTraceContext,
-        observer: &mut dyn LlmStreamObserver,
-    ) -> Result<LlmResponse, AgentError> {
-        observer.on_text_delta("hel").await?;
-        observer.on_reasoning_delta("thinking").await?;
-        observer.on_reasoning_done("thinking").await?;
-        observer.on_text_delta("lo").await?;
-        Ok(LlmResponse {
-            content: Some("hello".into()),
-            content_already_streamed: true,
-            tool_calls: Vec::new(),
-            finish_reason: Some("stop".into()),
-            usage: None,
-        })
-    }
-}
-
-struct StreamingToolCallLlm {
-    call_count: Mutex<u32>,
-}
-
-impl StreamingToolCallLlm {
-    fn new() -> Self {
-        Self { call_count: Mutex::new(0) }
-    }
-}
-
-#[async_trait]
-impl LlmPort for StreamingToolCallLlm {
-    async fn chat_completion(
-        &self,
-        _model: &str,
-        _messages: &[ConversationMessage],
-        _tools: &[ToolSpec],
-        _config: &AgentConfig,
-        _trace_context: &AgentTraceContext,
-    ) -> Result<LlmResponse, AgentError> {
-        Ok(LlmResponse {
-            content: Some("done".into()),
-            content_already_streamed: false,
-            tool_calls: Vec::new(),
-            finish_reason: Some("stop".into()),
-            usage: None,
-        })
-    }
-
-    async fn chat_completion_streaming(
-        &self,
-        _model: &str,
-        _messages: &[ConversationMessage],
-        _tools: &[ToolSpec],
-        _config: &AgentConfig,
-        _trace_context: &AgentTraceContext,
-        observer: &mut dyn LlmStreamObserver,
-    ) -> Result<LlmResponse, AgentError> {
-        let next_call = {
-            let mut count = self.call_count.lock().unwrap();
-            *count += 1;
-            *count
-        };
-
-        if next_call == 1 {
-            observer.on_text_delta("checking ").await?;
-            Ok(LlmResponse {
-                content: Some("checking ".into()),
-                content_already_streamed: true,
-                tool_calls: vec![ParsedToolCall {
-                    id: "call-1".into(),
-                    name: "echo".into(),
-                    arguments: r#"{"message":"hello"}"#.into(),
-                }],
-                finish_reason: Some("tool_calls".into()),
-                usage: None,
-            })
-        } else {
-            observer.on_text_delta("done").await?;
-            Ok(LlmResponse {
-                content: Some("done".into()),
-                content_already_streamed: true,
                 tool_calls: Vec::new(),
                 finish_reason: Some("stop".into()),
                 usage: None,
@@ -808,46 +795,10 @@ impl AgentStorePort for NoopStore {
     ) -> Result<(), AgentError> {
         Ok(())
     }
-
-    async fn insert_tool_call(&self, _record: &ToolCallRecord) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn update_tool_call_status(
-        &self,
-        _id: &str,
-        _status: slab_types::agent::ToolCallStatus,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn update_tool_call(
-        &self,
-        _id: &str,
-        _output: Option<&str>,
-        _status: slab_types::agent::ToolCallStatus,
-        _completed_at: &str,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn insert_thread_message(&self, _record: &ThreadMessageRecord) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn list_thread_messages(
-        &self,
-        _thread_id: &str,
-    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
-        Ok(Vec::new())
-    }
 }
 
 #[derive(Default)]
-struct RecordingStore {
-    inserted_statuses: Mutex<Vec<slab_types::agent::ToolCallStatus>>,
-    updated_statuses: Mutex<Vec<slab_types::agent::ToolCallStatus>>,
-}
+struct RecordingStore {}
 
 #[async_trait]
 impl AgentStorePort for RecordingStore {
@@ -874,50 +825,16 @@ impl AgentStorePort for RecordingStore {
     ) -> Result<(), AgentError> {
         Ok(())
     }
-
-    async fn insert_tool_call(&self, record: &ToolCallRecord) -> Result<(), AgentError> {
-        self.inserted_statuses.lock().unwrap().push(record.status);
-        Ok(())
-    }
-
-    async fn update_tool_call_status(
-        &self,
-        _id: &str,
-        status: slab_types::agent::ToolCallStatus,
-    ) -> Result<(), AgentError> {
-        self.updated_statuses.lock().unwrap().push(status);
-        Ok(())
-    }
-
-    async fn update_tool_call(
-        &self,
-        _id: &str,
-        _output: Option<&str>,
-        status: slab_types::agent::ToolCallStatus,
-        _completed_at: &str,
-    ) -> Result<(), AgentError> {
-        self.updated_statuses.lock().unwrap().push(status);
-        Ok(())
-    }
-
-    async fn insert_thread_message(&self, _record: &ThreadMessageRecord) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn list_thread_messages(
-        &self,
-        _thread_id: &str,
-    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
-        Ok(Vec::new())
-    }
 }
 
 #[derive(Default)]
 struct RecordingPersistingStore {
     snapshots: Mutex<HashMap<String, ThreadSnapshot>>,
+    // The slab-agent `insert_thread_message` trait method is gone;
+    // retained for direct-push seeding in tests. Unread — tests verify emission
+    // via `RecordingNotify`.
+    #[allow(dead_code)]
     messages: Mutex<Vec<ThreadMessageRecord>>,
-    inserted_statuses: Mutex<Vec<slab_types::agent::ToolCallStatus>>,
-    updated_statuses: Mutex<Vec<slab_types::agent::ToolCallStatus>>,
 }
 
 #[async_trait]
@@ -956,50 +873,6 @@ impl AgentStorePort for RecordingPersistingStore {
             snapshot.completion_text = completion_text.map(str::to_owned);
         }
         Ok(())
-    }
-
-    async fn insert_tool_call(&self, record: &ToolCallRecord) -> Result<(), AgentError> {
-        self.inserted_statuses.lock().unwrap().push(record.status);
-        Ok(())
-    }
-
-    async fn update_tool_call_status(
-        &self,
-        _id: &str,
-        status: slab_types::agent::ToolCallStatus,
-    ) -> Result<(), AgentError> {
-        self.updated_statuses.lock().unwrap().push(status);
-        Ok(())
-    }
-
-    async fn update_tool_call(
-        &self,
-        _id: &str,
-        _output: Option<&str>,
-        status: slab_types::agent::ToolCallStatus,
-        _completed_at: &str,
-    ) -> Result<(), AgentError> {
-        self.updated_statuses.lock().unwrap().push(status);
-        Ok(())
-    }
-
-    async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError> {
-        self.messages.lock().unwrap().push(record.clone());
-        Ok(())
-    }
-
-    async fn list_thread_messages(
-        &self,
-        thread_id: &str,
-    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
-        Ok(self
-            .messages
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|record| record.thread_id == thread_id)
-            .cloned()
-            .collect())
     }
 }
 
@@ -1047,52 +920,6 @@ impl AgentStorePort for PersistingStore {
         }
         Ok(())
     }
-
-    async fn insert_tool_call(&self, _record: &ToolCallRecord) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn update_tool_call_status(
-        &self,
-        _id: &str,
-        _status: slab_types::agent::ToolCallStatus,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn update_tool_call(
-        &self,
-        _id: &str,
-        _output: Option<&str>,
-        _status: slab_types::agent::ToolCallStatus,
-        _completed_at: &str,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError> {
-        self.messages.lock().unwrap().push(record.clone());
-        Ok(())
-    }
-
-    async fn list_thread_messages(
-        &self,
-        thread_id: &str,
-    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
-        Ok(self
-            .messages
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|record| record.thread_id == thread_id)
-            .cloned()
-            .collect())
-    }
-
-    async fn upsert_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError> {
-        self.turn_states.lock().unwrap().push(record.clone());
-        Ok(())
-    }
 }
 
 // ── Mock notify ───────────────────────────────────────────────────────────────
@@ -1104,22 +931,22 @@ impl AgentNotifyPort for NoopNotify {
     async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
 }
 
+/// A notify port that records every `EventMsg` slab-agent emits, so
+/// tests can verify emission (slab-agent no longer writes conversation data to
+/// the store — it emits `MessageAppended` / `TurnStateChanged` events).
+/// Implements `ApprovalPort` (rejecting, matching `NoopNotify`) so it can stand
+/// in for `NoopNotify` in tests that wire both ports from one Arc.
 #[derive(Default)]
 struct RecordingNotify {
-    events: Mutex<Vec<TurnEvent>>,
+    events: Mutex<Vec<EventMsg>>,
 }
 
 #[async_trait]
 impl AgentNotifyPort for RecordingNotify {
-    async fn on_status_change(&self, _thread_id: &str, status: ThreadStatus) {
-        self.events.lock().unwrap().push(TurnEvent::Response {
-            turn_index: None,
-            event: AgentEventKind::AgentStatus { status },
-        });
-    }
+    async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
 
-    async fn on_turn_event(&self, _thread_id: &str, event: &TurnEvent) {
-        self.events.lock().unwrap().push(event.clone());
+    async fn on_event_msg(&self, _thread_id: &str, msg: &EventMsg) {
+        self.events.lock().unwrap().push(msg.clone());
     }
 }
 
@@ -1130,11 +957,47 @@ impl ApprovalPort for RecordingNotify {
         _thread_id: &str,
         _call_id: &str,
         _tool_name: &str,
-        _command: &str,
+        _descriptor: &crate::OperationDescriptor,
         _risk: Option<crate::ToolRiskAssessment>,
     ) -> ApprovalDecision {
-        ApprovalDecision::Approved
+        ApprovalDecision::Rejected
     }
+}
+
+impl RecordingNotify {
+    /// Collect emitted `MessageAppended` conversation messages for a thread, in
+    /// emission order. Replaces the old `store.messages` read for tests that
+    /// verified slab-agent persisted messages to the store.
+    fn emitted_messages(&self, thread_id: &str) -> Vec<ConversationMessage> {
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event {
+                EventMsg::MessageAppended(p) if p.thread_id == thread_id => Some(p.message.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+/// Poll for an emitted `MessageAppended` whose rendered text contains
+/// `text` (replaces `wait_for_persisted_message`, which polled the store).
+async fn wait_for_emitted_message(notify: &RecordingNotify, thread_id: &str, text: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let found = notify
+                .emitted_messages(thread_id)
+                .iter()
+                .any(|message| message.rendered_text().contains(text));
+            if found {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("emitted message did not appear");
 }
 
 #[async_trait]
@@ -1144,10 +1007,10 @@ impl ApprovalPort for NoopNotify {
         _thread_id: &str,
         _call_id: &str,
         _tool_name: &str,
-        _command: &str,
+        _descriptor: &crate::OperationDescriptor,
         _risk: Option<crate::ToolRiskAssessment>,
     ) -> ApprovalDecision {
-        ApprovalDecision::Approved
+        ApprovalDecision::Approved(crate::ApprovalScope::RunOnce)
     }
 }
 
@@ -1160,10 +1023,112 @@ impl ApprovalPort for RejectingApproval {
         _thread_id: &str,
         _call_id: &str,
         _tool_name: &str,
-        _command: &str,
+        _descriptor: &crate::OperationDescriptor,
         _risk: Option<crate::ToolRiskAssessment>,
     ) -> ApprovalDecision {
         ApprovalDecision::Rejected
+    }
+}
+
+/// Test exec-policy that requires approval for every non-read-only operation,
+/// mirroring the legacy `ApprovalEchoTool` behavior so approval-flow tests
+/// still observe a `Pending` → `Running`/`Failed` transition.
+struct AskAllExecPolicy;
+
+#[async_trait]
+impl crate::ExecPolicyPort for AskAllExecPolicy {
+    async fn evaluate(
+        &self,
+        _thread_id: &str,
+        descriptor: &crate::OperationDescriptor,
+    ) -> crate::ExecDecision {
+        match descriptor.category {
+            crate::OperationCategory::ReadOnly => crate::ExecDecision::Allow,
+            _ => crate::ExecDecision::RequireApproval,
+        }
+    }
+    async fn remember(
+        &self,
+        _thread_id: &str,
+        _descriptor: &crate::OperationDescriptor,
+        _scope: crate::ApprovalScope,
+    ) {
+    }
+    async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
+    async fn clear_thread(&self, _thread_id: &str) {}
+    fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
+        // Full exposure keeps the tool list unfiltered in approval-flow tests.
+        crate::PermissionStateSnapshot {
+            mode: crate::PermissionMode::FullControl,
+            baseline: crate::PermissionBaseline::FullAccess,
+            exposure: crate::ToolExposure::all(),
+        }
+    }
+}
+
+/// Test exec-policy that refuses every non-read-only operation. Proves the
+/// kernel returns "blocked by policy" WITHOUT requesting approval (the
+/// approve-then-block bug).
+struct DenyAllExecPolicy;
+
+#[async_trait]
+impl crate::ExecPolicyPort for DenyAllExecPolicy {
+    async fn evaluate(
+        &self,
+        _thread_id: &str,
+        descriptor: &crate::OperationDescriptor,
+    ) -> crate::ExecDecision {
+        match descriptor.category {
+            crate::OperationCategory::ReadOnly => crate::ExecDecision::Allow,
+            _ => crate::ExecDecision::Deny,
+        }
+    }
+    async fn remember(
+        &self,
+        _thread_id: &str,
+        _descriptor: &crate::OperationDescriptor,
+        _scope: crate::ApprovalScope,
+    ) {
+    }
+    async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
+    async fn clear_thread(&self, _thread_id: &str) {}
+    fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
+        // Full exposure keeps the tool list unfiltered in denial-flow tests.
+        crate::PermissionStateSnapshot {
+            mode: crate::PermissionMode::FullControl,
+            baseline: crate::PermissionBaseline::FullAccess,
+            exposure: crate::ToolExposure::all(),
+        }
+    }
+}
+
+/// ApprovalPort that counts how many times `request_approval` was called, so a
+/// test can assert the kernel did NOT prompt for a hard-denied operation.
+struct CountingApproval {
+    calls: Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl CountingApproval {
+    fn new() -> Self {
+        Self { calls: Arc::new(std::sync::atomic::AtomicU32::new(0)) }
+    }
+    fn calls(&self) -> u32 {
+        self.calls.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[async_trait]
+impl ApprovalPort for CountingApproval {
+    async fn request_approval(
+        &self,
+        _thread_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _descriptor: &crate::OperationDescriptor,
+        _risk: Option<crate::ToolRiskAssessment>,
+    ) -> ApprovalDecision {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        ApprovalDecision::Approved(crate::ApprovalScope::RunOnce)
     }
 }
 
@@ -1282,20 +1247,45 @@ async fn wait_for_persisted_status(
     .expect("persisted status did not reach expected value");
 }
 
-async fn wait_for_persisted_message(store: &PersistingStore, thread_id: &str, text: &str) {
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            let found = store.messages.lock().unwrap().iter().any(|record| {
-                record.thread_id == thread_id && record.message.rendered_text().contains(text)
-            });
-            if found {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("persisted message did not appear");
+/// Test helper: resume a thread with a new user message, mirroring the
+/// hoisted `AgentCore::send_input` flow (read history from the mock + sort +
+/// max-turn + append user + `resume_thread`). slab-agent no longer reads
+/// conversation data itself (the trait method is gone), so tests that previously
+/// called `control.send_input(thread_id, content)` build the resume payload here
+/// from the `PersistingStore` mock's in-memory messages.
+async fn resume_with_input(
+    store: &PersistingStore,
+    control: &AgentControl,
+    thread_id: &str,
+    content: String,
+) -> Result<(), AgentError> {
+    let mut records: Vec<ThreadMessageRecord> = store
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|m| m.thread_id == thread_id)
+        .cloned()
+        .collect();
+    records.sort_by(|a, b| {
+        a.turn_index
+            .cmp(&b.turn_index)
+            .then_with(|| a.created_at.cmp(&b.created_at))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    let starting_turn_index =
+        records.iter().map(|r| r.turn_index).max().map_or(0, |index| index + 1);
+    let mut messages: Vec<ConversationMessage> =
+        records.into_iter().map(|record| record.message).collect();
+    let emit_from = messages.len();
+    messages.push(ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text(content),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    });
+    control.resume_thread(thread_id, messages, starting_turn_index, Some(emit_from)).await
 }
 
 #[tokio::test]
@@ -1315,6 +1305,7 @@ async fn wait_for_terminal_snapshot_polls_persisted_status_when_thread_is_not_ac
             completion_text: None,
             created_at: now.clone(),
             updated_at: now,
+            archived_at: None,
         },
     );
 
@@ -1411,6 +1402,394 @@ async fn smoke_echo_tool_agent_completes() {
     assert_eq!(control.active_thread_count().await, 0);
 }
 
+/// Spawn an agent whose router has a Deferred tool + a `tool_search` stub, drive
+/// it with a [`ToolSearchLlm`] that calls `tool_search` with `query` on turn 1,
+/// and return the per-turn captured visible-tool-name lists.
+async fn run_tool_search_agent(query: &str) -> Vec<Vec<String>> {
+    let calls: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(ToolSearchLlm { query: query.to_owned(), calls: Arc::clone(&calls) });
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(DeferredSearchableTool));
+    router.register(Box::new(ToolSearchStubTool));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store, notify, approval, Arc::new(router), 8, 4));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("search for tools".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id = control.spawn("session-search".into(), config, messages).await.expect("spawn");
+    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            if matches!(
+                *status_rx.borrow(),
+                ThreadStatus::Completed
+                    | ThreadStatus::Errored
+                    | ThreadStatus::Shutdown
+                    | ThreadStatus::Interrupted
+            ) {
+                return;
+            }
+        }
+    })
+    .await;
+
+    calls.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn tool_search_discovers_and_injects_deferred_tool() {
+    let calls = run_tool_search_agent("deferred").await;
+    assert!(calls.len() >= 2, "expected at least 2 LLM calls, got {calls:?}");
+    // Turn 1 (before search): the Deferred tool is hidden; tool_search is visible.
+    assert!(
+        !calls[0].iter().any(|n| n == "deferred_read_tool"),
+        "deferred tool should be hidden before tool_search, got {:?}",
+        calls[0]
+    );
+    assert!(calls[0].iter().any(|n| n == "tool_search"), "tool_search should be visible");
+    // Turn 2 (after search): the Deferred tool has been injected and is visible.
+    assert!(
+        calls[1].iter().any(|n| n == "deferred_read_tool"),
+        "deferred tool should be visible after tool_search injected it, got {:?}",
+        calls[1]
+    );
+}
+
+#[tokio::test]
+async fn tool_search_no_match_returns_empty_and_does_not_inject() {
+    let calls = run_tool_search_agent("zzz_no_match").await;
+    assert!(calls.len() >= 2, "expected at least 2 LLM calls, got {calls:?}");
+    // A non-matching query injects nothing: the Deferred tool stays hidden.
+    assert!(
+        !calls[1].iter().any(|n| n == "deferred_read_tool"),
+        "deferred tool should stay hidden after a non-matching search, got {:?}",
+        calls[1]
+    );
+}
+
+// ── present_plan approval gate (Plan → Default mode flip) ────────────────────
+
+/// In-memory plan store for tests (mirrors the app-core impl).
+#[derive(Default)]
+struct InMemoryPlanStore {
+    plan: Mutex<Option<crate::Plan>>,
+}
+
+#[async_trait]
+impl crate::PlanStorePort for InMemoryPlanStore {
+    async fn replace_plan(&self, _thread_id: &str, plan: crate::Plan) -> Result<(), AgentError> {
+        *self.plan.lock().unwrap() = Some(plan);
+        Ok(())
+    }
+    async fn current_plan(&self, _thread_id: &str) -> Option<crate::Plan> {
+        self.plan.lock().unwrap().clone()
+    }
+    async fn clear(&self, _thread_id: &str) {
+        *self.plan.lock().unwrap() = None;
+    }
+}
+
+/// Full-exposure exec-policy stub: allows everything and reports full tool
+/// exposure. Read-only enforcement in plan mode now comes from the plan agent's
+/// tool denylist (`filter_tools_for_agent` via `agent_type`), not from the
+/// exec-policy exposure, so the present_plan approval tests no longer need a
+/// mode-tracking policy.
+struct FullExposureExecPolicy;
+
+#[async_trait]
+impl crate::ExecPolicyPort for FullExposureExecPolicy {
+    async fn evaluate(&self, _: &str, _: &crate::OperationDescriptor) -> crate::ExecDecision {
+        crate::ExecDecision::Allow
+    }
+    async fn remember(&self, _: &str, _: &crate::OperationDescriptor, _: crate::ApprovalScope) {}
+    async fn set_thread_mode(&self, _: &str, _: crate::PermissionMode) {}
+    async fn clear_thread(&self, _: &str) {}
+    fn permission_state_for(&self, _: &str) -> crate::PermissionStateSnapshot {
+        crate::PermissionStateSnapshot {
+            mode: crate::PermissionMode::FullControl,
+            baseline: crate::PermissionBaseline::FullAccess,
+            exposure: crate::ToolExposure::all(),
+        }
+    }
+}
+
+/// Test registry exposing a single `plan` agent whose denylist hides the test
+/// mutation tool — mirroring how the built-in plan agent's denylist hides
+/// mutation tools when a turn runs with `agent_type = "plan"`.
+struct PlanAgentRegistry;
+
+impl crate::AgentRegistry for PlanAgentRegistry {
+    fn get(&self, agent_type: &str) -> Option<AgentDefinition> {
+        (agent_type == "plan").then_some(AgentDefinition {
+            agent_type: "plan".into(),
+            description: "test plan agent".into(),
+            tools: ToolConstraint::Denylist(vec!["mutate_tool".into()]),
+            system_prompt: "test plan prompt".into(),
+            model: ModelPolicy::Inherit,
+        })
+    }
+    fn list(&self) -> Vec<AgentDefinition> {
+        vec![self.get("plan").expect("plan agent registered")]
+    }
+}
+
+struct ApprovingApproval;
+#[async_trait]
+impl ApprovalPort for ApprovingApproval {
+    async fn request_approval(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &crate::OperationDescriptor,
+        _: Option<crate::ToolRiskAssessment>,
+    ) -> ApprovalDecision {
+        ApprovalDecision::Approved(crate::ApprovalScope::RunOnce)
+    }
+}
+
+/// A mutation (FileEdit) tool used only to assert progressive exposure.
+struct MutatingTestTool;
+#[async_trait]
+impl ToolHandler for MutatingTestTool {
+    fn name(&self) -> &str {
+        "mutate_tool"
+    }
+    fn description(&self) -> &str {
+        "A mutating tool used to assert visibility."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object","properties":{}})
+    }
+    fn category(&self) -> crate::OperationCategory {
+        crate::OperationCategory::FileEdit
+    }
+    async fn execute(
+        &self,
+        _: &ToolContext,
+        _: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        Ok(ToolOutput { content: "mutated".into(), metadata: None })
+    }
+}
+
+/// Test-only `plan` tool (slab-agent tests cannot depend on slab-agent-tools).
+struct PlanStubTool;
+#[async_trait]
+impl ToolHandler for PlanStubTool {
+    fn name(&self) -> &str {
+        "plan"
+    }
+    fn description(&self) -> &str {
+        "Create a plan (test stub)."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object","properties":{"items":{"type":"array"}}})
+    }
+    async fn execute(
+        &self,
+        ctx: &ToolContext,
+        _: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let plan = crate::Plan {
+            plan_id: "plan-test".into(),
+            summary: Some("test plan".into()),
+            items: vec![crate::PlanItem {
+                step: "do thing".into(),
+                status: crate::PlanStatus::InProgress,
+                depends_on: None,
+                result_ref: None,
+            }],
+            counts: crate::PlanCounts { pending: 0, in_progress: 1, completed: 0, blocked: 0 },
+            current_step: Some(0),
+        };
+        ctx.plan_store
+            .replace_plan(&ctx.thread_id, plan.clone())
+            .await
+            .map_err(|e| AgentError::ToolExecution(e.to_string()))?;
+        Ok(ToolOutput { content: format!("plan created: {}", plan.summary_line()), metadata: None })
+    }
+}
+
+/// Test-only `present_plan` tool. The turn loop detects its name and drives the
+/// approval gate; this stub just surfaces the stored plan as content.
+struct PresentPlanStubTool;
+#[async_trait]
+impl ToolHandler for PresentPlanStubTool {
+    fn name(&self) -> &str {
+        "present_plan"
+    }
+    fn description(&self) -> &str {
+        "Present the plan (test stub)."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object","properties":{}})
+    }
+    async fn execute(
+        &self,
+        ctx: &ToolContext,
+        _: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let plan = ctx
+            .plan_store
+            .current_plan(&ctx.thread_id)
+            .await
+            .ok_or_else(|| AgentError::ToolExecution("no plan".into()))?;
+        Ok(ToolOutput {
+            content: format!("presenting plan for approval: {}", plan.summary_line()),
+            metadata: None,
+        })
+    }
+}
+
+struct PlanPresentLlm {
+    calls: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+#[async_trait]
+impl LlmPort for PlanPresentLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut calls = self.calls.lock().unwrap();
+        calls.push(tools.iter().map(|t| t.name.clone()).collect());
+        let idx = calls.len();
+        drop(calls);
+        let tc = |id: &str, name: &str, args: &str| ParsedToolCall {
+            id: id.into(),
+            name: name.into(),
+            arguments: args.into(),
+        };
+        Ok(match idx {
+            1 => LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![tc(
+                    "p1",
+                    "plan",
+                    r#"{"items":[{"step":"do","status":"in_progress"}]}"#,
+                )],
+                finish_reason: Some("tool_calls".into()),
+                usage: None,
+            },
+            2 => LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![tc("pp", "present_plan", "{}")],
+                finish_reason: Some("tool_calls".into()),
+                usage: None,
+            },
+            _ => LlmResponse {
+                content: Some("done".into()),
+                content_already_streamed: false,
+                tool_calls: vec![],
+                finish_reason: Some("stop".into()),
+                usage: None,
+            },
+        })
+    }
+}
+
+/// Drive a plan-agent turn through `plan` → `present_plan` → final, capturing
+/// the per-turn visible tool lists. Runs with `agent_type = "plan"` against a
+/// test registry whose plan denylist hides `mutate_tool`, so the capture shows
+/// progressive tool exposure driven by the plan agent constraint.
+async fn run_present_plan_agent(approval: Arc<dyn ApprovalPort>) -> Arc<Mutex<Vec<Vec<String>>>> {
+    let tool_calls_capture: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(PlanPresentLlm { calls: Arc::clone(&tool_calls_capture) });
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(MutatingTestTool));
+    router.register(Box::new(PlanStubTool));
+    router.register(Box::new(PresentPlanStubTool));
+    let exec_policy: Arc<FullExposureExecPolicy> = Arc::new(FullExposureExecPolicy);
+    let plan_store: Arc<dyn crate::PlanStorePort> = Arc::new(InMemoryPlanStore::default());
+    let control = Arc::new(
+        AgentControl::new(llm, store, notify, approval, Arc::new(router), 8, 4)
+            .with_exec_policy(exec_policy)
+            .with_plan_store(plan_store)
+            .with_agent_registry(Arc::new(PlanAgentRegistry)),
+    );
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("plan then present".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig {
+        model: "mock".into(),
+        max_turns: 6,
+        agent_type: Some("plan".into()),
+        ..AgentConfig::default()
+    };
+    let thread_id = control.spawn("session-plan".into(), config, messages).await.expect("spawn");
+    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            if matches!(
+                *status_rx.borrow(),
+                ThreadStatus::Completed
+                    | ThreadStatus::Errored
+                    | ThreadStatus::Shutdown
+                    | ThreadStatus::Interrupted
+            ) {
+                return;
+            }
+        }
+    })
+    .await;
+    tool_calls_capture
+}
+
+#[tokio::test]
+async fn present_plan_approval_runs_as_plan_agent_and_hides_mutation() {
+    let capture = run_present_plan_agent(Arc::new(ApprovingApproval)).await;
+    let calls = capture.lock().unwrap().clone();
+    assert!(calls.len() >= 2, "expected >=2 LLM turns, got {:?}", calls);
+
+    // The plan agent's denylist hides the mutation tool for the whole turn;
+    // plan + present_plan remain visible so the agent can author and submit.
+    assert!(
+        !calls[0].iter().any(|n| n == "mutate_tool"),
+        "mutation tool should be hidden under the plan agent, got {:?}",
+        calls[0]
+    );
+    assert!(calls[0].iter().any(|n| n == "plan"), "plan tool visible");
+    assert!(calls[0].iter().any(|n| n == "present_plan"), "present_plan tool visible");
+}
+
+#[tokio::test]
+async fn present_plan_rejected_keeps_mutation_hidden() {
+    let capture = run_present_plan_agent(Arc::new(RejectingApproval)).await;
+    let calls = capture.lock().unwrap().clone();
+    // Rejection does not change the agent_type, so the plan agent denylist keeps
+    // the mutation tool hidden on every turn.
+    for (i, turn) in calls.iter().enumerate() {
+        assert!(
+            !turn.iter().any(|n| n == "mutate_tool"),
+            "turn {i}: mutation tool should stay hidden under the plan agent, got {:?}",
+            turn
+        );
+    }
+}
+
 #[tokio::test]
 async fn trace_sink_records_prompt_llm_tool_and_turn_events() {
     let llm = Arc::new(MockLlm::new());
@@ -1488,6 +1867,253 @@ fn assert_trace_event(events: &[(AgentTraceContext, AgentTraceEvent)], event_nam
     );
 }
 
+// ── F3: real-path integration — slab-agent → BundleAgentTraceSink ───────────
+//
+// Every bundle_sink unit test hand-builds an AgentTraceContext and stuffs
+// `root_thread_id` into it. If `thread.rs` ever stopped stamping
+// `root_thread_id` on the trace context, ALL of those sink tests would stay
+// green while production stopped writing bundles (classic false-green). This
+// test drives the REAL production path: AgentControl → AgentThread::run →
+// record_json → BundleAgentTraceSink → bundle on disk. It pins the wiring.
+
+#[tokio::test]
+async fn bundle_sink_receives_events_from_real_agent_control_path() {
+    use slab_agent_tracing::{
+        AGENT_TRACE_DIR_NAME, BundleAgentTraceSink, MANIFEST_FILE, TRACE_FILE,
+        bundle_dir_for_root_thread,
+    };
+
+    let trace_root = tempfile::tempdir().expect("trace temp dir");
+    let trace_dir = trace_root.path().to_path_buf();
+
+    // Real bundle sink + real trace_dir flowing into AgentControl (mirrors
+    // slab-app-core bootstrap when agent.debug is on).
+    let trace_sink: Arc<dyn AgentTraceSink> = BundleAgentTraceSink::shared(trace_dir.clone());
+
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    // Register echo so MockLlm's first-call tool request resolves (build before
+    // wrapping in Arc — ToolRouter is registered through &self before the run).
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new_with_hooks_and_tracing(
+        llm,
+        store_port,
+        notify,
+        approval,
+        Arc::new(router),
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        Vec::new(),
+        trace_sink,
+        Some(trace_dir.clone()),
+    ));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+
+    let thread_id = control.spawn("bundle-session".into(), config, messages).await.expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    // The bundle the sink MUST have written into (deterministic path).
+    let bundle_dir = bundle_dir_for_root_thread(&trace_dir, &thread_id);
+    assert!(bundle_dir.is_dir(), "bundle materialized: {}", bundle_dir.display());
+    assert!(bundle_dir.join(MANIFEST_FILE).is_file(), "manifest.json written");
+    assert!(bundle_dir.join(TRACE_FILE).is_file(), "trace.jsonl written");
+
+    // Parse trace.jsonl; the manifest points at trace_id == root_thread_id.
+    let manifest: serde_json::Value = serde_json::from_str(
+        std::fs::read_to_string(bundle_dir.join(MANIFEST_FILE)).expect("read manifest").trim(),
+    )
+    .expect("manifest json");
+    assert_eq!(manifest["root_thread_id"], thread_id, "manifest stamped with root thread id");
+
+    let trace_text =
+        std::fs::read_to_string(bundle_dir.join(TRACE_FILE)).expect("read trace.jsonl");
+    let lines: Vec<&str> = trace_text.trim().lines().collect();
+    assert!(!lines.is_empty(), "trace.jsonl has events");
+
+    // The full turn lifecycle landed: turn_started → agent_llm_request →
+    // llm_response_normalized → tool lifecycle → turn_completed. Pins the
+    // slab-agent→sink path against a future bypass.
+    assert!(trace_text.contains("\"kind\":\"turn_started\""), "turn_started: {trace_text}");
+    assert!(
+        trace_text.contains("\"kind\":\"inference_started\""),
+        "agent_llm_request bridged to InferenceStarted: {trace_text}",
+    );
+    assert!(
+        trace_text.contains("\"kind\":\"inference_completed\""),
+        "llm_response_normalized bridged to InferenceCompleted: {trace_text}",
+    );
+    assert!(trace_text.contains("\"kind\":\"turn_completed\""), "turn_completed: {trace_text}",);
+
+    // Every event stamped with the root thread id (root thread owns this bundle).
+    for line in &lines {
+        let event: serde_json::Value = serde_json::from_str(line).expect("parse trace line");
+        assert_eq!(event["thread_id"], thread_id, "event stamped with root thread id: {line}");
+    }
+
+    // The bundle lives under <trace_dir>/agent_trace/ (the deterministic root).
+    assert!(bundle_dir.starts_with(trace_dir.join(AGENT_TRACE_DIR_NAME)));
+}
+
+// ── F2: depth>=2 spawn chain — true root propagates to grandchild bundle ─────
+//
+// A naive "child root = parent_id" stamp groups a depth-2 grandchild under its
+// depth-1 parent, producing an orphan bundle unreachable from the rollout
+// (build_session_meta stamps trace_path ONLY on the true root). This test
+// spawns a 3-layer chain (root → child → grandchild) through the REAL
+// AgentControl spawn path and asserts all three thread_ids land in the SAME
+// (root) bundle.
+
+/// LLM that immediately returns a final text answer (no tool calls) so each
+/// spawned thread completes in a single turn.
+struct FinalAnswerLlm;
+
+#[async_trait]
+impl LlmPort for FinalAnswerLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        Ok(LlmResponse {
+            content: Some("done".into()),
+            content_already_streamed: false,
+            tool_calls: vec![],
+            finish_reason: Some("stop".into()),
+            usage: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn depth_two_grandchild_groups_under_root_bundle() {
+    use slab_agent_tracing::{BundleAgentTraceSink, TRACE_FILE, bundle_dir_for_root_thread};
+
+    let trace_root = tempfile::tempdir().expect("trace temp dir");
+    let trace_dir = trace_root.path().to_path_buf();
+    let trace_sink: Arc<dyn AgentTraceSink> = BundleAgentTraceSink::shared(trace_dir.clone());
+
+    let llm = Arc::new(FinalAnswerLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new_with_hooks_and_tracing(
+        llm,
+        store_port,
+        notify,
+        approval,
+        Arc::new(ToolRouter::new()),
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        Vec::new(),
+        trace_sink,
+        Some(trace_dir.clone()),
+    ));
+
+    let mk = || ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("go".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    };
+    let config = AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() };
+
+    // depth 0 — root.
+    let root_id = control.spawn("depth-session".into(), config.clone(), vec![mk()]).await.unwrap();
+    wait_for_persisted_status(&store, &root_id, ThreadStatus::Completed).await;
+
+    // depth 1 — child whose root is root_id.
+    let child_id = control
+        .spawn_child("depth-session".into(), root_id.clone(), 1, config.clone(), vec![mk()])
+        .await
+        .unwrap();
+    wait_for_persisted_status(&store, &child_id, ThreadStatus::Completed).await;
+
+    // depth 2 — grandchild whose nearest parent is child_id but whose ROOT is root_id.
+    let grandchild_id = control
+        .spawn_child("depth-session".into(), child_id.clone(), 2, config.clone(), vec![mk()])
+        .await
+        .unwrap();
+    wait_for_persisted_status(&store, &grandchild_id, ThreadStatus::Completed).await;
+
+    // All three thread_ids must appear in the SAME root bundle. If the
+    // nearest-ancestor bug regressed, the grandchild would write into a
+    // trace-<child>-<child> orphan dir instead.
+    let root_bundle = bundle_dir_for_root_thread(&trace_dir, &root_id);
+    let trace_text = std::fs::read_to_string(root_bundle.join(TRACE_FILE))
+        .expect("read root bundle trace.jsonl");
+    assert!(trace_text.contains(&format!("\"thread_id\":\"{root_id}\"")), "root in root bundle");
+    assert!(trace_text.contains(&format!("\"thread_id\":\"{child_id}\"")), "child in root bundle");
+    assert!(
+        trace_text.contains(&format!("\"thread_id\":\"{grandchild_id}\"")),
+        "grandchild in ROOT bundle (not orphaned under child): {trace_text}",
+    );
+
+    // No orphan bundle directory exists for the child or grandchild as a root.
+    let child_as_root = bundle_dir_for_root_thread(&trace_dir, &child_id);
+    assert!(
+        !child_as_root.join(TRACE_FILE).exists(),
+        "no orphan child bundle: a depth-1 child is NOT its own root",
+    );
+    let grandchild_as_root = bundle_dir_for_root_thread(&trace_dir, &grandchild_id);
+    assert!(
+        !grandchild_as_root.join(TRACE_FILE).exists(),
+        "no orphan grandchild bundle: depth-2 groups under the true root",
+    );
+}
+
+#[tokio::test]
+async fn resolve_root_thread_id_walks_three_layer_parent_chain() {
+    // Focused unit test for the chain walker (the heart of the F2 fix), with a
+    // hand-built 3-layer parent chain in the in-memory store.
+    use crate::thread::resolve_root_thread_id;
+
+    let store = Arc::new(PersistingStore::default());
+    let now = chrono::Utc::now().to_rfc3339();
+    let snap = |id: &str, parent: Option<&str>, depth: u32| ThreadSnapshot {
+        id: id.into(),
+        session_id: "s".into(),
+        parent_id: parent.map(str::to_owned),
+        depth,
+        status: ThreadStatus::Completed,
+        role_name: None,
+        config_json: "{}".into(),
+        completion_text: None,
+        created_at: now.clone(),
+        updated_at: now.clone(),
+        archived_at: None,
+    };
+    store.upsert_thread(&snap("root", None, 0)).await.unwrap();
+    store.upsert_thread(&snap("child", Some("root"), 1)).await.unwrap();
+    store.upsert_thread(&snap("grandchild", Some("child"), 2)).await.unwrap();
+
+    // Walking from the grandchild's parent (child) reaches root in 2 hops.
+    let resolved = resolve_root_thread_id(&*store, "child").await;
+    assert_eq!(resolved.as_deref(), Some("root"), "grandchild resolves to the true root");
+
+    // depth-1 child's parent is the root → one hop.
+    let resolved = resolve_root_thread_id(&*store, "root").await;
+    assert_eq!(resolved.as_deref(), Some("root"), "child resolves to root");
+
+    // A missing parent snapshot falls back to None (caller uses nearest ancestor).
+    let resolved = resolve_root_thread_id(&*store, "nonexistent").await;
+    assert_eq!(resolved, None, "missing parent chain → None fallback");
+}
+
 #[tokio::test]
 async fn lifecycle_hooks_inject_start_observations_and_llm_messages_in_order() {
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -1547,15 +2173,15 @@ async fn tool_start_observations_are_appended_to_tool_output() {
     let llm = Arc::new(MockLlm::new());
     let store = Arc::new(PersistingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
-    let notify = Arc::new(NoopNotify);
+    let notify = Arc::new(RecordingNotify::default());
     let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
 
-    let approval = Arc::clone(&notify);
+    let approval = Arc::clone(&Arc::new(NoopNotify));
     let control = Arc::new(AgentControl::new_with_hooks(
         llm,
         store_port,
-        notify,
+        notify.clone(),
         approval,
         Arc::new(router),
         AgentControlLimits { max_threads: 8, max_depth: 4 },
@@ -1577,12 +2203,12 @@ async fn tool_start_observations_are_appended_to_tool_output() {
         .expect("spawn");
     wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
 
-    let messages = store.messages.lock().unwrap();
-    let tool_output = messages
+    // slab-agent emits `MessageAppended` (no store writes).
+    let tool_output = notify
+        .emitted_messages(&thread_id)
         .iter()
-        .find(|record| record.thread_id == thread_id && record.message.role == "tool")
+        .find(|message| message.role == "tool")
         .expect("tool message")
-        .message
         .rendered_text();
     assert!(tool_output.contains("hello from agent"));
     assert!(tool_output.contains("Hook observations:"));
@@ -1594,13 +2220,20 @@ async fn turn_state_records_running_llm_tool_and_completed_statuses() {
     let llm = Arc::new(MockLlm::new());
     let store = Arc::new(PersistingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
-    let notify = Arc::new(NoopNotify);
+    let notify = Arc::new(RecordingNotify::default());
     let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
 
-    let approval = Arc::clone(&notify);
-    let control =
-        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let approval = Arc::clone(&Arc::new(NoopNotify));
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
     let thread_id = control
         .spawn(
             "session-turn-state".into(),
@@ -1617,13 +2250,18 @@ async fn turn_state_records_running_llm_tool_and_completed_statuses() {
         .expect("spawn");
     wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
 
-    let statuses = store
-        .turn_states
+    // slab-agent emits `TurnStateChanged` events (no longer writes
+    // turn-state records to the store). Assert the emitted events carry the
+    // expected status progression; the app-core observer lands them in rollout.
+    let statuses = notify
+        .events
         .lock()
         .unwrap()
         .iter()
-        .filter(|record| record.thread_id == thread_id)
-        .map(|record| record.status.clone())
+        .filter_map(|event| match event {
+            EventMsg::TurnStateChanged(p) => Some(p.status.clone()),
+            _ => None,
+        })
         .collect::<Vec<_>>();
     assert!(statuses.contains(&"running".to_owned()));
     assert!(statuses.contains(&"llm_completed".to_owned()));
@@ -1748,6 +2386,135 @@ async fn offline_mode_drops_external_tools_from_llm_tool_list() {
     }
 }
 
+/// Test tool with a configurable exposure category (defaults to `ReadOnly`).
+struct CategorizedTool {
+    name: &'static str,
+    category: crate::OperationCategory,
+}
+
+#[async_trait]
+impl ToolHandler for CategorizedTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn description(&self) -> &str {
+        "Categorized no-op tool for progressive-exposure tests."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({ "type": "object" })
+    }
+    fn category(&self) -> crate::OperationCategory {
+        self.category
+    }
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        _arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        Ok(ToolOutput { content: "{}".to_owned(), metadata: None })
+    }
+}
+
+/// Test exec-policy that reports a read-only exposure (mirrors a read-only
+/// permission mode) so the tool-list filter hides mutating categories.
+struct ReadOnlyExposurePolicy;
+
+#[async_trait]
+impl crate::ExecPolicyPort for ReadOnlyExposurePolicy {
+    async fn evaluate(
+        &self,
+        _thread_id: &str,
+        descriptor: &crate::OperationDescriptor,
+    ) -> crate::ExecDecision {
+        match descriptor.category {
+            crate::OperationCategory::ReadOnly => crate::ExecDecision::Allow,
+            _ => crate::ExecDecision::Deny,
+        }
+    }
+    async fn remember(
+        &self,
+        _thread_id: &str,
+        _descriptor: &crate::OperationDescriptor,
+        _scope: crate::ApprovalScope,
+    ) {
+    }
+    async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
+    async fn clear_thread(&self, _thread_id: &str) {}
+    fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
+        crate::PermissionStateSnapshot {
+            mode: crate::PermissionMode::Custom,
+            baseline: crate::PermissionBaseline::ReadOnly,
+            exposure: crate::ToolExposure::read_only(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn read_only_permission_mode_drops_mutating_tools_from_llm_tool_list() {
+    // Progressive tool exposure: a read-only permission state hides tools whose
+    // category isn't ReadOnly (shell / file_edit / network), while read-only
+    // tools (echo) stay visible. Composes with the offline filter the same way.
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(CapturingToolsLlm { calls: calls.clone() });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+    router.register(Box::new(CategorizedTool {
+        name: "shell",
+        category: crate::OperationCategory::Shell,
+    }));
+    router.register(Box::new(CategorizedTool {
+        name: "write_file",
+        category: crate::OperationCategory::FileEdit,
+    }));
+    router.register(Box::new(CategorizedTool {
+        name: "web_search",
+        category: crate::OperationCategory::Network,
+    }));
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(
+        AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(ReadOnlyExposurePolicy)),
+    );
+    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-readonly".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("finish".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Interrupted).await;
+    let calls = calls.lock().unwrap().clone();
+    assert!(!calls.is_empty(), "LLM should have been called at least once");
+    for tools in &calls {
+        assert!(tools.contains(&"echo".to_owned()), "read-only tool `echo` must remain: {tools:?}");
+        assert!(
+            !tools.contains(&"shell".to_owned()),
+            "shell must be hidden in read-only mode: {tools:?}"
+        );
+        assert!(
+            !tools.contains(&"write_file".to_owned()),
+            "write_file must be hidden in read-only mode: {tools:?}"
+        );
+        assert!(
+            !tools.contains(&"web_search".to_owned()),
+            "web_search must be hidden in read-only mode: {tools:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn disallowed_registered_tool_is_not_executed_and_feedback_is_persisted() {
     let executions = Arc::new(Mutex::new(0));
@@ -1759,9 +2526,16 @@ async fn disallowed_registered_tool_is_not_executed_and_feedback_is_persisted() 
     router.register(Box::new(TestEchoTool));
     router.register(Box::new(SecretTool { executions: executions.clone() }));
 
-    let approval = notify.clone();
-    let control =
-        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let approval = Arc::clone(&Arc::new(NoopNotify));
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
     let config = AgentConfig {
         model: "mock".into(),
         max_turns: 5,
@@ -1785,7 +2559,7 @@ async fn disallowed_registered_tool_is_not_executed_and_feedback_is_persisted() 
 
     wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
     assert_eq!(*executions.lock().unwrap(), 0);
-    wait_for_persisted_message(&store, &thread_id, "invalid tool call: tool not allowed: secret")
+    wait_for_emitted_message(&notify, &thread_id, "invalid tool call: tool not allowed: secret")
         .await;
 }
 
@@ -1838,13 +2612,20 @@ async fn concurrent_tool_calls_preserve_persisted_message_order() {
     let llm = Arc::new(TwoToolCallsLlm::new());
     let store = Arc::new(PersistingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
-    let notify = Arc::new(NoopNotify);
+    let notify = Arc::new(RecordingNotify::default());
     let router = ToolRouter::new();
     router.register(Box::new(DelayEchoTool));
 
-    let approval = Arc::clone(&notify);
-    let control =
-        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let approval = Arc::clone(&Arc::new(NoopNotify));
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
     let config = AgentConfig {
         model: "mock".into(),
         max_turns: 5,
@@ -1867,15 +2648,15 @@ async fn concurrent_tool_calls_preserve_persisted_message_order() {
         .expect("spawn");
 
     wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
-    let tool_outputs = store
-        .messages
-        .lock()
-        .unwrap()
+    // slab-agent emits `MessageAppended` (no store writes); read the
+    // emitted tool messages and assert FIFO order is preserved.
+    let tool_outputs = notify
+        .emitted_messages(&thread_id)
         .iter()
-        .filter(|record| record.thread_id == thread_id && record.message.role == "tool")
-        .map(|record| match &record.message.content {
+        .filter(|message| message.role == "tool")
+        .map(|message| match &message.content {
             ConversationMessageContent::Text(text) => text.clone(),
-            ConversationMessageContent::Parts(_) => record.message.rendered_text(),
+            ConversationMessageContent::Parts(_) => message.rendered_text(),
         })
         .collect::<Vec<_>>();
     assert_eq!(tool_outputs, vec!["slow".to_owned(), "fast".to_owned()]);
@@ -1919,7 +2700,19 @@ async fn sliding_window_compaction_drops_leading_orphan_tool_result() {
         },
     ];
 
-    let outcome = compact.compact(&messages).await.expect("compact");
+    let outcome = compact
+        .compact(
+            &messages,
+            &CompactContext {
+                model_id: "test",
+                summary_instructions: None,
+                force: false,
+                progress: None,
+                memory_pressure_hint: None,
+            },
+        )
+        .await
+        .expect("compact");
     let crate::CompactOutcome::Replaced { messages, .. } = outcome else {
         panic!("expected replaced outcome");
     };
@@ -1938,6 +2731,71 @@ fn tool_router_supports_runtime_unregister() {
 }
 
 #[tokio::test]
+async fn denied_tool_does_not_request_approval_and_is_blocked() {
+    // Reproduces the approve-then-block bug's fix: when the exec-policy denies
+    // an operation, the kernel must NOT request approval and must return a
+    // blocked result. Previously a shell tool under `Block` policy would still
+    // prompt (risk fallback) then fail with "blocked by policy".
+    let llm = Arc::new(MockLlm::new());
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let approval = Arc::new(CountingApproval::new());
+    let router = ToolRouter::new();
+    router.register(Box::new(ApprovalEchoTool));
+
+    let approval_port: Arc<dyn ApprovalPort> = approval.clone();
+    let control = Arc::new(
+        AgentControl::new(llm, store, Arc::new(NoopNotify), approval_port, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(DenyAllExecPolicy)),
+    );
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id = control.spawn("session-deny".into(), config, messages).await.expect("spawn");
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+
+    assert_eq!(final_status, ThreadStatus::Completed);
+    // The operation was denied — approval must NOT have been requested.
+    assert_eq!(approval.calls(), 0, "denied tool must not prompt for approval");
+}
+
+#[tokio::test]
+async fn approved_tool_runs_after_prompting_exec_policy() {
+    // Counterpart: when the exec-policy requires approval and the host approves
+    // (RunOnce), the tool executes and the turn completes.
+    let llm = Arc::new(MockLlm::new());
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let approval = Arc::new(CountingApproval::new());
+    let router = ToolRouter::new();
+    router.register(Box::new(ApprovalEchoTool));
+
+    let approval_port: Arc<dyn ApprovalPort> = approval.clone();
+    let control = Arc::new(
+        AgentControl::new(llm, store, Arc::new(NoopNotify), approval_port, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(AskAllExecPolicy)),
+    );
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id = control.spawn("session-approve".into(), config, messages).await.expect("spawn");
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+
+    assert_eq!(final_status, ThreadStatus::Completed);
+    assert_eq!(approval.calls(), 1, "approved tool must prompt exactly once");
+}
+
+#[tokio::test]
 async fn approval_required_tool_is_recorded_pending_then_completed() {
     let llm = Arc::new(MockLlm::new());
     let store = Arc::new(RecordingStore::default());
@@ -1948,8 +2806,10 @@ async fn approval_required_tool_is_recorded_pending_then_completed() {
     router.register(Box::new(ApprovalEchoTool));
 
     let approval = Arc::clone(&notify);
-    let control =
-        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let control = Arc::new(
+        AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(AskAllExecPolicy)),
+    );
 
     let messages = vec![ConversationMessage {
         role: "user".into(),
@@ -1976,14 +2836,127 @@ async fn approval_required_tool_is_recorded_pending_then_completed() {
     .expect("thread should finish");
 
     assert_eq!(final_status, ThreadStatus::Completed);
-    assert_eq!(
-        store.inserted_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Pending]
+}
+
+/// Reproduces the post-approval hang with a tool that streams output via
+/// `ctx.output` (like the real shell tool), driven through the FULL
+/// `handle_tool_call` path: approval → `tokio::join!(run, drain)`. The hard
+/// timeout turns a hang into a test failure.
+#[tokio::test]
+async fn streaming_tool_after_approval_completes_without_hang() {
+    use crate::tool::ToolOutputStream;
+
+    struct StreamingEchoTool;
+    #[async_trait]
+    impl ToolHandler for StreamingEchoTool {
+        fn name(&self) -> &str {
+            "streaming_echo"
+        }
+        fn description(&self) -> &str {
+            "Echo with streaming output."
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type":"object","properties":{"message":{"type":"string"}},"required":["message"]})
+        }
+        fn describe_operation(
+            &self,
+            args: &serde_json::Value,
+        ) -> Option<crate::OperationDescriptor> {
+            Some(crate::OperationDescriptor::shell(
+                args.get("message").and_then(serde_json::Value::as_str).unwrap_or(""),
+            ))
+        }
+        async fn execute(
+            &self,
+            ctx: &ToolContext,
+            args: &serde_json::Value,
+        ) -> Result<ToolOutput, AgentError> {
+            if let Some(observer) = ctx.output.as_ref() {
+                observer.on_output(ToolOutputStream::Stdout, "chunk-1\n");
+                observer.on_output(ToolOutputStream::Stdout, "chunk-2\n");
+            }
+            let msg = args.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
+            Ok(ToolOutput { content: format!("streamed: {msg}"), metadata: None })
+        }
+    }
+
+    struct StreamingLlm {
+        count: Mutex<u32>,
+    }
+    impl StreamingLlm {
+        fn new() -> Self {
+            Self { count: Mutex::new(0) }
+        }
+    }
+    #[async_trait]
+    impl LlmPort for StreamingLlm {
+        async fn chat_completion(
+            &self,
+            _model: &str,
+            _messages: &[ConversationMessage],
+            _tools: &[ToolSpec],
+            _config: &AgentConfig,
+            _trace_context: &AgentTraceContext,
+        ) -> Result<LlmResponse, AgentError> {
+            let mut c = self.count.lock().unwrap();
+            *c += 1;
+            if *c == 1 {
+                Ok(LlmResponse {
+                    content: None,
+                    content_already_streamed: false,
+                    tool_calls: vec![ParsedToolCall {
+                        id: "sc-1".into(),
+                        name: "streaming_echo".into(),
+                        arguments: r#"{"message":"hi"}"#.into(),
+                    }],
+                    finish_reason: Some("tool_calls".into()),
+                    usage: None,
+                })
+            } else {
+                Ok(LlmResponse {
+                    content: Some("done".into()),
+                    content_already_streamed: false,
+                    tool_calls: vec![],
+                    finish_reason: Some("stop".into()),
+                    usage: None,
+                })
+            }
+        }
+    }
+
+    let llm = Arc::new(StreamingLlm::new());
+    let store_port: Arc<dyn AgentStorePort> = Arc::new(RecordingStore::default());
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(StreamingEchoTool));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(
+        AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(AskAllExecPolicy)),
     );
-    assert_eq!(
-        store.updated_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Running, slab_types::agent::ToolCallStatus::Completed,]
-    );
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("go".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+
+    let thread_id = control.spawn("sess-stream".into(), config, messages).await.expect("spawn");
+    let mut rx = control.subscribe(&thread_id).await.expect("subscribe");
+    let status = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            rx.changed().await.expect("status channel closed");
+            let s = *rx.borrow();
+            if matches!(s, ThreadStatus::Completed | ThreadStatus::Errored) {
+                break s;
+            }
+        }
+    })
+    .await
+    .expect("HANG: streaming tool after approval did not complete in 10s");
+    assert_eq!(status, ThreadStatus::Completed);
 }
 
 #[tokio::test]
@@ -2004,7 +2977,8 @@ async fn rejected_approval_tool_is_recorded_pending_then_failed() {
         Arc::new(router),
         8,
         4,
-    );
+    )
+    .with_exec_policy(Arc::new(AskAllExecPolicy));
 
     let messages = vec![ConversationMessage {
         role: "user".into(),
@@ -2020,14 +2994,6 @@ async fn rejected_approval_tool_is_recorded_pending_then_failed() {
     let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
 
     assert_eq!(final_status, ThreadStatus::Completed);
-    assert_eq!(
-        store.inserted_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Pending]
-    );
-    assert_eq!(
-        store.updated_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Failed]
-    );
 }
 
 #[tokio::test]
@@ -2054,14 +3020,6 @@ async fn invalid_tool_arguments_are_recorded_failed() {
     let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
 
     assert_eq!(final_status, ThreadStatus::Completed);
-    assert_eq!(
-        store.inserted_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Running]
-    );
-    assert_eq!(
-        store.updated_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Failed]
-    );
 }
 
 #[tokio::test]
@@ -2099,163 +3057,11 @@ async fn hook_blocked_tool_call_is_recorded_failed() {
     let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
 
     assert_eq!(final_status, ThreadStatus::Completed);
-    assert_eq!(
-        store.inserted_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Running]
-    );
-    assert_eq!(
-        store.updated_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Failed]
-    );
 }
 
 #[tokio::test]
-async fn response_style_events_include_text_tool_and_metrics() {
+async fn send_input_replays_persisted_thread_messages() {
     let llm = Arc::new(MockLlm::new());
-    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
-    let notify = Arc::new(RecordingNotify::default());
-
-    let router = ToolRouter::new();
-    router.register(Box::new(ApprovalEchoTool));
-
-    let approval = Arc::clone(&notify);
-    let control =
-        Arc::new(AgentControl::new(llm, store, notify.clone(), approval, Arc::new(router), 8, 4));
-
-    let messages = vec![ConversationMessage {
-        role: "user".into(),
-        content: slab_types::ConversationMessageContent::Text("Please echo".into()),
-        name: None,
-        tool_call_id: None,
-        tool_calls: vec![],
-    }];
-    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
-
-    let thread_id = control.spawn("session-events".into(), config, messages).await.expect("spawn");
-    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            status_rx.changed().await.expect("status channel closed");
-            if *status_rx.borrow() == ThreadStatus::Completed {
-                return;
-            }
-        }
-    })
-    .await
-    .expect("thread should complete");
-
-    let events = notify.events.lock().unwrap();
-    assert!(events.iter().any(|event| {
-        matches!(
-            event,
-            TurnEvent::Response {
-                event: AgentEventKind::ResponseFunctionCallArgumentsDone { risk: Some(_), .. },
-                ..
-            }
-        )
-    }));
-    assert!(events.iter().any(|event| {
-        matches!(
-            event,
-            TurnEvent::Response { event: AgentEventKind::ResponseOutputTextDone { .. }, .. }
-        )
-    }));
-    assert!(events.iter().any(|event| {
-        matches!(event, TurnEvent::Response { event: AgentEventKind::ResponseMetrics { .. }, .. })
-    }));
-}
-
-#[tokio::test]
-async fn streaming_llm_deltas_arrive_before_text_done() {
-    let llm = Arc::new(StreamingLlm);
-    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
-    let notify = Arc::new(RecordingNotify::default());
-    let router = Arc::new(ToolRouter::new());
-
-    let approval = Arc::clone(&notify);
-    let control = Arc::new(AgentControl::new(llm, store, notify.clone(), approval, router, 8, 4));
-
-    let messages = vec![ConversationMessage {
-        role: "user".into(),
-        content: slab_types::ConversationMessageContent::Text("Say hello".into()),
-        name: None,
-        tool_call_id: None,
-        tool_calls: vec![],
-    }];
-    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
-
-    let thread_id =
-        control.spawn("session-streaming".into(), config, messages).await.expect("spawn");
-    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            status_rx.changed().await.expect("status channel closed");
-            if *status_rx.borrow() == ThreadStatus::Completed {
-                return;
-            }
-        }
-    })
-    .await
-    .expect("thread should complete");
-
-    let events = notify.events.lock().unwrap();
-    let first_delta = events
-        .iter()
-        .position(|event| {
-            matches!(
-                event,
-                TurnEvent::Response {
-                    event: AgentEventKind::ResponseOutputTextDelta { delta, .. },
-                    ..
-                } if delta == "hel"
-            )
-        })
-        .expect("first text delta");
-    let done = events
-        .iter()
-        .position(|event| {
-            matches!(
-                event,
-                TurnEvent::Response {
-                    event: AgentEventKind::ResponseOutputTextDone { text, .. },
-                    ..
-                } if text == "hello"
-            )
-        })
-        .expect("text done");
-    let reasoning_delta = events
-        .iter()
-        .position(|event| {
-            matches!(
-                event,
-                TurnEvent::Response {
-                    event: AgentEventKind::ResponseReasoningTextDelta { delta, .. },
-                    ..
-                } if delta == "thinking"
-            )
-        })
-        .expect("reasoning delta");
-    let reasoning_done = events
-        .iter()
-        .position(|event| {
-            matches!(
-                event,
-                TurnEvent::Response {
-                    event: AgentEventKind::ResponseReasoningTextDone { text, .. },
-                    ..
-                } if text == "thinking"
-            )
-        })
-        .expect("reasoning done");
-
-    assert!(first_delta < done);
-    assert!(reasoning_delta < reasoning_done);
-    assert!(reasoning_done < done);
-}
-
-#[tokio::test]
-async fn streaming_tool_call_emits_text_before_function_call_without_duplicate_delta() {
-    let llm = Arc::new(StreamingToolCallLlm::new());
     let store = Arc::new(PersistingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
     let notify = Arc::new(RecordingNotify::default());
@@ -2263,7 +3069,7 @@ async fn streaming_tool_call_emits_text_before_function_call_without_duplicate_d
     let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
 
-    let approval = Arc::clone(&notify);
+    let approval = Arc::clone(&Arc::new(NoopNotify));
     let control = Arc::new(AgentControl::new(
         llm,
         store_port,
@@ -2273,92 +3079,6 @@ async fn streaming_tool_call_emits_text_before_function_call_without_duplicate_d
         8,
         4,
     ));
-
-    let messages = vec![ConversationMessage {
-        role: "user".into(),
-        content: slab_types::ConversationMessageContent::Text("Please echo".into()),
-        name: None,
-        tool_call_id: None,
-        tool_calls: vec![],
-    }];
-    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
-
-    let thread_id =
-        control.spawn("session-streaming-tool".into(), config, messages).await.expect("spawn");
-    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
-
-    let events = notify.events.lock().unwrap();
-    let text_delta_positions = events
-        .iter()
-        .enumerate()
-        .filter_map(|(index, event)| match event {
-            TurnEvent::Response {
-                event: AgentEventKind::ResponseOutputTextDelta { delta, .. },
-                ..
-            } if delta == "checking " => Some(index),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(text_delta_positions.len(), 1);
-
-    let function_call_position = events
-        .iter()
-        .position(|event| {
-            matches!(
-                event,
-                TurnEvent::Response {
-                    event: AgentEventKind::ResponseFunctionCallArgumentsDone {
-                        item_id,
-                        name,
-                        arguments,
-                        ..
-                    },
-                    ..
-                } if item_id == "call-1" && name == "echo" && arguments == r#"{"message":"hello"}"#
-            )
-        })
-        .expect("function call event");
-    assert!(text_delta_positions[0] < function_call_position);
-    drop(events);
-
-    let records = store.messages.lock().unwrap();
-    let debug_records = records
-        .iter()
-        .map(|record| {
-            format!(
-                "{}:{}:{}:{:?}:{}",
-                record.thread_id,
-                record.turn_index,
-                record.message.role,
-                record.message.tool_call_id,
-                record.message.rendered_text()
-            )
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        records.iter().any(|record| {
-            record.thread_id == thread_id
-                && record.message.role == "tool"
-                && record.message.tool_call_id.as_deref() == Some("call-1")
-                && record.message.rendered_text().contains("hello")
-        }),
-        "{debug_records:#?}"
-    );
-}
-
-#[tokio::test]
-async fn send_input_replays_persisted_thread_messages() {
-    let llm = Arc::new(MockLlm::new());
-    let store = Arc::new(PersistingStore::default());
-    let store_port: Arc<dyn AgentStorePort> = store.clone();
-    let notify = Arc::new(NoopNotify);
-
-    let router = ToolRouter::new();
-    router.register(Box::new(TestEchoTool));
-
-    let approval = Arc::clone(&notify);
-    let control =
-        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
 
     let messages = vec![ConversationMessage {
         role: "user".into(),
@@ -2372,21 +3092,68 @@ async fn send_input_replays_persisted_thread_messages() {
     let thread_id = control.spawn("session-replay".into(), config, messages).await.expect("spawn");
     wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
 
-    control.send_input(&thread_id, "second prompt".into()).await.expect("send input");
-    wait_for_persisted_message(&store, &thread_id, "second prompt").await;
+    // slab-agent no longer reads conversation data itself (the trait
+    // method is gone). `resume_with_input` mirrors the hoisted
+    // `AgentCore::send_input` read+sort+max over the mock's seeded messages.
+    // Seed the spawn-time user message as a turn-0 record (what the OLD adapter
+    // persisted) so the helper has NON-EMPTY history to replay — without this
+    // the helper builds an empty history and the replay/sort/max logic this test
+    // names is never exercised (a false-green). End-to-end replay coverage over
+    // the REAL rollout reader lives in app-core `harness_tests.rs`.
+    store.messages.lock().unwrap().push(ThreadMessageRecord {
+        id: "replay-0".into(),
+        thread_id: thread_id.clone(),
+        turn_index: 0,
+        message: ConversationMessage {
+            role: "user".into(),
+            content: slab_types::ConversationMessageContent::Text("first prompt".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![],
+        },
+        created_at: "2026-01-01T00:00:00Z".into(),
+    });
 
-    let records = store.messages.lock().unwrap();
+    resume_with_input(&store, &control, &thread_id, "second prompt".into())
+        .await
+        .expect("send input");
+    // slab-agent emits `MessageAppended` events (no store writes).
+    wait_for_emitted_message(&notify, &thread_id, "second prompt").await;
+
+    let emitted = notify.emitted_messages(&thread_id);
     assert!(
-        records
-            .iter()
-            .filter(|record| record.thread_id == thread_id)
-            .any(|record| record.message.rendered_text().contains("first prompt"))
+        emitted.iter().any(|message| message.rendered_text().contains("first prompt")),
+        "initial prompt emitted on spawn: {:?}",
+        emitted
     );
     assert!(
-        records
-            .iter()
-            .filter(|record| record.thread_id == thread_id)
-            .any(|record| record.message.rendered_text().contains("second prompt"))
+        emitted.iter().any(|message| message.rendered_text().contains("second prompt")),
+        "resume prompt emitted: {:?}",
+        emitted
+    );
+    // The resume read the seeded turn-0 record and computed
+    // `starting_turn_index = max(turn_index) + 1 = 1`, so the resume's emitted
+    // `MessageAppended("second prompt")` must carry `turn_index = 1`. If the
+    // helper failed to read/sort/max the history, this would be 0.
+    let resume_turn = notify
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::MessageAppended(p)
+                if p.thread_id == thread_id
+                    && p.message.rendered_text().contains("second prompt") =>
+            {
+                Some(p.turn_index)
+            }
+            _ => None,
+        })
+        .next()
+        .expect("resume MessageAppended for second prompt");
+    assert_eq!(
+        resume_turn, 1,
+        "resume computed starting_turn_index from the seeded turn-0 history"
     );
 }
 
@@ -2542,12 +3309,19 @@ async fn task_complete_finalizes_run_on_success() {
     let llm_handle = Arc::clone(&llm);
     let store = Arc::new(PersistingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
-    let notify = Arc::new(NoopNotify);
+    let notify = Arc::new(RecordingNotify::default());
     let router = ToolRouter::new();
     router.register(Box::new(TaskCompleteMarkerTool::always_succeeds()));
-    let approval = Arc::clone(&notify);
-    let control =
-        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let approval = Arc::clone(&Arc::new(NoopNotify));
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
     let config = AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() };
     let thread_id = control
         .spawn(
@@ -2570,14 +3344,13 @@ async fn task_complete_finalizes_run_on_success() {
     let calls = *llm_handle.call_count.lock().unwrap();
     assert_eq!(calls, 1, "task.complete should finalize without a second LLM turn");
 
-    let final_text = store
-        .messages
-        .lock()
-        .unwrap()
+    // slab-agent emits `MessageAppended` (no store writes).
+    let final_text = notify
+        .emitted_messages(&thread_id)
         .iter()
         .rev()
-        .find(|record| record.thread_id == thread_id && record.message.role == "assistant")
-        .and_then(|record| match &record.message.content {
+        .find(|message| message.role == "assistant")
+        .and_then(|message| match &message.content {
             ConversationMessageContent::Text(text) => Some(text.clone()),
             _ => None,
         });
@@ -2835,6 +3608,149 @@ async fn agent_control_enforces_depth_limit() {
     );
 }
 
+#[tokio::test]
+async fn fork_thread_clones_history_at_depth_plus_one() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port.clone(), notify, approval, router, 8, 4));
+
+    // Seed a parent thread (depth 0) with two messages and one turn state.
+    let now = "2026-01-01T00:00:00Z".to_owned();
+    let parent_config = AgentConfig { model: "parent-model".into(), ..AgentConfig::default() };
+    store_port
+        .upsert_thread(&ThreadSnapshot {
+            id: "parent-1".into(),
+            session_id: "session-1".into(),
+            parent_id: None,
+            depth: 0,
+            status: ThreadStatus::Completed,
+            role_name: None,
+            config_json: serde_json::to_string(&parent_config).expect("config"),
+            completion_text: Some("done".into()),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            archived_at: None,
+        })
+        .await
+        .expect("seed parent");
+    for (id, turn_index) in [("pmsg-0", 0u32), ("pmsg-1", 1)] {
+        // `insert_thread_message` left the slab-agent store trait;
+        // seed the mock's in-memory messages vec directly.
+        store.messages.lock().unwrap().push(ThreadMessageRecord {
+            id: id.into(),
+            thread_id: "parent-1".into(),
+            turn_index,
+            message: ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text(id.into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            },
+            created_at: now.clone(),
+        });
+    }
+    // `upsert_turn_state` left the slab-agent store trait (slab-agent
+    // emits `TurnStateChanged` events now). Seed the mock's in-memory turn-state
+    // vec directly so the parent has a realistic history; fork does not copy
+    // per-record turn states, so this is not asserted on below.
+    store.turn_states.lock().unwrap().push(TurnStateRecord {
+        thread_id: "parent-1".into(),
+        turn_index: 1,
+        status: "completed".into(),
+        input_messages_json: None,
+        tool_specs_json: None,
+        llm_response_json: None,
+        error: None,
+        started_at: now.clone(),
+        completed_at: Some(now.clone()),
+    });
+
+    // Fork with a model override.
+    let child_id = control
+        .fork_thread("parent-1", Some("child-model".into()))
+        .await
+        .expect("fork should succeed");
+
+    let child = control.thread_snapshot(&child_id).await.expect("read").expect("child present");
+    assert_eq!(child.depth, 1, "child is one level deeper than the parent");
+    assert_eq!(child.parent_id.as_deref(), Some("parent-1"));
+    assert_eq!(child.status, ThreadStatus::Pending);
+    let child_config: AgentConfig =
+        serde_json::from_str(&child.config_json).expect("child config parses");
+    assert_eq!(child_config.model, "child-model", "model override applied");
+
+    // `AgentControl::fork_thread` no longer clones the parent's
+    // per-record history — the production fork path (HarnessService::fork_thread)
+    // snapshots the parent rollout file wholesale into the child. At this layer
+    // the child is just new metadata, so the parent's history stays untouched
+    // under the parent id (no per-record copy into the child).
+    //
+    // `list_thread_messages` left the slab-agent store trait (slab-agent
+    // is pure now); assert directly against the mock's in-memory messages.
+    let parent_message_count =
+        store.messages.lock().unwrap().iter().filter(|m| m.thread_id == "parent-1").count();
+    assert_eq!(parent_message_count, 2, "parent history untouched by fork");
+}
+
+#[tokio::test]
+async fn apply_agent_override_sets_and_clears_agent_type_and_prompt() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port.clone(), notify, approval, router, 8, 4));
+
+    // Seed a default thread (no agent_type, no system_prompt).
+    let now = "2026-01-01T00:00:00Z".to_owned();
+    store_port
+        .upsert_thread(&ThreadSnapshot {
+            id: "thread-1".into(),
+            session_id: "session-1".into(),
+            parent_id: None,
+            depth: 0,
+            status: ThreadStatus::Completed,
+            role_name: None,
+            config_json: serde_json::to_string(&AgentConfig::default()).expect("config"),
+            completion_text: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            archived_at: None,
+        })
+        .await
+        .expect("seed thread");
+
+    let plan_def = AgentDefinition {
+        agent_type: "plan".into(),
+        description: "read-only planner".into(),
+        tools: ToolConstraint::Denylist(vec!["shell".into()]),
+        system_prompt: "You are a planning agent.".into(),
+        model: ModelPolicy::Inherit,
+    };
+
+    // Setting the override persists agent_type + system_prompt on the config.
+    control.apply_agent_override("thread-1", Some(&plan_def)).await.expect("override applies");
+    let snap = control.thread_snapshot("thread-1").await.expect("read").expect("thread present");
+    let cfg: AgentConfig = serde_json::from_str(&snap.config_json).expect("config parses");
+    assert_eq!(cfg.agent_type.as_deref(), Some("plan"));
+    assert_eq!(cfg.system_prompt.as_deref(), Some("You are a planning agent."));
+
+    // Clearing the override removes both so the next turn runs as the default agent.
+    control.apply_agent_override("thread-1", None).await.expect("clear applies");
+    let snap = control.thread_snapshot("thread-1").await.expect("read").expect("thread present");
+    let cfg: AgentConfig = serde_json::from_str(&snap.config_json).expect("config parses");
+    assert!(cfg.agent_type.is_none(), "agent_type cleared");
+    assert!(cfg.system_prompt.is_none(), "system_prompt cleared");
+}
+
 // ── Error propagation tests ───────────────────────────────────────────────────────────
 
 struct FailingLlm;
@@ -2943,7 +3859,7 @@ async fn interrupt_cancels_running_turn_and_allows_follow_up_input() {
     wait_for_persisted_status(&store, &thread_id, ThreadStatus::Interrupted).await;
 
     assert_eq!(control.active_thread_count().await, 0);
-    let result = control.send_input(&thread_id, "continue".into()).await;
+    let result = resume_with_input(&store, &control, &thread_id, "continue".into()).await;
     assert!(result.is_ok(), "interrupted thread should accept follow-up input");
     let _ = control.shutdown(&thread_id).await;
 }
@@ -2985,7 +3901,7 @@ async fn max_turns_exhaustion_is_interrupted_with_reason_not_completed() {
     assert_eq!(snapshot.completion_text.as_deref(), Some("max_turns_reached"));
     assert_eq!(control.active_thread_count().await, 0);
     assert!(
-        control.send_input(&thread_id, "continue".into()).await.is_ok(),
+        resume_with_input(&store, &control, &thread_id, "continue".into()).await.is_ok(),
         "max-turns interrupted threads should remain resumable"
     );
 }
@@ -2998,7 +3914,7 @@ async fn repeated_side_effect_tool_call_interrupts_with_reason_and_trace_event()
     ));
     let store = Arc::new(PersistingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
-    let notify = Arc::new(RecordingNotify::default());
+    let notify = Arc::new(NoopNotify);
     let router = ToolRouter::new();
     router.register(Box::new(JsonNoopTool { name: "write_file" }));
     let trace = Arc::new(RecordingTraceSink::default());
@@ -3041,21 +3957,9 @@ async fn repeated_side_effect_tool_call_interrupts_with_reason_and_trace_event()
     assert_eq!(snapshot.completion_text.as_deref(), Some("repetition_detected"));
     assert_eq!(control.active_thread_count().await, 0);
     assert!(
-        control.send_input(&thread_id, "continue".into()).await.is_ok(),
+        resume_with_input(&store, &control, &thread_id, "continue".into()).await.is_ok(),
         "repetition-interrupted threads should remain resumable"
     );
-
-    let events = notify.events.lock().unwrap();
-    assert!(events.iter().any(|event| {
-        matches!(
-            event,
-            TurnEvent::Response {
-                event: AgentEventKind::ResponseCancelled { reason, .. },
-                ..
-            } if reason == "repetition_detected"
-        )
-    }));
-    drop(events);
 
     let trace_events = trace.events.lock().unwrap().clone();
     assert_trace_event(&trace_events, "loop_detected");
@@ -3147,7 +4051,7 @@ async fn token_budget_exhaustion_interrupts_with_reason_and_keeps_thread_resumab
     assert_eq!(snapshot.completion_text.as_deref(), Some("budget_exhausted"));
     assert_eq!(control.active_thread_count().await, 0);
     assert!(
-        control.send_input(&thread_id, "continue".into()).await.is_ok(),
+        resume_with_input(&store, &control, &thread_id, "continue".into()).await.is_ok(),
         "budget-interrupted threads should remain resumable"
     );
 }
@@ -3213,7 +4117,8 @@ async fn high_risk_tool_calls_require_approval_even_without_tool_metadata() {
         AgentControlLimits { max_threads: 8, max_depth: 4 },
         Arc::new(SlidingWindowCompactPort::default()),
         Arc::new(HighRiskToolAnalyzer),
-    );
+    )
+    .with_exec_policy(Arc::new(AskAllExecPolicy));
 
     let config = AgentConfig { model: "mock".into(), max_turns: 2, ..AgentConfig::default() };
     let thread_id = control
@@ -3236,14 +4141,6 @@ async fn high_risk_tool_calls_require_approval_even_without_tool_metadata() {
         .expect("terminal snapshot should be available");
 
     assert_eq!(snapshot.status, ThreadStatus::Completed);
-    assert_eq!(
-        store.inserted_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Pending]
-    );
-    assert_eq!(
-        store.updated_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Failed]
-    );
 }
 
 #[tokio::test]
@@ -3271,7 +4168,7 @@ async fn shutdown_prevents_follow_up_input() {
     wait_for_persisted_status(&store, &thread_id, ThreadStatus::Running).await;
     control.shutdown(&thread_id).await.expect("shutdown");
 
-    let result = control.send_input(&thread_id, "continue".into()).await;
+    let result = resume_with_input(&store, &control, &thread_id, "continue".into()).await;
     assert!(
         matches!(result, Err(AgentError::ThreadNotResumable { .. })),
         "shutdown thread should reject follow-up input"

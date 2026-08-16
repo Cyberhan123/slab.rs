@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function AccordionGallery() {
   return (
-    <div data-testid="accordion-gallery" className="w-full max-w-md rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="accordion-gallery" className="w-full max-w-md rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <Accordion type="single" collapsible defaultValue="item-1" data-testid="accordion">
         <AccordionItem value="item-1">
           <AccordionTrigger>Is it accessible?</AccordionTrigger>

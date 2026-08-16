@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "paths": {
+      "@/*": ["../slab-components/src/*"],
       "@slab/components": ["../slab-components/src/index.ts"],
       "@slab/components/*": ["../slab-components/src/*"]
     },

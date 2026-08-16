@@ -203,7 +203,9 @@ impl AudioService {
 
 fn ensure_audio_backend(backend_id: RuntimeBackendId) -> Result<(), AppCoreError> {
     match backend_id {
-        RuntimeBackendId::GgmlWhisper | RuntimeBackendId::CandleWhisper => Ok(()),
+        RuntimeBackendId::GgmlWhisper
+        | RuntimeBackendId::GgmlParakeet
+        | RuntimeBackendId::CandleWhisper => Ok(()),
         other => Err(AppCoreError::BadRequest(format!(
             "backend '{}' does not support audio transcription",
             other.canonical_id()

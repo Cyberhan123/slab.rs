@@ -1,41 +1,28 @@
 import * as React from "react"
-import { cva, type VariantProps } from "class-variance-authority"
 
-import { cn } from "./lib/utils"
-
-const cardVariants = cva(
-  "text-card-foreground flex flex-col gap-6 rounded-2xl border border-border/70 py-6",
-  {
-    variants: {
-      variant: {
-        default: "bg-card",
-        soft: "bg-[var(--surface-1)]",
-        elevated:
-          "bg-[var(--surface-1)]",
-        metric:
-          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-1)_85%,var(--background))_0%,var(--surface-1)_100%)]",
-        hero:
-          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--brand-teal)_9%,var(--surface-1))_0%,var(--surface-1)_56%,color-mix(in_oklab,var(--brand-gold)_10%,var(--surface-1))_100%)]",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-    },
-  }
-)
+import { cn } from "@/lib/utils"
 
 function Card({
   className,
-  variant = "default",
+  variant,
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof cardVariants>) {
+}: React.ComponentProps<"div"> & {
+  variant?: "default" | "metric" | "panel" | "soft" | "surface"
+}) {
   return (
     <div
       data-slot="card"
       data-variant={variant}
       className={cn(
-        "focus-ring",
-        cardVariants({ variant }),
+        "flex flex-col gap-6 rounded-xl border bg-card py-6 text-card-foreground shadow-sm",
+        variant === "metric" &&
+          "border-border/60 bg-card shadow-elevation-1",
+        variant === "panel" &&
+          "border-border/60 bg-card shadow-elevation-1",
+        variant === "soft" &&
+          "border-border/60 bg-secondary shadow-none",
+        variant === "surface" &&
+          "border-border/60 bg-card shadow-sm",
         className
       )}
       {...props}
@@ -70,7 +57,7 @@ function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-description"
-      className={cn("text-muted-foreground text-sm", className)}
+      className={cn("text-sm text-muted-foreground", className)}
       {...props}
     />
   )
@@ -117,5 +104,4 @@ export {
   CardAction,
   CardDescription,
   CardContent,
-  cardVariants,
 }

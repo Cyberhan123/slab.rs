@@ -282,6 +282,7 @@
       "enum": [
         "ggml_llama",
         "ggml_whisper",
+        "ggml_parakeet",
         "ggml_diffusion",
         "candle_llama",
         "candle_whisper",
@@ -317,14 +318,6 @@
         "$ref": "#/$defs/ConfigEntryRef"
       },
       "type": "array"
-    },
-    "context_window": {
-      "format": "uint32",
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
     },
     "default_preset": {
       "type": [

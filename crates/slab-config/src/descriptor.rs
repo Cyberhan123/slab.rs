@@ -56,6 +56,7 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
             descriptor!("tools.ffmpeg.source.artifact", tools.ffmpeg.source.artifact)
         }
         "agent.debug" => descriptor!("agent.debug", agent.debug),
+        "agent.sleep_inhibitor" => descriptor!("agent.sleep_inhibitor", agent.sleep_inhibitor),
         "agent.hooks.enabled" => descriptor!("agent.hooks.enabled", agent.hooks.enabled),
         "agent.hooks.scripts" => descriptor!("agent.hooks.scripts", agent.hooks.scripts),
         "agent.memories.enabled" => {

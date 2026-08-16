@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package slab.ipc.v1;
+
+import "slab/ipc/v1/common.proto";
+
+// Parakeet is a greedy-only ASR engine (peer of whisper). It has no language
+// detection and no VAD, so its decode options are a strict subset of whisper's
+// and there is no `language` / `prompt` / `detect_language` / `vad` on the
+// transcribe request. The response reuses the shared `WhisperTranscription`.
+service GgmlParakeetService {
+  rpc Transcribe(GgmlParakeetTranscribeRequest) returns (GgmlParakeetTranscribeResponse);
+  rpc LoadModel(GgmlParakeetLoadRequest) returns (ModelStatusResponse);
+  rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
+}
+
+message GgmlParakeetDecodeOptions {
+  optional int32 offset_ms = 1;
+  optional int32 duration_ms = 2;
+  optional bool no_context = 3;
+  optional int32 audio_ctx = 4;
+  optional int32 n_threads = 5;
+}
+
+message GgmlParakeetLoadRequest {
+  optional string model_path = 1;
+}
+
+message GgmlParakeetTranscribeRequest {
+  optional string path = 1;
+  GgmlParakeetDecodeOptions decode = 2;
+}
+
+message GgmlParakeetTranscribeResponse {
+  WhisperTranscription transcription = 1;
+}

@@ -86,6 +86,7 @@ impl SettingsPmidCatalog {
             self.tools.ffmpeg.source.version(),
             self.tools.ffmpeg.source.artifact(),
             self.agent.debug(),
+            self.agent.sleep_inhibitor(),
             self.agent.hooks.enabled(),
             self.agent.hooks.scripts(),
             self.agent.memories.enabled(),
@@ -416,6 +417,10 @@ impl AgentPmids {
     pub fn debug(self) -> SettingPmid {
         SettingPmid::from_path("agent.debug")
     }
+
+    pub fn sleep_inhibitor(self) -> SettingPmid {
+        SettingPmid::from_path("agent.sleep_inhibitor")
+    }
 }
 
 impl Default for AgentPmids {
@@ -498,11 +503,12 @@ impl AgentMemoriesPmids {
 pub struct AgentToolsPmids {
     pub mcp: AgentMcpPmids,
     pub websearch: AgentWebSearchPmids,
+    pub shell: AgentShellToolsPmids,
 }
 
 impl AgentToolsPmids {
     pub const fn new() -> Self {
-        Self { mcp: AgentMcpPmids, websearch: AgentWebSearchPmids }
+        Self { mcp: AgentMcpPmids, websearch: AgentWebSearchPmids, shell: AgentShellToolsPmids }
     }
 }
 
@@ -535,6 +541,19 @@ impl AgentWebSearchPmids {
 
     pub fn providers(self) -> SettingPmid {
         SettingPmid::from_path("agent.tools.websearch.providers")
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AgentShellToolsPmids;
+
+impl AgentShellToolsPmids {
+    pub fn launcher(self) -> SettingPmid {
+        SettingPmid::from_path("agent.tools.shell.launcher")
+    }
+
+    pub fn bash_path(self) -> SettingPmid {
+        SettingPmid::from_path("agent.tools.shell.bash_path")
     }
 }
 

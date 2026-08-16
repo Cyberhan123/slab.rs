@@ -82,6 +82,7 @@ impl GrpcGateway {
         for (backend_id, endpoint) in [
             (RuntimeBackendId::GgmlLlama, config.llama_grpc_endpoint.as_deref()),
             (RuntimeBackendId::GgmlWhisper, config.whisper_grpc_endpoint.as_deref()),
+            (RuntimeBackendId::GgmlParakeet, config.parakeet_grpc_endpoint.as_deref()),
             (RuntimeBackendId::GgmlDiffusion, config.diffusion_grpc_endpoint.as_deref()),
             (RuntimeBackendId::CandleLlama, config.candle_llama_grpc_endpoint.as_deref()),
             (RuntimeBackendId::CandleWhisper, config.candle_whisper_grpc_endpoint.as_deref()),

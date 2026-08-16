@@ -4,24 +4,25 @@ React frontend application for the Slab desktop shell.
 
 ## Role
 
-`@slab/desktop` is the primary frontend package for the Slab Tauri application. It provides the full user interface, including:
+`@slab/desktop` is the pure Tauri shell: it assembles the desktop platform (module-level seams + `SlabProvider` with `createDesktopPorts()`), mounts the shared routes from `@slab/ui`, and owns the desktop-only test suites. All pages, stores, hooks, layouts, and routes live in `@slab/ui`; ports/seams/infra adapters live in `@slab/core`.
 
-- Chat interface with streaming language model responses (Ant Design X).
-- Image generation, audio transcription, and video processing pages.
-- Model hub, plugin center, task queue, and settings views.
-- Integration with `bin/slab-server` via `openapi-fetch` and TanStack Query.
-- Workspace Monaco language features via `monaco-languageclient` over `bin/slab-server` WebSocket LSP sessions.
-- Integration with host-only Tauri commands via `@tauri-apps/api` for plugin/runtime shell features.
-- Theme and layout using `@slab/components` (shared shadcn/ui + Tailwind 4 primitives).
-- Internationalization via `@slab/i18n`.
+- Installs Tauri platform adapters into `@slab/core` seams at startup (`assembleDesktopPlatform`).
+- Mounts `SlabProvider` + `QueryClientProvider` around `RouterProvider` (`src/main.tsx`).
+- Workspace Monaco language features run inside `@slab/ui` via `monaco-languageclient` over `bin/slab-server` WebSocket LSP sessions.
 
 ## Stack
 
 - React 19, Vite, React Router 7
-- Ant Design X, Tailwind CSS 4, Radix UI
-- TanStack Query, `openapi-fetch`, `openapi-react-query`
-- Zustand (client state), i18next (i18n)
+- `@slab/ui` (all features), `@slab/core` (ports/seams), `@slab/components`, `@slab/i18n`
+- TanStack Query
 - TypeScript
+
+## Dependency anchors
+
+The shell's `package.json` intentionally declares only what its own sources (and tests/vite config) resolve. Two exceptions are **vite dev anchors**, kept for tooling resolution even though the real consumer is `@slab/ui` source code:
+
+- `vscode` — `vite.config.ts` aliases the bare `vscode` specifier to `./node_modules/vscode` (bun does not hoist this package to the workspace root).
+- `@codingame/monaco-vscode-api` — referenced as a bare id in `optimizeDeps.include`.
 
 ## Type
 

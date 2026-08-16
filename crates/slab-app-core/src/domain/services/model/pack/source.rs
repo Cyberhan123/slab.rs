@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use serde_json::{Map, Value};
+
 use crate::domain::models::{ModelSpec, SelectedModelDownloadSource, StoredModelConfig};
 
 use super::super::catalog;
@@ -180,6 +182,108 @@ pub(in crate::domain::services::model) fn apply_materialized_source_to_bridge(
     for engine in &mut bridge.engine_load_specs {
         engine.model_spec.source =
             materialized_model_source(&engine.model_spec.source, persisted, source_hint);
+    }
+}
+
+/// Applies user load overrides to both the bridge top-level `load_defaults`
+/// (consumed by the config document) and each `engine_load_specs[i].load_defaults`
+/// (consumed by `model_pack_load_target_from_bridge` at load time). Mirrors the
+/// per-engine update pattern of [`apply_materialized_source_to_bridge`]. Unknown
+/// keys are ignored here — whitelist validation happens in `update_model_config_selection`.
+pub(in crate::domain::services::model) fn apply_user_load_overrides_to_bridge(
+    bridge: &mut slab_model_pack::ModelPackRuntimeBridge,
+    load_overrides: Option<&Map<String, Value>>,
+) {
+    let Some(overrides) = load_overrides else {
+        return;
+    };
+    if overrides.is_empty() {
+        return;
+    }
+    apply_load_overrides_to_defaults(&mut bridge.load_defaults, overrides);
+    for engine in &mut bridge.engine_load_specs {
+        apply_load_overrides_to_defaults(&mut engine.load_defaults, overrides);
+    }
+}
+
+/// Applies user inference overrides to `bridge.inference_defaults` so the config
+/// document reflects them. Effective inference sampling is driven by
+/// `model.runtime_presets` (merged in `update_model_config_selection`), not by
+/// this bridge field — this helper only keeps the document view consistent.
+pub(in crate::domain::services::model) fn apply_user_inference_overrides_to_bridge(
+    bridge: &mut slab_model_pack::ModelPackRuntimeBridge,
+    inference_overrides: Option<&Map<String, Value>>,
+) {
+    let Some(overrides) = inference_overrides else {
+        return;
+    };
+    for (key, value) in overrides {
+        if matches!(key.as_str(), "temperature" | "top_p") {
+            bridge.inference_defaults.insert(key.clone(), value.clone());
+        }
+    }
+}
+
+/// Parses a stored overrides JSON column (`load_overrides` / `inference_overrides`)
+/// into a map. Returns `None` when the column is absent (keep pack defaults) and
+/// `Some(empty map)` for an explicit `{}` (clear overrides back to pack defaults).
+pub(in crate::domain::services::model) fn parse_overrides_map(
+    json: Option<&str>,
+) -> Option<Map<String, Value>> {
+    json.and_then(|json| serde_json::from_str(json).ok())
+}
+
+fn apply_load_overrides_to_defaults(
+    defaults: &mut slab_model_pack::ModelPackLoadDefaults,
+    overrides: &Map<String, Value>,
+) {
+    if let Some(workers) = overrides
+        .get("num_workers")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+    {
+        defaults.num_workers = Some(workers);
+    }
+    if let Some(context_length) = overrides
+        .get("context_length")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+    {
+        defaults.context_length = Some(context_length);
+    }
+    if let Some(diffusion) = defaults.diffusion.as_mut() {
+        apply_diffusion_overrides(diffusion, overrides);
+    }
+}
+
+fn apply_diffusion_overrides(
+    diffusion: &mut slab_types::DiffusionLoadOptions,
+    overrides: &Map<String, Value>,
+) {
+    fn set_path(target: &mut Option<PathBuf>, value: Option<&Value>) {
+        if let Some(path) =
+            value.and_then(Value::as_str).map(str::trim).filter(|path| !path.is_empty())
+        {
+            *target = Some(PathBuf::from(path));
+        }
+    }
+    set_path(&mut diffusion.diffusion_model_path, overrides.get("diffusion_model_path"));
+    set_path(&mut diffusion.vae_path, overrides.get("vae_path"));
+    set_path(&mut diffusion.taesd_path, overrides.get("taesd_path"));
+    set_path(&mut diffusion.clip_l_path, overrides.get("clip_l_path"));
+    set_path(&mut diffusion.clip_g_path, overrides.get("clip_g_path"));
+    set_path(&mut diffusion.t5xxl_path, overrides.get("t5xxl_path"));
+    if let Some(flash_attn) = overrides.get("flash_attn").and_then(Value::as_bool) {
+        diffusion.flash_attn = flash_attn;
+    }
+    if let Some(offload) = overrides.get("offload_params_to_cpu").and_then(Value::as_bool) {
+        diffusion.offload_params_to_cpu = offload;
+    }
+    if let Some(device) = overrides.get("vae_device").and_then(Value::as_str) {
+        diffusion.vae_device = device.to_owned();
+    }
+    if let Some(device) = overrides.get("clip_device").and_then(Value::as_str) {
+        diffusion.clip_device = device.to_owned();
     }
 }
 

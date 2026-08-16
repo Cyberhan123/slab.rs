@@ -200,7 +200,7 @@ impl PsuedoCon {
                 cwd.as_ref().map(|c| OsString::from_wide(c)),
                 err
             );
-            log::error!("{msg}");
+            ::log::error!("{msg}");
             bail!("{msg}");
         }
 

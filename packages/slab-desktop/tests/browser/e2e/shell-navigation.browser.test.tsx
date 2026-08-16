@@ -2,10 +2,12 @@ import { page, userEvent } from 'vitest/browser';
 import { describe, expect, it, vi } from 'vitest';
 import { createMemoryRouter, Route, Routes } from 'react-router-dom';
 
-import Layout from '@/layouts';
+import Layout from '@slab/ui/layouts';
+import { staticDesktopRoutes } from '@slab/ui/routes';
 import { renderDesktopScene } from '../test-utils';
 
-vi.mock('@/pages/plugins/hooks/use-runtime-plugins', () => ({
+vi.mock('@slab/ui/pages/plugins/hooks/use-runtime-plugins', () => ({
+  RUNTIME_PLUGINS_QUERY_KEY: ['plugin-runtime-list'],
   useRuntimePlugins: vi.fn<() => unknown>(() => ({
     data: [],
   })),
@@ -23,7 +25,7 @@ describe('desktop shell navigation e2e', () => {
   it('routes through the real sidebar and marks the active item', async () => {
     await renderDesktopScene(
       <Routes>
-        <Route element={<Layout />} path="/">
+        <Route element={<Layout routes={staticDesktopRoutes} />} path="/">
           <Route index element={<RouteMarker id="assistant" label="Assistant route" />} />
           <Route path="workspace" element={<RouteMarker id="workspace" label="Workspace route" />} />
           <Route path="image" element={<RouteMarker id="image" label="Image route" />} />
@@ -62,7 +64,7 @@ describe('desktop shell navigation e2e', () => {
   it('keeps sidebar navigation keyboard focusable and aria-current accurate', async () => {
     await renderDesktopScene(
       <Routes>
-        <Route element={<Layout />} path="/">
+        <Route element={<Layout routes={staticDesktopRoutes} />} path="/">
           <Route index element={<RouteMarker id="assistant" label="Assistant route" />} />
           <Route path="workspace" element={<RouteMarker id="workspace" label="Workspace route" />} />
         </Route>
@@ -89,7 +91,7 @@ describe('desktop shell navigation e2e', () => {
       [
         {
           path: '/',
-          element: <Layout />,
+          element: <Layout routes={staticDesktopRoutes} />,
           children: [
             { index: true, element: <RouteMarker id="assistant" label="Assistant route" /> },
             { path: 'settings', element: <CrashingRoute /> },
@@ -104,7 +106,7 @@ describe('desktop shell navigation e2e', () => {
     await page.getByTestId('sidebar-link-settings').click();
 
     await expect.element(page.getByText('Page crashed')).toBeVisible();
-    expect(document.querySelector('header.shell-topbar')).not.toBeNull();
+    expect(document.querySelector('header[data-slot="shell-topbar"]')).not.toBeNull();
     await expect.element(page.getByTestId('sidebar-link-settings')).toBeVisible();
 
     const details = document.querySelector<HTMLDetailsElement>('details');

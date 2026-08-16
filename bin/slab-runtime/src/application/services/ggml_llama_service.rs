@@ -36,6 +36,7 @@ impl GgmlLlamaService {
             status: "loaded".to_owned(),
             context_length: metadata.context_length,
             training_context_length: metadata.training_context_length,
+            chat_template: metadata.chat_template,
         })
     }
 
@@ -63,5 +64,12 @@ impl GgmlLlamaService {
         RuntimeApplicationError,
     > {
         clone_loaded(&self.loaded).await?.chat_stream(request).await.map_err(Into::into)
+    }
+
+    pub(crate) async fn quantize_model(
+        &self,
+        request: dto::GgmlLlamaQuantizeRequest,
+    ) -> Result<dto::GgmlLlamaQuantizeResult, RuntimeApplicationError> {
+        clone_loaded(&self.loaded).await?.quantize(request).await.map_err(Into::into)
     }
 }

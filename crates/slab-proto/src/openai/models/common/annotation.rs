@@ -4,13 +4,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Annotation {
-    #[serde(rename = "FileCitationBody")]
+    #[serde(rename = "file_citation")]
     FileCitationBody(Box<models::FileCitationBody>),
-    #[serde(rename = "UrlCitationBody")]
+    #[serde(rename = "url_citation")]
     UrlCitationBody(Box<models::UrlCitationBody>),
-    #[serde(rename = "ContainerFileCitationBody")]
+    #[serde(rename = "container_file_citation")]
     ContainerFileCitationBody(Box<models::ContainerFileCitationBody>),
-    #[serde(rename = "FilePath")]
+    #[serde(rename = "file_path")]
     FilePath(Box<models::FilePath>),
 }
 
@@ -22,9 +22,6 @@ impl Default for Annotation {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UrlAnnotation {
-    /// Type discriminator that is always `url` for this annotation.
-    #[serde(rename = "type")]
-    pub r#type: UrlAnnotationType,
     /// URL referenced by the annotation.
     #[serde(rename = "source")]
     pub source: Box<models::UrlAnnotationSource>,
@@ -32,18 +29,9 @@ pub struct UrlAnnotation {
 
 impl UrlAnnotation {
     /// Annotation that references a URL.
-    pub fn new(r#type: UrlAnnotationType, source: models::UrlAnnotationSource) -> UrlAnnotation {
-        UrlAnnotation { r#type, source: Box::new(source) }
+    pub fn new(source: models::UrlAnnotationSource) -> UrlAnnotation {
+        UrlAnnotation { source: Box::new(source) }
     }
-}
-/// Type discriminator that is always `url` for this annotation.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum UrlAnnotationType {
-    #[serde(rename = "url")]
-    #[default]
-    Url,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -74,9 +62,6 @@ pub enum UrlAnnotationSourceType {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UrlCitationBody {
-    /// The type of the URL citation. Always `url_citation`.
-    #[serde(rename = "type")]
-    pub r#type: UrlCitationBodyType,
     /// The URL of the web resource.
     #[serde(rename = "url")]
     pub url: String,
@@ -93,22 +78,7 @@ pub struct UrlCitationBody {
 
 impl UrlCitationBody {
     /// A citation for a web resource used to generate a model response.
-    pub fn new(
-        r#type: UrlCitationBodyType,
-        url: String,
-        start_index: i32,
-        end_index: i32,
-        title: String,
-    ) -> UrlCitationBody {
-        UrlCitationBody { r#type, url, start_index, end_index, title }
+    pub fn new(url: String, start_index: i32, end_index: i32, title: String) -> UrlCitationBody {
+        UrlCitationBody { url, start_index, end_index, title }
     }
-}
-/// The type of the URL citation. Always `url_citation`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum UrlCitationBodyType {
-    #[serde(rename = "url_citation")]
-    #[default]
-    UrlCitation,
 }

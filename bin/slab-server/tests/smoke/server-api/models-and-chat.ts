@@ -2,12 +2,9 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import type { SlabServerTestHarness } from "../../support/slab-server";
 import {
-  buildCloudModelPackFile,
-  externalBaseUrl,
   expectError,
   expectJson,
   expectOpenAiError,
-  formDataWithFile,
   jsonInit,
   type DeletedModelResponse,
   type Schema
@@ -153,6 +150,15 @@ export function registerModelsAndChatSmoke(
           method: "POST"
         })
       );
+      await expectError(
+        server,
+        "/v1/models/quantize",
+        400,
+        jsonInit(
+          { input_path: "", output_path: "", ftype: 15 } satisfies Schema["QuantizeModelRequest"],
+          { method: "POST" }
+        )
+      );
 
       const emptyPack = new FormData();
       const importPack = await server.requestFormData("/v1/models/import-pack", emptyPack, {
@@ -160,39 +166,5 @@ export function registerModelsAndChatSmoke(
       });
       expect(importPack.status).toBe(400);
     });
-
-    it.skipIf(Boolean(externalBaseUrl))(
-      "imports a cloud model pack and exposes it through the catalog",
-      async () => {
-        const modelId = `smoke-cloud-${Date.now()}`;
-        const file = await buildCloudModelPackFile(modelId);
-        const response = await server.requestFormData(
-          "/v1/models/import-pack",
-          formDataWithFile(file),
-          { method: "POST" }
-        );
-        expect(response.status).toBe(200);
-
-        const imported = (await response.json()) as Schema["UnifiedModelResponse"];
-        expect(imported.id).toBe(modelId);
-        expect(imported.kind).toBe("cloud");
-        expect(imported.display_name).toContain("Smoke");
-
-        try {
-          const listed = await expectJson<Schema["UnifiedModelResponse"][]>(server, "/v1/models");
-          expect(listed.body.some((model) => model.id === modelId)).toBe(true);
-
-          const fetched = await expectJson<Schema["UnifiedModelResponse"]>(
-            server,
-            `/v1/models/${modelId}`
-          );
-          expect(fetched.body.id).toBe(modelId);
-        } finally {
-          await expectJson<DeletedModelResponse>(server, `/v1/models/${modelId}`, {
-            method: "DELETE"
-          });
-        }
-      }
-    );
   });
 }

@@ -112,7 +112,17 @@ fn render_minijinja_template(
         AppCoreError::BadRequest(format!("configured chat_template failed to load: {error}"))
     })?;
     let eos_token = infer_eos_token(source);
-    let template_tools = serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
+    // Wrap each function tool in the canonical `Tool` enum so the internal
+    // `type` tag is emitted on the wire. The bare `FunctionTool` struct no
+    // longer carries a `type` field (slab-proto Tool serde Option 2 fix), so
+    // serializing it directly would omit `"type":"function"`.
+    let template_tools = serde_json::to_value(
+        tools
+            .iter()
+            .map(|t| slab_proto::openai::Tool::FunctionTool(Box::new(t.clone())))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| Value::Array(Vec::new()));
 
     let render_result = match enable_thinking {
         Some(enable_thinking) => template.render(context! {
@@ -183,7 +193,36 @@ struct NormalizedAssistantContent {
 }
 
 fn normalize_template_messages(messages: &[DomainConversationMessage]) -> Vec<Value> {
-    messages.iter().map(normalize_template_message).collect()
+    let mut result: Vec<Value> = Vec::with_capacity(messages.len() + 1);
+
+    // Local chat templates (llama.cpp / HF jinja) have no `developer` role and
+    // require `system` only at index 0 — e.g. the Qwen3.5 template raises
+    // `System message must be at the beginning` on any later system message.
+    // Coalesce every system + developer fragment into a single leading system
+    // block so the template sees exactly one system message, preserving the
+    // original order of the fragments. Trailing developer messages (e.g. hook
+    // observations appended via `append_observations`) are folded in too.
+    let system_blob: Vec<String> = messages
+        .iter()
+        .filter(|message| matches!(message.role.as_str(), "system" | "developer"))
+        .map(|message| message.rendered_text())
+        .filter(|text| !text.trim().is_empty())
+        .collect();
+    if !system_blob.is_empty() {
+        let mut object = Map::new();
+        object.insert("role".to_owned(), Value::String("system".to_owned()));
+        object.insert("content".to_owned(), Value::String(system_blob.join("\n\n")));
+        object.insert("tool_calls".to_owned(), Value::Array(Vec::new()));
+        result.push(Value::Object(object));
+    }
+
+    for message in messages {
+        if matches!(message.role.as_str(), "system" | "developer") {
+            continue;
+        }
+        result.push(normalize_template_message(message));
+    }
+    result
 }
 
 fn normalize_template_message(message: &DomainConversationMessage) -> Value {
@@ -201,7 +240,13 @@ fn normalize_template_message(message: &DomainConversationMessage) -> Value {
         }
     }
 
-    object.insert("role".to_owned(), Value::String(message.role.clone()));
+    // Local chat templates (llama.cpp / HF jinja) have no `developer` role —
+    // fold it into `system` so the model renders it correctly. `developer`
+    // remains a first-class internal role everywhere else; the cloud provider
+    // boundary also flattens it to `system` (see `domain::services::llm::cloud`
+    // — genai 0.6.5 exposes no `Developer` chat role variant).
+    let role = if message.role == "developer" { "system".to_owned() } else { message.role.clone() };
+    object.insert("role".to_owned(), Value::String(role));
     object.insert("content".to_owned(), content);
 
     if let Some(name) = message.name.as_ref() {
@@ -293,7 +338,9 @@ fn render_raw_chat(
 }
 
 fn raw_tool_prompt(tools: &[slab_proto::openai::FunctionTool]) -> String {
-    let tools_json = serde_json::to_string_pretty(tools).unwrap_or_else(|_| "[]".to_owned());
+    let wrapped: Vec<slab_proto::openai::Tool> =
+        tools.iter().map(|t| slab_proto::openai::Tool::FunctionTool(Box::new(t.clone()))).collect();
+    let tools_json = serde_json::to_string_pretty(&wrapped).unwrap_or_else(|_| "[]".to_owned());
     format!(
         "Tools are available as OpenAI Responses function tools.\n\
 Available tools:\n{tools_json}\n\
@@ -332,7 +379,7 @@ mod tests {
         ConversationMessageContent,
     };
     use serde_json::Value;
-    use slab_proto::openai::{FunctionTool, FunctionToolType};
+    use slab_proto::openai::FunctionTool;
 
     const QWEN35_TEMPLATE: &str =
         include_str!("../../../../../../models/llama/Qwen3.5-9B/configs/chat_template.jinja");
@@ -349,7 +396,6 @@ mod tests {
 
     fn echo_tool() -> FunctionTool {
         let mut tool = FunctionTool::new(
-            FunctionToolType::Function,
             "echo".to_owned(),
             Some([("type".to_owned(), Value::String("object".to_owned()))].into_iter().collect()),
             Some(true),
@@ -365,6 +411,85 @@ mod tests {
                 .expect("raw fallback prompt");
 
         assert_eq!(rendered, "System: hi\nUser: hello\nAssistant:");
+    }
+
+    #[test]
+    fn developer_role_folds_into_system_for_local_template() {
+        // llama.cpp / HF jinja templates have no `developer` role; the minijinja
+        // path must fold it into `system` before rendering.
+        let template =
+            "{% for message in messages %}[{{ message.role }}] {{ message.content }}\n{% endfor %}";
+        let rendered = build_prompt(
+            &[message("developer", "you are a coder"), message("user", "hi")],
+            Some(template),
+            None,
+            &[],
+        )
+        .expect("rendered prompt");
+
+        assert!(rendered.contains("[system] you are a coder"));
+        assert!(!rendered.contains("developer"));
+    }
+
+    #[test]
+    fn coalesces_system_and_developer_into_single_leading_system() {
+        // Regression: multiple system/developer fragments must merge into a
+        // single leading `system` message so HF jinja templates that require
+        // system only at index 0 (e.g. Qwen3.5) don't raise. Trailing
+        // developer messages (e.g. hook observations) are folded in too.
+        let template =
+            "{% for message in messages %}[{{ message.role }}] {{ message.content }}\n{% endfor %}";
+        let rendered = build_prompt(
+            &[
+                message("system", "persona"),
+                message("developer", "env"),
+                message("developer", "perm"),
+                message("user", "hi"),
+                message("developer", "trailing-obs"),
+            ],
+            Some(template),
+            None,
+            &[],
+        )
+        .expect("coalesced prompt");
+
+        assert_eq!(rendered.matches("[system]").count(), 1);
+        // All system/developer text merged in original order.
+        assert!(rendered.contains("[system] persona\n\nenv\n\nperm\n\ntrailing-obs"));
+        assert!(rendered.contains("[user] hi"));
+        assert!(!rendered.contains("[developer]"));
+    }
+
+    #[test]
+    fn qwen35_template_renders_multi_fragment_context_without_system_collision() {
+        // Mirrors the ContextInstructionHook startup batch: 1 system (persona)
+        // + N developer fragments + a user turn. Before the fix this raised
+        // `System message must be at the beginning` (chat_template:85).
+        let rendered = build_prompt(
+            &[
+                message("system", "You are Slab."),
+                message("developer", "<environment_context>cwd=/x</environment_context>"),
+                message(
+                    "developer",
+                    "<permissions_instructions>mode=full</permissions_instructions>",
+                ),
+                message("user", "hello"),
+            ],
+            Some(QWEN35_TEMPLATE),
+            Some(ChatReasoningEffort::None),
+            &[],
+        )
+        .expect("qwen3.5 multi-fragment prompt should render");
+
+        assert_eq!(rendered.matches("<|im_start|>system\n").count(), 1);
+        let system_block = rendered
+            .split("<|im_start|>system\n")
+            .nth(1)
+            .and_then(|rest| rest.split("<|im_end|>").next())
+            .expect("system block present");
+        assert!(system_block.contains("You are Slab."));
+        assert!(system_block.contains("<environment_context>"));
+        assert!(system_block.contains("<permissions_instructions>"));
     }
 
     #[test]

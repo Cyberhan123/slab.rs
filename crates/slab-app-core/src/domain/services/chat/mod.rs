@@ -2,16 +2,19 @@
 
 mod cloud;
 mod gbnf;
-mod local;
+pub(crate) mod local;
 mod params;
+mod sampling;
 mod session;
 mod streaming;
 mod template;
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use futures::stream::BoxStream;
+use slab_agent::{CompactPort, NoopCompactPort};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -22,12 +25,16 @@ use crate::domain::models::{
     TextCompletionCommand, TextCompletionOutput, TextCompletionResult, TextGenerationResponse,
     TextResultChoice, assistant_message_from_text_response,
 };
+use crate::domain::services::agent::maybe_compact_messages;
+use crate::domain::services::llm::{
+    build_estimated_usage, cloud::CloudChatRequestConfig, finish_reason_from_token_budget,
+};
 use crate::error::AppCoreError;
 #[cfg(test)]
 use params::validate_cloud_structured_output;
 use params::{
-    apply_stop_sequences, build_estimated_usage, finish_reason_from_token_budget, merge_usage,
-    text_response_has_visible_output, validate_chat_route_params, validate_text_route_params,
+    apply_stop_sequences, merge_usage, text_response_has_visible_output,
+    validate_chat_route_params, validate_text_route_params,
 };
 use session::{build_messages, persist_session_message};
 use streaming::{
@@ -35,8 +42,6 @@ use streaming::{
     build_usage_chunk, into_text_completion_stream, with_stream_session_persistence,
 };
 
-const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
-const DEFAULT_COMPLETION_MAX_TOKENS: u32 = 512;
 const SYSTEM_FINGERPRINT: &str = "b-slab";
 
 enum GeneratedChatOutput {
@@ -47,18 +52,28 @@ enum GeneratedChatOutput {
 #[derive(Clone)]
 pub struct ChatService {
     state: ModelState,
+    /// Compaction policy. Defaults to [`NoopCompactPort`] for callers that
+    /// construct `ChatService::new` directly (including the summarizer's own
+    /// internal completion call — the structural recursion guard). The app
+    /// wiring injects the shared `SummarizingCompactPort` via [`Self::new_with_compact`].
+    compact: Arc<dyn CompactPort>,
 }
 
 impl ChatService {
     pub fn new(state: ModelState) -> Self {
-        Self { state }
+        Self { state, compact: Arc::new(NoopCompactPort::default()) }
+    }
+
+    /// Construct with an explicit compaction policy (the shared summarizing port).
+    pub fn new_with_compact(state: ModelState, compact: Arc<dyn CompactPort>) -> Self {
+        Self { state, compact }
     }
 
     pub async fn create_chat_completion(
         &self,
         command: ChatCompletionCommand,
     ) -> Result<ChatCompletionOutput, AppCoreError> {
-        create_chat_completion_with_state(self.state.clone(), command).await
+        create_chat_completion_with_state(self.state.clone(), self.compact.clone(), command).await
     }
 
     pub async fn create_text_completion(
@@ -69,7 +84,7 @@ impl ChatService {
     }
 }
 
-async fn resolve_requested_model(
+pub(crate) async fn resolve_requested_model(
     state: &ModelState,
     requested_model: &str,
 ) -> Result<String, AppCoreError> {
@@ -91,6 +106,7 @@ async fn resolve_requested_model(
 
 async fn create_chat_completion_with_state(
     state: ModelState,
+    compact: Arc<dyn CompactPort>,
     command: ChatCompletionCommand,
 ) -> Result<ChatCompletionOutput, AppCoreError> {
     if command.common.stream && command.common.n > 1 {
@@ -107,9 +123,21 @@ async fn create_chat_completion_with_state(
         .map(DomainConversationMessage::rendered_text)
         .unwrap_or_default();
 
-    let max_tokens = command.common.max_tokens.unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
-    let temperature = command.common.temperature.unwrap_or(0.7);
-    let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
+    // Resolve sampling: request > model effort-preset > built-in effort preset.
+    // This finally applies the model's `runtime_presets` (flat default + optional
+    // per-effort overrides) to the call — they were parsed/stored but ignored
+    // before — and pairs thinking-strength with convergent sampling.
+    let model_presets =
+        crate::domain::services::model::runtime_presets_for(&state, &resolved_model).await;
+    let sampling = sampling::resolve_sampling(
+        &command.common,
+        command.cloud.reasoning_effort,
+        model_presets.as_ref(),
+    );
+    let max_tokens = sampling.max_tokens;
+    let temperature = sampling.temperature;
+    let route_to_cloud =
+        crate::domain::services::llm::should_route_to_cloud(&state, &resolved_model).await?;
     let telemetry_config = state.pmid().config().telemetry;
     let capture_content = telemetry_config.capture_content;
     let gen_ai_provider = if route_to_cloud { "cloud" } else { "local" };
@@ -130,8 +158,18 @@ async fn create_chat_completion_with_state(
         "chat completion request"
     );
 
-    let resolved_messages =
+    let mut resolved_messages =
         build_messages(&state, command.id.as_deref(), &command.messages).await?;
+    // Auto-compaction: summarize older history when token pressure exceeds the
+    // model's context window, before the LLM call. The summarizing port resolves
+    // the window itself from the model catalog. A compaction failure is
+    // non-fatal — log and continue with the uncompacted messages.
+    if let Err(error) =
+        maybe_compact_messages(compact.as_ref(), &resolved_model, &mut resolved_messages, false)
+            .await
+    {
+        warn!(%error, "context compaction skipped before chat completion");
+    }
     let latest_user_message = command
         .messages
         .iter()
@@ -164,10 +202,10 @@ async fn create_chat_completion_with_state(
                 &state,
                 &resolved_model,
                 &resolved_messages,
-                cloud::CloudChatRequestConfig {
+                CloudChatRequestConfig {
                     max_tokens,
                     temperature,
-                    top_p: command.common.top_p,
+                    top_p: sampling.top_p,
                     structured_output: command.cloud.structured_output.clone(),
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
@@ -183,16 +221,17 @@ async fn create_chat_completion_with_state(
                 &resolved_model,
                 &resolved_messages,
                 local::LocalChatRequestConfig {
-                    session_id: command.id.clone(),
+                    session_id: command.local.session_key.clone().or(command.id.clone()),
                     max_tokens,
                     temperature,
-                    top_p: command.common.top_p,
-                    top_k: command.common.top_k,
-                    min_p: command.common.min_p,
-                    presence_penalty: command.common.presence_penalty,
-                    repetition_penalty: command.common.repetition_penalty,
+                    top_p: sampling.top_p,
+                    top_k: sampling.top_k,
+                    min_p: sampling.min_p,
+                    presence_penalty: sampling.presence_penalty,
+                    repetition_penalty: sampling.repetition_penalty,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
+                    reasoning_guidance_in_context: command.local.reasoning_guidance_in_context,
                     gbnf: command.local.gbnf.clone(),
                     structured_output: command.local.structured_output.clone(),
                     tools: command.tools.clone(),
@@ -264,10 +303,10 @@ async fn create_chat_completion_with_state(
                 &state,
                 &resolved_model,
                 &resolved_messages,
-                cloud::CloudChatRequestConfig {
+                CloudChatRequestConfig {
                     max_tokens,
                     temperature,
-                    top_p: command.common.top_p,
+                    top_p: sampling.top_p,
                     structured_output: command.cloud.structured_output.clone(),
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
@@ -283,16 +322,17 @@ async fn create_chat_completion_with_state(
                 &resolved_model,
                 &resolved_messages,
                 local::LocalChatRequestConfig {
-                    session_id: command.id.clone(),
+                    session_id: command.local.session_key.clone().or(command.id.clone()),
                     max_tokens,
                     temperature,
-                    top_p: command.common.top_p,
-                    top_k: command.common.top_k,
-                    min_p: command.common.min_p,
-                    presence_penalty: command.common.presence_penalty,
-                    repetition_penalty: command.common.repetition_penalty,
+                    top_p: sampling.top_p,
+                    top_k: sampling.top_k,
+                    min_p: sampling.min_p,
+                    presence_penalty: sampling.presence_penalty,
+                    repetition_penalty: sampling.repetition_penalty,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
+                    reasoning_guidance_in_context: command.local.reasoning_guidance_in_context,
                     gbnf: command.local.gbnf.clone(),
                     structured_output: command.local.structured_output.clone(),
                     tools: command.tools.clone(),
@@ -509,9 +549,21 @@ async fn create_text_completion_with_state(
     }
 
     let resolved_model = resolve_requested_model(&state, &command.model).await?;
-    let max_tokens = command.common.max_tokens.unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
-    let temperature = command.common.temperature.unwrap_or(0.7);
-    let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
+    // Resolve sampling: request > model effort-preset > built-in effort preset.
+    // This finally applies the model's `runtime_presets` (flat default + optional
+    // per-effort overrides) to the call — they were parsed/stored but ignored
+    // before — and pairs thinking-strength with convergent sampling.
+    let model_presets =
+        crate::domain::services::model::runtime_presets_for(&state, &resolved_model).await;
+    let sampling = sampling::resolve_sampling(
+        &command.common,
+        command.cloud.reasoning_effort,
+        model_presets.as_ref(),
+    );
+    let max_tokens = sampling.max_tokens;
+    let temperature = sampling.temperature;
+    let route_to_cloud =
+        crate::domain::services::llm::should_route_to_cloud(&state, &resolved_model).await?;
     validate_text_route_params(route_to_cloud, &command)?;
 
     debug!(
@@ -529,10 +581,10 @@ async fn create_text_completion_with_state(
                 &state,
                 &resolved_model,
                 &command.prompt,
-                cloud::CloudChatRequestConfig {
+                CloudChatRequestConfig {
                     max_tokens,
                     temperature,
-                    top_p: command.common.top_p,
+                    top_p: sampling.top_p,
                     structured_output: command.cloud.structured_output.clone(),
                     reasoning_effort: None,
                     verbosity: None,
@@ -550,11 +602,11 @@ async fn create_text_completion_with_state(
                 local::LocalTextRequestConfig {
                     max_tokens,
                     temperature,
-                    top_p: command.common.top_p,
-                    top_k: command.common.top_k,
-                    min_p: command.common.min_p,
-                    presence_penalty: command.common.presence_penalty,
-                    repetition_penalty: command.common.repetition_penalty,
+                    top_p: sampling.top_p,
+                    top_k: sampling.top_k,
+                    min_p: sampling.min_p,
+                    presence_penalty: sampling.presence_penalty,
+                    repetition_penalty: sampling.repetition_penalty,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
                     gbnf: command.local.gbnf.clone(),
@@ -610,7 +662,7 @@ async fn generate_cloud_chat_text(
     state: &ModelState,
     model: &str,
     messages: &[DomainConversationMessage],
-    config: cloud::CloudChatRequestConfig,
+    config: CloudChatRequestConfig,
 ) -> Result<TextGenerationResponse, AppCoreError> {
     match cloud::create_chat_completion(state, model, messages, config).await? {
         GeneratedChatOutput::Text(text) => Ok(text),
@@ -667,7 +719,12 @@ mod test {
                 stop: Vec::new(),
                 stream_options: Default::default(),
             },
-            local: crate::domain::models::LocalChatParams { gbnf: None, structured_output: None },
+            local: crate::domain::models::LocalChatParams {
+                gbnf: None,
+                structured_output: None,
+                session_key: None,
+                reasoning_guidance_in_context: false,
+            },
             cloud: crate::domain::models::CloudChatParams {
                 reasoning_effort: None,
                 verbosity: None,
@@ -694,7 +751,12 @@ mod test {
                 stop: Vec::new(),
                 stream_options: Default::default(),
             },
-            local: crate::domain::models::LocalChatParams { gbnf: None, structured_output: None },
+            local: crate::domain::models::LocalChatParams {
+                gbnf: None,
+                structured_output: None,
+                session_key: None,
+                reasoning_guidance_in_context: false,
+            },
             cloud: crate::domain::models::CloudChatParams {
                 reasoning_effort: None,
                 verbosity: None,
@@ -708,7 +770,7 @@ mod test {
         let mut req = make_command("user", "hello");
         req.common.max_tokens = Some(0);
         assert_eq!(req.common.max_tokens, Some(0));
-        let max_tokens = req.common.max_tokens.unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
+        let max_tokens = req.common.max_tokens.unwrap_or(sampling::DEFAULT_COMPLETION_MAX_TOKENS);
         assert_eq!(max_tokens, 0, "zero should stay invalid");
     }
 
@@ -716,7 +778,7 @@ mod test {
     fn validate_large_max_tokens_is_preserved() {
         let mut req = make_command("user", "hello");
         req.common.max_tokens = Some(81_920);
-        let max_tokens = req.common.max_tokens.unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
+        let max_tokens = req.common.max_tokens.unwrap_or(sampling::DEFAULT_COMPLETION_MAX_TOKENS);
         assert_eq!(max_tokens, 81_920);
     }
 

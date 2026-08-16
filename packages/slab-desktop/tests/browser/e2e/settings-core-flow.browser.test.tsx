@@ -1,9 +1,9 @@
 import { page } from 'vitest/browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import SettingsPage from '@/pages/settings';
+import SettingsPage from '@slab/ui/pages/settings';
 import i18n from '@slab/i18n';
-import type { SettingsDocumentResponse } from '@/pages/settings/types';
+import type { SettingsDocumentResponse } from '@slab/ui/pages/settings/types';
 import { renderDesktopScene } from '../test-utils';
 
 const {
@@ -51,9 +51,12 @@ const {
   } as SettingsDocumentResponse,
 }));
 
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderSearch: vi.fn<() => void>(),
+vi.mock('@slab/ui/hooks/use-header', () => ({
+  useHeader: vi.fn<() => unknown>(() => ({
+    meta: { title: 'Settings', subtitle: 'Settings', icon: vi.fn(), contextLabel: null },
+    search: null,
+    select: null,
+  })),
 }));
 
 vi.mock('@slab/api', async () => {

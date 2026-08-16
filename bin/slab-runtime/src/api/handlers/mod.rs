@@ -22,6 +22,7 @@ mod candle_diffusion;
 mod candle_transformers;
 mod ggml_diffusion;
 mod ggml_llama;
+mod ggml_parakeet;
 mod ggml_whisper;
 mod onnx;
 

@@ -5,7 +5,7 @@ import { renderComponentScene } from "../test-utils"
 
 function RadioGroupGallery() {
   return (
-    <div data-testid="radio-group-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-surface-1 p-6 shadow-sm">
+    <div data-testid="radio-group-gallery" className="flex flex-col gap-4 rounded-[28px] border border-border/60 bg-card p-6 shadow-sm">
       <RadioGroup defaultValue="option1" data-testid="radio-group">
         <div className="flex items-center gap-2">
           <RadioGroupItem id="gallery-option-1" value="option1" />

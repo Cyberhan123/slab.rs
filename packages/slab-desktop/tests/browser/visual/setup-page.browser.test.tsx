@@ -1,32 +1,25 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import SetupPage from '@/pages/setup';
-import type { SetupViewModel } from '@/pages/setup/hooks/use-setup';
+import SetupPage from '@slab/ui/pages/setup';
+import type { SetupViewModel } from '@slab/ui/pages/setup/hooks/use-setup';
 
 import { renderDesktopScene } from '../test-utils';
 
 const {
   mockUseDesktopPlatform,
-  mockUseIsTauri,
   mockUseSetup,
 } = vi.hoisted(() => ({
   mockUseDesktopPlatform: vi.fn<() => 'macos' | 'windows' | 'linux' | 'unknown'>(),
-  mockUseIsTauri: vi.fn<() => boolean>(),
   mockUseSetup: vi.fn<() => SetupViewModel>(),
 }));
 
-vi.mock('@/hooks/use-desktop-platform', () => ({
+vi.mock('@slab/ui/hooks/use-desktop-platform', () => ({
   default: mockUseDesktopPlatform,
   getDesktopPlatform: mockUseDesktopPlatform,
 }));
 
-vi.mock('@/hooks/use-tauri', () => ({
-  default: mockUseIsTauri,
-  isTauri: mockUseIsTauri,
-}));
-
-vi.mock('@/pages/setup/hooks/use-setup', () => ({
+vi.mock('@slab/ui/pages/setup/hooks/use-setup', () => ({
   useSetup: mockUseSetup,
 }));
 
@@ -74,7 +67,6 @@ function createViewModel(overrides: Partial<SetupViewModel> = {}): SetupViewMode
 describe('SetupPage browser visual regression', () => {
   beforeEach(() => {
     mockUseDesktopPlatform.mockReturnValue('unknown');
-    mockUseIsTauri.mockReturnValue(false);
     mockUseSetup.mockReset();
   });
 
@@ -121,14 +113,15 @@ describe('SetupPage browser visual regression', () => {
 
   it('renders macOS traffic-light controls at the top of the setup sidebar', async () => {
     mockUseDesktopPlatform.mockReturnValue('macos');
-    mockUseIsTauri.mockReturnValue(true);
     mockUseSetup.mockReturnValue(
       createViewModel({
         runtimePayloadMode: 'bundled',
       }),
     );
 
-    await renderDesktopScene(<SetupPage />);
+    await renderDesktopScene(<SetupPage />, {
+      portsOverrides: { platformInfo: { desktop: true, mobile: false } },
+    });
 
     await expect.element(page.getByTestId('setup-sidebar')).toBeVisible();
     await expect.element(
@@ -144,10 +137,11 @@ describe('SetupPage browser visual regression', () => {
 
   it('keeps Windows window controls in the setup header', async () => {
     mockUseDesktopPlatform.mockReturnValue('windows');
-    mockUseIsTauri.mockReturnValue(true);
     mockUseSetup.mockReturnValue(createViewModel());
 
-    await renderDesktopScene(<SetupPage />);
+    await renderDesktopScene(<SetupPage />, {
+      portsOverrides: { platformInfo: { desktop: true, mobile: false } },
+    });
 
     await expect.element(
       page.getByRole('toolbar', { name: 'Window controls' }),

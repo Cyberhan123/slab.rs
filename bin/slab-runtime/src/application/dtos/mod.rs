@@ -9,6 +9,7 @@ mod candle_diffusion;
 mod candle_transformers;
 mod ggml_diffusion;
 mod ggml_llama;
+mod ggml_parakeet;
 mod ggml_whisper;
 mod onnx;
 
@@ -29,7 +30,12 @@ pub(crate) use ggml_diffusion::{
 };
 pub(crate) use ggml_llama::{
     decode_ggml_llama_chat_request, decode_ggml_llama_load_request,
-    encode_ggml_llama_chat_response, encode_ggml_llama_chat_stream_chunk,
+    decode_ggml_llama_quantize_request, encode_ggml_llama_chat_response,
+    encode_ggml_llama_chat_stream_chunk, encode_ggml_llama_quantize_response,
+};
+pub(crate) use ggml_parakeet::{
+    decode_ggml_parakeet_load_request, decode_ggml_parakeet_transcribe_request,
+    encode_ggml_parakeet_transcribe_response,
 };
 pub(crate) use ggml_whisper::{
     decode_ggml_whisper_load_request, decode_ggml_whisper_transcribe_request,
@@ -47,6 +53,7 @@ pub(crate) struct ModelStatus {
     pub status: String,
     pub context_length: Option<u32>,
     pub training_context_length: Option<u32>,
+    pub chat_template: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -202,9 +209,36 @@ pub(crate) struct GgmlLlamaLoadRequest {
     pub model_path: Option<PathBuf>,
     pub num_workers: Option<u32>,
     pub context_length: Option<u32>,
+    pub free_vram_bytes: Option<u64>,
     pub chat_template: Option<String>,
     pub gbnf: Option<String>,
     pub flash_attn: Option<bool>,
+    pub mmproj_path: Option<PathBuf>,
+    /// Scheduler sizing tunables from the server (see the load request proto);
+    /// unset fields fall back per-field on the engine side.
+    pub vram_buffer_bytes: Option<u64>,
+    pub auto_context_quantum: Option<u32>,
+    pub auto_context_fallback: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct GgmlLlamaQuantizeRequest {
+    pub input_path: String,
+    pub output_path: String,
+    pub ftype: i32,
+    pub nthread: Option<i32>,
+    pub allow_requantize: Option<bool>,
+    pub quantize_output_tensor: Option<bool>,
+    pub only_copy: Option<bool>,
+    pub pure: Option<bool>,
+    pub keep_split: Option<bool>,
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct GgmlLlamaQuantizeResult {
+    pub layers_processed: u32,
+    pub output_path: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -223,6 +257,14 @@ pub(crate) struct GgmlLlamaChatRequest {
     pub ignore_eos: Option<bool>,
     pub logit_bias_json: Option<Vec<u8>>,
     pub agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
+    pub image_parts: Vec<LlamaChatImagePart>,
+}
+
+/// Encoded image bytes for a multimodal chat turn.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LlamaChatImagePart {
+    pub data: Vec<u8>,
+    pub mime_type: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -280,6 +322,31 @@ pub(crate) struct GgmlWhisperTranscribeRequest {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct GgmlWhisperTranscribeResponse {
+    pub transcription: WhisperTranscription,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct GgmlParakeetDecodeOptions {
+    pub offset_ms: Option<i32>,
+    pub duration_ms: Option<i32>,
+    pub no_context: Option<bool>,
+    pub audio_ctx: Option<i32>,
+    pub n_threads: Option<i32>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct GgmlParakeetLoadRequest {
+    pub model_path: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct GgmlParakeetTranscribeRequest {
+    pub path: Option<PathBuf>,
+    pub decode: Option<GgmlParakeetDecodeOptions>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct GgmlParakeetTranscribeResponse {
     pub transcription: WhisperTranscription,
 }
 
@@ -454,6 +521,7 @@ pub(crate) fn encode_model_status_response(status: &ModelStatus) -> pb::ModelSta
         status: status.status.clone(),
         context_length: status.context_length,
         training_context_length: status.training_context_length,
+        chat_template: status.chat_template.clone(),
     }
 }
 
@@ -583,6 +651,18 @@ fn decode_ggml_whisper_decode_options(
     }
 }
 
+fn decode_ggml_parakeet_decode_options(
+    value: &pb::GgmlParakeetDecodeOptions,
+) -> GgmlParakeetDecodeOptions {
+    GgmlParakeetDecodeOptions {
+        offset_ms: value.offset_ms,
+        duration_ms: value.duration_ms,
+        no_context: value.no_context,
+        audio_ctx: value.audio_ctx,
+        n_threads: value.n_threads,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -608,6 +688,7 @@ mod tests {
             ignore_eos: Some(false),
             logit_bias_json: Some(Vec::new()),
             agent_trace_json: None,
+            image_parts: Vec::new(),
         })
         .expect("decode should succeed");
 
@@ -652,6 +733,7 @@ mod tests {
             status: "loaded".to_owned(),
             context_length: Some(4096),
             training_context_length: None,
+            chat_template: None,
         });
 
         assert_eq!(encoded.backend, "onnx.text");

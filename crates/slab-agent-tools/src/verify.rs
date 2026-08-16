@@ -12,13 +12,13 @@
 //! tool stays unit-testable without spawning real `cargo`/`git` subprocesses.
 
 use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_sandboxing::{SandboxDriver, spawn_sandboxed_option};
 
 /// Deterministic verification target. The command mapped to each variant is
 /// fixed by the host; the model only chooses the variant.
@@ -67,18 +67,29 @@ impl VerifyOutcome {
 }
 
 /// Runs a verification command for a workspace root. Production implementation
-/// shells out to fixed host commands; tests inject a fake.
+/// shells out to fixed host commands via the sandbox driver; tests inject a fake.
+#[async_trait]
 pub trait WorkspaceVerifier: Send + Sync {
-    fn verify(&self, root: &Path, target: VerifyTarget) -> VerifyOutcome;
+    async fn verify(&self, root: &Path, target: VerifyTarget) -> VerifyOutcome;
 }
 
 /// Default verifier that maps each target to a fixed host command.
-#[derive(Default)]
-pub struct CommandWorkspaceVerifier;
+///
+/// Spawns through the sandbox driver (falling back to `PassThroughDriver` when
+/// `None`) so `cargo check` / `git status` respect workspace containment and
+/// isolation instead of bypassing the sandbox with a bare `Command::new`.
+pub struct CommandWorkspaceVerifier {
+    driver: Option<Arc<dyn SandboxDriver>>,
+}
 
 impl CommandWorkspaceVerifier {
     pub fn new() -> Self {
-        Self
+        Self { driver: None }
+    }
+
+    /// Construct with an explicit sandbox driver (agent-driven path).
+    pub fn new_with_driver(driver: Option<Arc<dyn SandboxDriver>>) -> Self {
+        Self { driver }
     }
 
     fn command_for(target: VerifyTarget) -> Vec<&'static str> {
@@ -93,17 +104,31 @@ impl CommandWorkspaceVerifier {
     }
 }
 
+impl Default for CommandWorkspaceVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
 impl WorkspaceVerifier for CommandWorkspaceVerifier {
-    fn verify(&self, root: &Path, target: VerifyTarget) -> VerifyOutcome {
+    async fn verify(&self, root: &Path, target: VerifyTarget) -> VerifyOutcome {
         let cmd = Self::command_for(target);
-        let output = match Command::new(cmd[0]).args(&cmd[1..]).current_dir(root).output() {
+        let argv: Vec<String> = cmd.iter().map(|part| (*part).to_owned()).collect();
+        let output = match spawn_sandboxed_option(
+            self.driver.as_ref(),
+            argv.clone(),
+            Some(root.to_path_buf()),
+        )
+        .await
+        {
             Ok(output) => output,
             Err(error) => {
                 return VerifyOutcome {
                     target,
                     passed: false,
                     exit_code: None,
-                    summary: format!("failed to run {}: {error}", cmd.join(" ")),
+                    summary: format!("failed to run {}: {error}", argv.join(" ")),
                 };
             }
         };
@@ -120,14 +145,15 @@ impl WorkspaceVerifier for CommandWorkspaceVerifier {
         }
         truncate(&mut summary, 2048);
 
+        let success = output.success();
         let passed = match target {
             // git status --porcelain: pass iff there is no dirty output.
-            VerifyTarget::Diff => output.status.success() && summary.trim().is_empty(),
+            VerifyTarget::Diff => success && summary.trim().is_empty(),
             // cargo check / cargo fmt --check: pass on exit code 0.
-            _ => output.status.success(),
+            _ => success,
         };
 
-        VerifyOutcome { target, passed, exit_code: output.status.code(), summary }
+        VerifyOutcome { target, passed, exit_code: Some(output.exit_code), summary }
     }
 }
 
@@ -146,8 +172,8 @@ pub struct VerifyTool {
 }
 
 impl VerifyTool {
-    pub fn new() -> Self {
-        Self { verifier: Arc::new(CommandWorkspaceVerifier::new()) }
+    pub fn new(driver: Option<Arc<dyn SandboxDriver>>) -> Self {
+        Self { verifier: Arc::new(CommandWorkspaceVerifier::new_with_driver(driver)) }
     }
 
     /// Construct with a custom verifier (for tests / host overrides).
@@ -158,7 +184,7 @@ impl VerifyTool {
 
 impl Default for VerifyTool {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
@@ -217,10 +243,7 @@ impl ToolHandler for VerifyTool {
             })?;
 
         let scope = args.path.as_deref().map(str::trim).filter(|value| !value.is_empty());
-        let verifier = Arc::clone(&self.verifier);
-        let outcome = tokio::task::spawn_blocking(move || verifier.verify(&root, target))
-            .await
-            .map_err(|error| AgentError::ToolExecution(format!("verify task failed: {error}")))?;
+        let outcome = self.verifier.verify(&root, target).await;
 
         let content = json!({
             "target": outcome.target.as_str(),
@@ -275,8 +298,9 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl WorkspaceVerifier for FakeVerifier {
-        fn verify(&self, root: &Path, target: VerifyTarget) -> VerifyOutcome {
+        async fn verify(&self, root: &Path, target: VerifyTarget) -> VerifyOutcome {
             self.seen.lock().expect("lock").push((root.to_path_buf(), target));
             self.outcome.clone()
         }
