@@ -88,6 +88,11 @@ async fn model_runtime_loads_catalog_llama_by_model_id() {
             assert_eq!(config.num_workers, 2);
             assert!(config.chat_template.is_none());
             assert!(config.gbnf.is_none());
+            // The scheduler's sizing tunables ride the spec so the engine
+            // resolves `auto` with host policy.
+            assert_eq!(config.vram_buffer_bytes, Some(2 * 1024 * 1024 * 1024));
+            assert_eq!(config.auto_context_quantum, Some(512));
+            assert_eq!(config.auto_context_fallback, Some(8192));
         }
         other => panic!("unexpected load spec: {other:?}"),
     }

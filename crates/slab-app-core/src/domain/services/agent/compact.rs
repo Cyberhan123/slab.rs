@@ -34,6 +34,22 @@ const DEFAULT_TARGET_RATIO: f32 = 0.60;
 const DEFAULT_SUMMARY_MAX_TOKENS: u32 = 512;
 /// Fallback fixed threshold (tokens) when a model's context window is unknown.
 const DEFAULT_FALLBACK_THRESHOLD_TOKENS: usize = 12_000;
+/// Memory-pressure fill ratio (0-1, scheduler-reported GPU VRAM) at which
+/// auto-compaction fires even below the token threshold. High by design — a
+/// transient spike must not re-summarize history; only a sustained squeeze
+/// (or a genuinely tight card) should.
+const MEMORY_PRESSURE_COMPACT_THRESHOLD: f64 = 0.90;
+
+/// Auto-compaction gate: the token threshold OR an explicit memory-pressure
+/// signal (`None` never fabricates pressure).
+fn should_compact(
+    estimated_tokens: usize,
+    threshold_tokens: usize,
+    memory_pressure: Option<f64>,
+) -> bool {
+    estimated_tokens >= threshold_tokens
+        || memory_pressure.is_some_and(|pressure| pressure >= MEMORY_PRESSURE_COMPACT_THRESHOLD)
+}
 
 const SUMMARY_SYSTEM_INSTRUCTION: &str = "You are a conversation summarizer. Read the \
 conversation transcript and write a concise, faithful recap that preserves every decision, fact, \
@@ -102,7 +118,13 @@ impl CompactPort for SummarizingCompactPort {
                 }
                 _ => self.fallback_threshold_tokens,
             };
-            if estimate_tokens(messages) < threshold {
+            // Dual gate: the token threshold, OR memory pressure — an
+            // injected hint wins, else the policy self-queries the scheduler's
+            // cached gauge (no probe on this per-turn path).
+            let memory_pressure = ctx
+                .memory_pressure_hint
+                .or_else(|| self.state.gpu_scheduler().gpu_memory_pressure());
+            if !should_compact(estimate_tokens(messages), threshold, memory_pressure) {
                 return Ok(CompactOutcome::Skipped { reason: "below threshold".into() });
             }
         }
@@ -258,7 +280,14 @@ pub async fn maybe_compact_messages(
     messages: &mut Vec<ConversationMessage>,
     force: bool,
 ) -> Result<CompactOutcome, AppCoreError> {
-    let ctx = CompactContext { model_id, summary_instructions: None, force, progress: None };
+    let ctx = CompactContext {
+        model_id,
+        summary_instructions: None,
+        force,
+        progress: None,
+        // The host policy self-queries the scheduler when the hint is unset.
+        memory_pressure_hint: None,
+    };
     let outcome = compact.compact(messages, &ctx).await.map_err(AppCoreError::from)?;
     if let CompactOutcome::Replaced { messages: compacted, .. } = outcome.clone() {
         *messages = compacted;
@@ -293,10 +322,17 @@ fn render_transcript(messages: &[ConversationMessage]) -> String {
 
 /// Best-effort resolution of a model's context window (tokens).
 ///
-/// 1. The model catalog's recorded `context_window` (covers cloud + local with
-///    a manifest entry). 2. The configured local llama per-seq context length.
-/// 3. `None` when neither is known.
+/// 1. The scheduler's ledger: the engine-resolved `n_ctx` for the resident
+///    model — what `auto` actually sized to (workers + projector accounted).
+///    Without this, an `auto` context resolves to the fixed 12k fallback and
+///    compaction fires at the wrong threshold. 2. The model catalog's
+///    recorded `context_window` (covers cloud + local with a manifest entry).
+/// 3. The configured local llama per-seq context length (fixed values only).
+/// 4. `None` when neither is known.
 async fn resolve_context_length(state: &ModelState, model_id: &str) -> Option<u32> {
+    if let Some(resolved) = state.gpu_scheduler().effective_context_budget(model_id).await {
+        return Some(resolved);
+    }
     if let Some(context_window) =
         crate::domain::services::model::context_window_for(state, model_id).await
     {
@@ -344,5 +380,150 @@ mod tests {
         let transcript = render_transcript(&messages);
         assert!(transcript.contains("user: hi"));
         assert!(transcript.contains("assistant: hello"));
+    }
+
+    /// S1-b integration: the compaction threshold's context resolution is
+    /// scheduler-first — the ledger's engine-resolved `n_ctx` (what `auto`
+    /// sized to) beats the catalog and the fixed config fallback. Without
+    /// this an `auto` context compacts at the fixed 12k fallback threshold.
+    #[tokio::test]
+    async fn resolve_context_length_prefers_ledger_over_catalog_and_config() {
+        use crate::test_support::{TestAppCore, ready_local_llama_command};
+
+        let app = TestAppCore::new().await;
+
+        // Catalog tier: a local model with a recorded context window.
+        let model_path = app.model_cache_dir.join("compact-ctx.gguf");
+        std::fs::write(&model_path, b"gguf").expect("write model fixture");
+        let mut command = ready_local_llama_command("catalog-model", &model_path);
+        command.spec.context_window = Some(2048);
+        app.model.create_model(command).await.expect("create catalog model");
+
+        // No ledger entry yet: the catalog tier answers.
+        assert_eq!(resolve_context_length(&app.model_state, "catalog-model").await, Some(2048));
+
+        // A resident ledger entry with the engine-resolved n_ctx wins over
+        // every fallback tier.
+        app.model_state
+            .gpu_scheduler()
+            .ledger()
+            .note_model_loaded(
+                None,
+                slab_gpu_memory_scheduler::LedgerEntry {
+                    backend: slab_types::RuntimeBackendId::GgmlLlama,
+                    model_id: Some("catalog-model".to_owned()),
+                    model_path: model_path.to_string_lossy().into_owned(),
+                    num_workers: 2,
+                    resolved_context_length: Some(4096),
+                    mmproj_resident: false,
+                    weights_bytes: None,
+                    mmproj_bytes: None,
+                    measured_delta_bytes: None,
+                    recorded_at: chrono::Utc::now(),
+                },
+            )
+            .await;
+        assert_eq!(
+            resolve_context_length(&app.model_state, "catalog-model").await,
+            Some(4096),
+            "ledger beats the catalog's 2048"
+        );
+
+        // Clearing the entry falls the resolver back to the catalog tier.
+        app.model_state
+            .gpu_scheduler()
+            .ledger()
+            .note_model_unloaded(slab_types::RuntimeBackendId::GgmlLlama)
+            .await;
+        assert_eq!(
+            resolve_context_length(&app.model_state, "catalog-model").await,
+            Some(2048),
+            "catalog tier after the ledger entry clears"
+        );
+    }
+
+    #[test]
+    fn should_compact_fires_on_either_gate() {
+        assert!(should_compact(100, 100, None), "token gate at threshold");
+        assert!(!should_compact(99, 100, None), "below threshold without pressure");
+        assert!(!should_compact(0, 100, Some(0.5)), "pressure below the trigger");
+        assert!(should_compact(0, 100, Some(0.90)), "pressure at the trigger");
+        assert!(should_compact(0, 100, Some(0.95)), "pressure above the trigger");
+        assert!(!should_compact(0, 100, None), "no signal never fabricates pressure");
+    }
+
+    /// Dual gate end-to-end: memory pressure compacts below the token
+    /// threshold. The ledger's large n_ctx keeps the token gate closed; the
+    /// unavailable gateway forces the summarizer onto its sliding-window
+    /// fallback, which still compacts because the pressure gate opened.
+    #[tokio::test]
+    async fn memory_pressure_hint_compacts_below_token_threshold() {
+        use crate::test_support::TestAppCore;
+
+        let app = TestAppCore::new().await;
+        app.model_state
+            .gpu_scheduler()
+            .ledger()
+            .note_model_loaded(
+                None,
+                slab_gpu_memory_scheduler::LedgerEntry {
+                    backend: slab_types::RuntimeBackendId::GgmlLlama,
+                    model_id: Some("pressure-model".to_owned()),
+                    model_path: "pressure.gguf".to_owned(),
+                    num_workers: 1,
+                    resolved_context_length: Some(65_536),
+                    mmproj_resident: false,
+                    weights_bytes: None,
+                    mmproj_bytes: None,
+                    measured_delta_bytes: None,
+                    recorded_at: chrono::Utc::now(),
+                },
+            )
+            .await;
+
+        let port = SummarizingCompactPort::new(app.model_state.clone());
+        let mut messages = vec![text_message("system", "sys")];
+        for _ in 0..6 {
+            messages.push(text_message("user", &"x".repeat(28_000)));
+        }
+        // ~42k tokens: below the 80% token threshold (~52k), above the 60%
+        // keep window (~39k) so there is history to compact, and above the
+        // fallback's fixed 16k.
+
+        let below = port
+            .compact(
+                &messages,
+                &CompactContext {
+                    model_id: "pressure-model",
+                    summary_instructions: None,
+                    force: false,
+                    progress: None,
+                    memory_pressure_hint: None,
+                },
+            )
+            .await
+            .expect("compact without pressure");
+        assert!(
+            matches!(&below, CompactOutcome::Skipped { reason } if reason == "below threshold"),
+            "token gate alone must not fire: {below:?}"
+        );
+
+        let pressured = port
+            .compact(
+                &messages,
+                &CompactContext {
+                    model_id: "pressure-model",
+                    summary_instructions: None,
+                    force: false,
+                    progress: None,
+                    memory_pressure_hint: Some(0.95),
+                },
+            )
+            .await
+            .expect("compact under pressure");
+        assert!(
+            matches!(pressured, CompactOutcome::Replaced { .. }),
+            "pressure gate compacts below the token threshold: {pressured:?}"
+        );
     }
 }

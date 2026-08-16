@@ -18,6 +18,9 @@ pub(crate) fn decode_ggml_llama_load_request(
         gbnf: request.gbnf.clone(),
         flash_attn: request.flash_attn,
         mmproj_path: decode_optional_path(request.mmproj_path.as_ref()),
+        vram_buffer_bytes: request.vram_buffer_bytes,
+        auto_context_quantum: request.auto_context_quantum,
+        auto_context_fallback: request.auto_context_fallback,
     })
 }
 
@@ -104,5 +107,41 @@ pub(crate) fn encode_ggml_llama_quantize_response(
     pb::GgmlLlamaQuantizeResponse {
         layers_processed: Some(result.layers_processed),
         output_path: Some(result.output_path.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_load_request_carries_scheduler_tunables() {
+        let request = pb::GgmlLlamaLoadRequest {
+            model_path: Some("model.gguf".to_owned()),
+            num_workers: Some(2),
+            flash_attn: Some(true),
+            vram_buffer_bytes: Some(1024),
+            auto_context_quantum: Some(256),
+            auto_context_fallback: Some(4096),
+            ..Default::default()
+        };
+
+        let decoded = decode_ggml_llama_load_request(&request).expect("decode load request");
+        assert_eq!(decoded.vram_buffer_bytes, Some(1024));
+        assert_eq!(decoded.auto_context_quantum, Some(256));
+        assert_eq!(decoded.auto_context_fallback, Some(4096));
+
+        // Absent fields (older servers) decode to None — the engine falls
+        // back per-field to the scheduler defaults.
+        let legacy = pb::GgmlLlamaLoadRequest {
+            model_path: Some("model.gguf".to_owned()),
+            num_workers: Some(1),
+            flash_attn: Some(true),
+            ..Default::default()
+        };
+        let decoded = decode_ggml_llama_load_request(&legacy).expect("decode legacy request");
+        assert_eq!(decoded.vram_buffer_bytes, None);
+        assert_eq!(decoded.auto_context_quantum, None);
+        assert_eq!(decoded.auto_context_fallback, None);
     }
 }

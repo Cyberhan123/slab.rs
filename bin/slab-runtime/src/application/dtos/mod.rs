@@ -214,6 +214,11 @@ pub(crate) struct GgmlLlamaLoadRequest {
     pub gbnf: Option<String>,
     pub flash_attn: Option<bool>,
     pub mmproj_path: Option<PathBuf>,
+    /// Scheduler sizing tunables from the server (see the load request proto);
+    /// unset fields fall back per-field on the engine side.
+    pub vram_buffer_bytes: Option<u64>,
+    pub auto_context_quantum: Option<u32>,
+    pub auto_context_fallback: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

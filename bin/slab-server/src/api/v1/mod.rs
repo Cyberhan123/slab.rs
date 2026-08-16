@@ -141,6 +141,7 @@ mod tests {
         ("/v1/system/diagnostics", "get"),
         ("/v1/system/diagnostics/agent-stats", "get"),
         ("/v1/system/gpu", "get"),
+        ("/v1/system/gpu/ledger", "get"),
         ("/v1/tasks", "get"),
         ("/v1/tasks/{id}", "get"),
         ("/v1/tasks/{id}/cancel", "post"),

@@ -16,7 +16,6 @@ use crate::domain::ports::RuntimeBackendStatus;
 use crate::error::{AppCoreError, AppCoreErrorData, RuntimeEngineAttemptError};
 use crate::infra::db::{ModelConfigStateStore, ModelStore};
 use crate::infra::model_packs;
-use crate::model_auto_unload::ModelReplayPlan;
 
 use super::{ModelService, catalog, pack};
 
@@ -60,6 +59,14 @@ impl ModelService {
         info!(backend = %backend_id, model_id = ?command.model_id, "unloading model");
 
         self.model_state.auto_unload().ensure_idle_for_manual_unload(backend_id).await?;
+        self.model_state
+            .gpu_scheduler()
+            .hooks()
+            .dispatch_before_unload(&slab_gpu_memory_scheduler::UnloadContext {
+                backend: backend_id,
+                reason: slab_gpu_memory_scheduler::UnloadReason::Manual,
+            })
+            .await;
         let response = self.model_state.runtime().unload_model(backend_id).await?;
         self.model_state.auto_unload().notify_model_unloaded(backend_id).await;
 
@@ -403,8 +410,11 @@ async fn load_model_candidate(
         "{log_message}"
     );
 
-    // Snapshot free GPU VRAM so the runtime can size an `auto` context to fit.
-    let free_vram_bytes = state.auto_unload().primary_gpu_free_bytes().await;
+    // Snapshot free GPU VRAM so the runtime can size an `auto` context to fit,
+    // and forward the scheduler's sizing tunables so the engine resolves
+    // `auto` with host policy (never a divergent local default).
+    let scheduler_params = state.gpu_scheduler().params();
+    let free_vram_bytes = state.gpu_scheduler().free_bytes_for_load().await;
     let load_spec = build_backend_load_spec(
         candidate.backend_id,
         &candidate.model_path,
@@ -422,19 +432,20 @@ async fn load_model_candidate(
                 .and_then(|defaults| defaults.gbnf_source.clone()),
             flash_attn,
             diffusion,
+            vram_buffer_bytes: Some(scheduler_params.vram_buffer_bytes),
+            auto_context_quantum: Some(scheduler_params.auto_context_quantum),
+            auto_context_fallback: Some(scheduler_params.auto_context_fallback),
         },
     )?;
-    let response = state.auto_unload().load_model_with_pressure_control(&load_spec).await?;
-    let status = decode_model_status(response)?;
-    state
+
+    // Full lifecycle load (shared with the replay path): before_load → load
+    // under pressure control → fresh replay plan → after_load with the
+    // engine-resolved n_ctx into the ledger.
+    let response = state
         .auto_unload()
-        .notify_model_loaded(ModelReplayPlan {
-            backend_id: candidate.backend_id,
-            model_id: resolved_target.model_id.clone(),
-            load_spec,
-            chat_template: status.chat_template.clone(),
-        })
-        .await;
+        .load_with_lifecycle(&load_spec, resolved_target.model_id.clone())
+        .await?;
+    let status = decode_model_status(response)?;
 
     if resolved_target.persist_selected_engine_id
         && let Some(model_id) = resolved_target.model_id.as_deref()
@@ -497,6 +508,11 @@ struct BackendLoadSpecOptions {
     gbnf: Option<String>,
     flash_attn: bool,
     diffusion: Option<DiffusionLoadOptions>,
+    /// Scheduler sizing tunables so the runtime's `auto` context sizing uses
+    /// host policy (mirrors `SchedulerParams` 1:1; see the load request proto).
+    vram_buffer_bytes: Option<u64>,
+    auto_context_quantum: Option<u32>,
+    auto_context_fallback: Option<u32>,
 }
 
 fn build_backend_load_spec(
@@ -513,6 +529,9 @@ fn build_backend_load_spec(
         gbnf,
         flash_attn,
         diffusion,
+        vram_buffer_bytes,
+        auto_context_quantum,
+        auto_context_fallback,
     } = options;
 
     match backend_id {
@@ -529,6 +548,9 @@ fn build_backend_load_spec(
             chat_template,
             gbnf,
             mmproj_path: None,
+            vram_buffer_bytes,
+            auto_context_quantum,
+            auto_context_fallback,
         })),
         RuntimeBackendId::GgmlWhisper => {
             Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {

@@ -186,6 +186,13 @@ export function registerCoreAndSetupSmoke(
       expect(gpu.body.backend).toBeTypeOf("string");
       expect(Array.isArray(gpu.body.devices)).toBe(true);
 
+      const ledger = await expectJson<Schema["GpuLedgerResponse"]>(
+        server,
+        "/v1/system/gpu/ledger"
+      );
+      expect(ledger.response.ok).toBe(true);
+      expect(Array.isArray(ledger.body.devices)).toBe(true);
+
       const diagnostics = await expectJson<Schema["SystemDiagnosticsResponse"]>(
         server,
         "/v1/system/diagnostics"

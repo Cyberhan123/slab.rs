@@ -15440,7 +15440,6 @@ dependencies = [
 name = "slab-app-core"
 version = "0.1.0"
 dependencies = [
- "all-smi",
  "anyhow",
  "async-trait",
  "axum",
@@ -15473,6 +15472,7 @@ dependencies = [
  "slab-exec-policy",
  "slab-file",
  "slab-git",
+ "slab-gpu-memory-scheduler",
  "slab-hub",
  "slab-jsonrpc",
  "slab-libfetch",
@@ -15693,6 +15693,19 @@ dependencies = [
  "tracing",
  "ts-rs",
  "walkdir",
+]
+
+[[package]]
+name = "slab-gpu-memory-scheduler"
+version = "0.1.0"
+dependencies = [
+ "all-smi",
+ "async-trait",
+ "chrono",
+ "slab-types",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -16052,6 +16065,7 @@ dependencies = [
  "slab-agent-tracing",
  "slab-candle",
  "slab-diffusion",
+ "slab-gpu-memory-scheduler",
  "slab-llama",
  "slab-mtmd",
  "slab-otel",

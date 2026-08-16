@@ -67,6 +67,9 @@ pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> ModelLoadRpcR
                 gbnf: non_empty_string(config.gbnf.as_deref()),
                 flash_attn: Some(config.flash_attn),
                 mmproj_path: config.mmproj_path.as_ref().map(|path| path_to_string(path)),
+                vram_buffer_bytes: config.vram_buffer_bytes,
+                auto_context_quantum: config.auto_context_quantum,
+                auto_context_fallback: config.auto_context_fallback,
             })
         }
         RuntimeBackendLoadSpec::GgmlWhisper(config) => {

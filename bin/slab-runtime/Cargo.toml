@@ -33,6 +33,7 @@ slab-proto = { workspace = true }
 slab-candle = { workspace = true, optional = true }
 slab-diffusion = { workspace = true }
 slab-llama = { workspace = true }
+slab-gpu-memory-scheduler = { workspace = true }
 slab-mtmd = { workspace = true }
 slab-whisper = { workspace = true }
 slab-parakeet = { workspace = true }

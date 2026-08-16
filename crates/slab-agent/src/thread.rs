@@ -655,6 +655,9 @@ impl AgentThread {
             model_id: &self.config.model,
             summary_instructions: None,
             force: false,
+            // The host policy self-queries the scheduler (slab-agent stays
+            // pure); the hint stays `None` on the turn-loop path.
+            memory_pressure_hint: None,
             progress: Some(Arc::new(NotifyingCompactProgress {
                 notify: notify.clone(),
                 thread_id: self.id.clone(),

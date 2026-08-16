@@ -7,6 +7,7 @@ use utoipa::OpenApi;
 
 use crate::api::v1::system::schema::{
     AgentDiagnosticsResponse, AgentThreadStatResponse, FailedToolCallResponse, GpuDeviceStatus,
+    GpuLedgerDeviceResponse, GpuLedgerEntryResponse, GpuLedgerGaugeResponse, GpuLedgerResponse,
     GpuStatusResponse, SystemDiagnosticPathResponse, SystemDiagnosticsResponse,
 };
 use crate::error::ServerError;
@@ -15,10 +16,14 @@ use slab_app_core::domain::services::SystemService;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(gpu_status, system_diagnostics, agent_diagnostics),
+    paths(gpu_status, gpu_ledger, system_diagnostics, agent_diagnostics),
     components(schemas(
         GpuStatusResponse,
         GpuDeviceStatus,
+        GpuLedgerResponse,
+        GpuLedgerDeviceResponse,
+        GpuLedgerEntryResponse,
+        GpuLedgerGaugeResponse,
         SystemDiagnosticsResponse,
         SystemDiagnosticPathResponse,
         AgentDiagnosticsResponse,
@@ -31,6 +36,7 @@ pub struct SystemApi;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/system/gpu", get(gpu_status))
+        .route("/system/gpu/ledger", get(gpu_ledger))
         .route("/system/diagnostics", get(system_diagnostics))
         .route("/system/diagnostics/agent-stats", get(agent_diagnostics))
 }
@@ -45,6 +51,18 @@ pub fn router() -> Router<Arc<AppState>> {
 )]
 async fn gpu_status(State(service): State<SystemService>) -> Json<GpuStatusResponse> {
     Json(service.gpu_status().await.into())
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/system/gpu/ledger",
+    tag = "system",
+    responses(
+        (status = 200, description = "Resident model memory ledger (diagnostics)", body = GpuLedgerResponse),
+    )
+)]
+async fn gpu_ledger(State(service): State<SystemService>) -> Json<GpuLedgerResponse> {
+    Json(service.gpu_ledger().await)
 }
 
 #[utoipa::path(

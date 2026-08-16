@@ -2708,6 +2708,7 @@ async fn sliding_window_compaction_drops_leading_orphan_tool_result() {
                 summary_instructions: None,
                 force: false,
                 progress: None,
+                memory_pressure_hint: None,
             },
         )
         .await

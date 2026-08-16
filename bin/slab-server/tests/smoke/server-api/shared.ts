@@ -118,6 +118,7 @@ export const executableSmokeOperations = [
   { method: "get", path: "/v1/system/diagnostics" },
   { method: "get", path: "/v1/system/diagnostics/agent-stats" },
   { method: "get", path: "/v1/system/gpu" },
+  { method: "get", path: "/v1/system/gpu/ledger" },
   { method: "get", path: "/v1/tasks" },
   { method: "get", path: "/v1/tasks/{id}" },
   { method: "post", path: "/v1/tasks/{id}/cancel" },

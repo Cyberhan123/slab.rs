@@ -811,6 +811,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/system/gpu/ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["gpu_ledger"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tasks": {
         parameters: {
             query?: never;
@@ -1928,6 +1944,68 @@ export interface components {
              * @description Core utilization in percentage (0-100).
              */
             utilization_percent: number;
+        };
+        /** @description Per-device ledger: last-synced gauge + resident model entries. */
+        GpuLedgerDeviceResponse: {
+            gauge?: null | components["schemas"]["GpuLedgerGaugeResponse"];
+            resident: components["schemas"]["GpuLedgerEntryResponse"][];
+            uuid: string;
+        };
+        /**
+         * @description One resident model's ledger entry (diagnostics). The ledger is
+         *     attribution — probe-measured free bytes remain the decision input.
+         */
+        GpuLedgerEntryResponse: {
+            /** @description Backend canonical id, e.g. "ggml.llama". */
+            backend: string;
+            /**
+             * Format: int64
+             * @description Measured free-VRAM delta across the load (probe before vs after).
+             */
+            measured_delta_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Projector file size in bytes (best-effort stat).
+             */
+            mmproj_bytes?: number | null;
+            /** @description Whether a multimodal projector is resident alongside the model. */
+            mmproj_resident: boolean;
+            /** @description Model id when the load was dispatched for a catalog model. */
+            model_id?: string | null;
+            /** @description Model weights file path as loaded. */
+            model_path: string;
+            num_workers: number;
+            /** @description RFC3339 timestamp of the recorded load. */
+            recorded_at: string;
+            /**
+             * Format: int32
+             * @description Engine-resolved `n_ctx` (what `auto` sized to), when reported.
+             */
+            resolved_context_length?: number | null;
+            /**
+             * Format: int64
+             * @description Weights file size in bytes (best-effort stat).
+             */
+            weights_bytes?: number | null;
+        };
+        /**
+         * @description Probe gauge folded into a ledger row. `free = total − used` (all-smi
+         *     reports no free; the scheduler derives it).
+         */
+        GpuLedgerGaugeResponse: {
+            /** Format: int64 */
+            free_bytes: number;
+            /** Format: int64 */
+            total_bytes: number;
+            /** Format: int64 */
+            used_bytes: number;
+        };
+        /**
+         * @description Resident-model memory ledger exposed at `/v1/system/gpu/ledger`
+         *     (diagnostics-only; the `/v1/system/gpu` response shape stays frozen).
+         */
+        GpuLedgerResponse: {
+            devices: components["schemas"]["GpuLedgerDeviceResponse"][];
         };
         /** @description Aggregated GPU monitor payload for the status bar. */
         GpuStatusResponse: {
@@ -5393,6 +5471,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GpuStatusResponse"];
+                };
+            };
+        };
+    };
+    gpu_ledger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resident model memory ledger (diagnostics) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GpuLedgerResponse"];
                 };
             };
         };

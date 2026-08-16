@@ -48,6 +48,9 @@ impl GgmlLlamaService {
             chat_template: request.chat_template,
             gbnf: request.gbnf,
             mmproj_path: request.mmproj_path,
+            vram_buffer_bytes: request.vram_buffer_bytes,
+            auto_context_quantum: request.auto_context_quantum,
+            auto_context_fallback: request.auto_context_fallback,
         };
 
         Ok(Self {

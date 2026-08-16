@@ -193,6 +193,9 @@ impl ModelPackEngineLoadSpec {
                 chat_template: self.load_defaults.chat_template_source.clone(),
                 gbnf: self.load_defaults.gbnf_source.clone(),
                 mmproj_path: self.load_defaults.mmproj_path.clone(),
+                vram_buffer_bytes: None,
+                auto_context_quantum: None,
+                auto_context_fallback: None,
             }),
             RuntimeBackendId::GgmlWhisper => {
                 RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {

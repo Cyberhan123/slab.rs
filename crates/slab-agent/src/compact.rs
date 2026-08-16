@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use slab_types::{ConversationMessage, ConversationMessageContent};
+use slab_types::{ConversationContentPart, ConversationMessage, ConversationMessageContent};
 
 use crate::error::AgentError;
 
@@ -42,6 +42,11 @@ pub struct CompactContext<'a> {
     pub force: bool,
     /// Optional in-progress callback (auto-compaction only).
     pub progress: Option<std::sync::Arc<dyn CompactProgress + 'a>>,
+    /// Host-injected memory-pressure hint (0-1 fill ratio, e.g. GPU VRAM).
+    /// Opaque to pure-local policies; context-length-aware host policies use
+    /// it as an OR-trigger so a memory squeeze compacts history even below
+    /// the token threshold. `None` lets the host policy self-query.
+    pub memory_pressure_hint: Option<f64>,
 }
 
 impl<'a> std::fmt::Debug for CompactContext<'a> {
@@ -51,6 +56,7 @@ impl<'a> std::fmt::Debug for CompactContext<'a> {
             .field("summary_instructions", &self.summary_instructions)
             .field("force", &self.force)
             .field("progress", &self.progress.as_ref().map(|_| "<CompactProgress>"))
+            .field("memory_pressure_hint", &self.memory_pressure_hint)
             .finish()
     }
 }
@@ -210,13 +216,35 @@ pub fn estimate_message_tokens(message: &ConversationMessage) -> usize {
     estimate_message_chars(message).div_ceil(4)
 }
 
+/// Fixed char budget an image part contributes to token estimates. The
+/// vision projector encodes images to a bounded embedding sequence — the
+/// base64 payload is not prompt text, and counting it serialized a 1MB
+/// image as ~342k "tokens", blowing the auto-compaction threshold on a
+/// single screenshot. ~1024 tokens at the 4-chars-per-token heuristic.
+const IMAGE_PART_CHAR_BUDGET: usize = 4096;
+
+fn estimate_part_chars(part: &ConversationContentPart) -> usize {
+    match part {
+        ConversationContentPart::Text { text }
+        | ConversationContentPart::InputText { text }
+        | ConversationContentPart::OutputText { text }
+        | ConversationContentPart::Refusal { text } => text.chars().count(),
+        ConversationContentPart::Image { .. } => IMAGE_PART_CHAR_BUDGET,
+        // Structured text: keep the serialized JSON length (tool results
+        // and raw values are real prompt material for the model).
+        ConversationContentPart::ToolResult { value, .. }
+        | ConversationContentPart::Json { value } => {
+            serde_json::to_string(value).map_or(0, |text| text.chars().count())
+        }
+    }
+}
+
 pub fn estimate_message_chars(message: &ConversationMessage) -> usize {
     match &message.content {
         ConversationMessageContent::Text(text) => text.chars().count(),
-        ConversationMessageContent::Parts(parts) => parts
-            .iter()
-            .map(|part| serde_json::to_string(part).map_or(0, |text| text.chars().count()))
-            .sum(),
+        ConversationMessageContent::Parts(parts) => {
+            parts.iter().map(estimate_part_chars).sum::<usize>()
+        }
     }
 }
 
@@ -249,5 +277,70 @@ pub fn remove_leading_orphan_tool_results(messages: &mut Vec<ConversationMessage
 pub fn trim_to_target_after_system(messages: &mut Vec<ConversationMessage>, target_tokens: usize) {
     while messages.len() > 1 && estimate_tokens(messages) > target_tokens {
         messages.remove(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use slab_types::{ConversationContentPart, ConversationMessage};
+
+    fn parts_message(parts: Vec<ConversationContentPart>) -> ConversationMessage {
+        ConversationMessage {
+            role: "user".to_owned(),
+            content: ConversationMessageContent::Parts(parts),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }
+    }
+
+    fn image_part(image_url: Option<String>) -> ConversationContentPart {
+        ConversationContentPart::Image { image_url, mime_type: None, detail: None }
+    }
+
+    #[test]
+    fn image_parts_estimate_bounded_instead_of_base64_length() {
+        // A ~1MB base64 payload used to count as ~342k tokens.
+        let big_payload = "x".repeat(1_000_000);
+        let message = parts_message(vec![
+            ConversationContentPart::Text { text: "hello".to_owned() },
+            image_part(Some(format!("data:image/png;base64,{big_payload}"))),
+            image_part(None),
+        ]);
+
+        assert_eq!(estimate_message_chars(&message), "hello".len() + 2 * IMAGE_PART_CHAR_BUDGET);
+        assert!(estimate_message_tokens(&message) < 2_100);
+    }
+
+    #[test]
+    fn text_like_parts_count_chars_verbatim() {
+        let message = parts_message(vec![
+            ConversationContentPart::Text { text: "four".to_owned() },
+            ConversationContentPart::InputText { text: "アイウ".to_owned() },
+            ConversationContentPart::OutputText { text: String::new() },
+            ConversationContentPart::Refusal { text: "x".to_owned() },
+        ]);
+
+        // four + three chars + zero + one char, written per-part.
+        assert_eq!(estimate_message_chars(&message), "four".chars().count() + 3 + 1);
+    }
+
+    #[test]
+    fn tool_result_and_json_parts_count_serialized_value() {
+        let tool_value = serde_json::json!({"a": 1});
+        let json_value = serde_json::json!([1, 2, 3]);
+        let expected = serde_json::to_string(&tool_value).unwrap().chars().count()
+            + serde_json::to_string(&json_value).unwrap().chars().count();
+
+        let message = parts_message(vec![
+            ConversationContentPart::ToolResult {
+                tool_call_id: Some("call-1".to_owned()),
+                value: tool_value,
+            },
+            ConversationContentPart::Json { value: json_value },
+        ]);
+
+        assert_eq!(estimate_message_chars(&message), expected);
     }
 }

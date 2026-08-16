@@ -396,21 +396,7 @@ fn is_memory_pressure_error(error: &anyhow::Error) -> bool {
     let Some(status) = error.chain().find_map(|cause| cause.downcast_ref::<tonic::Status>()) else {
         return false;
     };
-    let message = status.message().trim().to_ascii_lowercase();
-    let mentions_memory = [
-        "out of memory",
-        "not enough memory",
-        "insufficient memory",
-        "memory allocation",
-        "memory",
-        "oom",
-        "vram",
-        "cudaerrormemoryallocation",
-    ]
-    .iter()
-    .any(|needle| message.contains(needle));
-
-    mentions_memory
+    slab_gpu_memory_scheduler::is_oom_message(status.message())
         && matches!(
             status.code(),
             tonic::Code::ResourceExhausted | tonic::Code::Internal | tonic::Code::Unknown

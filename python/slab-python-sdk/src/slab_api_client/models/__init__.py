@@ -78,6 +78,10 @@ from .delete_session_response import DeleteSessionResponse
 from .download_model_request import DownloadModelRequest
 from .failed_tool_call_response import FailedToolCallResponse
 from .gpu_device_status import GpuDeviceStatus
+from .gpu_ledger_device_response import GpuLedgerDeviceResponse
+from .gpu_ledger_entry_response import GpuLedgerEntryResponse
+from .gpu_ledger_gauge_response import GpuLedgerGaugeResponse
+from .gpu_ledger_response import GpuLedgerResponse
 from .gpu_status_response import GpuStatusResponse
 from .health_response import HealthResponse
 from .i18n_message_ref import I18NMessageRef
@@ -327,6 +331,10 @@ __all__ = (
     "DownloadModelRequest",
     "FailedToolCallResponse",
     "GpuDeviceStatus",
+    "GpuLedgerDeviceResponse",
+    "GpuLedgerEntryResponse",
+    "GpuLedgerGaugeResponse",
+    "GpuLedgerResponse",
     "GpuStatusResponse",
     "HealthResponse",
     "I18NMessageRef",

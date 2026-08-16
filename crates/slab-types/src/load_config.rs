@@ -28,6 +28,15 @@ pub struct GgmlLlamaLoadConfig {
     /// runtime loads an mtmd context bound to the text model for image inputs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mmproj_path: Option<PathBuf>,
+    /// Scheduler sizing tunables forwarded from the server so `auto` context
+    /// sizing uses host policy. `None` fields fall back per-field to
+    /// `SchedulerParams::default()` on the runtime side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vram_buffer_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_context_quantum: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_context_fallback: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]

@@ -504,7 +504,10 @@ impl GGMLLlamaEngine {
 
     /// Load a model and start a multi-worker inference engine.
     ///
-    /// Any previously loaded model/engine are replaced.
+    /// Any previously loaded model/engine are replaced. `tunables` carries the
+    /// server's scheduler sizing policy; only its three `auto`-context fields
+    /// (vram buffer / quantum / fallback) are consumed here.
+    #[allow(clippy::too_many_arguments)]
     pub fn load_model_with_workers<P: AsRef<Path>>(
         &self,
         path_to_model: P,
@@ -513,6 +516,8 @@ impl GGMLLlamaEngine {
         num_workers: usize,
         context_length: Option<u32>,
         free_vram_bytes: Option<u64>,
+        mmproj_bytes: Option<u64>,
+        tunables: slab_gpu_memory_scheduler::SchedulerParams,
     ) -> Result<GgmlLlamaLoadMetadata, ggml::EngineError> {
         if num_workers == 0 {
             return Err(GGMLLlamaEngineError::InvalidWorkerCount { num_workers }.into());
@@ -541,15 +546,26 @@ impl GGMLLlamaEngine {
 
         // Resolve the context window: an explicit value, or `auto` = the largest
         // context that fits in GPU VRAM (capped at the model's training context).
+        // The sizing math lives in `slab-gpu-memory-scheduler` (single source
+        // of truth) and accounts for every worker context plus the projector;
+        // the tunables arrive over the wire from the server so both sides
+        // compute with one policy.
         ctx_params.n_ctx = context_length.unwrap_or_else(|| {
-            resolve_auto_n_ctx(
-                training_context_length,
-                model.model_size(),
-                model.n_layer().max(0) as u32,
-                model.n_head_kv().max(0) as u32,
-                model.n_embd().max(0) as u32,
-                model.n_head().max(0) as u32,
-                free_vram_bytes,
+            slab_gpu_memory_scheduler::resolve_auto_context(
+                &slab_gpu_memory_scheduler::AutoContextInput {
+                    n_ctx_train: training_context_length,
+                    model_size_bytes: model.model_size(),
+                    n_layer: model.n_layer().max(0) as u32,
+                    n_head_kv: model.n_head_kv().max(0) as u32,
+                    n_embd: model.n_embd().max(0) as u32,
+                    n_head: model.n_head().max(0) as u32,
+                    num_workers: num_workers as u32,
+                    mmproj_bytes,
+                    free_vram_bytes,
+                    vram_buffer_bytes: tunables.vram_buffer_bytes,
+                    quantum: tunables.auto_context_quantum,
+                    fallback: tunables.auto_context_fallback,
+                },
             )
         });
         if ctx_params.n_batch > ctx_params.n_ctx {
@@ -587,6 +603,26 @@ impl GGMLLlamaEngine {
         };
         // `context_length` (None = auto) is resolved inside load_model_with_workers
         // once the model is loaded and its native training context is known.
+        // The projector's file size is reserved up-front so `auto` sizing
+        // doesn't overspend the VRAM budget it will load into. Sizing
+        // tunables arrive with the load request; unset fields fall back
+        // per-field to the scheduler defaults (older servers send none).
+        let defaults = slab_gpu_memory_scheduler::SchedulerParams::default();
+        let tunables = slab_gpu_memory_scheduler::SchedulerParams {
+            vram_buffer_bytes: config.vram_buffer_bytes.unwrap_or(defaults.vram_buffer_bytes),
+            auto_context_quantum: config
+                .auto_context_quantum
+                .unwrap_or(defaults.auto_context_quantum),
+            auto_context_fallback: config
+                .auto_context_fallback
+                .unwrap_or(defaults.auto_context_fallback),
+            ..defaults
+        };
+        let mmproj_bytes = config
+            .mmproj_path
+            .as_ref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
         let metadata = self.load_model_with_workers(
             &config.model_path,
             LlamaModelParams::default(),
@@ -594,6 +630,8 @@ impl GGMLLlamaEngine {
             config.engine_workers,
             config.context_length,
             config.free_vram_bytes,
+            mmproj_bytes,
+            tunables,
         )?;
 
         // Load the multimodal projector when an mmproj path is configured. Best
@@ -1786,6 +1824,12 @@ impl GGMLLlamaEngine {
             GGMLLlamaEngineError::LockPoisoned { operation: "lock loaded llama model state" }
         })?;
         *model_write_lock = None;
+        // Drop the multimodal projector too — otherwise its GPU memory stays
+        // resident until the next load replaces it (a leak for eviction-based
+        // scheduling, which unloads to free VRAM).
+        if let Ok(mut guard) = self.mmproj.lock() {
+            *guard = None;
+        }
         self.lock_session_bindings()?.clear();
         Ok(())
     }
@@ -1848,50 +1892,6 @@ fn reasoning_event_payload(reasoning: String) -> serde_json::Value {
         ..Default::default()
     })
     .expect("llama stream reasoning event should serialize")
-}
-
-/// VRAM budget reserved above the KV cache when sizing an `auto` context.
-const AUTO_CONTEXT_VRAM_BUFFER: u64 = 2 * 1024 * 1024 * 1024;
-/// Conservative fallback context (no VRAM signal or degenerate model dims).
-const AUTO_CONTEXT_FALLBACK: u32 = 8192;
-/// `auto` contexts are floored to a multiple of this many tokens.
-const AUTO_CONTEXT_QUANTUM: u32 = 512;
-/// KV cache element size (f16 k + f16 v are llama.cpp's defaults).
-const F16_BYTES: u64 = 2;
-
-/// Resolve an `auto` context length: the largest `n_ctx` whose KV cache fits in
-/// `free_vram_bytes` (minus the model weights and a 2 GB buffer), floored to a
-/// 512-token quantum and capped at the model's native training context.
-///
-/// With no VRAM signal (or degenerate dimensions) it falls back to
-/// `min(n_ctx_train, AUTO_CONTEXT_FALLBACK)` to stay OOM-safe.
-pub(crate) fn resolve_auto_n_ctx(
-    n_ctx_train: Option<u32>,
-    model_size_bytes: u64,
-    n_layer: u32,
-    n_head_kv: u32,
-    n_embd: u32,
-    n_head: u32,
-    free_vram_bytes: Option<u64>,
-) -> u32 {
-    let cap = n_ctx_train.unwrap_or(AUTO_CONTEXT_FALLBACK);
-    let fallback = cap.min(AUTO_CONTEXT_FALLBACK);
-
-    let Some(free_vram) = free_vram_bytes else {
-        return fallback;
-    };
-
-    // KV bytes per token = 2 (k+v) · n_layer · n_head_kv · head_dim · sizeof(f16).
-    // checked_div also covers the degenerate case (bytes_per_token == 0).
-    let head_dim = n_embd.checked_div(n_head).unwrap_or(0);
-    let bytes_per_token = n_layer as u64 * 2 * n_head_kv as u64 * head_dim as u64 * F16_BYTES;
-    let budget =
-        free_vram.saturating_sub(model_size_bytes).saturating_sub(AUTO_CONTEXT_VRAM_BUFFER);
-    let Some(max_for_vram) = budget.checked_div(bytes_per_token).map(|value| value as u32) else {
-        return fallback;
-    };
-    let quantized = (max_for_vram / AUTO_CONTEXT_QUANTUM) * AUTO_CONTEXT_QUANTUM;
-    quantized.clamp(AUTO_CONTEXT_QUANTUM, cap)
 }
 
 #[cfg(test)]
@@ -2143,7 +2143,7 @@ fn trailing_partial_stop_len(generated: &str, stop_sequences: &[String]) -> usiz
 
 #[cfg(test)]
 mod stop_sequence_tests {
-    use super::{apply_stop_sequences, resolve_auto_n_ctx, trailing_partial_stop_len};
+    use super::{apply_stop_sequences, trailing_partial_stop_len};
 
     #[test]
     fn apply_stop_sequences_trims_at_earliest_match() {
@@ -2165,51 +2165,5 @@ mod stop_sequence_tests {
         assert_eq!(hold_back, "我".len());
         assert!(generated.is_char_boundary(safe_end));
         assert_eq!(&generated[safe_end..], "我");
-    }
-
-    #[test]
-    fn auto_context_falls_back_when_no_vram() {
-        // head_dim = 4096/32 = 128 → bytes_per_token = 32·2·8·128·2 = 131072.
-        // No VRAM signal → min(n_ctx_train, 8192).
-        assert_eq!(resolve_auto_n_ctx(Some(32768), 5_000_000_000, 32, 8, 4096, 32, None), 8192);
-        assert_eq!(resolve_auto_n_ctx(Some(4096), 5_000_000_000, 32, 8, 4096, 32, None), 4096);
-        // Unknown training context + no VRAM → fallback default.
-        assert_eq!(resolve_auto_n_ctx(None, 5_000_000_000, 32, 8, 4096, 32, None), 8192);
-    }
-
-    #[test]
-    fn auto_context_sizes_to_vram_and_caps_at_training_context() {
-        // free 10 GiB − model 5 GiB − buffer 2 GiB = 3 GiB; ÷131072 = 24576.
-        let sized = resolve_auto_n_ctx(
-            Some(32768),
-            5 * 1024 * 1024 * 1024,
-            32,
-            8,
-            4096,
-            32,
-            Some(10 * 1024 * 1024 * 1024),
-        );
-        assert_eq!(sized, 24576);
-
-        // Capped at n_ctx_train when VRAM would allow more.
-        let capped = resolve_auto_n_ctx(
-            Some(8192),
-            5 * 1024 * 1024 * 1024,
-            32,
-            8,
-            4096,
-            32,
-            Some(64 * 1024 * 1024 * 1024),
-        );
-        assert_eq!(capped, 8192);
-    }
-
-    #[test]
-    fn auto_context_floors_to_quantum_with_a_minimum() {
-        // Budget too small for even one full KV slot → clamped to the 512 minimum.
-        let n_ctx =
-            resolve_auto_n_ctx(Some(32768), 5_000_000_000, 32, 8, 4096, 32, Some(5_500_000_000));
-        assert!(n_ctx >= 512);
-        assert_eq!(n_ctx % 512, 0);
     }
 }

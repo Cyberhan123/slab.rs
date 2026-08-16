@@ -381,6 +381,7 @@ impl HarnessService {
             summary_instructions: None,
             force: true,
             progress: None,
+            memory_pressure_hint: None,
         };
         let outcome =
             self.0.compact().compact(&messages, &ctx).await.map_err(AppCoreError::from)?;

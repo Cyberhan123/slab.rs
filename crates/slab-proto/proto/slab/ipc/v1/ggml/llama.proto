@@ -28,6 +28,13 @@ message GgmlLlamaLoadRequest {
   // Free GPU VRAM (bytes) snapshot from the server, used to size an `auto`
   // context (context_length unset). `null` when no VRAM signal is available.
   optional uint64 free_vram_bytes = 8;
+  // Scheduler sizing tunables forwarded from the server so `auto` context
+  // sizing uses host policy instead of the engine's local defaults. Unset
+  // fields fall back per-field to slab-gpu-memory-scheduler's
+  // `SchedulerParams::default()` (2 GiB buffer, 512 quantum, 8192 fallback).
+  optional uint64 vram_buffer_bytes = 9;
+  optional uint32 auto_context_quantum = 10;
+  optional uint32 auto_context_fallback = 11;
 }
 
 message GgmlLlamaChatRequest {

@@ -7,6 +7,7 @@ pub mod model_state;
 pub mod worker_state;
 
 use crate::domain::ports::RuntimeInferenceGateway;
+use slab_gpu_memory_scheduler::SchedulerParams;
 
 pub use config::AppConfig;
 pub use model_state::ModelState;
@@ -31,6 +32,8 @@ impl AppContext {
         store: Arc<crate::infra::db::AnyStore>,
     ) -> Self {
         pmid.spawn_periodic_refresh(SETTINGS_REFRESH_INTERVAL);
+        let gpu_scheduler = new_gpu_scheduler();
+        gpu_scheduler.spawn_periodic_refresh();
         let task_manager = Arc::new(OperationManager::new());
         let runtime_gateway: Arc<dyn RuntimeInferenceGateway> =
             Arc::new(crate::infra::rpc::GrpcRuntimeInferenceGateway::new(Arc::clone(&grpc)));
@@ -38,6 +41,7 @@ impl AppContext {
             Arc::clone(&pmid),
             Arc::clone(&runtime_gateway),
             Arc::clone(&runtime_status),
+            Arc::clone(&gpu_scheduler),
         ));
         let model_state = Arc::new(ModelState::new(
             Arc::clone(&config),
@@ -47,6 +51,7 @@ impl AppContext {
             Arc::clone(&runtime_gateway),
             Arc::clone(&runtime_status),
             Arc::clone(&model_auto_unload),
+            gpu_scheduler,
         ));
         let worker_state = Arc::new(WorkerState::new(
             Arc::clone(&config),
@@ -60,6 +65,20 @@ impl AppContext {
 
         Self { config, pmid, model_state, worker_state }
     }
+}
+
+/// Build the GPU memory scheduler with the telemetry probe this build
+/// supports. The scheduler (not `SystemService`) is the process-wide GPU
+/// telemetry/sizing authority — decisions (eviction, compaction) live in
+/// their host services and read from it.
+fn new_gpu_scheduler() -> Arc<slab_gpu_memory_scheduler::GpuMemoryScheduler> {
+    #[cfg(feature = "gpu-telemetry")]
+    let probe: Arc<dyn slab_gpu_memory_scheduler::GpuProbe> =
+        Arc::new(slab_gpu_memory_scheduler::AllSmiProbe);
+    #[cfg(not(feature = "gpu-telemetry"))]
+    let probe: Arc<dyn slab_gpu_memory_scheduler::GpuProbe> =
+        Arc::new(slab_gpu_memory_scheduler::NoopGpuProbe);
+    slab_gpu_memory_scheduler::GpuMemoryScheduler::new(probe, SchedulerParams::default())
 }
 
 #[derive(Clone)]

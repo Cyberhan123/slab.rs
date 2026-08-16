@@ -17,6 +17,7 @@ members = [
     "crates/slab-otel",
     "crates/slab-build-utils",
     "crates/slab-candle",
+    "crates/slab-gpu-memory-scheduler",
     "crates/slab-model-pack",
     "crates/slab-utils",
     "crates/slab-diffusion",
@@ -120,6 +121,7 @@ slab-js-runtime = { path = "./bin/slab-js-runtime", package = "slab-js-runtime",
 slab-python-runtime = { path = "./bin/slab-python-runtime", package = "slab-python-runtime", version = "0.1.0" }
 slab-apply-patch = { path = "./crates/slab-apply-patch", package = "slab-apply-patch", version = "0.1.0" }
 slab-exec-policy = { path = "./crates/slab-exec-policy", package = "slab-exec-policy", version = "0.1.0" }
+slab-gpu-memory-scheduler = { path = "./crates/slab-gpu-memory-scheduler", package = "slab-gpu-memory-scheduler", version = "0.1.0" }
 
 notify = "8"
 ignore = "0.4"
