@@ -177,6 +177,26 @@ impl RolloutConversationStore for HarnessMockStore {
             .cloned()
             .collect())
     }
+    async fn list_turn_timeline(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<slab_agent_rollout::TurnTimelineEntry>, AgentError> {
+        // Deterministic mock: per turn, the appended messages (in insertion
+        // order) followed by the turn's items — the interleaving the real
+        // rollout timeline produces for a normally-written session.
+        let mut out = Vec::new();
+        for message in self.messages.lock().unwrap().iter() {
+            if message.thread_id == thread_id {
+                out.push(slab_agent_rollout::TurnTimelineEntry::Message(message.clone()));
+            }
+        }
+        for item in self.items.lock().unwrap().iter() {
+            if item.thread_id == thread_id {
+                out.push(slab_agent_rollout::TurnTimelineEntry::Item(item.clone()));
+            }
+        }
+        Ok(out)
+    }
     async fn list_thread_messages(
         &self,
         thread_id: &str,

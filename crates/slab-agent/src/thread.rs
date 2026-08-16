@@ -201,7 +201,7 @@ impl AgentThread {
         mut messages: Vec<ConversationMessage>,
         runtime: AgentThreadRuntime,
         starting_turn_index: u32,
-        emit_from: Option<usize>,
+        emit_new: Option<usize>,
     ) -> Result<String, AgentError> {
         let AgentThreadRuntime {
             llm,
@@ -259,7 +259,7 @@ impl AgentThread {
                 "parent_id": self.parent_id,
                 "depth": self.depth,
                 "starting_turn_index": starting_turn_index,
-                "emit_from": emit_from,
+                "emit_new": emit_new,
                 "config": self.config,
                 "initial_messages": messages,
             }),
@@ -342,13 +342,19 @@ impl AgentThread {
             },
         )
         .await;
-        insert_injected_messages(&mut messages, start_effects.injected_messages);
+        // Merge (replace-by-tag), never append: the init batch carries stable
+        // `name` tags (slab_system / slab_environment / …), so a later run
+        // refreshes volatile fragments (permission mode, environment time,
+        // reasoning effort) IN PLACE instead of re-inserting a second full
+        // batch that inflates the context every user turn.
+        merge_injected_messages(&mut messages, start_effects.injected_messages);
         insert_injected_messages(
             &mut messages,
             hook_observation_messages(start_effects.observations),
         );
 
-        if let Some(start) = emit_from {
+        if let Some(new_count) = emit_new {
+            let start = messages.len().saturating_sub(new_count);
             for message in messages.iter().skip(start) {
                 emit_message_appended(notify.as_ref(), &thread_id, starting_turn_index, message)
                     .await;
@@ -829,6 +835,95 @@ fn insert_injected_messages(
     }
 }
 
+/// Replace-by-tag merge of an injected init-context batch into the message
+/// history — the OnAgentStart path's replacement for
+/// [`insert_injected_messages`] (which APPENDS a fresh batch on every run and
+/// inflated the context once per user turn).
+///
+/// Semantics:
+/// 1. Every message whose `name` matches one of the injected batch's names is
+///    removed (the whole tag family — e.g. multiple `slab_agents_md` entries).
+/// 2. Legacy compatibility for histories written before the tags existed:
+///    untagged messages whose rendered content starts with the same XML-ish
+///    wrapper prefix as an injected developer fragment
+///    (`<environment_context>`, `<permissions_instructions>`, …), and an
+///    untagged leading `system` whose first line equals the injected system's
+///    first line, are removed too.
+/// 3. The fresh batch is inserted as ONE contiguous block at the position of
+///    the first removed message (index 0 when nothing was removed), so the
+///    init batch always sits ahead of the user history — exactly one copy.
+fn merge_injected_messages(
+    messages: &mut Vec<ConversationMessage>,
+    injected: Vec<ConversationMessage>,
+) {
+    if injected.is_empty() {
+        return;
+    }
+    // The tag family + role-matched wrapper prefixes carried by THIS batch.
+    let names: std::collections::HashSet<&str> =
+        injected.iter().filter_map(|m| m.name.as_deref()).collect();
+    // `(role, prefix)` pairs — a wrapper only strips UNTAGGED messages of the
+    // SAME role, so a developer fragment's `<environment_context>` wrapper can
+    // never strip a user turn that happens to start with the same text.
+    let wrappers: Vec<(&str, String)> =
+        injected.iter().filter_map(|m| wrapper_prefix(m).map(|w| (m.role.as_str(), w))).collect();
+    let system_first_line =
+        injected.iter().find(|m| m.role == "system").and_then(|m| first_line(&m.content));
+
+    // Walk with index bookkeeping so the first dropped position is exact.
+    let mut insert_at = None;
+    let mut index = 0;
+    messages.retain(|message| {
+        let tagged_duplicate = message.name.as_deref().is_some_and(|n| names.contains(n));
+        // A wrapper only strips UNTAGGED messages of the SAME role, so a
+        // developer fragment's `<environment_context>` wrapper can never strip a
+        // user turn that happens to start with the same text.
+        let wrapper_duplicate = message.name.is_none()
+            && wrappers.iter().any(|(role, w)| {
+                message.role.as_str() == *role
+                    && message.content.rendered_text().starts_with(w.as_str())
+            });
+        // Untagged leading system duplicated by an older build.
+        let legacy_system_duplicate = message.name.is_none()
+            && message.role == "system"
+            && index == 0
+            && system_first_line.is_some()
+            && first_line(&message.content) == system_first_line;
+        let drop = tagged_duplicate || wrapper_duplicate || legacy_system_duplicate;
+        if drop && insert_at.is_none() {
+            insert_at = Some(index);
+        }
+        if !drop {
+            index += 1;
+        }
+        !drop
+    });
+
+    let at = insert_at.unwrap_or(0);
+    for (offset, message) in injected.into_iter().enumerate() {
+        messages.insert(at + offset, message);
+    }
+}
+
+/// The leading `<wrapper>` token of a rendered fragment, when its content
+/// starts with one (e.g. `<environment_context>`). Used to recognize untagged
+/// legacy copies of the same fragment.
+fn wrapper_prefix(message: &ConversationMessage) -> Option<String> {
+    let text = message.content.rendered_text();
+    let rest = text.strip_prefix('<')?;
+    let end = rest.find('>')?;
+    let name = &rest[..end];
+    if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') && !name.is_empty() {
+        Some(format!("<{name}>"))
+    } else {
+        None
+    }
+}
+
+fn first_line(content: &slab_types::ConversationMessageContent) -> Option<String> {
+    content.rendered_text().lines().next().map(str::to_owned)
+}
+
 fn hook_observation_messages(observations: Vec<String>) -> Vec<ConversationMessage> {
     observations
         .into_iter()
@@ -843,4 +938,150 @@ fn hook_observation_messages(observations: Vec<String>) -> Vec<ConversationMessa
             tool_calls: Vec::new(),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+    use slab_types::ConversationMessageContent;
+
+    fn msg(role: &str, text: &str, name: Option<&str>) -> ConversationMessage {
+        ConversationMessage {
+            role: role.to_owned(),
+            content: ConversationMessageContent::Text(text.to_owned()),
+            name: name.map(str::to_owned),
+            tool_call_id: None,
+            tool_calls: vec![],
+        }
+    }
+
+    fn init_batch(mode_line: &str) -> Vec<ConversationMessage> {
+        vec![
+            msg("system", "You are Slab, an AI agent. …", Some("slab_system")),
+            msg("developer", "<environment_context>\n<cwd>/w</cwd>", Some("slab_environment")),
+            msg("developer", mode_line, Some("slab_permissions")),
+        ]
+    }
+
+    // The context-inflation regression: merging a SECOND batch into a history
+    // that already carries the first must REPLACE, not append — exactly one
+    // system message, exactly one permissions fragment, and the refreshed
+    // (mode-changed) content wins.
+    #[test]
+    fn second_merge_replaces_instead_of_appending() {
+        let mut messages = init_batch("<permissions_instructions>\nmode: request_approval");
+        messages.push(msg("user", "你好", None));
+        messages.push(msg("assistant", "你好！", None));
+        messages.push(msg("user", "再见", None));
+
+        let mut refreshed = init_batch("<permissions_instructions>\nmode: auto_accept");
+        refreshed.push(msg("developer", "<skills_instructions>\n…", Some("slab_skills")));
+        merge_injected_messages(&mut messages, refreshed);
+
+        let systems = messages.iter().filter(|m| m.role == "system").count();
+        assert_eq!(systems, 1, "exactly one system message after re-merge");
+        let perms: Vec<&ConversationMessage> =
+            messages.iter().filter(|m| m.name.as_deref() == Some("slab_permissions")).collect();
+        assert_eq!(perms.len(), 1, "permissions fragment replaced, not duplicated");
+        assert!(
+            perms[0].content.rendered_text().contains("auto_accept"),
+            "refreshed fragment content wins"
+        );
+        // The batch sits as ONE contiguous block ahead of the user history.
+        let first_user = messages.iter().position(|m| m.role == "user").expect("user present");
+        assert!(
+            !messages[..first_user].iter().any(|m| m.name.is_none()),
+            "init batch is contiguous and ahead of history: {:?}",
+            messages[..first_user].iter().map(|m| m.name.clone()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            messages.iter().filter(|m| m.role == "user").count(),
+            2,
+            "user history untouched"
+        );
+    }
+
+    // Legacy rollout files carry the init batch WITHOUT tags — the merge must
+    // still recognize and replace those (wrapper-prefix + leading-system
+    // first-line rules), or every resumed legacy thread would duplicate.
+    #[test]
+    fn merge_recleans_untagged_legacy_batch() {
+        let mut messages = vec![
+            msg("system", "You are Slab, an AI agent. …", None),
+            msg("developer", "<environment_context>\n<cwd>/w</cwd>", None),
+            msg("developer", "<permissions_instructions>\nmode: request_approval", None),
+            msg("developer", "<skills_instructions>\n…", None),
+            msg("user", "你好", None),
+            msg("assistant", "你好！", None),
+            msg("user", "再来", None),
+        ];
+        merge_injected_messages(
+            &mut messages,
+            init_batch("<permissions_instructions>\nmode: auto_accept"),
+        );
+
+        assert_eq!(
+            messages.iter().filter(|m| m.role == "system").count(),
+            1,
+            "legacy untagged system replaced"
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| m.content.rendered_text().starts_with("<environment_context>"))
+                .count(),
+            1,
+            "legacy untagged environment replaced"
+        );
+        assert_eq!(
+            messages.iter().filter(|m| m.role == "user").count(),
+            2,
+            "user history untouched"
+        );
+    }
+
+    // Fresh spawn: nothing to replace — the batch lands ahead of the user
+    // messages (same placement the old insert-after-leading-system produced).
+    #[test]
+    fn merge_into_fresh_history_inserts_at_front() {
+        let mut messages = vec![msg("user", "你好", None)];
+        merge_injected_messages(&mut messages, init_batch("<permissions_instructions>\nx"));
+
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0].role, "system");
+        assert_eq!(messages[3].content.rendered_text(), "你好");
+    }
+
+    // Post-compaction history (init summarized away): the merge re-inserts the
+    // fresh batch ahead of the summary — exactly one copy again.
+    #[test]
+    fn merge_after_compaction_reinserts_single_copy() {
+        let mut messages = vec![
+            msg("system", "You are Slab, an AI agent. …", Some("slab_system")),
+            msg("user", "summary of earlier turns", None),
+        ];
+        merge_injected_messages(&mut messages, init_batch("<permissions_instructions>\nx"));
+
+        assert_eq!(
+            messages.iter().filter(|m| m.role == "system").count(),
+            1,
+            "tagged system replaced, not duplicated"
+        );
+        assert_eq!(messages.len(), 4, "batch + summary");
+        assert_eq!(messages[3].content.rendered_text(), "summary of earlier turns");
+    }
+
+    // A user message legitimately repeating earlier text must survive — the
+    // wrapper rules only strip developer-shaped fragments, never user turns.
+    #[test]
+    fn merge_never_touches_user_messages() {
+        let mut messages =
+            vec![msg("user", "<environment_context>\nfake", None), msg("assistant", "hi", None)];
+        merge_injected_messages(&mut messages, init_batch("<permissions_instructions>\nx"));
+        assert_eq!(
+            messages.iter().filter(|m| m.role == "user").count(),
+            1,
+            "user message with a wrapper-looking prefix is kept"
+        );
+    }
 }

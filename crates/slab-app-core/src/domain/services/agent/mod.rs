@@ -18,6 +18,9 @@ pub mod response;
 pub use compact::{SummarizingCompactPort, maybe_compact_messages};
 pub use harness::HarnessService;
 pub use response::ResponseService;
+/// Re-exported so harness consumers (`slab-server`) can name the timeline
+/// entry type without a direct `slab-agent-rollout` dependency.
+pub use slab_agent_rollout::TurnTimelineEntry;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -58,6 +61,16 @@ pub(crate) trait RolloutConversationStore: Send + Sync {
     /// Persisted full-fidelity `TurnItem` snapshots for a thread, ordered by
     /// `(turn_index, seq)` for deterministic replay.
     async fn list_turn_items(&self, thread_id: &str) -> Result<Vec<TurnItemRecord>, AgentError>;
+
+    /// Persisted interleaved `TurnItem` + `MessageAppend` timeline for a
+    /// thread, in rollout write (file) order with per-turn attribution — the
+    /// single ordered source for the `thread/resume` history projection (the
+    /// bucket-merge over separate reads lost ordering when a `TurnState`
+    /// restamp collapsed every message onto the last turn).
+    async fn list_turn_timeline(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<slab_agent_rollout::TurnTimelineEntry>, AgentError>;
 
     /// Persisted turn-state records for a thread ordered by `turn_index`.
     async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError>;
@@ -247,10 +260,14 @@ impl AgentCore {
             records.iter().map(|record| record.turn_index).max().map_or(0, |index| index + 1);
         let mut messages: Vec<ConversationMessage> =
             records.into_iter().map(|record| record.message).collect();
-        let emit_from = messages.len();
         messages.push(message);
+        // Exactly ONE message is new (the user input above). A trailing COUNT,
+        // not an absolute index — the OnAgentStart init-batch merge inside
+        // `run()` shifts history positions, and an absolute anchor would drift
+        // and re-emit a tail of old messages as `MessageAppended` (duplicating
+        // them in the rollout).
         self.runtime
-            .resume_thread(thread_id, messages, starting_turn_index, Some(emit_from))
+            .resume_thread(thread_id, messages, starting_turn_index, Some(1))
             .await
             .map_err(AppCoreError::from)?;
         self.ensure_rollout_persistence(thread_id);

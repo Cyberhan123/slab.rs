@@ -17,6 +17,27 @@ use crate::reader::read_rollout_lines;
 use crate::recorder::{RolloutCmd, RolloutRecorderHandle, RolloutRecorderParams};
 use crate::writer::replace_file_atomically;
 
+/// One entry of the interleaved turn timeline produced by
+/// [`RolloutStore::read_turn_timeline`] — full-fidelity UI artifacts and
+/// LLM-grade conversation messages **in the order their rollout lines were
+/// written**, each carrying its turn affiliation.
+///
+/// Unlike the three separate replay reads (`read_messages` /
+/// `read_turn_items` / `read_events`), the timeline preserves the relative
+/// order between `TurnItem` and `MessageAppend` lines, so a consumer
+/// rebuilding the UI history (`thread/resume`) renders the exact sequence the
+/// live event stream produced instead of re-merging per-turn buckets.
+#[derive(Debug, Clone)]
+pub enum TurnTimelineEntry {
+    /// A finalized UI artifact (`RolloutItem::TurnItem`), attributed by the
+    /// running-turn heuristic (identical to [`RolloutStore::read_turn_items`]).
+    Item(slab_agent::port::TurnItemRecord),
+    /// An appended conversation message (`TurnContext::MessageAppend`) or a
+    /// post-compaction baseline message (`Compacted`), carrying its own
+    /// explicit turn affiliation.
+    Message(slab_agent::port::ThreadMessageRecord),
+}
+
 /// Abstract read/write surface over the rollout true source.
 #[async_trait]
 pub trait RolloutStore: Send + Sync {
@@ -26,6 +47,10 @@ pub trait RolloutStore: Send + Sync {
     /// Replay finalized items (from `RolloutItem::TurnItem`), attaching the
     /// currently-tracked turn index and a monotonic `seq`.
     async fn read_turn_items(&self, thread_id: &str) -> Vec<slab_agent::port::TurnItemRecord>;
+    /// Replay the interleaved `TurnItem` + `MessageAppend` timeline in file
+    /// (write) order, each entry attributed to its turn. The single ordered
+    /// source for history-restore projections — see [`TurnTimelineEntry`].
+    async fn read_turn_timeline(&self, thread_id: &str) -> Vec<TurnTimelineEntry>;
     /// Replay persisted events (from `RolloutItem::EventMsg`).
     async fn read_events(&self, thread_id: &str) -> Vec<slab_agent::protocol::EventMsg>;
     /// Append one rollout item.
@@ -698,6 +723,96 @@ impl RolloutStore for RolloutFileStore {
                     }
                 }
                 _ => {}
+            }
+        }
+        out
+    }
+
+    async fn read_turn_timeline(&self, thread_id: &str) -> Vec<TurnTimelineEntry> {
+        let _ = self.flush(thread_id).await;
+        let lines = read_rollout_lines(&self.resolve_path(thread_id));
+        let mut out: Vec<TurnTimelineEntry> = Vec::new();
+        let mut current_turn: u32 = 0;
+        // Item `seq` ordering within a turn (mirrors `read_turn_items`).
+        let mut seq = 0u32;
+        // Message record counter for synthetic ids (mirrors `replay_messages`).
+        let mut msg_seq = 0u32;
+        for line in lines {
+            match line.item {
+                RolloutItem::TurnItem(ti) => {
+                    let id = ti.id().to_owned();
+                    let item_json = serde_json::to_string(&ti).unwrap_or_default();
+                    out.push(TurnTimelineEntry::Item(slab_agent::port::TurnItemRecord {
+                        id,
+                        thread_id: thread_id.to_owned(),
+                        turn_index: current_turn,
+                        seq,
+                        item_json,
+                        created_at: line.timestamp,
+                    }));
+                    seq += 1;
+                }
+                RolloutItem::TurnContext(TurnContextPayload::TurnState { turn_index, .. }) => {
+                    // TurnStates contribute no timeline entries, but they carry
+                    // the turn affiliation for subsequent TurnItem lines —
+                    // advance the running turn exactly like `read_turn_items`.
+                    if turn_index != current_turn {
+                        current_turn = turn_index;
+                        seq = 0;
+                    }
+                }
+                RolloutItem::TurnContext(TurnContextPayload::MessageAppend {
+                    turn_index,
+                    message,
+                    id,
+                    created_at,
+                }) => {
+                    if turn_index != current_turn {
+                        current_turn = turn_index;
+                        seq = 0;
+                    }
+                    let stamped = created_at.unwrap_or_else(|| line.timestamp.clone());
+                    let record_id = id.unwrap_or_else(|| format!("{thread_id}-r{msg_seq}"));
+                    msg_seq += 1;
+                    out.push(TurnTimelineEntry::Message(slab_agent::port::ThreadMessageRecord {
+                        id: record_id,
+                        thread_id: thread_id.to_owned(),
+                        turn_index,
+                        message,
+                        created_at: stamped,
+                    }));
+                }
+                RolloutItem::Compacted(payload) => {
+                    // A skipped compaction changed nothing — no timeline
+                    // entries and no running-turn advance (mirrors the
+                    // `read_messages` no-op).
+                    if payload.status == "skipped" {
+                        continue;
+                    }
+                    // The compacted baseline becomes the conversation's new
+                    // starting point AT this turn: advance the running turn so
+                    // post-compaction items attribute to the compacted turn,
+                    // and surface the baseline messages in timeline order.
+                    if payload.turn_index != current_turn {
+                        current_turn = payload.turn_index;
+                        seq = 0;
+                    }
+                    for message in payload.compacted_messages {
+                        let record_id = format!("{thread_id}-r{msg_seq}");
+                        msg_seq += 1;
+                        out.push(TurnTimelineEntry::Message(
+                            slab_agent::port::ThreadMessageRecord {
+                                id: record_id,
+                                thread_id: thread_id.to_owned(),
+                                turn_index: payload.turn_index,
+                                message,
+                                created_at: line.timestamp.clone(),
+                            },
+                        ));
+                    }
+                }
+                // SessionMeta / EventMsg contribute no timeline entries.
+                RolloutItem::SessionMeta(_) | RolloutItem::EventMsg(_) => {}
             }
         }
         out
@@ -2571,6 +2686,223 @@ mod tests {
             "dup dedup keeps the newest (date-tree) t-a: got started_at={}",
             a.started_at,
         );
+    }
+
+    // ── read_turn_timeline ──────────────────────────────────────────────────
+    //
+    // Regression for the restore-ordering bug: the fixture mirrors a REAL
+    // production rollout file (sessions/2026/08/16/rollout-...-3a5d231e) —
+    // per-turn TurnState full snapshots, re-appended duplicate messages from
+    // the historical emit-anchor drift, and an auto-compaction marker. The
+    // timeline must surface entries in FILE order with per-turn attribution
+    // that matches the live event sequence (not the TurnState restamp that
+    // collapses all messages onto the last turn).
+
+    fn dev_msg(text: &str) -> slab_types::ConversationMessage {
+        ConversationMessage {
+            role: "developer".to_owned(),
+            content: ConversationMessageContent::Text(text.to_owned()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![],
+        }
+    }
+
+    fn turn_state(turn: u32, input: Vec<slab_types::ConversationMessage>) -> RolloutItem {
+        RolloutItem::TurnContext(TurnContextPayload::TurnState {
+            turn_index: turn,
+            status: "completed".to_owned(),
+            input_messages: input,
+            tool_specs_json: None,
+            llm_response_json: None,
+            error: None,
+            completed_at: None,
+            started_at: None,
+            input_messages_raw: None,
+        })
+    }
+
+    fn append(turn: u32, message: slab_types::ConversationMessage) -> RolloutItem {
+        RolloutItem::TurnContext(TurnContextPayload::MessageAppend {
+            turn_index: turn,
+            message,
+            id: None,
+            created_at: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn read_turn_timeline_preserves_file_order_and_append_attribution() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+        s.create_session(default_meta("t"));
+
+        // Turn 0: init batch (system + dev) + user, then assistant item+append,
+        // closed by a TurnState carrying the FULL input snapshot (this is the
+        // line whose restamp collapsed every message onto the last turn in the
+        // old bucket-merge restore path).
+        s.append(
+            "t",
+            append(
+                0,
+                ConversationMessage {
+                    role: "system".to_owned(),
+                    content: ConversationMessageContent::Text("persona".to_owned()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: vec![],
+                },
+            ),
+        )
+        .await
+        .unwrap();
+        s.append("t", append(0, dev_msg("<environment_context>"))).await.unwrap();
+        s.append("t", append(0, user_msg("你是谁"))).await.unwrap();
+        s.append(
+            "t",
+            RolloutItem::TurnItem(TurnItem::AgentMessage {
+                id: "a0".to_owned(),
+                text: "我是 Slab".to_owned(),
+            }),
+        )
+        .await
+        .unwrap();
+        s.append("t", append(0, user_msg_reply("我是 Slab"))).await.unwrap();
+        s.append("t", turn_state(0, vec![user_msg("你是谁")])).await.unwrap();
+
+        // Turn 1: the historical emit-drift re-append (old dev + prior
+        // user/assistant duplicated at the new turn's index) + the new input.
+        s.append("t", append(1, dev_msg("<environment_context>"))).await.unwrap();
+        s.append("t", append(1, user_msg("你是谁"))).await.unwrap();
+        s.append("t", append(1, user_msg_reply("我是 Slab"))).await.unwrap();
+        s.append("t", append(1, user_msg("权限测试"))).await.unwrap();
+        s.append(
+            "t",
+            RolloutItem::TurnItem(TurnItem::CommandExecution {
+                id: "c1".to_owned(),
+                command: "echo hi".to_owned(),
+                cwd: "/".to_owned(),
+                process_id: None,
+                status: "completed".to_owned(),
+                aggregated_output: None,
+                exit_code: Some(0),
+                duration_ms: None,
+            }),
+        )
+        .await
+        .unwrap();
+        s.append(
+            "t",
+            append(
+                1,
+                ConversationMessage {
+                    role: "tool".to_owned(),
+                    content: ConversationMessageContent::Text("hi".to_owned()),
+                    name: None,
+                    tool_call_id: Some("c1".to_owned()),
+                    tool_calls: vec![],
+                },
+            ),
+        )
+        .await
+        .unwrap();
+
+        // Auto-compaction with a non-empty baseline at turn 1.
+        s.append(
+            "t",
+            RolloutItem::Compacted(crate::item::CompactedPayload {
+                thread_id: "t".to_owned(),
+                compacted_messages: vec![user_msg("summary")],
+                removed_messages: 4,
+                output_tokens: 10,
+                status: "auto".to_owned(),
+                turn_index: 1,
+            }),
+        )
+        .await
+        .unwrap();
+        // Post-compaction turn 2.
+        s.append("t", append(2, user_msg("你能做什么"))).await.unwrap();
+        s.append(
+            "t",
+            RolloutItem::TurnItem(TurnItem::AgentMessage {
+                id: "a2".to_owned(),
+                text: "很多".to_owned(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        let timeline = s.read_turn_timeline("t").await;
+        // Render the timeline as a compact (kind, turn, key) list for assertion.
+        let rendered: Vec<(u8, u32, String)> = timeline
+            .iter()
+            .map(|e| match e {
+                TurnTimelineEntry::Item(r) => (0, r.turn_index, format!("item:{}", r.id)),
+                TurnTimelineEntry::Message(r) => (
+                    1,
+                    r.turn_index,
+                    format!("msg:{}:{}", r.message.role, r.message.content.rendered_text()),
+                ),
+            })
+            .collect();
+        assert_eq!(
+            rendered,
+            vec![
+                (1, 0, "msg:system:persona".to_owned()),
+                (1, 0, "msg:developer:<environment_context>".to_owned()),
+                (1, 0, "msg:user:你是谁".to_owned()),
+                (0, 0, "item:a0".to_owned()),
+                (1, 0, "msg:assistant:我是 Slab".to_owned()),
+                // TurnState contributes nothing.
+                (1, 1, "msg:developer:<environment_context>".to_owned()),
+                (1, 1, "msg:user:你是谁".to_owned()),
+                (1, 1, "msg:assistant:我是 Slab".to_owned()),
+                (1, 1, "msg:user:权限测试".to_owned()),
+                (0, 1, "item:c1".to_owned()),
+                (1, 1, "msg:tool:hi".to_owned()),
+                // Compacted baseline surfaces at its turn.
+                (1, 1, "msg:user:summary".to_owned()),
+                (1, 2, "msg:user:你能做什么".to_owned()),
+                (0, 2, "item:a2".to_owned()),
+            ],
+            "timeline must preserve file order with per-append turn attribution"
+        );
+
+        // The item seq resets per turn (mirrors read_turn_items).
+        let seqs: Vec<(u32, u32, &str)> = timeline
+            .iter()
+            .filter_map(|e| match e {
+                TurnTimelineEntry::Item(r) => Some((r.turn_index, r.seq, r.id.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(seqs, vec![(0, 0, "a0"), (1, 0, "c1"), (2, 0, "a2")]);
+
+        // Message records carry stable synthetic ids and the append's own
+        // turn index — NOT the last TurnState's restamp.
+        let user_turns: Vec<u32> = timeline
+            .iter()
+            .filter_map(|e| match e {
+                TurnTimelineEntry::Message(r) if r.message.role == "user" => Some(r.turn_index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            user_turns,
+            vec![0, 1, 1, 1, 2],
+            "user messages keep their append-turn attribution (incl. compacted summary)"
+        );
+    }
+
+    fn user_msg_reply(text: &str) -> slab_types::ConversationMessage {
+        ConversationMessage {
+            role: "assistant".to_owned(),
+            content: ConversationMessageContent::Text(text.to_owned()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![],
+        }
     }
 }
 

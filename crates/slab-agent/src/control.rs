@@ -44,8 +44,15 @@ struct SpawnRequest {
     config: AgentConfig,
     messages: Vec<ConversationMessage>,
     starting_turn_index: u32,
-    emit_from: Option<usize>,
+    emit_new: Option<usize>,
 }
+
+/// `emit_new` marker for "the whole (post-injection) context is new" — the
+/// spawn paths persist the fresh thread's ENTIRE message vec (init batch
+/// included) as `MessageAppended`. `run()`'s
+/// `messages.len().saturating_sub(EMIT_ALL)` collapses to `0`, i.e. skip
+/// nothing.
+const EMIT_ALL: usize = usize::MAX;
 
 /// Defensive upper bound on parent-chain walks (e.g. [`crate::thread::resolve_root_thread_id`]).
 /// Well beyond any realistic `max_depth` (default 4, configurable per config) —
@@ -294,7 +301,7 @@ impl AgentControl {
             config,
             messages,
             starting_turn_index: 0,
-            emit_from: Some(0),
+            emit_new: Some(EMIT_ALL),
         })
         .await
     }
@@ -321,7 +328,7 @@ impl AgentControl {
             config,
             messages,
             starting_turn_index: 0,
-            emit_from: Some(0),
+            emit_new: Some(EMIT_ALL),
         })
         .await
     }
@@ -494,15 +501,19 @@ impl AgentControl {
     /// into the app-core caller (`AgentCore::send_input`); slab-agent
     /// no longer reads conversation data (it leaves via the `EventMsg` protocol
     /// only). This entry point receives the FULL message vec (history + the new
-    /// user message already appended), the `starting_turn_index`, and `emit_from`
-    /// — the index of the first NEW message to emit as `MessageAppended` before
-    /// the turn loop (the M5 within-turn attribution anchor).
+    /// user message already appended), the `starting_turn_index`, and
+    /// `emit_new` — HOW MANY trailing messages are new and must be emitted as
+    /// `MessageAppended` before the turn loop (the M5 within-turn attribution
+    /// anchor). A TRAILING COUNT, not an absolute index: the OnAgentStart
+    /// init-batch merge shifts message positions between the caller's read and
+    /// the emit, so an absolute anchor drifts and re-emits a tail of old
+    /// history.
     pub async fn resume_thread(
         &self,
         thread_id: &str,
         messages: Vec<ConversationMessage>,
         starting_turn_index: u32,
-        emit_from: Option<usize>,
+        emit_new: Option<usize>,
     ) -> Result<(), AgentError> {
         if self.threads.read().await.contains_key(thread_id) {
             return Err(AgentError::ThreadBusy(thread_id.to_owned()));
@@ -530,7 +541,7 @@ impl AgentControl {
             snapshot.depth,
             config,
         );
-        self.start_thread(thread, status_rx, messages, starting_turn_index, emit_from).await?;
+        self.start_thread(thread, status_rx, messages, starting_turn_index, emit_new).await?;
         Ok(())
     }
 
@@ -671,11 +682,11 @@ impl AgentControl {
             config,
             messages,
             starting_turn_index,
-            emit_from,
+            emit_new,
         } = request;
 
         let (thread, status_rx) = AgentThread::new(session_id, parent_id, depth, config);
-        self.start_thread(thread, status_rx, messages, starting_turn_index, emit_from).await
+        self.start_thread(thread, status_rx, messages, starting_turn_index, emit_new).await
     }
 
     async fn start_thread(
@@ -684,7 +695,7 @@ impl AgentControl {
         status_rx: watch::Receiver<ThreadStatus>,
         messages: Vec<ConversationMessage>,
         starting_turn_index: u32,
-        emit_from: Option<usize>,
+        emit_new: Option<usize>,
     ) -> Result<String, AgentError> {
         // Memory circuit breaker (INFRA-05): pause spawns while the host reports
         // process RSS above the configured threshold.
@@ -744,7 +755,7 @@ impl AgentControl {
         // into the task and dropped on completion or abort.
         let join_handle = tokio::spawn(async move {
             let _permit = permit;
-            let result = thread.run(messages, runtime, starting_turn_index, emit_from).await;
+            let result = thread.run(messages, runtime, starting_turn_index, emit_new).await;
             if let Err(ref e) = result {
                 warn!(thread_id = %id_cleanup, error = %e, "agent thread finished with error");
             }

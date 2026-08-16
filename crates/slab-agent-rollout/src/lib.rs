@@ -45,5 +45,5 @@ pub use projection::{
 pub use reader::{RolloutReader, read_rollout_lines};
 pub use recorder::{RolloutCmd, RolloutRecorderHandle, RolloutRecorderParams};
 pub use session_index::SessionIndexEntry;
-pub use store::{RolloutFileStore, RolloutStore};
+pub use store::{RolloutFileStore, RolloutStore, TurnTimelineEntry};
 pub use writer::JsonlWriter;

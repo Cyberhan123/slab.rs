@@ -130,6 +130,101 @@ describe("harness stream convertNotification", () => {
     ])
   })
 
+  it("creates the Running card on item/started(commandExecution)", () => {
+    const state = createStreamState()
+    const item: TurnItem = {
+      type: "commandExecution",
+      id: "c9",
+      command: "ls",
+      cwd: "/tmp",
+      status: "running",
+    }
+    const chunks = convertNotification(
+      { method: "item/started", params: { item, threadId: THREAD, turnId: TURN } },
+      state,
+    )
+    expect(chunks).toEqual([
+      {
+        input: { command: "ls", cwd: "/tmp" },
+        toolCallId: "c9",
+        toolName: "commandExecution",
+        type: "tool-input-available",
+      },
+    ])
+  })
+
+  it("creates the Running card on item/started(fileChange) with the change list", () => {
+    const state = createStreamState()
+    const item: TurnItem = {
+      type: "fileChange",
+      id: "f1",
+      changes: [{ path: "a.txt", type: "edit", diff: "+hello" }],
+      status: "running",
+    }
+    const chunks = convertNotification(
+      { method: "item/started", params: { item, threadId: THREAD, turnId: TURN } },
+      state,
+    )
+    expect(chunks).toEqual([
+      {
+        input: { changes: [{ path: "a.txt", type: "edit", diff: "+hello" }] },
+        toolCallId: "f1",
+        toolName: "fileChange",
+        type: "tool-input-available",
+      },
+    ])
+  })
+
+  it("keeps one toolCallId across started → approval → completed (single card)", () => {
+    // Regression lock for the live "Running + Completed split card" bug: the
+    // approval notification, item/started and item/completed must all carry the
+    // same id so the AI SDK merges them into one tool part.
+    const state = createStreamState()
+    const started = convertNotification(
+      {
+        method: "item/started",
+        params: {
+          item: { type: "commandExecution", id: "c1", command: "whoami", cwd: "/tmp", status: "running" },
+          threadId: THREAD,
+          turnId: TURN,
+        },
+      },
+      state,
+    )
+    const approval = convertNotification(
+      {
+        method: "item/commandExecution/requestApproval",
+        params: { threadId: THREAD, turnId: TURN, itemId: "c1", command: "whoami", cwd: "/tmp", allowedScopes: [] },
+      },
+      state,
+    )
+    const completed = convertNotification(
+      {
+        method: "item/completed",
+        params: {
+          item: {
+            type: "commandExecution",
+            id: "c1",
+            command: "whoami",
+            cwd: "/tmp",
+            status: "completed",
+            aggregatedOutput: "cyberhan",
+          },
+          threadId: THREAD,
+          turnId: TURN,
+        },
+      },
+      state,
+    )
+    const all = [...started, ...approval, ...completed]
+    const ids = all
+      .filter((chunk): chunk is Extract<(typeof all)[number], { toolCallId: string }> =>
+        "toolCallId" in chunk,
+      )
+      .map((chunk) => chunk.toolCallId)
+    expect(ids).toEqual(["c1", "c1", "c1", "c1"])
+  })
+
   it("emits a tool-output-error chunk for a failed mcpToolCall", () => {
     const state = createStreamState()
     const item: TurnItem = {

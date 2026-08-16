@@ -173,10 +173,13 @@ impl AgentEventHub {
 
     /// Send an approval decision for a pending tool call.
     ///
-    /// The pending entry is matched by `call_id` alone — it is a fresh
-    /// per-call UUID (globally unique), so no `thread_id` scoping is needed.
-    /// Keying by `call_id` only avoids the fragile harness↔real thread-id
-    /// remap that previously caused resolves to miss the pending entry.
+    /// The pending entry is matched by the approval correlation id alone —
+    /// normally the provider-assigned `tool_call.id` (the same id the item
+    /// lifecycle events use), falling back to a fresh per-call UUID when the
+    /// provider id is empty. Either way it is globally unique within the
+    /// pending window, so no `thread_id` scoping is needed. Keying by this id
+    /// only avoids the fragile harness↔real thread-id remap that previously
+    /// caused resolves to miss the pending entry.
     ///
     /// `scope` is the user's persistence choice (run-once / workspace / always
     /// / deny); it flows back to the exec-policy engine via the returned

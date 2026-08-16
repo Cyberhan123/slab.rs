@@ -17,7 +17,8 @@ use crate::{
     port::{ApprovalDecision, ParsedToolCall, ToolRiskAssessment},
     protocol::{
         CommandExecutionOutputDeltaParams, CommandExecutionRequestApprovalParams, EventMsg,
-        FileChangeOutputDeltaParams, ItemCompletedParams, ItemStartedParams, TurnItem,
+        FileChangeApprovalChange, FileChangeOutputDeltaParams, FileChangeRequestApprovalParams,
+        ItemCompletedParams, ItemStartedParams, TurnItem,
     },
     state::ToolCallStateMachine,
     tool::{
@@ -352,39 +353,84 @@ fn default_allowed_scopes() -> Vec<slab_exec_policy::ApprovalScope> {
     ]
 }
 
-/// Emit `EventMsg::CommandExecutionRequestApproval` for a tool that the
-/// exec-policy engine gated behind approval. `item_id` is the per-call UUID
-/// (`call_id`) — the same key the approval resolution flow correlates on, so
-/// the client can match the banner back to the pending decision.
+/// The id approval notifications and the approval resolution flow correlate
+/// on. This is the provider-assigned `tool_call.id` — the same id the
+/// `ItemStarted`/`ItemCompleted`/output-delta events use — so the client can
+/// merge the approval banner onto the in-stream tool card. Falls back to the
+/// per-call UUID when the provider id is empty (some local backends).
+fn approval_correlation_id<'a>(tool_call_id: &'a str, call_id: &'a str) -> &'a str {
+    if tool_call_id.is_empty() { call_id } else { tool_call_id }
+}
+
+/// Extract the typed approval-change list from a rendered
+/// [`TurnItem::FileChange`]'s untyped `changes` JSON entries. Missing fields
+/// degrade gracefully (`edit` kind, no diff) so a partial render still yields a
+/// usable banner.
+fn file_change_approval_changes(changes: &[serde_json::Value]) -> Vec<FileChangeApprovalChange> {
+    changes
+        .iter()
+        .map(|change| FileChangeApprovalChange {
+            path: change.get("path").and_then(serde_json::Value::as_str).unwrap_or("").to_owned(),
+            change_type: change
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("edit")
+                .to_owned(),
+            diff: change.get("diff").and_then(serde_json::Value::as_str).map(str::to_owned),
+        })
+        .collect()
+}
+
+/// Emit the approval-request notification for a tool that the exec-policy
+/// engine gated behind approval. `item_id` is [`approval_correlation_id`] —
+/// the same key `request_approval` registers the pending decision under, so
+/// the client's `approval/resolve` routes back to this call.
+///
+/// Tools whose render is a [`TurnItem::FileChange`] (apply_patch, write_file)
+/// get the dedicated [`EventMsg::FileChangeRequestApproval`] with the per-file
+/// change list; everything else keeps the command-style notification.
 async fn emit_approval_request(run: &ToolRunContext<'_, '_>) {
     let Some(request) = &run.approval_request else {
         return;
     };
-    let msg = EventMsg::CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams {
-        thread_id: run.context.thread_id.to_owned(),
-        turn_id: run.context.turn_index.to_string(),
-        item_id: run.call_id.to_owned(),
-        command: request.display.clone(),
-        cwd: String::new(),
-        reason: None,
-        category: Some(request.descriptor.category),
-        allowed_scopes: default_allowed_scopes(),
-        plan_snapshot: None,
-    });
+    let item_id = approval_correlation_id(&run.tool_call.id, run.call_id).to_owned();
+    let msg = match &run.started_item {
+        TurnItem::FileChange { changes, .. } => {
+            EventMsg::FileChangeRequestApproval(FileChangeRequestApprovalParams {
+                thread_id: run.context.thread_id.to_owned(),
+                turn_id: run.context.turn_index.to_string(),
+                item_id,
+                changes: file_change_approval_changes(changes),
+                allowed_scopes: default_allowed_scopes(),
+            })
+        }
+        _ => EventMsg::CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams {
+            thread_id: run.context.thread_id.to_owned(),
+            turn_id: run.context.turn_index.to_string(),
+            item_id,
+            command: request.display.clone(),
+            cwd: String::new(),
+            reason: None,
+            category: Some(request.descriptor.category),
+            allowed_scopes: default_allowed_scopes(),
+            plan_snapshot: None,
+        }),
+    };
     run.context.notify.on_event_msg(run.context.thread_id, &msg).await;
 }
 
 /// Drive the `present_plan` approval gate after the tool ran. Emits the plan
 /// for approval via the existing `CommandExecutionRequestApproval` channel
 /// (plan summary shown as `command`), awaits the host approval decision, and
-/// returns the verdict. On approval the caller (the UI, by clearing the plan
-/// chip) runs the next turn as the default agent with the full tool set — this
-/// gate no longer flips a server-side mode. Returns the content + status to
-/// surface as the tool result (the verdict flows back to the LLM as the tool
-/// output).
+/// returns the verdict. `approval_id` is [`approval_correlation_id`] — the
+/// notification `item_id` and the pending-decision key in one. On approval the
+/// caller (the UI, by clearing the plan chip) runs the next turn as the
+/// default agent with the full tool set — this gate no longer flips a
+/// server-side mode. Returns the content + status to surface as the tool
+/// result (the verdict flows back to the LLM as the tool output).
 async fn drive_present_plan_approval(
     context: &TurnExecutionContext<'_>,
-    call_id: &str,
+    approval_id: &str,
     plan_summary: String,
     plan_snapshot: Option<serde_json::Value>,
     risk: &ToolRiskAssessment,
@@ -395,7 +441,7 @@ async fn drive_present_plan_approval(
     let msg = EventMsg::CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams {
         thread_id: context.thread_id.to_owned(),
         turn_id: context.turn_index.to_string(),
-        item_id: call_id.to_owned(),
+        item_id: approval_id.to_owned(),
         command: plan_summary,
         cwd: String::new(),
         reason: Some("Plan ready for approval".to_owned()),
@@ -409,13 +455,13 @@ async fn drive_present_plan_approval(
         &context.trace_context,
         "slab-agent",
         "plan_approval_required",
-        serde_json::json!({ "item_id": call_id, "tool_name": PRESENT_PLAN_TOOL_NAME }),
+        serde_json::json!({ "item_id": approval_id, "tool_name": PRESENT_PLAN_TOOL_NAME }),
     );
 
     let decision = tokio::select! {
         decision = context.approval.request_approval(
             context.thread_id,
-            call_id,
+            approval_id,
             PRESENT_PLAN_TOOL_NAME,
             &descriptor,
             Some(risk.clone()),
@@ -430,7 +476,7 @@ async fn drive_present_plan_approval(
                 &context.trace_context,
                 "slab-agent",
                 "plan_approval_resolved",
-                serde_json::json!({ "item_id": call_id, "approved": true }),
+                serde_json::json!({ "item_id": approval_id, "approved": true }),
             );
             // On approval the caller (the UI, by clearing the plan chip) runs the
             // next turn as the default agent with the full tool set. Mutation
@@ -447,7 +493,7 @@ async fn drive_present_plan_approval(
                 &context.trace_context,
                 "slab-agent",
                 "plan_approval_resolved",
-                serde_json::json!({ "item_id": call_id, "approved": false }),
+                serde_json::json!({ "item_id": approval_id, "approved": false }),
             );
             (
                 "Plan not approved. Stay in Plan mode, revise the plan, and call present_plan again when ready.".to_owned(),
@@ -805,20 +851,17 @@ async fn handle_tool_call(
         if approval_request.is_some() { ToolCallStatus::Pending } else { ToolCallStatus::Running };
     let mut tool_state = ToolCallStateMachine::new(initial_status);
     let workspace_root = workspace_root_of(context);
-    emit_item_started(
-        context,
-        render_tool_call_item(
-            handler.as_deref(),
-            tool_call,
-            &effective_args,
-            "running",
-            None,
-            workspace_root.as_deref(),
-            None,
-            None,
-        ),
-    )
-    .await;
+    let started_item = render_tool_call_item(
+        handler.as_deref(),
+        tool_call,
+        &effective_args,
+        "running",
+        None,
+        workspace_root.as_deref(),
+        None,
+        None,
+    );
+    emit_item_started(context, started_item.clone()).await;
 
     // Stream incremental command output (display-only) while the tool runs. A
     // channel-backed observer on the tool context forwards each delta to the
@@ -844,6 +887,7 @@ async fn handle_tool_call(
             handler,
             approval_request,
             tool_state: &mut tool_state,
+            started_item,
         })
         .await
     };
@@ -894,7 +938,7 @@ async fn handle_tool_call(
                 plan_snapshot_for(PRESENT_PLAN_TOOL_NAME, tool_output.metadata.as_ref());
             let (approved_content, resolved_status) = drive_present_plan_approval(
                 context,
-                &call_id,
+                approval_correlation_id(&tool_call.id, &call_id),
                 tool_output.content.clone(),
                 plan_snapshot,
                 &risk,
@@ -981,6 +1025,10 @@ struct ToolRunContext<'a, 'ctx> {
     handler: Option<Arc<dyn ToolHandler>>,
     approval_request: Option<ToolApprovalRequest>,
     tool_state: &'a mut ToolCallStateMachine,
+    /// The already-emitted `ItemStarted` render. The approval emitter reuses it
+    /// to pick the notification type (FileChange vs command) and to keep the
+    /// banner's change list identical to the in-stream card.
+    started_item: TurnItem,
 }
 
 async fn run_tool_with_optional_approval(
@@ -1017,7 +1065,7 @@ async fn run_tool_with_optional_approval(
     let decision = tokio::select! {
         decision = run.context.approval.request_approval(
             run.context.thread_id,
-            run.call_id,
+            approval_correlation_id(&run.tool_call.id, run.call_id),
             &run.tool_call.name,
             &request.descriptor,
             Some(run.risk.clone()),

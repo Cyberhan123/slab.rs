@@ -7,11 +7,14 @@
  * OpenAI-Responses `convertEvent` state machine but keyed on harness item ids
  * (which are stable within a turn).
  *
- * Tool calls are finalized via `item/completed` → `tool-input-available` followed
- * by `tool-output-available` (result) or `tool-output-error` (failure). The
- * approval-request notifications also emit `tool-input-available` so the card
- * shows the pending command/changes; approval status is tracked out-of-band by
- * the conversation controller. `tool-input-delta` is intentionally avoided — it
+ * Tool calls are created via `item/started` → `tool-input-available` (Running
+ * card) and finalized via `item/completed` → `tool-output-available` (result)
+ * or `tool-output-error` (failure). The approval-request notifications also
+ * emit `tool-input-available` — with the same item id — so the card shows the
+ * pending command/changes; approval status is tracked out-of-band by the
+ * conversation controller. The AI SDK merges these by `toolCallId`, keeping
+ * one card per tool call across its whole lifecycle.
+ * `tool-input-delta` is intentionally avoided — it
  * requires a preceding `tool-input-start` we never emit.
  *
  * Terminal detection: a failed turn emits an `error` notification with NO
@@ -156,7 +159,22 @@ function handleItemStarted(state: StreamState, params: ItemStartedParams): UIMes
     return chunks.concat(openText(state, item.id))
   }
   if (item.type === "reasoning") return openReasoning(state, item.id)
-  return []
+  // Tool-like items: create the part immediately (Running card) so commands are
+  // visible — and stream live output — while they execute, even when the policy
+  // auto-allows them and no approval request ever arrives. The AI SDK merges
+  // chunks by `toolCallId`, so the later `item/completed` (and any approval
+  // notification, which carries the same id) update THIS part in place rather
+  // than appending a second card.
+  const fields = toolItemFields(item)
+  if (!fields) return []
+  return [
+    {
+      input: fields.input,
+      toolCallId: item.id,
+      toolName: fields.toolName,
+      type: "tool-input-available",
+    },
+  ]
 }
 
 function handleItemCompleted(state: StreamState, params: ItemCompletedParams): UIMessageChunk[] {

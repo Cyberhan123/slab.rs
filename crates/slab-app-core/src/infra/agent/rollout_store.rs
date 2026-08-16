@@ -43,7 +43,7 @@ use slab_agent::port::{
 };
 use slab_agent_rollout::{
     RolloutFileStore, RolloutItem, RolloutLine, RolloutStore, SessionMeta, TurnContextPayload,
-    read_rollout_lines,
+    TurnTimelineEntry, read_rollout_lines,
 };
 // `SessionMeta` is re-exported above for `build_session_meta` and the D2a
 // filesystem fallback; `read_first_line_session_meta` is private to the rollout
@@ -564,6 +564,14 @@ impl RolloutConversationStore for RolloutBackedAgentStore {
     async fn list_turn_items(&self, thread_id: &str) -> Result<Vec<TurnItemRecord>, AgentError> {
         let _ = self.rollout.flush(thread_id).await;
         Ok(self.rollout.read_turn_items(thread_id).await)
+    }
+
+    async fn list_turn_timeline(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<TurnTimelineEntry>, AgentError> {
+        let _ = self.rollout.flush(thread_id).await;
+        Ok(self.rollout.read_turn_timeline(thread_id).await)
     }
 
     async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError> {

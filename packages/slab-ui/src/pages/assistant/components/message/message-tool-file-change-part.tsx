@@ -11,6 +11,7 @@ import {
   ToolHeader,
   type ToolPartLike,
 } from "./message-tool-part"
+import { PatchDiffView } from "../patch-diff-view"
 
 /** A single file-change entry from a finalized `fileChange` item. */
 interface FileChangeEntry {
@@ -90,11 +91,7 @@ function MessageToolFileChangePart({
                 <span className="font-mono text-muted-foreground">{change.type ?? "edit"}</span>
                 <code className="font-mono">{change.path ?? "(file)"}</code>
               </div>
-              {change.diff ? (
-                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-caption text-muted-foreground">
-                  {change.diff}
-                </pre>
-              ) : null}
+              {change.diff ? <PatchDiffView diff={change.diff} /> : null}
             </li>
           ))}
         </ul>

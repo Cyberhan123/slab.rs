@@ -145,11 +145,18 @@ impl ToolHandler for WriteFileTool {
     }
 
     fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+        // The diff preview is the incoming content as an all-added block. The
+        // render path is sync and must not touch the filesystem, so add-vs-edit
+        // cannot be distinguished here — `type` stays "edit" and the UI shows
+        // what is about to be written.
+        let content = render.args.get("content").and_then(Value::as_str).unwrap_or("");
+        let diff = content.lines().map(|line| format!("+{line}")).collect::<Vec<_>>().join("\n");
         TurnItem::FileChange {
             id: render.call.id.clone(),
             changes: vec![serde_json::json!({
                 "path": render.args.get("path").and_then(Value::as_str).unwrap_or(""),
                 "type": "edit",
+                "diff": diff,
             })],
             status: render.status.to_owned(),
         }
@@ -339,6 +346,36 @@ mod tests {
         // Sensitive-path protection now lives in the exec-policy engine, not
         // the tool — `describe_operation` returns a descriptor regardless.
         assert!(read.describe_operation(&json!({"path": ".env"})).is_some());
+    }
+
+    #[test]
+    fn write_file_renders_file_change_with_added_lines_diff() {
+        let tool = WriteFileTool::new(Some(PathBuf::from(".")));
+        let call = slab_agent::port::ParsedToolCall {
+            id: "c1".into(),
+            name: "write_file".into(),
+            arguments: "{}".into(),
+        };
+        let args = json!({ "path": "notes/a.txt", "content": "alpha\nbeta" });
+        let render = ToolCallRender {
+            call: &call,
+            args: &args,
+            status: "running",
+            output: None,
+            workspace_root: None,
+            exit_code: None,
+            duration_ms: None,
+        };
+        match tool.render_turn_item(&render) {
+            TurnItem::FileChange { changes, status, .. } => {
+                assert_eq!(status, "running");
+                assert_eq!(changes.len(), 1);
+                assert_eq!(changes[0]["path"].as_str(), Some("notes/a.txt"));
+                assert_eq!(changes[0]["type"].as_str(), Some("edit"));
+                assert_eq!(changes[0]["diff"].as_str(), Some("+alpha\n+beta"));
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
     }
 
     #[tokio::test]

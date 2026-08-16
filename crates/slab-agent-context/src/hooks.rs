@@ -70,31 +70,34 @@ impl ContextInstructionHook {
 
         let mut messages = Vec::new();
         // 1. Identity / persona.
-        messages.push(SystemInstructionFragment.render(&env)?);
+        messages.push(tagged(SystemInstructionFragment.render(&env)?, "slab_system"));
         // 2. Environment facts (cwd / shell / os / time).
-        messages.push(
+        messages.push(tagged(
             EnvironmentContextFragment { snapshot: self.sources.environment_snapshot() }
                 .render(&env)?,
-        );
+            "slab_environment",
+        ));
         // 3. Permission instructions + tool-use policy.
-        messages.push(
+        messages.push(tagged(
             PermissionsInstructionFragment {
                 snapshot: self.sources.permission_snapshot(thread_id),
             }
             .render(&env)?,
-        );
+            "slab_permissions",
+        ));
         // 4. Reasoning-effort steer (only when an effort/verbosity is requested).
         if reasoning_effort.is_some() || verbosity.is_some() {
-            messages.push(
+            messages.push(tagged(
                 ReasoningEffortFragment { effort: reasoning_effort, verbosity }.render(&env)?,
-            );
+                "slab_reasoning_effort",
+            ));
         }
         // 5. Skills (developer).
         let mut developer = DeveloperInstructionFragment::new(skills, skill_roots);
         if let Some(template_source) = developer_template {
             developer.template_source = template_source;
         }
-        messages.push(developer.render(&env)?);
+        messages.push(tagged(developer.render(&env)?, "slab_skills"));
         // 6. Folded read-side memory (developer, preserves the `slab_memory` name).
         if let Some(memory) = self.sources.memory_context() {
             messages.push(ConversationMessage {
@@ -107,12 +110,24 @@ impl ContextInstructionHook {
         }
         // 7. Discovered `AGENTS.md` bodies (user).
         for AgentMdRecord { path, body } in agents_md {
-            messages.push(
+            messages.push(tagged(
                 AgentMdFragment { path: path.to_string_lossy().into_owned(), body }.render(&env)?,
-            );
+                "slab_agents_md",
+            ));
         }
         Ok(messages)
     }
+}
+
+/// Stamp a stable fragment tag on an injected message.
+///
+/// The thread-level merge (`slab_agent::thread::merge_injected_messages`)
+/// REPLACES same-tagged messages on every run instead of inserting duplicates
+/// — without the tag there is no identity to replace against, and the batch
+/// re-appended once per user turn (the context-inflation bug).
+fn tagged(mut message: ConversationMessage, name: &str) -> ConversationMessage {
+    message.name = Some(name.to_owned());
+    message
 }
 
 #[async_trait]

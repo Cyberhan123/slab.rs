@@ -490,6 +490,29 @@ impl HarnessService {
             .map_err(|e| AppCoreError::Internal(e.to_string()))
     }
 
+    /// List the persisted interleaved `TurnItem` + `MessageAppend` timeline for
+    /// a thread in rollout write order (the `thread/resume` history source).
+    pub async fn list_turn_timeline(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<slab_agent_rollout::TurnTimelineEntry>, AppCoreError> {
+        if self
+            .0
+            .store()
+            .get_thread(thread_id)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))?
+            .is_none()
+        {
+            return Err(AppCoreError::NotFound(format!("agent thread not found: {thread_id}")));
+        }
+        self.0
+            .reader()
+            .list_turn_timeline(thread_id)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))
+    }
+
     /// Return the number of currently active threads.
     #[allow(dead_code)]
     pub async fn active_thread_count(&self) -> usize {

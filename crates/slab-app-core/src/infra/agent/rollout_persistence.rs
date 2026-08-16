@@ -775,7 +775,7 @@ mod tests {
 
         for (turn, item_id, user_text) in [(0u32, "a0", "u0"), (1, "a1", "u1")] {
             // The user MessageAppended (M5 anchor) — emitted BEFORE the turn's
-            // ItemCompleted, exactly as slab-agent's `emit_from` loop does.
+            // ItemCompleted, exactly as slab-agent's `emit_new` loop does.
             events
                 .on_event_msg(
                     "t",

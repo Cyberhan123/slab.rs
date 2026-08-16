@@ -34,7 +34,7 @@ use super::session::HarnessSession;
 use super::transform::Established;
 use super::{
     build_user_message_from_input, messages_from_input, model_info_from_spec, scan_known_skills,
-    thread_from_snapshot, thread_from_snapshot_with_id, thread_from_snapshot_with_turns,
+    thread_from_snapshot, thread_from_snapshot_with_id, thread_from_timeline,
 };
 use crate::api::v1::agent::schema::AgentConfigInput;
 
@@ -474,24 +474,19 @@ pub(crate) async fn thread_resume(
         }
     };
     // `bind` + `spawn_event_fanout` are run centrally by the establish_op
-    // adapter once we return the Established thread.
-    let messages =
-        session.service().list_thread_messages(&snapshot.id).await.map_err(|e| e.to_string())?;
+    // adapter once we return the Established thread. The history projection
+    // comes from the single interleaved rollout timeline (items + messages in
+    // write order) — the bucket-merge over separate reads restamped every
+    // message onto the last turn and misordered the restored history.
     let turn_states =
         session.service().list_turn_states(&snapshot.id).await.map_err(|e| e.to_string())?;
-    let turn_items =
-        session.service().list_turn_items(&snapshot.id).await.map_err(|e| e.to_string())?;
+    let timeline =
+        session.service().list_turn_timeline(&snapshot.id).await.map_err(|e| e.to_string())?;
     Ok(Established {
         real_id: snapshot.id.clone(),
         harness_id: harness_id.clone(),
         result: ThreadResumeResult {
-            thread: thread_from_snapshot_with_turns(
-                &harness_id,
-                &snapshot,
-                &messages,
-                &turn_states,
-                &turn_items,
-            ),
+            thread: thread_from_timeline(&harness_id, &snapshot, &turn_states, &timeline),
         },
     })
 }

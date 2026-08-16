@@ -14,8 +14,8 @@ use std::{
 
 use crate::{
     AgentControl, AgentControlLimits, AgentDefinition, AgentError, AgentHook, AgentThreadContext,
-    HookEvent, HookOutcome, ModelPolicy, PlanRef, ToolConstraint, ToolContext, ToolHandler,
-    ToolOutput, ToolRouter, ToolVisibility, WorkspaceRef,
+    HookEvent, HookOutcome, ModelPolicy, PlanRef, ToolCallRender, ToolConstraint, ToolContext,
+    ToolHandler, ToolOutput, ToolRouter, ToolVisibility, WorkspaceRef,
     compact::{CompactContext, CompactPort, SlidingWindowCompactPort},
     config::{AgentConfig, AgentToolChoice},
     port::{
@@ -23,7 +23,7 @@ use crate::{
         LlmUsage, ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec,
         TurnStateRecord,
     },
-    protocol::EventMsg,
+    protocol::{EventMsg, TurnItem},
     risk::ToolRiskAnalyzer,
 };
 use async_trait::async_trait;
@@ -1277,7 +1277,6 @@ async fn resume_with_input(
         records.iter().map(|r| r.turn_index).max().map_or(0, |index| index + 1);
     let mut messages: Vec<ConversationMessage> =
         records.into_iter().map(|record| record.message).collect();
-    let emit_from = messages.len();
     messages.push(ConversationMessage {
         role: "user".into(),
         content: ConversationMessageContent::Text(content),
@@ -1285,7 +1284,8 @@ async fn resume_with_input(
         tool_call_id: None,
         tool_calls: vec![],
     });
-    control.resume_thread(thread_id, messages, starting_turn_index, Some(emit_from)).await
+    // One trailing message is new (the user input) — a count, not an index.
+    control.resume_thread(thread_id, messages, starting_turn_index, Some(1)).await
 }
 
 #[tokio::test]
@@ -2838,6 +2838,270 @@ async fn approval_required_tool_is_recorded_pending_then_completed() {
     assert_eq!(final_status, ThreadStatus::Completed);
 }
 
+/// Records every `EventMsg` AND auto-approves approval requests, for tests
+/// that assert on the full approval → execution → completion event sequence.
+#[derive(Default)]
+struct ApprovingRecordingNotify {
+    events: Mutex<Vec<EventMsg>>,
+}
+
+#[async_trait]
+impl AgentNotifyPort for ApprovingRecordingNotify {
+    async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
+
+    async fn on_event_msg(&self, _thread_id: &str, msg: &EventMsg) {
+        self.events.lock().unwrap().push(msg.clone());
+    }
+}
+
+#[async_trait]
+impl ApprovalPort for ApprovingRecordingNotify {
+    async fn request_approval(
+        &self,
+        _thread_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _descriptor: &crate::OperationDescriptor,
+        _risk: Option<crate::ToolRiskAssessment>,
+    ) -> ApprovalDecision {
+        ApprovalDecision::Approved(crate::ApprovalScope::RunOnce)
+    }
+}
+
+/// One tool call on the first LLM turn, a plain final answer on the second —
+/// the `MockLlm` shape but with a configurable tool name/arguments.
+struct OneShotToolLlm {
+    call_count: Mutex<u32>,
+    tool_name: String,
+    arguments: String,
+}
+
+impl OneShotToolLlm {
+    fn new(tool_name: &str, arguments: &str) -> Self {
+        Self {
+            call_count: Mutex::new(0),
+            tool_name: tool_name.to_owned(),
+            arguments: arguments.to_owned(),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmPort for OneShotToolLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut count = self.call_count.lock().unwrap();
+        *count += 1;
+        if *count == 1 {
+            Ok(LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "call-1".into(),
+                    name: self.tool_name.clone(),
+                    arguments: self.arguments.clone(),
+                }],
+                finish_reason: Some("tool_calls".into()),
+                usage: None,
+            })
+        } else {
+            Ok(LlmResponse {
+                content: Some("done".into()),
+                content_already_streamed: false,
+                tool_calls: vec![],
+                finish_reason: Some("stop".into()),
+                usage: None,
+            })
+        }
+    }
+}
+
+/// The approval notification must carry the SAME id as the item lifecycle
+/// events for the call (the provider `tool_call.id`), so the client can merge
+/// the approval banner onto the in-stream tool card and route its resolve
+/// back. Regression lock for the live "Running + Completed split card" bug.
+#[tokio::test]
+async fn approval_notification_shares_item_id_with_lifecycle_events() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(RecordingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(ApprovingRecordingNotify::default());
+
+    let router = ToolRouter::new();
+    router.register(Box::new(ApprovalEchoTool));
+
+    let approval = Arc::clone(&notify) as Arc<dyn ApprovalPort>;
+    let control = Arc::new(
+        AgentControl::new(llm, store_port, notify.clone(), approval, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(AskAllExecPolicy)),
+    );
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id =
+        control.spawn("session-approval-id".into(), config, messages).await.expect("spawn");
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+    assert_eq!(final_status, ThreadStatus::Completed);
+
+    let events = notify.events.lock().unwrap().clone();
+    let started_ids: Vec<String> = events
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::ItemStarted(p) if p.thread_id == thread_id => match &p.item {
+                TurnItem::CommandExecution { id, .. } => Some(id.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        started_ids,
+        vec!["call-1".to_owned()],
+        "ItemStarted uses the provider tool_call.id"
+    );
+
+    let approval_ids: Vec<String> = events
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::CommandExecutionRequestApproval(p) if p.thread_id == thread_id => {
+                Some(p.item_id.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        approval_ids,
+        vec!["call-1".to_owned()],
+        "approval notification must correlate on the same id as the item events"
+    );
+
+    let completed_ids: Vec<String> = events
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::ItemCompleted(p) if p.thread_id == thread_id => match &p.item {
+                TurnItem::CommandExecution { id, .. } => Some(id.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(completed_ids, vec!["call-1".to_owned()]);
+}
+
+/// A write-like tool whose render is a `TurnItem::FileChange` must request
+/// approval through the dedicated `FileChangeRequestApproval` notification
+/// (with the per-file change list), not the command-style channel — and with
+/// the same correlation id as its lifecycle events.
+#[tokio::test]
+async fn file_change_tool_approval_uses_file_change_notification() {
+    struct FileEditWriteTool;
+    #[async_trait]
+    impl ToolHandler for FileEditWriteTool {
+        fn name(&self) -> &str {
+            "write_file"
+        }
+        fn description(&self) -> &str {
+            "Write a file (approval routing test)."
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": { "path": { "type": "string" }, "content": { "type": "string" } },
+                "required": ["path", "content"]
+            })
+        }
+        fn describe_operation(
+            &self,
+            args: &serde_json::Value,
+        ) -> Option<crate::OperationDescriptor> {
+            Some(crate::OperationDescriptor::file_edit(
+                args.get("path").and_then(serde_json::Value::as_str).unwrap_or(""),
+            ))
+        }
+        fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+            TurnItem::FileChange {
+                id: render.call.id.clone(),
+                changes: vec![serde_json::json!({
+                    "path": render.args.get("path").and_then(serde_json::Value::as_str).unwrap_or(""),
+                    "type": "edit",
+                    "diff": "+hello",
+                })],
+                status: render.status.to_owned(),
+            }
+        }
+        async fn execute(
+            &self,
+            _ctx: &ToolContext,
+            _args: &serde_json::Value,
+        ) -> Result<ToolOutput, AgentError> {
+            Ok(ToolOutput { content: "written".to_owned(), metadata: None })
+        }
+    }
+
+    let llm = Arc::new(OneShotToolLlm::new("write_file", r#"{"path":"a.txt","content":"hello"}"#));
+    let store = Arc::new(RecordingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(ApprovingRecordingNotify::default());
+
+    let router = ToolRouter::new();
+    router.register(Box::new(FileEditWriteTool));
+
+    let approval = Arc::clone(&notify) as Arc<dyn ApprovalPort>;
+    let control = Arc::new(
+        AgentControl::new(llm, store_port, notify.clone(), approval, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(AskAllExecPolicy)),
+    );
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("Write a file".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id =
+        control.spawn("session-file-approval".into(), config, messages).await.expect("spawn");
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+    assert_eq!(final_status, ThreadStatus::Completed);
+
+    let events = notify.events.lock().unwrap().clone();
+    let file_approvals: Vec<&crate::protocol::FileChangeRequestApprovalParams> = events
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::FileChangeRequestApproval(p) if p.thread_id == thread_id => Some(p),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(file_approvals.len(), 1, "FileChange render must request via the file channel");
+    let params = file_approvals[0];
+    assert_eq!(params.item_id, "call-1", "approval id must match the lifecycle item id");
+    assert_eq!(params.changes.len(), 1);
+    assert_eq!(params.changes[0].path, "a.txt");
+    assert_eq!(params.changes[0].change_type, "edit");
+    assert_eq!(params.changes[0].diff.as_deref(), Some("+hello"));
+
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            EventMsg::CommandExecutionRequestApproval(p) if p.thread_id == thread_id
+        )),
+        "file-change approvals must not also emit the command-style notification"
+    );
+}
+
 /// Reproduces the post-approval hang with a tool that streams output via
 /// `ctx.output` (like the real shell tool), driven through the FULL
 /// `handle_tool_call` path: approval → `tokio::join!(run, drain)`. The hard
@@ -3155,6 +3419,143 @@ async fn send_input_replays_persisted_thread_messages() {
         resume_turn, 1,
         "resume computed starting_turn_index from the seeded turn-0 history"
     );
+}
+
+// ── OnAgentStart init-batch re-injection regression (context inflation) ─────
+//
+// A hook that injects a TAGGED init batch on every `OnAgentStart` (what
+// `ContextInstructionHook` does in production) must not duplicate the batch
+// across turns: the thread-level merge REPLACES same-tagged messages, and the
+// trailing-count emit anchor emits only the new user message. Pre-fix, the
+// second run re-INSERTED the batch (a second system message reached the LLM
+// and the rollout TurnState snapshots) and the absolute `emit_from` anchor —
+// shifted by the injected batch — re-emitted a tail of old history as
+// `MessageAppended` (duplicating it in the rollout).
+
+/// Test hook mirroring `ContextInstructionHook`: injects a tagged init batch
+/// (system + two developer fragments) on every agent start.
+struct TaggedInitHook;
+
+#[async_trait]
+impl crate::AgentHook for TaggedInitHook {
+    async fn on_event(&self, event: &crate::HookEvent) -> crate::HookOutcome {
+        let crate::HookEvent::OnAgentStart { .. } = event else {
+            return crate::HookOutcome::Continue;
+        };
+        let batch = vec![
+            ConversationMessage {
+                role: "system".into(),
+                content: ConversationMessageContent::Text("You are a test agent.".into()),
+                name: Some("slab_system".into()),
+                tool_call_id: None,
+                tool_calls: vec![],
+            },
+            ConversationMessage {
+                role: "developer".into(),
+                content: ConversationMessageContent::Text(
+                    "<environment_context>\n<cwd>/w</cwd>".into(),
+                ),
+                name: Some("slab_environment".into()),
+                tool_call_id: None,
+                tool_calls: vec![],
+            },
+            ConversationMessage {
+                role: "developer".into(),
+                content: ConversationMessageContent::Text(
+                    "<permissions_instructions>\nmode: test".into(),
+                ),
+                name: Some("slab_permissions".into()),
+                tool_call_id: None,
+                tool_calls: vec![],
+            },
+        ];
+        crate::HookOutcome::Effects {
+            tool_action: crate::HookToolAction::Continue,
+            injected_messages: batch,
+            observations: Vec::new(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn on_agent_start_batch_replaces_and_does_not_reemit_history() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let approval = Arc::clone(&Arc::new(NoopNotify));
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(ToolRouter::new()),
+        8,
+        4,
+    ));
+    // Register the init hook BEFORE the first spawn so BOTH runs inject.
+    control.replace_hooks(vec![Arc::new(TaggedInitHook)]);
+
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-injection".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("first prompt".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    // Seed the turn-0 record (mirrors what the persisted read path returns),
+    // then run a second turn with the hook injecting AGAIN.
+    store.messages.lock().unwrap().push(ThreadMessageRecord {
+        id: "injection-0".into(),
+        thread_id: thread_id.clone(),
+        turn_index: 0,
+        message: ConversationMessage {
+            role: "user".into(),
+            content: ConversationMessageContent::Text("first prompt".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![],
+        },
+        created_at: "2026-01-01T00:00:00Z".into(),
+    });
+    resume_with_input(&store, &control, &thread_id, "second prompt".into())
+        .await
+        .expect("send input");
+    wait_for_emitted_message(&notify, &thread_id, "second prompt").await;
+
+    let emitted = notify.emitted_messages(&thread_id);
+    // The init batch is emitted EXACTLY once (on spawn) — the second run's
+    // merge replaces in place and re-emits nothing for it.
+    assert_eq!(
+        emitted.iter().filter(|m| m.role == "system").count(),
+        1,
+        "system message emitted once total (not once per turn): {emitted:?}"
+    );
+    for tag in ["slab_environment", "slab_permissions"] {
+        assert_eq!(
+            emitted.iter().filter(|m| m.name.as_deref() == Some(tag)).count(),
+            1,
+            "{tag} fragment emitted exactly once"
+        );
+    }
+    // No anchor-drift re-emission of history: each user message exactly once.
+    for text in ["first prompt", "second prompt"] {
+        assert_eq!(
+            emitted.iter().filter(|m| m.rendered_text().contains(text)).count(),
+            1,
+            "{text} emitted exactly once (no drift re-emission): {emitted:?}"
+        );
+    }
 }
 
 #[tokio::test]

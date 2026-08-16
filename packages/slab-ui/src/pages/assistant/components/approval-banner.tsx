@@ -16,6 +16,7 @@ import { useState } from "react"
 
 import type { ApprovalScope } from "@slab/core/harness"
 import type { ApprovalRequest } from "@slab/core/harness"
+import { PatchDiffView } from "./patch-diff-view"
 import { PlanCardBody } from "./message/message-tool-plan-part"
 
 const changeTypeVariant: Record<string, "default" | "secondary" | "destructive"> = {
@@ -118,11 +119,7 @@ export function ApprovalCard({
                   </Badge>
                   <code className="font-mono">{change.path}</code>
                 </div>
-                {change.diff ? (
-                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-caption text-muted-foreground">
-                    {change.diff}
-                  </pre>
-                ) : null}
+                {change.diff ? <PatchDiffView diff={change.diff} /> : null}
               </li>
             ))}
           </ul>
