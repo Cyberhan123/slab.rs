@@ -228,7 +228,7 @@ export function WorkspaceWorkbench({
             onOpen={openWorkspacePath}
             emptyLabel={t("pages.workspace.recent.empty")}
             title={t("pages.workspace.recent.title")}
-            openLabel={t("pages.workspace.actions.reopen")}
+            openLabel={t("common.actions.open")}
           />
         </div>
         {commandPalette}

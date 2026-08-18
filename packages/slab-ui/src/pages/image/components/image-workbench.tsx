@@ -200,7 +200,7 @@ export function ImageWorkbench({
                       {t('pages.image.workbench.sectionTitle')}
                     </p>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      {t('pages.image.workbench.modelHint')}
+                      {t('common.diffusion.modelHint')}
                     </p>
                     <Tabs
                       value={mode}
@@ -301,7 +301,7 @@ export function ImageWorkbench({
 
                   <div className="space-y-2.5">
                     <Label htmlFor="negative-prompt" className={SIDEBAR_LABEL_CLASSNAME}>
-                      {t('pages.image.workbench.negativePrompt.label')}
+                      {t('common.diffusion.negativePrompt')}
                     </Label>
                     <Textarea
                       id="negative-prompt"
@@ -389,7 +389,7 @@ export function ImageWorkbench({
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-2.5">
                           <Label className={SIDEBAR_LABEL_CLASSNAME}>
-                            {t('pages.image.workbench.advanced.width')}
+                            {t('common.diffusion.width')}
                           </Label>
                           <Input
                             type="number"
@@ -403,7 +403,7 @@ export function ImageWorkbench({
                         </div>
                         <div className="space-y-2.5">
                           <Label className={SIDEBAR_LABEL_CLASSNAME}>
-                            {t('pages.image.workbench.advanced.height')}
+                            {t('common.diffusion.height')}
                           </Label>
                           <Input
                             type="number"
@@ -417,7 +417,7 @@ export function ImageWorkbench({
                         </div>
                       </div>
                       <SliderField
-                        label={t('pages.image.workbench.advanced.cfgScale')}
+                        label={t('common.diffusion.cfgScale')}
                         value={cfgScale.toFixed(1)}
                         slider={
                           <Slider
@@ -430,7 +430,7 @@ export function ImageWorkbench({
                         }
                       />
                       <SliderField
-                        label={t('pages.image.workbench.advanced.guidance')}
+                        label={t('common.diffusion.guidance')}
                         value={guidance.toFixed(1)}
                         slider={
                           <Slider
@@ -443,7 +443,7 @@ export function ImageWorkbench({
                         }
                       />
                       <SliderField
-                        label={t('pages.image.workbench.advanced.steps')}
+                        label={t('common.diffusion.steps')}
                         value={steps}
                         slider={
                           <Slider
@@ -457,7 +457,7 @@ export function ImageWorkbench({
                       />
                       {mode === 'img2img' ? (
                         <SliderField
-                          label={t('pages.image.workbench.advanced.strength')}
+                          label={t('common.diffusion.strength')}
                           value={strength.toFixed(2)}
                           slider={
                             <Slider
@@ -473,7 +473,7 @@ export function ImageWorkbench({
 
                       <div className="space-y-2.5">
                         <Label className={SIDEBAR_LABEL_CLASSNAME}>
-                          {t('pages.image.workbench.advanced.seed')}
+                          {t('common.diffusion.seed')}
                         </Label>
                         <Input
                           type="number"
@@ -487,7 +487,7 @@ export function ImageWorkbench({
 
                       <div className="space-y-2.5">
                         <Label className={SIDEBAR_LABEL_CLASSNAME}>
-                          {t('pages.image.workbench.advanced.sampler')}
+                          {t('common.diffusion.sampler')}
                         </Label>
                         <Select value={sampleMethod} onValueChange={setSampleMethod}>
                           <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
@@ -505,7 +505,7 @@ export function ImageWorkbench({
 
                       <div className="space-y-2.5">
                         <Label className={SIDEBAR_LABEL_CLASSNAME}>
-                          {t('pages.image.workbench.advanced.scheduler')}
+                          {t('common.diffusion.scheduler')}
                         </Label>
                         <Select value={scheduler} onValueChange={setScheduler}>
                           <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
@@ -573,7 +573,7 @@ export function ImageWorkbench({
                       ) : isGenerating ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          {t('pages.image.workbench.actions.generating')}
+                          {t('common.diffusion.generating')}
                         </>
                       ) : (
                         <>
@@ -596,11 +596,11 @@ export function ImageWorkbench({
                       <GenerationProgressView
                         progress={generationProgress}
                         labels={{
-                          eta: t('pages.image.progress.eta'),
+                          eta: t('common.progress.eta'),
                           finalizing: t('pages.image.progress.finalizing'),
-                          queued: t('pages.image.progress.queued'),
+                          queued: t('common.progress.queued'),
                           running: t('pages.image.progress.running'),
-                          step: t('pages.image.progress.step'),
+                          step: t('common.progress.step'),
                           title: t('pages.image.progress.title'),
                         }}
                         className="mt-3"

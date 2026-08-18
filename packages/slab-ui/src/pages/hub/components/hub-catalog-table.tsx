@@ -369,7 +369,7 @@ function HubModelCard({
 
             <div className="space-y-1">
               <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
-                {t('pages.hub.catalog.source')}
+                {t('common.fields.source')}
               </p>
               <p className="truncate font-mono text-xs text-muted-foreground" title={sourceLabel}>
                 {sourceLabel}

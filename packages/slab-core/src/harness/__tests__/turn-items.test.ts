@@ -78,6 +78,40 @@ describe("harness turnItemsToMessages", () => {
     const messages = turnItemsToMessages([agent("a1", "")])
     expect(messages).toEqual([])
   })
+
+  it("strips legacy embedded <think> blocks from agentMessage text", () => {
+    // Rollout files written before the server-side strip carry the
+    // LLM-context form (reasoning wrapped in <think status="done">) in the
+    // persisted item; history must render only the visible text.
+    const messages = turnItemsToMessages([
+      user("u1", "hello"),
+      {
+        type: "reasoning",
+        id: "r1",
+        summary: "trace",
+        content: "the trace",
+      },
+      agent("a1", '<think status="done">\n\nthe trace\n\n</think>\n\nthe answer'),
+    ])
+    const assistant = messages[1]
+    const text = assistant.parts.find((p) => p.type === "text")
+    expect(text).toMatchObject({ type: "text", text: "the answer" })
+  })
+
+  it("drops an agentMessage whose text is only an embedded <think> block", () => {
+    expect(
+      turnItemToUiParts(agent("a1", '<think status="done">\n\nonly thinking\n\n</think>')),
+    ).toEqual([])
+  })
+
+  it("keeps unterminated or lookalike think markup verbatim", () => {
+    expect(turnItemToUiParts(agent("a1", "before<think>never closes"))).toEqual([
+      { type: "text", text: "before<think>never closes" },
+    ])
+    expect(turnItemToUiParts(agent("a1", "<thinking>not a think tag</thinking>"))).toEqual([
+      { type: "text", text: "<thinking>not a think tag</thinking>" },
+    ])
+  })
 })
 
 describe("harness turnItemToUiParts / toolItemFields (ex-lossy cases)", () => {

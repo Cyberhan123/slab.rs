@@ -1,14 +1,6 @@
 export const image = {
-  header: {
-    title: 'Image',
-    subtitle: 'Generate and manage AI images',
-    subtitleTxt2Img: 'Generate images from text prompts',
-    subtitleImg2Img: 'Refine an input image with diffusion controls',
-  },
   modelPicker: {
     groupLabel: 'Image Models',
-    placeholder: 'Select model',
-    emptyLabel: 'No diffusion models',
   },
   options: {
     mode: {
@@ -39,7 +31,6 @@ export const image = {
   },
   workbench: {
     sectionTitle: 'Generation Parameters',
-    modelHint: 'Choose the active diffusion model from the global header.',
     initImage: {
       currentLabel: 'Init Image',
       uploadLabel: 'Upload Init Image',
@@ -53,7 +44,6 @@ export const image = {
       placeholder: 'A cinematic portrait with moody rim light...',
     },
     negativePrompt: {
-      label: 'Negative Prompt',
       placeholder: 'blurry, low quality, distorted...',
     },
     dimensions: {
@@ -66,22 +56,12 @@ export const image = {
     },
     advanced: {
       title: 'Advanced Settings',
-      width: 'Width',
-      height: 'Height',
-      cfgScale: 'CFG Scale',
-      guidance: 'Guidance',
-      steps: 'Steps',
-      strength: 'Strength',
-      seed: 'Seed (-1 random)',
-      sampler: 'Sampler',
-      scheduler: 'Scheduler',
       clipSkip: 'CLIP Skip',
       eta: 'Eta (DDIM)',
     },
     actions: {
       loadingPreset: 'Loading preset...',
       preparingModel: 'Preparing model...',
-      generating: 'Generating...',
       generate: 'Generate Images',
       cancel: 'Cancel generation',
     },
@@ -106,53 +86,30 @@ export const image = {
     },
   },
   history: {
-    title: 'Recent History',
     loading: 'Loading recent image generations...',
-    error: 'Failed to load history: {{message}}',
     description: 'Reopen prompts, previews, and saved outputs from recent image tasks.',
     empty: 'No image history yet. Your completed image tasks will appear here.',
     detailTitle: 'Image Task Detail',
-    refilled: 'History parameters loaded. Review them before generating again.',
-    actions: {
-      refill: 'Reuse parameters',
-    },
     fields: {
       mode: 'Mode',
-      size: 'Size',
-      backend: 'Backend',
-      model: 'Model',
     },
   },
   progress: {
     title: 'Generation progress',
-    queued: 'Queued and waiting for the runtime',
     running: 'Runtime is producing samples',
     finalizing: 'Finalizing generated assets',
-    eta: 'ETA',
-    step: 'Step',
   },
   toast: {
-    downloaded: 'Downloaded {{model}}',
-    modelLoadRetry: 'Model load failed, re-downloading and retrying once...',
     generated_one: 'Generated {{count}} image!',
     generated_other: 'Generated {{count}} images!',
-    generationTimedOut: 'Generation timed out',
     historyDetailFailed: 'Failed to open image history detail: {{message}}',
-    pollingError: 'Polling error: {{message}}',
     resultFetchFailed: 'Failed to fetch generation result: {{message}}',
   },
   error: {
     modelPresetLoading: 'Model preset is still loading',
-    enterPrompt: 'Please enter a prompt',
     uploadInitImage: 'Please upload an init image for img2img mode',
-    readImageFileFailed: 'Failed to read image file',
     selectModelFirst: 'Please select an image model first.',
     selectedModelUnavailable: 'Selected model is not available',
-    selectedModelMissing: 'Selected model does not exist in catalog',
-    selectedModelNotLocal: 'Selected model is not a local image model',
-    downloadTimedOut: 'Model download timed out',
-    startDownloadFailed: 'Failed to start model download task',
-    missingDownloadedPath: 'Model download completed, but local_path is empty',
     generationFailed: 'Image generation failed',
   },
 } as const;

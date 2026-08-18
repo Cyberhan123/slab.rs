@@ -73,7 +73,7 @@ export function TaskDetailDialog({
         <DialogHeader>
           <DialogTitle>{t('pages.task.dialog.title')}</DialogTitle>
           <DialogDescription>
-            {t('pages.task.dialog.taskId', { id: taskDetail.id })}
+            {t('common.fields.taskId', { id: taskDetail.id })}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -89,7 +89,7 @@ export function TaskDetailDialog({
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-eyebrow text-muted-foreground">
-                      {t('pages.task.dialog.fields.status')}
+                      {t('common.fields.status')}
                     </p>
                     <div className="mt-1">{renderStatusPill(selectedTask.status, t)}</div>
                   </div>

@@ -1013,6 +1013,16 @@ export function translateServerField(
   return translated && translated !== ref.key ? translated : (fallback ?? '');
 }
 
+/**
+ * The message tables above are Partial on purpose: keys without an entry are
+ * filled with '' here, and `translateServerField` falls back to the backend
+ * field's own fallback text for empty translations (the backend stays the
+ * single source of truth for that copy). Currently the 32
+ * `server.modelConfig.*.description` keys are intentionally blank — the exact
+ * set is pinned by `__tests__/server-empty-keys.test.ts`. When adding a new
+ * SERVER_I18N_KEY, decide explicitly whether to provide a translation or let
+ * the backend fallback own it (and extend the test list in the latter case).
+ */
 function buildServerLocale(messages: ServerLocaleMessages): LocaleNode {
   const root: LocaleNode = {};
   for (const key of SERVER_I18N_KEYS) {

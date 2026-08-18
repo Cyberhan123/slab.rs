@@ -1,17 +1,11 @@
 export const audio = {
-  header: {
-    title: '音频',
-    subtitle: '转录和处理音频文件',
-  },
   modelPicker: {
     groupLabel: 'Whisper 模型',
-    placeholder: '选择模型',
     emptyLabel: '暂无 Whisper 模型',
   },
   alerts: {
     catalogErrorTitle: '模型目录错误',
     catalogErrorDescription: '无法加载模型目录，请检查服务状态。',
-    transcribeErrorTitle: '错误',
     transcribeErrorDescription: '创建转录任务失败，请重试。',
   },
   workbench: {
@@ -32,7 +26,6 @@ export const audio = {
       cancel: '取消转录',
     },
     submitDescription: '开始后，所选文件会按当前转录流程提交，并可在任务页中跟踪。',
-    taskIdLabel: '任务 ID：{{id}}',
     busy: {
       preparingTitle: '正在准备所选模型',
       preparingDescription: '运行时正在确认所需模型已先下载并加载。',
@@ -42,7 +35,6 @@ export const audio = {
     taskCreated: {
       title: '转录任务已创建',
       description: '任务 ID：{{id}}。你可以继续在这里工作，或直接前往任务页查看进度。',
-      openTasks: '打开任务',
       viewTranscript: '打开转录详情',
     },
     ready: {
@@ -53,8 +45,6 @@ export const audio = {
   },
   preview: {
     rows: {
-      model: '模型',
-      source: '来源',
       vadMode: 'VAD 模式',
       decode: '解码',
     },
@@ -135,23 +125,18 @@ export const audio = {
     },
   },
   toast: {
-    downloaded: '已下载 {{model}}',
     downloadedVadModel: '已下载 VAD 模型 {{model}}',
     taskCreated: '转录任务已创建。',
     taskCreatedDescription: '任务 ID：{{id}} | 模型：{{model}} | {{vad}} | {{decode}}',
     historyDetailFailed: '打开转录详情失败：{{message}}',
     transcriptionReady: '转录结果已就绪。',
-    viewTasks: '查看任务',
     cancelled: '转录已取消。',
     cancelFailed: '取消转录失败。',
-    pollingError: '轮询出错：{{message}}',
     failedToCreateTask: '创建转录任务失败。',
-    unknownError: '未知错误',
   },
   history: {
     title: '最近转录',
     loading: '正在加载转录历史...',
-    error: '加载历史失败：{{message}}',
     description: '在这里查看转录结果，并重新打开最近的转录详情。',
     empty: '暂无转录历史。已完成的转录结果会显示在这里。',
     detailTitle: '转录详情',
@@ -169,19 +154,14 @@ export const audio = {
       seekAria: '跳转到 {{time}}',
     },
     fields: {
-      source: '来源',
-      model: '模型',
       language: '语言',
       segments: '分段',
     },
   },
   progress: {
     title: '转录进度',
-    queued: '已入队，等待运行时处理',
     running: '运行时正在转录音频',
     finalizing: '正在整理转录结果',
-    eta: '预计剩余',
-    step: '步骤',
   },
   error: {
     webUploadNotImplemented: '网页端暂未实现音频上传转录，请使用桌面应用。',
@@ -189,11 +169,6 @@ export const audio = {
     selectFileFirst: '请先选择文件。',
     selectModelFirst: '请先选择 Whisper 模型。',
     selectedModelMissing: '所选模型已不在目录中。',
-    selectedModelMissingGeneric: '所选模型不存在于目录中',
-    selectedModelNotLocal: '所选模型不是本地音频模型。',
-    downloadTimedOut: '模型下载超时',
-    startDownloadFailed: '启动模型下载任务失败',
-    missingDownloadedPath: '模型下载完成，但 local_path 为空',
     bundledVadMissing: '当前 Whisper 模型未暴露随附 VAD 文件。',
     selectDedicatedVadModel: '请选择一个专用 VAD 模型。',
     selectedVadMissing: '所选 VAD 模型已不在目录中。',

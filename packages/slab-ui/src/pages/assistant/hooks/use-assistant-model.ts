@@ -54,7 +54,7 @@ export function useAssistantModel() {
 
     if (downloadedNow) {
       toast.success(
-        t("pages.assistant.toast.downloaded", {
+        t("common.toasts.modelDownloaded", {
           model: selectedLocal?.display_name ?? selectedModelId,
         })
       )
@@ -75,7 +75,7 @@ export function useAssistantModel() {
       const retry = await assistantModels.ensureDownloaded(selectedModelId, { forceDownload: true })
       if (retry.downloadedNow) {
         toast.success(
-          t("pages.assistant.toast.downloaded", {
+          t("common.toasts.modelDownloaded", {
             model: selectedLocal?.display_name ?? selectedModelId,
           })
         )
@@ -93,7 +93,7 @@ export function useAssistantModel() {
       await prepareSelectedModel()
     } catch (error) {
       toast.error(t("pages.assistant.toast.failedToPrepareModel"), {
-        description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
+        description: getAssistantErrorDescription(error, t("common.toasts.unknownError"), t),
       })
       throw error
     }

@@ -49,7 +49,7 @@ export function useAssistantHeader({
         id: model.id,
         label: model.label,
       })),
-      placeholder: t("pages.assistant.modelPicker.placeholder"),
+      placeholder: t("common.fields.selectModel"),
       value: selectedModelId,
     }),
     [

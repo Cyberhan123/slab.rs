@@ -1,13 +1,8 @@
 export const settings = {
-  header: {
-    title: 'Settings',
-    subtitle: 'Configure app and backend options',
-  },
   page: {
     loadingTitle: 'Loading settings document',
     loadingDescription: 'Fetching runtime schema and values.',
     failedLoadTitle: 'Settings failed to load',
-    tryAgain: 'Try again',
     warningsTitle: 'Recovered settings warnings',
     adminTokenWarningTitle: 'Admin token required',
     adminTokenWarningDescription:
@@ -43,7 +38,6 @@ export const settings = {
       'en-US': 'English',
       'zh-CN': '中文',
     },
-    current: 'Current app language: {{language}}',
   },
   modelSource: {
     title: 'Model source',
@@ -65,8 +59,6 @@ export const settings = {
     valuePlaceholder: 'Enter a value',
     enterNamedValue: 'Enter {{label}}',
     propertyNamePlaceholder: 'Property name',
-    enabled: 'Enabled',
-    disabled: 'Disabled',
   },
   effect: {
     live: 'Live',
@@ -91,7 +83,6 @@ export const settings = {
     itemTitle: '{{label}} {{index}}',
   },
   providerRegistry: {
-    title: 'Cloud Model Providers',
     configuredProviders_one: '{{count}} configured provider',
     configuredProviders_other: '{{count}} configured providers',
     addProvider: 'Add provider',
@@ -103,7 +94,6 @@ export const settings = {
       editTitle: 'Edit cloud provider',
       description:
         'Pick a provider family to auto-fill its endpoint defaults, then add your credentials. The vendor model list activates on save.',
-      cancel: 'Cancel',
       add: 'Add provider',
       save: 'Save changes',
     },
@@ -145,7 +135,6 @@ export const settings = {
     integer: 'Value must be an integer.',
     json: 'Value must be valid JSON.',
     number: 'Value must be a finite number.',
-    emptyString: '(empty string)',
   },
   autosave: {
     needsAttention: 'Needs attention before auto-save.',

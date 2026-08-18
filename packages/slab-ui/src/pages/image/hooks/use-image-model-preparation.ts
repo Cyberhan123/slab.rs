@@ -36,11 +36,11 @@ export function useImageModelPreparation() {
 
     const { modelPath, downloadedNow } = await imageModels.ensureLoaded(imageModels.selectedId);
     if (downloadedNow) {
-      toast.success(t('pages.image.toast.downloaded', { model: selectedModel.display_name }));
+      toast.success(t('common.toasts.modelDownloaded', { model: selectedModel.display_name }));
     }
 
     if (!modelPath) {
-      throw new Error(t('pages.image.error.missingDownloadedPath'));
+      throw new Error(t('common.errors.missingDownloadedPath'));
     }
 
     return modelPath;

@@ -142,7 +142,7 @@ export function WorkspaceCommandPalette({
 
         {workspaceRoot ? (
           <>
-            <CommandGroup heading={t("pages.workspace.commandPalette.actions")}>
+            <CommandGroup heading={t("common.fields.actions")}>
               <CommandItem
                 value={t("pages.workspace.actions.openFolder")}
                 onSelect={() => {
@@ -154,14 +154,14 @@ export function WorkspaceCommandPalette({
                 <span>{t("pages.workspace.actions.openFolder")}</span>
               </CommandItem>
               <CommandItem
-                value={t("pages.workspace.actions.closeWorkspace")}
+                value={t("common.actions.close")}
                 onSelect={() => {
                   onOpenChange(false)
                   onCloseWorkspace()
                 }}
               >
                 <X className="size-4" />
-                <span>{t("pages.workspace.actions.closeWorkspace")}</span>
+                <span>{t("common.actions.close")}</span>
               </CommandItem>
               <CommandItem
                 value={consoleOpen ? t("pages.workspace.console.hide") : t("pages.workspace.console.show")}
@@ -444,7 +444,7 @@ export function WorkspaceCommandPalette({
           </>
         ) : (
           <>
-            <CommandGroup heading={t("pages.workspace.commandPalette.actions")}>
+            <CommandGroup heading={t("common.fields.actions")}>
               <CommandItem
                 value={t("pages.workspace.actions.openFolder")}
                 onSelect={() => {

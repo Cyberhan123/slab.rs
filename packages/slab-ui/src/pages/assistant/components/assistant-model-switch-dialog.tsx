@@ -35,7 +35,7 @@ export function AssistantModelSwitchDialog({
   selectedModelLabel,
 }: AssistantModelSwitchDialogProps) {
   const { t } = useTranslation()
-  const placeholder = t("pages.assistant.modelPicker.placeholder")
+  const placeholder = t("common.fields.selectModel")
 
   return (
     <Dialog open={Boolean(pendingModelId)} onOpenChange={onOpenChange}>
@@ -92,7 +92,7 @@ export function AssistantModelSwitchDialog({
 
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isCreatingSession}>
-            {t("pages.assistant.dialog.cancel")}
+            {t("common.actions.cancel")}
           </Button>
           <Button variant="secondary" onClick={onKeepSession} disabled={isCreatingSession}>
             {t("pages.assistant.dialog.keepTitle")}

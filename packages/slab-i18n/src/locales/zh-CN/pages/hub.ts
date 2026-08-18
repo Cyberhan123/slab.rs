@@ -1,8 +1,4 @@
 export const hub = {
-  header: {
-    title: '模型库',
-    subtitle: '模型仓库',
-  },
   hero: {
     badge: '新版本',
     titleLead: '塑造你的本地',
@@ -28,7 +24,7 @@ export const hub = {
       vision: '视觉',
       audio: '音频',
       coding: '编程',
-      embedding: '向量',
+      embedding: '嵌入',
     },
     statuses: {
       all: '全部状态',
@@ -37,7 +33,6 @@ export const hub = {
       not_downloaded: '未下载',
       error: '错误',
     },
-    statusPlaceholder: '状态',
   },
   alerts: {
     loadFailedTitle: '模型目录加载失败',
@@ -55,7 +50,6 @@ export const hub = {
     vad: 'VAD',
     download: '下载',
     downloading: '下载中...',
-    source: '来源',
     size: '大小 {{value}}',
     unknownSize: '未知',
     vramRisk: {
@@ -105,7 +99,7 @@ export const hub = {
     create: {
       title: '导入模型',
       description:
-        '上传一个 .slab 模型包。导入只会把条目加入目录中。提供方凭据仍在设置页中管理，支持的本地模型可以稍后从目录卡片中下载。',
+        '上传一个 .slab 模型包。导入只会把条目加入目录中。提供商凭据仍在设置页中管理，支持的本地模型可以稍后从目录卡片中下载。',
       modelPackLabel: '模型包',
       selectedDescription: '这个包会先经过校验、保存，并生成目录条目，但暂时不会拉取远端模型文件。',
       emptyDescription: '选择一个 .slab 包以导入模型条目。',
@@ -116,7 +110,6 @@ export const hub = {
       descriptionWithModel:
         '将 <strong>{{model}}</strong> 从模型目录中移除，并删除它保存的 .slab 包。这不会删除磁盘上已经下载的模型文件。',
       descriptionFallback: '从目录中移除这个模型条目。',
-      cancel: '取消',
       confirm: '删除条目',
     },
   },
@@ -128,19 +121,15 @@ export const hub = {
     selectionWarningTitle: '选择警告',
     blocks: {
       displayName: '显示名称',
-      backend: '后端',
       preset: '预设',
       variant: '变体',
       presetPlaceholder: '选择预设',
       variantPlaceholder: '选择变体',
-      close: '关闭',
       saveSelection: '保存选择',
       packLocked: '模型包已锁定',
       edited: '已编辑',
       resetToPack: '恢复默认',
       notSet: '未设置',
-      enabled: '已启用',
-      disabled: '已禁用',
       origin: {
         pack_manifest: '包清单',
         selected_preset: '预设',
@@ -153,8 +142,6 @@ export const hub = {
     reload: {
       title: '重新加载模型？',
       description: '加载参数的修改需要重新加载模型才能生效。这会短暂中断当前模型的使用。',
-      confirm: '重新加载',
-      skip: '稍后',
     },
   },
   toast: {
@@ -175,7 +162,6 @@ export const hub = {
   error: {
     taskEndedWithStatus: '任务 {{taskId}} 已结束，状态为：{{status}}',
     downloadTimedOut: '模型下载超时',
-    missingDownloadedPath: '模型下载完成，但 local_path 为空',
     startDownloadFailed: '启动模型下载任务失败',
     onlySlabPacks: '仅支持 .slab 模型包。',
   },

@@ -494,12 +494,17 @@ async fn persist_final_answer(
     messages: &mut Vec<ConversationMessage>,
     content: String,
 ) {
+    // `content` is the LLM-grade form (reasoning embedded as a
+    // `<think status="done">…</think>` block for the next prompt's chat
+    // template). The UI-grade agentMessage item must carry only the visible
+    // text — history renders item text verbatim, so the block is stripped
+    // here while the appended ConversationMessage keeps it.
     emit_agent_message_completed(
         context.notify,
         context.thread_id,
         context.turn_index,
         &assistant_item_id(context.turn_index),
-        &content,
+        &strip_think_blocks(&content),
     )
     .await;
 
@@ -538,12 +543,24 @@ async fn emit_unstreamed_tool_text(
 
     // This path only runs when the content was NOT streamed, so the streaming
     // observer never announced the item — emit the harness ItemStarted here,
-    // then the delta (mirrors the projection's first-delta behavior).
+    // then the delta (mirrors the projection's first-delta behavior). The
+    // delta is UI-grade: strip the LLM-context `<think>` block the adapter may
+    // have embedded, matching what the streamed-delta path delivers.
+    let text = strip_think_blocks(text);
+    if text.is_empty() {
+        return;
+    }
     let item_id = assistant_item_id(context.turn_index);
     emit_agent_message_started(context.notify, context.thread_id, context.turn_index, &item_id)
         .await;
-    emit_agent_message_delta(context.notify, context.thread_id, context.turn_index, &item_id, text)
-        .await;
+    emit_agent_message_delta(
+        context.notify,
+        context.thread_id,
+        context.turn_index,
+        &item_id,
+        &text,
+    )
+    .await;
 }
 
 async fn persist_assistant_tool_request(
@@ -803,6 +820,52 @@ async fn emit_reasoning_completed(
     notify.on_event_msg(thread_id, &msg).await;
 }
 
+const THINK_OPEN_MARKER: &str = "<think";
+const THINK_CLOSE_TAG: &str = "</think>";
+
+/// Find the start of a `<think …>` open tag whose next char is `>` or
+/// whitespace (so `<thinking>` and friends are not matched).
+fn find_think_open(text: &str) -> Option<usize> {
+    let mut search = 0;
+    while let Some(found) = text[search..].find(THINK_OPEN_MARKER) {
+        let at = search + found;
+        let after = &text[at + THINK_OPEN_MARKER.len()..];
+        let is_tag = after.chars().next().is_some_and(|c| c == '>' || c.is_whitespace());
+        if is_tag {
+            return Some(at);
+        }
+        search = at + THINK_OPEN_MARKER.len();
+    }
+    None
+}
+
+/// Remove complete `<think …>…</think>` blocks from assistant text.
+///
+/// The app-core adapter embeds the turn's reasoning into the LLM-grade
+/// assistant text (`format_assistant_content`) so the next prompt's chat
+/// template slots it correctly. That form must not reach the UI-grade
+/// agentMessage item — history renders the item text verbatim, which would
+/// show the raw thinking block in the message body. Unterminated blocks
+/// (streaming truncation) are kept verbatim.
+pub(crate) fn strip_think_blocks(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = find_think_open(rest) {
+        let after_open = &rest[open + THINK_OPEN_MARKER.len()..];
+        let Some(tag_end) = after_open.find('>') else {
+            break;
+        };
+        let body = &after_open[tag_end + 1..];
+        let Some(close) = body.find(THINK_CLOSE_TAG) else {
+            break;
+        };
+        out.push_str(&rest[..open]);
+        rest = &body[close + THINK_CLOSE_TAG.len()..];
+    }
+    out.push_str(rest);
+    out.trim().to_owned()
+}
+
 struct TurnTextDeltaObserver<'a> {
     thread_id: &'a str,
     turn_index: u32,
@@ -866,7 +929,39 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_external_tool_name;
+    use super::{is_external_tool_name, strip_think_blocks};
+
+    #[test]
+    fn strip_think_blocks_removes_embedded_reasoning_wrapper() {
+        let text = "<think status=\"done\">\n\nplan the reply\n\n</think>\n\nfinal answer";
+        assert_eq!(strip_think_blocks(text), "final answer");
+    }
+
+    #[test]
+    fn strip_think_blocks_reasoning_only_message_becomes_empty() {
+        let text = "<think status=\"done\">\n\nonly thinking\n\n</think>";
+        assert_eq!(strip_think_blocks(text), "");
+    }
+
+    #[test]
+    fn strip_think_blocks_keeps_unterminated_block_verbatim() {
+        let text = "before<think>never closes";
+        assert_eq!(strip_think_blocks(text), "before<think>never closes");
+    }
+
+    #[test]
+    fn strip_think_blocks_ignores_similar_tags() {
+        assert_eq!(
+            strip_think_blocks("<thinking>not a think tag</thinking>"),
+            "<thinking>not a think tag</thinking>"
+        );
+        assert_eq!(strip_think_blocks("plain text"), "plain text");
+    }
+
+    #[test]
+    fn strip_think_blocks_handles_multiple_blocks() {
+        assert_eq!(strip_think_blocks("<think>a</think>x<think>b</think>y"), "xy",);
+    }
 
     #[test]
     fn is_external_tool_name_classifies_offline_droppable_tools() {

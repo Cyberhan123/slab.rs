@@ -170,7 +170,7 @@ function Assistant() {
         toast.error(t("pages.assistant.toast.failedToLoadSession"), {
             description: getAssistantErrorDescription(
                 new Error(harnessError),
-                t("pages.assistant.toast.unknownError"),
+                t("common.toasts.unknownError"),
                 // eslint-disable-next-line react-hooks/exhaustive-deps
                 t
             ),

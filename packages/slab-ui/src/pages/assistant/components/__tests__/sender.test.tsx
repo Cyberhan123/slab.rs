@@ -115,7 +115,7 @@ describe("Sender slash-command menu", () => {
     // The menu label is localized, so resolve the expected text through the
     // live i18n instance instead of asserting a fixed English string.
     await expect
-      .element(screen.getByText(i18n.t("pages.assistant.composer.model")))
+      .element(screen.getByText(i18n.t("common.fields.model")))
       .toBeInTheDocument()
     await expect.element(screen.getByText("/compact")).toBeInTheDocument()
   })

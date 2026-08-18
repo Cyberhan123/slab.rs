@@ -444,7 +444,7 @@ function Sender({
             <DropdownMenuContent align="start" side="top">
               <DropdownMenuGroup>
                 <DropdownMenuLabel>
-                  {t("pages.assistant.composer.model")}
+                  {t("common.fields.model")}
                 </DropdownMenuLabel>
                 <DropdownMenuItem
                   onSelect={(event) => {

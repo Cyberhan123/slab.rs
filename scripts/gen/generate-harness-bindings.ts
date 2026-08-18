@@ -122,7 +122,7 @@ async function main() {
   if (byName.size === 0) throw new Error("no bindings generated");
 
   const sections = [...byName.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+    .toSorted(([a], [b]) => a.localeCompare(b))
     .map(([name, body]) => `// ── ${name} ──\n${body}`)
     .join("\n\n");
 

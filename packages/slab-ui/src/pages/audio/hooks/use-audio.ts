@@ -90,7 +90,7 @@ export function useAudio() {
   const isTranscriptionPolling = transcriptionPhase === 'polling';
   const isTranscriptionFetchingResult = transcriptionPhase === 'fetchingResult';
   const toPollingErrorMessage = useCallback(
-    (message: string) => t('pages.audio.toast.pollingError', { message }),
+    (message: string) => t('common.toasts.pollingError', { message }),
     [t],
   );
   const {
@@ -212,7 +212,7 @@ export function useAudio() {
       })),
       onChange: setSelectedModelId,
       groupLabel: t('pages.audio.modelPicker.groupLabel'),
-      placeholder: t('pages.audio.modelPicker.placeholder'),
+      placeholder: t('common.fields.selectModel'),
       loading: catalogModelsLoading,
       disabled: catalogModelsLoading || isBusy || whisperTranscribeModels.length === 0,
       emptyLabel: t('pages.audio.modelPicker.emptyLabel'),
@@ -290,7 +290,7 @@ export function useAudio() {
     const { downloadedNow } = await ensureDownloadedTranscriptionModel(selectedModelId);
 
     if (downloadedNow) {
-      toast.success(t('pages.audio.toast.downloaded', { model: model.display_name }));
+      toast.success(t('common.toasts.modelDownloaded', { model: model.display_name }));
     }
 
     await loadTranscriptionModel(selectedModelId);
@@ -371,7 +371,7 @@ export function useAudio() {
         }
 
         toast.error(t('pages.audio.toast.failedToCreateTask'), {
-          description: getErrorDescription(error, t('pages.audio.toast.unknownError')),
+          description: getErrorDescription(error, t('common.toasts.unknownError')),
         });
       } finally {
         if (!cancelled) {
@@ -567,7 +567,7 @@ export function useAudio() {
       });
     } catch (err: unknown) {
       toast.error(t('pages.audio.toast.failedToCreateTask'), {
-        description: getErrorDescription(err, t('pages.audio.toast.unknownError')),
+        description: getErrorDescription(err, t('common.toasts.unknownError')),
       });
     } finally {
       setPreparingStage(null);
@@ -588,7 +588,7 @@ export function useAudio() {
       });
     } catch (error) {
       toast.error(t('pages.audio.toast.cancelFailed'), {
-        description: getErrorDescription(error, t('pages.audio.toast.unknownError')),
+        description: getErrorDescription(error, t('common.toasts.unknownError')),
       });
     }
   }, [cancelTaskMutation, clearTranscriptionTask, t, taskId]);
@@ -659,13 +659,13 @@ export function useAudio() {
 
   const previewRows = [
     {
-      label: t('pages.audio.preview.rows.model'),
+      label: t('common.fields.model'),
       value: selectedModel?.display_name ?? t('pages.audio.preview.values.notSelected'),
       accent: Boolean(selectedModel),
       chip: true,
     },
     {
-      label: t('pages.audio.preview.rows.source'),
+      label: t('common.fields.source'),
       value: file?.name ?? t('pages.audio.preview.values.awaitingUpload'),
       accent: Boolean(file),
       chip: false,

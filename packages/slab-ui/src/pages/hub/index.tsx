@@ -157,7 +157,7 @@ export default function Hub() {
               onValueChange={(value) => hub.setStatus(value as typeof hub.status)}
             >
               <SelectTrigger variant="default" size="pill" className="h-9 min-w-[190px] bg-glass-bg-strong">
-                <SelectValue placeholder={t('pages.hub.filters.statusPlaceholder')} />
+                <SelectValue placeholder={t('common.fields.status')} />
               </SelectTrigger>
               <SelectContent variant="default">
                 {STATUS_OPTIONS.map((option) => (

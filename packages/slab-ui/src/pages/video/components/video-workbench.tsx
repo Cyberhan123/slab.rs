@@ -197,7 +197,7 @@ export function VideoWorkbench({
                 {t('pages.video.workbench.configTitle')}
               </p>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                {t('pages.video.workbench.modelHint')}
+                {t('common.diffusion.modelHint')}
               </p>
             </div>
 
@@ -220,7 +220,7 @@ export function VideoWorkbench({
 
               <div className="space-y-2.5">
                 <FieldLabel htmlFor="video-negative">
-                  {t('pages.video.workbench.negativePrompt.label')}
+                  {t('common.diffusion.negativePrompt')}
                 </FieldLabel>
                 <Input
                   id="video-negative"
@@ -234,7 +234,7 @@ export function VideoWorkbench({
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <ResolutionSliderField
-                  label={t('pages.video.workbench.fields.width')}
+                  label={t('common.diffusion.width')}
                   value={widthStr}
                   min={64}
                   max={2048}
@@ -242,7 +242,7 @@ export function VideoWorkbench({
                   onChange={setWidthStr}
                 />
                 <ResolutionSliderField
-                  label={t('pages.video.workbench.fields.height')}
+                  label={t('common.diffusion.height')}
                   value={heightStr}
                   min={64}
                   max={2048}
@@ -371,7 +371,7 @@ export function VideoWorkbench({
                 <CollapsibleContent className="space-y-5 pt-4">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <SliderField
-                      label={t('pages.video.workbench.fields.cfgScale')}
+                      label={t('common.diffusion.cfgScale')}
                       value={cfgScale.toFixed(1)}
                       slider={
                         <Slider
@@ -384,7 +384,7 @@ export function VideoWorkbench({
                       }
                     />
                     <SliderField
-                      label={t('pages.video.workbench.fields.guidance')}
+                      label={t('common.diffusion.guidance')}
                       value={guidance.toFixed(1)}
                       slider={
                         <Slider
@@ -397,7 +397,7 @@ export function VideoWorkbench({
                       }
                     />
                     <SliderField
-                      label={t('pages.video.workbench.fields.steps')}
+                      label={t('common.diffusion.steps')}
                       value={steps}
                       slider={
                         <Slider
@@ -411,7 +411,7 @@ export function VideoWorkbench({
                     />
                     {initImageDataUri ? (
                       <SliderField
-                        label={t('pages.video.workbench.fields.strength')}
+                        label={t('common.diffusion.strength')}
                         value={strength.toFixed(2)}
                         slider={
                           <Slider
@@ -428,7 +428,7 @@ export function VideoWorkbench({
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2.5">
-                      <FieldLabel>{t('pages.video.workbench.fields.seed')}</FieldLabel>
+                      <FieldLabel>{t('common.diffusion.seed')}</FieldLabel>
                       <Input
                         variant="soft"
                         type="number"
@@ -439,7 +439,7 @@ export function VideoWorkbench({
                     </div>
 
                     <div className="space-y-2.5">
-                      <FieldLabel>{t('pages.video.workbench.fields.sampler')}</FieldLabel>
+                      <FieldLabel>{t('common.diffusion.sampler')}</FieldLabel>
                       <Select value={sampleMethod} onValueChange={setSampleMethod}>
                         <SelectTrigger
                           variant="soft"
@@ -458,7 +458,7 @@ export function VideoWorkbench({
                     </div>
 
                     <div className="space-y-2.5 sm:col-span-2">
-                      <FieldLabel>{t('pages.video.workbench.fields.scheduler')}</FieldLabel>
+                      <FieldLabel>{t('common.diffusion.scheduler')}</FieldLabel>
                       <Select value={scheduler} onValueChange={setScheduler}>
                         <SelectTrigger
                           variant="soft"
@@ -492,7 +492,7 @@ export function VideoWorkbench({
                 {isGenerating ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    {t('pages.video.workbench.actions.generating')}
+                    {t('common.diffusion.generating')}
                   </>
                 ) : (
                   <>
@@ -569,11 +569,11 @@ export function VideoWorkbench({
                     <GenerationProgressView
                       progress={generationProgress}
                       labels={{
-                        eta: t('pages.video.progress.eta'),
+                        eta: t('common.progress.eta'),
                         finalizing: t('pages.video.progress.finalizing'),
-                        queued: t('pages.video.progress.queued'),
+                        queued: t('common.progress.queued'),
                         running: t('pages.video.progress.running'),
-                        step: t('pages.video.progress.step'),
+                        step: t('common.progress.step'),
                         title: t('pages.video.progress.title'),
                       }}
                       className="w-full max-w-[360px]"
@@ -625,13 +625,13 @@ export function VideoWorkbench({
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
-                    {t('pages.video.history.title')}
+                    {t('common.diffusion.recentHistory')}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {historyLoading
                       ? t('pages.video.history.loading')
                       : historyError
-                        ? t('pages.video.history.error', { message: historyError })
+                        ? t('common.toasts.historyLoadFailed', { message: historyError })
                         : t('pages.video.history.description')}
                   </p>
                 </div>
@@ -696,7 +696,7 @@ export function VideoWorkbench({
                   onClick={() => refillFromHistory(selectedHistoryTask)}
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
-                  {t('pages.video.history.actions.refill')}
+                  {t('common.diffusion.reuseParameters')}
                 </Button>
                 <Button
                   type="button"
@@ -748,7 +748,7 @@ export function VideoWorkbench({
                   </div>
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
-                      <p className="text-xs text-muted-foreground">{t('pages.video.history.fields.size')}</p>
+                      <p className="text-xs text-muted-foreground">{t('common.diffusion.size')}</p>
                       <p className="font-semibold">{selectedHistoryTask.width} x {selectedHistoryTask.height}</p>
                     </div>
                     <div>
@@ -756,11 +756,11 @@ export function VideoWorkbench({
                       <p className="font-semibold">{selectedHistoryTask.frames} / {selectedHistoryTask.fps}fps</p>
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground">{t('pages.video.history.fields.backend')}</p>
+                      <p className="text-xs text-muted-foreground">{t('common.fields.backend')}</p>
                       <p className="truncate font-semibold">{selectedHistoryTask.backend_id}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground">{t('pages.video.history.fields.model')}</p>
+                      <p className="text-xs text-muted-foreground">{t('common.fields.model')}</p>
                       <p className="truncate font-semibold">{selectedHistoryTask.model_id ?? selectedHistoryTask.model_path}</p>
                     </div>
                   </div>

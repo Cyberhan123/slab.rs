@@ -110,7 +110,7 @@ export function useVideoGeneration() {
   const isPolling = generationPhase === 'polling';
   const isFetchingResult = generationPhase === 'fetchingResult';
   const toPollingErrorMessage = useCallback(
-    (message: string) => t('pages.video.toast.pollingError', { message }),
+    (message: string) => t('common.toasts.pollingError', { message }),
     [t],
   );
   const {
@@ -136,10 +136,10 @@ export function useVideoGeneration() {
       })),
       onChange: setSelectedModelId,
       groupLabel: t('pages.video.modelPicker.groupLabel'),
-      placeholder: t('pages.video.modelPicker.placeholder'),
+      placeholder: t('common.fields.selectModel'),
       loading: catalogLoading,
       disabled: catalogLoading || isGenerating || !modelOptions.some((model) => model.downloaded),
-      emptyLabel: t('pages.video.modelPicker.emptyLabel'),
+      emptyLabel: t('common.diffusion.noModels'),
     }),
     [catalogLoading, isGenerating, modelOptions, selectedModelId, setSelectedModelId, t],
   );
@@ -199,7 +199,7 @@ export function useVideoGeneration() {
       const dataUri = await fileToDataUri(file);
       setInitImageDataUri(dataUri);
     } catch {
-      toast.error(t('pages.video.error.readImageFileFailed'));
+      toast.error(t('common.diffusion.readImageFileFailed'));
     }
   }, [t]);
 
@@ -228,7 +228,7 @@ export function useVideoGeneration() {
 
   const handleSubmit = useCallback(async () => {
     if (!prompt.trim()) {
-      toast.error(t('pages.video.error.enterPrompt'));
+      toast.error(t('common.diffusion.enterPrompt'));
       return;
     }
 
@@ -422,7 +422,7 @@ export function useVideoGeneration() {
     setStrength(request.strength ?? strength);
     setInitImageDataUri(null);
     setHistoryDialogOpen(false);
-    toast.success(t('pages.video.history.refilled'));
+    toast.success(t('common.diffusion.historyRefilled'));
   }, [cfgScale, guidance, seed, steps, strength, t]);
 
   const toggleHistoryComparison = useCallback((task: VideoGenerationTask) => {

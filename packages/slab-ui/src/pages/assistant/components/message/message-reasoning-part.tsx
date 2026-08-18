@@ -24,6 +24,7 @@ import { Markdown } from "./markdown"
 import { Shimmer } from "./shimmer"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
+import { useTranslation } from "@slab/i18n"
 
 interface ReasoningContextValue {
   isStreaming: boolean
@@ -137,19 +138,23 @@ const Reasoning = memo(
 )
 Reasoning.displayName = "Reasoning"
 
-const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number): ReactNode => {
-  if (isStreaming || duration === 0) return <Shimmer duration={1}>Thinking...</Shimmer>
-  if (duration === undefined) return <p>Thought for a few seconds</p>
-  return <p>Thought for {duration} seconds</p>
-}
-
 type ReasoningTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
   getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode
 }
 
 const ReasoningTrigger = memo(
-  ({ className, children, getThinkingMessage = defaultGetThinkingMessage, ...props }: ReasoningTriggerProps) => {
+  ({ className, children, getThinkingMessage, ...props }: ReasoningTriggerProps) => {
     const { isStreaming, isOpen, duration } = useReasoning()
+    const { t } = useTranslation()
+    const message =
+      getThinkingMessage?.(isStreaming, duration) ??
+      (isStreaming || duration === 0 ? (
+        <Shimmer duration={1}>{t("pages.assistant.thinking.loading")}</Shimmer>
+      ) : duration === undefined ? (
+        <p>{t("pages.assistant.thinking.thoughtForAFewSeconds")}</p>
+      ) : (
+        <p>{t("pages.assistant.thinking.thoughtForSeconds", { seconds: duration })}</p>
+      ))
     return (
       <CollapsibleTrigger
         className={cn(
@@ -161,7 +166,7 @@ const ReasoningTrigger = memo(
         {children ?? (
           <>
             <BrainIcon className="size-4" />
-            {getThinkingMessage(isStreaming, duration)}
+            {message}
             <ChevronDownIcon
               className={cn("size-4 transition-transform", isOpen ? "rotate-180" : "rotate-0")}
             />

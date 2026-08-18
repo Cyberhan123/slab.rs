@@ -154,7 +154,7 @@ export default function Task() {
 
         {tasksError ? (
           <Alert variant="destructive">
-            <AlertTitle>{t('pages.task.alerts.errorTitle')}</AlertTitle>
+            <AlertTitle>{t('common.status.error')}</AlertTitle>
             <AlertDescription>{t('pages.task.alerts.fetchFailed')}</AlertDescription>
           </Alert>
         ) : null}
@@ -184,13 +184,13 @@ export default function Task() {
                     {t('pages.task.table.headers.type')}
                   </TableHead>
                   <TableHead className="h-[45px] px-6 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
-                    {t('pages.task.table.headers.status')}
+                    {t('common.fields.status')}
                   </TableHead>
                   <TableHead className="h-[45px] px-6 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.task.table.headers.createdAt')}
                   </TableHead>
                   <TableHead className="h-[45px] px-6 text-right text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
-                    {t('pages.task.table.headers.actions')}
+                    {t('common.fields.actions')}
                   </TableHead>
                 </TableRow>
               </TableHeader>

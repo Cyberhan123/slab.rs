@@ -1,17 +1,11 @@
 export const audio = {
-  header: {
-    title: 'Audio',
-    subtitle: 'Transcribe and process audio files',
-  },
   modelPicker: {
     groupLabel: 'Whisper Models',
-    placeholder: 'Select model',
     emptyLabel: 'No whisper models',
   },
   alerts: {
     catalogErrorTitle: 'Model Catalog Error',
     catalogErrorDescription: 'Failed to load model catalog. Please check server status.',
-    transcribeErrorTitle: 'Error',
     transcribeErrorDescription: 'Failed to create transcription task. Please retry.',
   },
   workbench: {
@@ -34,7 +28,6 @@ export const audio = {
     },
     submitDescription:
       'By starting, the selected file is sent through the current transcription flow and can be tracked in Tasks.',
-    taskIdLabel: 'Task ID: {{id}}',
     busy: {
       preparingTitle: 'Preparing selected model',
       preparingDescription:
@@ -47,7 +40,6 @@ export const audio = {
       title: 'Transcription task created',
       description:
         'Task ID: {{id}}. You can keep working here or jump straight to the Tasks page to monitor progress.',
-      openTasks: 'Open Tasks',
       viewTranscript: 'Open Transcript',
     },
     ready: {
@@ -59,8 +51,6 @@ export const audio = {
   },
   preview: {
     rows: {
-      model: 'Model',
-      source: 'Source',
       vadMode: 'VAD Mode',
       decode: 'Decode',
     },
@@ -144,24 +134,19 @@ export const audio = {
     },
   },
   toast: {
-    downloaded: 'Downloaded {{model}}',
     downloadedVadModel: 'Downloaded VAD model {{model}}',
     taskCreated: 'Transcription task created.',
     taskCreatedDescription:
       'Task ID: {{id}} | Model: {{model}} | {{vad}} | {{decode}}',
     historyDetailFailed: 'Failed to open transcription detail: {{message}}',
     transcriptionReady: 'Transcription is ready.',
-    viewTasks: 'View tasks',
     cancelled: 'Transcription cancelled.',
     cancelFailed: 'Failed to cancel transcription.',
-    pollingError: 'Polling error: {{message}}',
     failedToCreateTask: 'Failed to create transcription task.',
-    unknownError: 'Unknown error',
   },
   history: {
     title: 'Recent Transcriptions',
     loading: 'Loading transcription history...',
-    error: 'Failed to load history: {{message}}',
     description: 'Review transcript output and reopen recent transcription details here.',
     empty: 'No transcription history yet. Finished transcripts will appear here.',
     detailTitle: 'Transcription Detail',
@@ -179,19 +164,14 @@ export const audio = {
       seekAria: 'Seek to {{time}}',
     },
     fields: {
-      source: 'Source',
-      model: 'Model',
       language: 'Language',
       segments: 'Segments',
     },
   },
   progress: {
     title: 'Transcription progress',
-    queued: 'Queued and waiting for the runtime',
     running: 'Runtime is transcribing audio',
     finalizing: 'Finalizing transcript',
-    eta: 'ETA',
-    step: 'Step',
   },
   error: {
     webUploadNotImplemented: 'Web transcription upload is not implemented yet. Please use the desktop app.',
@@ -199,11 +179,6 @@ export const audio = {
     selectFileFirst: 'Please select a file first.',
     selectModelFirst: 'Please select a whisper model first.',
     selectedModelMissing: 'Selected model no longer exists in catalog.',
-    selectedModelMissingGeneric: 'Selected model does not exist in catalog',
-    selectedModelNotLocal: 'Selected model is not a local audio model.',
-    downloadTimedOut: 'Model download timed out',
-    startDownloadFailed: 'Failed to start model download task',
-    missingDownloadedPath: 'Model download completed, but local_path is empty',
     bundledVadMissing: 'The current Whisper model does not expose a bundled VAD file.',
     selectDedicatedVadModel: 'Please select a dedicated VAD model.',
     selectedVadMissing: 'Selected VAD model no longer exists in catalog.',

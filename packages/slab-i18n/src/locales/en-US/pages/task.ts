@@ -1,8 +1,4 @@
 export const task = {
-  header: {
-    title: 'Tasks',
-    subtitle: 'Track and manage system tasks',
-  },
   metrics: {
     successRate: 'Success Rate',
     successful_one: '{{count}} successful',
@@ -19,7 +15,6 @@ export const task = {
     activeLabel: 'Active',
   },
   alerts: {
-    errorTitle: 'Error',
     fetchFailed: 'Failed to fetch task list',
   },
   states: {
@@ -32,9 +27,7 @@ export const task = {
     headers: {
       taskId: 'Task ID',
       type: 'Type',
-      status: 'Status',
       createdAt: 'Created At',
-      actions: 'Actions',
     },
     openDomain: 'Open Detail',
     pagination: {
@@ -47,10 +40,8 @@ export const task = {
   dialog: {
     detailsButton: 'Details',
     title: 'Task Details',
-    taskId: 'Task ID: {{id}}',
     fields: {
       type: 'Type',
-      status: 'Status',
       created: 'Created',
       updated: 'Updated',
     },
@@ -71,7 +62,6 @@ export const task = {
     fetchTaskDetailsFailed: 'Failed to fetch task details',
     cancelTaskFailed: 'Failed to cancel task: {{message}}',
     restartTaskFailed: 'Failed to restart task: {{message}}',
-    unknownError: 'Unknown error',
   },
   status: {
     succeeded: 'Succeeded',
