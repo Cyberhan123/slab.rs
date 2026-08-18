@@ -187,6 +187,7 @@ export const assistant = {
     reasoningOff: 'Reasoning off',
     reasoningActive: '{{effort}} reasoning',
     advanced: 'Advanced',
+    model: 'Model',
     reasoningEffort: 'Reasoning',
     toolChoice: 'Tools',
     toolConcurrency: 'Parallel tools',

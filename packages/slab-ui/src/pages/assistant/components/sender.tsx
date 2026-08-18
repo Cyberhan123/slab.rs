@@ -441,9 +441,11 @@ function Sender({
                 <Slash />
               </InputGroupButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" side="top" className="w-44">
+            <DropdownMenuContent align="start" side="top">
               <DropdownMenuGroup>
-                <DropdownMenuLabel>Model</DropdownMenuLabel>
+                <DropdownMenuLabel>
+                  {t("pages.assistant.composer.model")}
+                </DropdownMenuLabel>
                 <DropdownMenuItem
                   onSelect={(event) => {
                     // Keep the menu open so the embedded ToggleGroup stays interactive.

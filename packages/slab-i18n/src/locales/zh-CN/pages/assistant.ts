@@ -186,6 +186,7 @@ export const assistant = {
     reasoningOff: '推理关闭',
     reasoningActive: '{{effort}}推理',
     advanced: '高级',
+    model: '模型',
     reasoningEffort: '推理',
     toolChoice: '工具',
     toolConcurrency: '并行工具',

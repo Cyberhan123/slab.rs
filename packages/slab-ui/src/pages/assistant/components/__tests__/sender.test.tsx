@@ -7,6 +7,8 @@ import { createTestSlabPorts } from "../../../../provider/test-ports"
 
 import Sender from "../sender"
 
+import i18n from "@slab/i18n"
+
 import type { ReactElement } from "react"
 function renderSender(ui: ReactElement) {
   return render(
@@ -110,7 +112,11 @@ describe("Sender slash-command menu", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Commands" }))
 
-    await expect.element(screen.getByText("Model")).toBeInTheDocument()
+    // The menu label is localized, so resolve the expected text through the
+    // live i18n instance instead of asserting a fixed English string.
+    await expect
+      .element(screen.getByText(i18n.t("pages.assistant.composer.model")))
+      .toBeInTheDocument()
     await expect.element(screen.getByText("/compact")).toBeInTheDocument()
   })
 
