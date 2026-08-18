@@ -253,13 +253,75 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key_path = dir.path().join("helper.key").to_path_buf();
         let marker_path = dir.path().join("marker.json").to_path_buf();
-        let daemon_task = tokio::spawn(run_daemon(name.clone(), key_path, marker_path));
+        let daemon_task = tokio::spawn(run_daemon(name.clone(), key_path, marker_path, None));
 
         // `ping` retries the connect until the daemon has created its first instance.
         let echoed = ping(&name, "hello-daemon").await.expect("ping ok");
         assert_eq!(echoed, "hello-daemon");
 
         daemon_task.abort();
+    }
+
+    #[tokio::test]
+    async fn daemon_exits_when_owner_dies() {
+        let name = test_pipe_name("owner");
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("helper.key").to_path_buf();
+        let marker_path = dir.path().join("marker.json").to_path_buf();
+        // A real throwaway owner process (no elevation needed) that lives long enough to be
+        // watched; it self-terminates via ping's count even if the kill below somehow misses.
+        let mut owner = std::process::Command::new("ping")
+            .args(["-n", "60", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn dummy owner");
+        let owner_pid = owner.id();
+
+        // Snapshot the audit log so only lines written by THIS run are asserted on.
+        let log_path = slab_utils::app_home::sandbox_log_file();
+        let offset = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0) as usize;
+
+        let daemon_task =
+            tokio::spawn(run_daemon(name.clone(), key_path, marker_path, Some(owner_pid)));
+
+        // Liveness first: the watchdog must NOT kill the daemon while the owner is alive.
+        let echoed = ping(&name, "owner-watch").await.expect("ping ok");
+        assert_eq!(echoed, "owner-watch");
+
+        owner.kill().expect("kill dummy owner");
+        let _ = owner.wait();
+
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(15), daemon_task)
+            .await
+            .expect("run_daemon completes after owner death")
+            .expect("daemon task join");
+        joined.expect("run_daemon returns Ok");
+
+        // The shutdown must be visible in the unified sandbox audit log (the daemon's stderr is
+        // hidden in production). Read defensively: rotation could shrink the file.
+        let bytes = std::fs::read(&log_path).unwrap_or_default();
+        let tail = String::from_utf8_lossy(bytes.get(offset..).unwrap_or(&[]));
+        assert!(tail.contains("\"kind\":\"DaemonOwnerExited\""), "tail: {tail}");
+        assert!(tail.contains(&format!("owner_pid={owner_pid}")), "tail: {tail}");
+    }
+
+    #[tokio::test]
+    async fn daemon_refuses_unwatchable_owner() {
+        let name = test_pipe_name("owner-refuse");
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("helper.key").to_path_buf();
+        let marker_path = dir.path().join("marker.json").to_path_buf();
+        // A pid beyond Windows's allocation range: OpenProcess fails ⇒ the daemon must fail
+        // closed BEFORE binding the pipe (watchdog setup precedes every side effect).
+        let started = std::time::Instant::now();
+        let result = run_daemon(name.clone(), key_path, marker_path, Some(999_999_996)).await;
+        assert!(result.is_err(), "unwatchable owner must fail the daemon");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert!(
+            ping_with_timeout(&name, "x", std::time::Duration::from_millis(200)).await.is_err(),
+            "pipe must never be bound when the owner is unwatchable"
+        );
     }
 
     #[tokio::test]

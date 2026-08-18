@@ -174,11 +174,13 @@ impl Elevator for ShellElevator {
         let verb = wide("runas");
         let file = wide(&helper_exe.to_string_lossy());
         // The helper's clap takes a positional subcommand (`serve <PIPE>`), not `--serve --pipe`.
-        // Thread key/marker so the daemon shares the orchestrator's key (HMAC must match).
+        // Thread key/marker so the daemon shares the orchestrator's key (HMAC must match), and
+        // `--owner-pid` so the daemon dies with THIS process (slab-server) instead of leaking.
         let params = wide(&format!(
-            "serve \"{pipe_name}\" --key \"{}\" --marker \"{}\"",
+            "serve \"{pipe_name}\" --key \"{}\" --marker \"{}\" --owner-pid {}",
             key_path.to_string_lossy(),
-            marker_path.to_string_lossy()
+            marker_path.to_string_lossy(),
+            std::process::id()
         ));
 
         // SAFETY: zeroed then filled; wide strings own their NUL-terminated buffers for the call.
@@ -201,8 +203,8 @@ impl Elevator for ShellElevator {
             )));
         }
         // The daemon is long-lived: do NOT wait. Close the handle (no Job, so closing does not kill
-        // it); liveness is confirmed later by pinging the pipe. The daemon survives slab-server
-        // restart because nothing tracks/joins it.
+        // it); liveness is confirmed later by pinging the pipe. The daemon still self-terminates
+        // via its `--owner-pid` watchdog the moment THIS (orchestrator) process exits.
         if !info.hProcess.is_null() {
             unsafe {
                 windows_sys::Win32::Foundation::CloseHandle(info.hProcess);
@@ -214,7 +216,8 @@ impl Elevator for ShellElevator {
 
 /// Launch the daemon directly (no UAC) when the orchestrator is ALREADY elevated. The daemon
 /// inherits this process's elevated token. As with [`ShellElevator::run_serve`], the handles are
-/// closed (not tracked) so the daemon outlives the orchestrator.
+/// closed (not tracked), so the daemon outlives any single call — but it dies with the
+/// orchestrator process via its `--owner-pid` watchdog.
 pub fn launch_daemon_direct(
     helper_exe: &Path,
     pipe_name: &str,
@@ -229,12 +232,14 @@ pub fn launch_daemon_direct(
     let program = wide(&helper_exe.to_string_lossy());
     // CreateProcessW's lpCommandLine is the child's full command line (argv[0] first); clap takes
     // the `serve <PIPE>` positional subcommand. Quote the exe path as argv[0]. Thread key/marker so
-    // the daemon loads the SAME key the orchestrator signs with (HMAC must match).
+    // the daemon loads the SAME key the orchestrator signs with (HMAC must match), and
+    // `--owner-pid` so the daemon dies with THIS process (slab-server) instead of leaking.
     let cmd = format!(
-        "\"{}\" serve \"{pipe_name}\" --key \"{}\" --marker \"{}\"",
+        "\"{}\" serve \"{pipe_name}\" --key \"{}\" --marker \"{}\" --owner-pid {}",
         helper_exe.to_string_lossy(),
         key_path.to_string_lossy(),
-        marker_path.to_string_lossy()
+        marker_path.to_string_lossy(),
+        std::process::id()
     );
     let mut cmd_w = wide(&cmd);
 

@@ -108,8 +108,8 @@ impl WindowsSandboxExecutor for JobOnlyExecutor {
 
 /// The elevated executor: starts (once, via UAC) a long-lived daemon that provisions Low-IL
 /// integrity-label ACLs and spawns each sandboxed child under a restricted token. The orchestrator
-/// (non-elevated) drives the daemon over a named pipe; the daemon survives slab-server restart, so
-/// reconnect hits no UAC.
+/// (non-elevated) drives the daemon over a named pipe; the daemon dies with slab-server (owner-PID
+/// watchdog), so every server start pays one UAC.
 pub struct ElevatedAclTokenExecutor {
     cfg: PrepareContext,
     state: Mutex<ElevatedState>,

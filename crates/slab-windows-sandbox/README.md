@@ -20,6 +20,14 @@ child processes via an elevated helper (`slab-sandbox-helper`), opt-in through U
   stdio. Default off (`windows_use_conpty` config knob); the piped path remains the safe default.
   The AppContainer+ConPTY combination is not a documented Win32 scenario and must be empirically
   validated via the gated `os_conpty_*` test before it is relied on; fail-closed on attach failure.
+- **Daemon lifetime (owner watchdog):** `owner.rs` ties the daemon to the orchestrator that
+  launched it (slab-server threads `--owner-pid` into both launch paths in `elevation.rs`). The
+  watchdog waits on the owner's process handle and shuts the daemon down the moment it is signaled
+  (clean shutdown, crash, or taskkill), aborting every connection so each Job's
+  `KILL_ON_JOB_CLOSE` tears the sandboxed children down too. Consequence: each slab-server start
+  pays one UAC when the sandbox is enabled on a non-elevated host. Known edge: a second
+  slab-server instance reusing a live daemon inherits the first instance's owner, so the daemon
+  dies under it when the first instance exits (next spawn fails until that server restarts).
 
 ## Hard boundaries
 

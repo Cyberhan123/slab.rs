@@ -39,6 +39,8 @@ mod mac;
 #[cfg(target_os = "windows")]
 mod marker;
 #[cfg(target_os = "windows")]
+mod owner;
+#[cfg(target_os = "windows")]
 mod pipe;
 #[cfg(target_os = "windows")]
 mod request;
