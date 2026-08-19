@@ -23,6 +23,7 @@ Use this as the repo-wide AI reference for architecture boundaries, workflow, an
 - Inference stays behind `bin/slab-app -> bin/slab-server -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime -> crates/slab-runtime-core`.
 - The desktop host starts `slab-server`; product API traffic stays on HTTP; Tauri commands stay host-only.
 - Extend the existing `/v1/*` API surface instead of adding a parallel API tree.
+- `packages/slab-mobile` (Flutter) is a pure network client over the existing `/v1` + harness WS surface; mobile work must not add a parallel API tree. Design tokens flow one-way from `packages/slab-components/src/styles/globals.css` via `bun run gen:mobile`; never hand-edit generated mobile files (`slab_tokens.g.dart`, `design/tokens.json`, `assets/i18n/*`). `packages/slab-h5` remains the zero-install mobile-web shell.
 - Backend API shape changes require `bun run gen:api` to refresh `packages/api/src/v1.d.ts`.
 - Prefer `crates/slab-types` and `crates/slab-proto` for contracts that cross crate boundaries.
 - Keep `crates/slab-app-core` HTTP-free. Keep `bin/slab-runtime` as the runtime composition root. Keep `crates/slab-runtime-core` limited to scheduler and backend protocol concerns.
@@ -93,7 +94,14 @@ bun run gen:model-packs
 bun run docs:dev
 bun run docs:build
 bun run docs:preview
+
+bun run gen:mobile
+bun run check:mobile
+bun run test:mobile
+bun run dev:mobile
 ```
+
+`gen:mobile` regenerates the mobile token/locale assets and needs only Bun. The other mobile scripts wrap the Flutter SDK inside `packages/slab-mobile` (see `packages/slab-mobile/README.md`).
 
 ## Reference Map
 
@@ -115,4 +123,5 @@ Start with the nearest local README for the code you are changing.
 - Elevated Windows sandbox helper binary: `bin/slab-sandbox-helper/README.md`
 - Plugin model and packaging: `plugins/README.md`, `crates/slab-plugin/README.md`, `packages/slab-plugin-sdk/README.md`, `packages/slab-plugin-cli/README.md`, `packages/slab-plugin-ui/README.md`
 - Desktop frontend and UI packages: `packages/slab-desktop/README.md`, `packages/slab-components/README.md`, `packages/slab-i18n/README.md`
+- Mobile Flutter client (thin network client): `packages/slab-mobile/README.md`
 - Shared contracts and generated clients: `crates/slab-types/README.md`, `crates/slab-proto/README.md`, `packages/api/README.md`

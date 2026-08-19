@@ -1,0 +1,37 @@
+name: slab_mobile
+description: "slab mobile client — a thin Flutter client for a running slab-server."
+publish_to: 'none'
+
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.10.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State: Riverpod Notifier for the conversation state machine (mirrors the
+  # TS ConversationController external-store pattern 1:1).
+  flutter_riverpod: ^2.6.1
+  # Declarative redirect ladder (connect gate → setup gate), the analog of
+  # SetupGuard/app-guards.
+  go_router: ^16.2.1
+  # Harness WS (JSON-RPC 2.0). The client takes an injectable factory for tests.
+  web_socket_channel: ^3.0.3
+  # Six REST endpoints; dio's interceptors buy nothing here.
+  http: ^1.5.0
+  # Connection config + language preference storage.
+  shared_preferences: ^2.5.3
+  # LLM-streaming-tolerant markdown (survives unterminated fences mid-delta).
+  gpt_markdown: ^1.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/i18n/

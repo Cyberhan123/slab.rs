@@ -183,6 +183,26 @@ async function assertMethodConstantsInSync(): Promise<void> {
   if (drift.length > 0) {
     throw new Error(`HARNESS_METHOD drift vs crates/slab-proto mod.rs:\n${drift.join("\n")}`);
   }
+
+  // The Flutter client mirrors the same constants by hand (no ts-rs Dart
+  // emitter exists); keep the Dart file honest with a string-presence check.
+  const dartPath = path.join(
+    repoRoot,
+    "packages",
+    "slab-mobile",
+    "lib",
+    "proto",
+    "harness_methods.dart",
+  );
+  const dartSource = await readFile(dartPath, "utf8").catch(() => null);
+  if (dartSource !== null) {
+    const dartDrift = [...tsValues.values()].filter((value) => !dartSource.includes(`'${value}'`));
+    if (dartDrift.length > 0) {
+      throw new Error(
+        `HARNESS_METHOD values missing from packages/slab-mobile/lib/proto/harness_methods.dart:\n${dartDrift.map((v) => `  ${v}`).join("\n")}`,
+      );
+    }
+  }
   console.log(`Method constants in sync (${rustConsts.size} consts checked).`);
 }
 

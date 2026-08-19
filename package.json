@@ -61,7 +61,11 @@
     "docs:preview": "vitepress preview docs",
     "prepare": "husky && bun run scripts/apply-patches.ts",
     "dev:web": "bun run --cwd packages/slab-web dev",
-    "dev:h5": "bun run --cwd packages/slab-h5 dev"
+    "dev:h5": "bun run --cwd packages/slab-h5 dev",
+    "dev:mobile": "bun ./scripts/mobile/run.ts run",
+    "check:mobile": "bun ./scripts/mobile/run.ts analyze",
+    "test:mobile": "bun ./scripts/mobile/run.ts test",
+    "gen:mobile": "bun ./scripts/design/export-tokens.ts && bun ./scripts/i18n/export-mobile-locales.ts"
   },
   "workspaces": [
     "packages/api",

@@ -6,6 +6,9 @@ const ROOTS = [
   "packages/slab-desktop/src",
   "packages/slab-ui/src",
   "packages/slab-plugin-ui/src",
+  // Flutter app: same philosophy in Dart — colors flow from the generated
+  // tokens (slab_tokens.g.dart), never raw literals in app code.
+  "packages/slab-mobile/lib",
 ]
 
 const GLOBALS_PATH = "packages/slab-components/src/styles/globals.css"
@@ -61,6 +64,23 @@ const RAW_HEX_ALLOWLIST = [
   /^packages\/slab-ui\/src\/pages\/task\/__tests__\/utils\.test\.tsx?$/,
 ]
 
+// ── Flutter (Dart) leg ──────────────────────────────────────────────────────
+// The mobile app consumes the SAME tokens through the generated
+// `SlabTokensLight/Dark`/`SlabExtras` classes; raw color literals in Dart app
+// code are the mirror of raw hex in TSX.
+
+const DART_ROOT = "packages/slab-mobile/lib"
+
+const DART_RAW_COLOR_RULES = [
+  { name: "raw Dart Color literals", pattern: /Color\(0x[0-9A-Fa-f]{8}\)/g },
+  { name: "Material Colors.* palette", pattern: /Colors\.[a-zA-Z]+/g },
+] as const
+
+const DART_COLOR_ALLOWLIST = [
+  // The one legitimate source of literal colors: the generated token file.
+  /^packages\/slab-mobile\/lib\/theme\/slab_tokens\.g\.dart$/,
+]
+
 async function main() {
   const globals = await readFile(GLOBALS_PATH, "utf8")
   if (!globals.includes("prefers-reduced-motion")) {
@@ -82,6 +102,16 @@ async function main() {
   )
   if (rawHexMatches.length > 0) {
     failures.push(formatFailure("raw hex colors", rawHexMatches, 0))
+  }
+
+  const dartFiles = await walk(DART_ROOT)
+  for (const rule of DART_RAW_COLOR_RULES) {
+    const dartMatches = collectMatches(dartFiles, rule.pattern).filter(
+      (match) => !DART_COLOR_ALLOWLIST.some((pattern) => pattern.test(match.file)),
+    )
+    if (dartMatches.length > 0) {
+      failures.push(formatFailure(rule.name, dartMatches, 0))
+    }
   }
 
   if (failures.length > 0) {
@@ -162,7 +192,15 @@ async function walk(dir: string): Promise<Array<{ file: string; source: string }
 
 function isCheckedFile(name: string) {
   const ext = extname(name)
-  return ext === ".ts" || ext === ".tsx" || ext === ".css" || ext === ".js" || ext === ".jsx" || ext === ".mjs"
+  return (
+    ext === ".ts" ||
+    ext === ".tsx" ||
+    ext === ".css" ||
+    ext === ".js" ||
+    ext === ".jsx" ||
+    ext === ".mjs" ||
+    ext === ".dart"
+  )
 }
 
 await main()
