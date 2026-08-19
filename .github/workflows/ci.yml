@@ -103,6 +103,9 @@ jobs:
       - name: Apply patches (vendor setup)
         run: bun run scripts/apply-patches.ts
 
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
+
       - name: Check API type drift
         run: |
           bun run gen:api
