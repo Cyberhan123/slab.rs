@@ -48,7 +48,8 @@ jobs:
           sudo apt-get install -y \
             libssl-dev \
             pkg-config \
-            python3-dev
+            python3-dev \
+            libglib2.0-dev
 
       - name: Apply patches (vendor setup)
         run: bun run scripts/apply-patches.ts
@@ -162,7 +163,8 @@ jobs:
           sudo apt-get install -y \
             libssl-dev \
             pkg-config \
-            python3-dev
+            python3-dev \
+            libglib2.0-dev
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
