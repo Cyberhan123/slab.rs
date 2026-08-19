@@ -188,7 +188,7 @@ async function assertMethodConstantsInSync(): Promise<void> {
   // emitter exists); keep the Dart file honest with a string-presence check.
   const dartPath = path.join(
     repoRoot,
-    "packages",
+    "flutter",
     "slab-mobile",
     "lib",
     "proto",
@@ -199,7 +199,7 @@ async function assertMethodConstantsInSync(): Promise<void> {
     const dartDrift = [...tsValues.values()].filter((value) => !dartSource.includes(`'${value}'`));
     if (dartDrift.length > 0) {
       throw new Error(
-        `HARNESS_METHOD values missing from packages/slab-mobile/lib/proto/harness_methods.dart:\n${dartDrift.map((v) => `  ${v}`).join("\n")}`,
+        `HARNESS_METHOD values missing from flutter/slab-mobile/lib/proto/harness_methods.dart:\n${dartDrift.map((v) => `  ${v}`).join("\n")}`,
       );
     }
   }

@@ -3,7 +3,7 @@
  *
  * These interfaces are the ONLY way `@slab/core` and `@slab/ui` code may reach
  * platform-specific behavior (Tauri IPC, native dialogs, the asset protocol…).
- * Concrete implementations live under `src/infra/{tauri,web,h5}` and are
+ * Concrete implementations live under `src/infra/{tauri,web}` and are
  * injected by each shell at assembly time — never imported directly by
  * domain/application/UI code.
  */

@@ -7,7 +7,6 @@
 @source "../../../slab-ui/src";
 @source "../../../slab-desktop/src";
 @source "../../../slab-web/src";
-@source "../../../slab-h5/src";
 
 @custom-variant dark (&:is(.dark *));
 

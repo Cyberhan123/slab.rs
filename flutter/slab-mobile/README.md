@@ -4,14 +4,14 @@ Flutter mobile client for a running slab-server. A **pure network client** over 
 existing `/v1` REST surface + the `/v1/agents/harness` JSON-RPC WebSocket — zero
 backend changes, zero Rust on the device (phase 3 reserves that path, see below).
 
-Phase 1 scope mirrors `@slab/h5` (which remains the zero-install mobile-web
-shell; do not delete it): connect config → setup gate → conversation list →
-streaming chat with tool cards and command/file-change approvals.
+Phase 1 scope (it supersedes the removed `@slab/h5` mobile-web shell): connect
+config → setup gate → conversation list → streaming chat with tool cards and
+command/file-change approvals.
 
 ## Role
 
-- **Architecture position**: the mobile sibling of the `slab-web`/`slab-h5`
-  shells. It does NOT share `@slab/ui` code — visual unity comes from the
+- **Architecture position**: the mobile sibling of the `slab-web` shell.
+  It does NOT share `@slab/ui` code — visual unity comes from the
   one-way design-token pipeline below, not shared React components.
 - **Flutter SDK**: 3.38.x stable (pinned by CI; Dart 3.10). Android-first —
   the `ios/` skeleton is committed but building it requires macOS.

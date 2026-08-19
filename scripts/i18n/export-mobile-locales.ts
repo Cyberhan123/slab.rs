@@ -7,7 +7,7 @@
  * strings can never drift from web/desktop.
  *
  * Output (committed, deterministic; regenerate with `bun run gen:mobile`):
- *   packages/slab-mobile/assets/i18n/{en-US,zh-CN}.json
+ *   flutter/slab-mobile/assets/i18n/{en-US,zh-CN}.json
  *   — deep-flattened dot keys over the `common` / `layouts` / `pages`
  *     namespaces, preserving i18next `{{var}}` placeholders. The `server`
  *     namespace is a server-field translation map, not a UI catalog — skipped.
@@ -25,7 +25,7 @@ import { zhCN } from "../../packages/slab-i18n/src/locales/zh-CN";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
-const OUT_DIR = path.join(repoRoot, "packages/slab-mobile/assets/i18n");
+const OUT_DIR = path.join(repoRoot, "flutter/slab-mobile/assets/i18n");
 const LOCALES = [
   { tag: "en-US", catalog: enUS },
   { tag: "zh-CN", catalog: zhCN },
@@ -92,6 +92,6 @@ if (CHECK) {
   await mkdir(OUT_DIR, { recursive: true });
   await Promise.all(artifacts.map(({ outPath, text }) => writeFile(outPath, text, "utf8")));
   for (const { tag, count } of artifacts) {
-    console.log(`Exported ${count} keys → packages/slab-mobile/assets/i18n/${tag}.json`);
+    console.log(`Exported ${count} keys → flutter/slab-mobile/assets/i18n/${tag}.json`);
   }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * Thin wrapper that invokes the Flutter CLI inside `packages/slab-mobile` so
+ * Thin wrapper that invokes the Flutter CLI inside `flutter/slab-mobile` so
  * the root `package.json` stays the canonical entrypoint for every workflow
  * (same spawn pattern as `scripts/cargo/run.ts` / `gen/generate-harness-bindings.ts`).
  *
@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
-const mobileDir = path.join(repoRoot, "packages", "slab-mobile");
+const mobileDir = path.join(repoRoot, "flutter", "slab-mobile");
 
 const args = process.argv.slice(2);
 if (args.length === 0) {
@@ -49,7 +49,7 @@ try {
   if (/ENOENT|not recognized|not found/i.test(message)) {
     console.error(
       "The Flutter SDK was not found. Install it (https://docs.flutter.dev/get-started/install) " +
-        "and ensure `flutter` is on PATH. The pinned SDK version is recorded in packages/slab-mobile/README.md.",
+        "and ensure `flutter` is on PATH. The pinned SDK version is recorded in flutter/slab-mobile/README.md.",
     );
   }
   process.exit(1);

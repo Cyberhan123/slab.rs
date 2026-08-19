@@ -31,7 +31,6 @@ const SCAN_ROOTS = [
   "packages/slab-i18n/src/index.ts",
   // Shell apps currently only import for side effects; kept defensively.
   "packages/slab-web/src",
-  "packages/slab-h5/src",
   "packages/slab-desktop/src",
 ] as const;
 

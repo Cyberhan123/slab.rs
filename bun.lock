@@ -158,28 +158,6 @@
         "vitest": "catalog:",
       },
     },
-    "packages/slab-h5": {
-      "name": "@slab/h5",
-      "version": "0.1.0",
-      "dependencies": {
-        "@slab/api": "workspace:*",
-        "@slab/components": "workspace:*",
-        "@slab/core": "workspace:*",
-        "@slab/i18n": "workspace:*",
-        "@slab/ui": "workspace:*",
-        "@tanstack/react-query": "catalog:",
-        "react": "catalog:",
-        "react-dom": "catalog:",
-        "react-router-dom": "catalog:",
-      },
-      "devDependencies": {
-        "@tailwindcss/vite": "catalog:",
-        "@types/node": "catalog:",
-        "@vitejs/plugin-react": "catalog:",
-        "typescript": "catalog:",
-        "vite": "catalog:",
-      },
-    },
     "packages/slab-i18n": {
       "name": "@slab/i18n",
       "version": "0.1.0",
@@ -1143,8 +1121,6 @@
     "@slab/core": ["@slab/core@workspace:packages/slab-core"],
 
     "@slab/desktop": ["@slab/desktop@workspace:packages/slab-desktop"],
-
-    "@slab/h5": ["@slab/h5@workspace:packages/slab-h5"],
 
     "@slab/i18n": ["@slab/i18n@workspace:packages/slab-i18n"],
 

@@ -6,10 +6,10 @@
  * visually unified with web/desktop without sharing UI code.
  *
  * Outputs (both committed, both deterministic; regenerate with `bun run gen:mobile`):
- *   packages/slab-mobile/design/tokens.json          — inspectable intermediate
+ *   flutter/slab-mobile/design/tokens.json          — inspectable intermediate
  *                                                      (keeps the raw oklch strings for a
  *                                                      future wide-gamut upgrade)
- *   packages/slab-mobile/lib/theme/slab_tokens.g.dart — `SlabTokensLight/Dark` + `SlabMetrics`
+ *   flutter/slab-mobile/lib/theme/slab_tokens.g.dart — `SlabTokensLight/Dark` + `SlabMetrics`
  *
  * Color conversion mirrors the browser family of algorithms: oklch →
  * `culori.clampChroma` (chroma-reducing gamut clip) → sRGB hex. Compound CSS
@@ -31,10 +31,10 @@ const GLOBALS_PATH = path.join(
   repoRoot,
   "packages/slab-components/src/styles/globals.css",
 );
-const JSON_OUT = path.join(repoRoot, "packages/slab-mobile/design/tokens.json");
+const JSON_OUT = path.join(repoRoot, "flutter/slab-mobile/design/tokens.json");
 const DART_OUT = path.join(
   repoRoot,
-  "packages/slab-mobile/lib/theme/slab_tokens.g.dart",
+  "flutter/slab-mobile/lib/theme/slab_tokens.g.dart",
 );
 const REM_TO_PX = 16;
 const CHECK = process.argv.includes("--check");
@@ -339,6 +339,6 @@ if (drift.length > 0) {
 
 if (!CHECK) {
   console.log(
-    `Exported ${light.colors.size} light / ${dark.colors.size} dark colors + ${metrics.size} metrics → packages/slab-mobile (tokens.json + slab_tokens.g.dart).`,
+    `Exported ${light.colors.size} light / ${dark.colors.size} dark colors + ${metrics.size} metrics → flutter/slab-mobile (tokens.json + slab_tokens.g.dart).`,
   );
 }

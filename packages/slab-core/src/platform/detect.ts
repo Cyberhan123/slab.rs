@@ -17,7 +17,7 @@ export function isTauri(): boolean {
   )
 }
 
-/** True when running inside the mobile H5 shell. */
+/** True when running inside a mobile browser. */
 export function isMobileWeb(): boolean {
   if (typeof window === "undefined") return false
   const ua = window.navigator?.userAgent ?? ""

@@ -9,7 +9,7 @@ import api from "@slab/api";
 
 /**
  * Shell-agnostic app-level guards, extracted from the desktop App so the
- * web/h5 shells can mount them without pulling the desktop-only syncs
+ * the web shell can mount them without pulling the desktop-only syncs
  * (workspace redirect, plugin theme bridge, monaco preload) into their
  * bundles.
  */

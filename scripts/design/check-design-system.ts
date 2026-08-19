@@ -8,7 +8,7 @@ const ROOTS = [
   "packages/slab-plugin-ui/src",
   // Flutter app: same philosophy in Dart — colors flow from the generated
   // tokens (slab_tokens.g.dart), never raw literals in app code.
-  "packages/slab-mobile/lib",
+  "flutter/slab-mobile/lib",
 ]
 
 const GLOBALS_PATH = "packages/slab-components/src/styles/globals.css"
@@ -69,7 +69,7 @@ const RAW_HEX_ALLOWLIST = [
 // `SlabTokensLight/Dark`/`SlabExtras` classes; raw color literals in Dart app
 // code are the mirror of raw hex in TSX.
 
-const DART_ROOT = "packages/slab-mobile/lib"
+const DART_ROOT = "flutter/slab-mobile/lib"
 
 const DART_RAW_COLOR_RULES = [
   { name: "raw Dart Color literals", pattern: /Color\(0x[0-9A-Fa-f]{8}\)/g },
@@ -78,7 +78,7 @@ const DART_RAW_COLOR_RULES = [
 
 const DART_COLOR_ALLOWLIST = [
   // The one legitimate source of literal colors: the generated token file.
-  /^packages\/slab-mobile\/lib\/theme\/slab_tokens\.g\.dart$/,
+  /^flutter\/slab-mobile\/lib\/theme\/slab_tokens\.g\.dart$/,
 ]
 
 async function main() {
