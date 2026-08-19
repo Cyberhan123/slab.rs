@@ -41,6 +41,7 @@ export default defineConfig({
     "vitest/require-mock-type-parameters": "warn",
     "jsx-a11y/media-has-caption": "warn",
     "jsx-a11y/click-events-have-key-events": "warn",
+    "jsx-a11y/no-noninteractive-element-interactions": "warn",
     "jsx-a11y/prefer-tag-over-role": "warn",
     "jsx-a11y/anchor-has-content": "warn",
     "jsx-a11y/no-redundant-roles": "warn",

@@ -220,7 +220,7 @@ flowchart LR
 | LSP-005 | 内置 Web LSP | Bun 构建 | 使用 Bun 打包语言服务器 | plugins/web-language-servers | P0 |
 | LSP-006 | 内置 Web LSP | Vite 构建 | 使用 Vite 构建产物 | plugins/web-language-servers | P0 |
 | LSP-007 | 内置 Web LSP | 资源输出 | 输出到 resources/libs/language-servers/web/ | plugins/web-language-servers | P0 |
-| LSP-008 | 内置 Web LSP | 运行时启动 | slab-js-runtime lsp --entry <bundle> | slab-js-runtime | P0 |
+| LSP-008 | 内置 Web LSP | 运行时启动 | slab-js-runtime lsp `--entry <bundle>` | slab-js-runtime | P0 |
 | LSP-009 | 原生 LSP | Rust 支持 | rust-analyzer 集成 | workspace_lsp.rs | P0 |
 | LSP-010 | 原生 LSP | Go 支持 | gopls 集成 | workspace_lsp.rs | P1 |
 | LSP-011 | 原生 LSP | Python 支持 | pyright-langserver 集成 | workspace_lsp.rs | P1 |

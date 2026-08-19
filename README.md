@@ -113,7 +113,6 @@ This section keeps only the most common and practical development entry points. 
 
 - Install the Rust stable toolchain.
 - Install Bun.
-- Install Python as well if you plan to run the server compatibility tests.
 
 ```sh
 # From the repository root
