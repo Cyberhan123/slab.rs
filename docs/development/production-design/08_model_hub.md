@@ -390,7 +390,7 @@ sequenceDiagram
 
 - [07_agent_system.md](./07_agent_system.md) - Agent 系统（模型的使用者）
 - [09_plugin_system.md](./09_plugin_system.md) - 插件系统（可扩展模型提供商）
-- [06_runtime_system.md](./06_runtime_system.md) - 运行时系统（模型执行环境）
+- [04_runtime_worker.md](./04_runtime_worker.md) - 运行时系统（模型执行环境）
 
 ---
 

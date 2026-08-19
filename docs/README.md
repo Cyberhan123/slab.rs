@@ -30,4 +30,4 @@ bun run gen:schemas
 
 ## License
 
-AGPL-3.0-only. See [LICENSE](../LICENSE).
+AGPL-3.0-only. See [LICENSE](https://github.com/Cyberhan123/slab.rs/blob/main/LICENSE).

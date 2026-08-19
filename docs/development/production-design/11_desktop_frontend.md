@@ -448,7 +448,7 @@ function Component() {
 
 - [10_config_and_settings.md](./10_config_and_settings.md) - 配置系统
 - [12_mcp_protocol.md](./12_mcp_protocol.md) - MCP 协议集成
-- [01_global_map.md](./01_global_map.md) - 系统整体架构
+- [00_global_map.md](./00_global_map.md) - 系统整体架构
 
 ---
 

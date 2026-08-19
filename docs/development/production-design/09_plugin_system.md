@@ -590,7 +590,7 @@ graph TD
 
 - [07_agent_system.md](./07_agent_system.md) - Agent 系统（通过 agentHooks 扩展）
 - [08_model_hub.md](./08_model_hub.md) - Model Hub（插件可贡献模型提供商）
-- [10_ui_system.md](./10_ui_system.md) - UI 系统（UI 贡献点集成）
+- [11_desktop_frontend.md](./11_desktop_frontend.md) - UI 系统（UI 贡献点集成）
 
 ---
 

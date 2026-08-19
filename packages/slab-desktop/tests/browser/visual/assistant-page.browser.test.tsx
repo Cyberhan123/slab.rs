@@ -2,7 +2,6 @@ import { page } from 'vitest/browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import AssistantPage from '@slab/ui/pages/assistant';
-import type { AssistantMessageRecord } from '@slab/ui/pages/assistant/lib/assistant-types';
 import type { AssistantConversationItem } from '@slab/ui/pages/assistant/hooks/use-assistant-sessions';
 import {
   expectDesktopSceneAccessible,
@@ -10,9 +9,44 @@ import {
   renderDesktopScene,
 } from '../test-utils';
 
-const { mockUseAssistantAgent } = vi.hoisted(() => ({
-  mockUseAssistantAgent: vi.fn<() => unknown>(),
-}));
+const mocks = vi.hoisted(() => {
+  const translate = (key: string) => key;
+  // Mirrors the initial `ConversationState` of the real harness controller
+  // (packages/slab-core/src/harness/conversation-controller.ts); every field
+  // the page destructures is present so unguarded `.map`s stay defined.
+  const harnessConversation = {
+    activeConversation: 'session-1' as string | undefined,
+    actionError: null,
+    commands: [] as Array<Record<string, unknown>>,
+    compactionMarkers: [] as Array<Record<string, unknown>>,
+    compactThread: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    error: null as string | null,
+    forkThread: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    historyCreatedAt: null as number | null,
+    isCompacting: false,
+    isForking: false,
+    isHistoryLoading: false,
+    isRollingBack: false,
+    liveOutputByItemId: new Map<string, string>(),
+    livePatchByItemId: new Map<string, string[]>(),
+    modelLoad: null,
+    planMode: false,
+    restoredMessages: [] as Array<Record<string, unknown>>,
+    restoredThreadId: 'thread-1' as string | null,
+    restoreVersion: 1,
+    rollbackFromTurn: vi.fn<(turnIndex: number) => void>(),
+    setPlanMode: vi.fn<(enabled: boolean) => void>(),
+    transport: {},
+    turnUsage: null,
+    userMessageTurnIndex: new Map<string, number>(),
+    approvals: [] as Array<Record<string, unknown>>,
+    approvalStatusByItemId: new Map<string, 'pending' | 'approved' | 'denied'>(),
+    resolveApproval: vi.fn<
+      (itemId: string, approved: boolean, scope: 'run_once' | 'always_in_workspace' | 'always' | 'deny') => Promise<void>
+    >(),
+  };
+  return { harnessConversation, translate };
+});
 
 const { mockUseAssistantSessions } = vi.hoisted(() => ({
   mockUseAssistantSessions: vi.fn<() => unknown>(),
@@ -26,8 +60,42 @@ const { mockUseMarkdownTheme } = vi.hoisted(() => ({
   mockUseMarkdownTheme: vi.fn<() => unknown>(),
 }));
 
-vi.mock('@slab/ui/pages/assistant/hooks/use-assistant-agent', () => ({
-  useAssistantAgent: mockUseAssistantAgent,
+vi.mock('@slab/ui/pages/assistant/hooks/use-harness-conversation', () => ({
+  useHarnessConversation: vi.fn(() => mocks.harnessConversation),
+}));
+
+vi.mock('@ai-sdk/react', () => ({
+  useChat: vi.fn(({ messages = [] }: { messages?: Array<Record<string, unknown>> }) => ({
+    messages,
+    sendMessage: vi.fn(),
+    status: 'ready',
+    stop: vi.fn(),
+  })),
+}));
+
+vi.mock('@slab/ui/hooks/use-ai-model', () => ({
+  useAiModel: vi.fn(() => ({
+    ensureDownloaded: vi.fn().mockResolvedValue({ downloadedNow: false }),
+    ensureLoaded: vi.fn().mockResolvedValue({ runtimeStatus: null }),
+    loading: false,
+    localModels: [],
+    models: [
+      {
+        chat_capabilities: null,
+        display_name: 'Model A',
+        id: 'model-a',
+        kind: 'cloud',
+        local_path: null,
+        pending: false,
+        runtime_presets: null,
+        spec: { context_window: 4096 },
+        status: 'ready',
+      },
+    ],
+    selectedId: 'model-a',
+    setSelectedId: vi.fn(),
+    status: { busy: false },
+  })),
 }));
 
 vi.mock('@slab/ui/pages/assistant/hooks/use-assistant-sessions', () => ({
@@ -86,45 +154,9 @@ vi.mock('@slab/i18n', () => ({
   Trans: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   getResolvedAppLanguage: vi.fn<() => string>(() => 'en'),
   useTranslation: vi.fn<() => unknown>(() => ({
-    t: vi.fn<(key: string) => string>((key) => key),
+    t: mocks.translate,
   })),
 }));
-
-const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();
-const createAsyncVoidMock = () =>
-  vi.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
-
-function createMockMessage(
-  overrides: Partial<AssistantMessageRecord> = {},
-): AssistantMessageRecord {
-  return {
-    id: 'msg-1',
-    message: {
-      content: 'Hello, how are you?',
-      role: 'user',
-    },
-    status: 'success',
-    ...overrides,
-  };
-}
-
-function createAssistantAgentViewModel(overrides = {}) {
-  return {
-    abort: createVoidMock(),
-    activeConversation: 'session-1',
-    eventsConnected: false,
-    handleSubmit: createAsyncVoidMock(),
-    isHistoryLoading: false,
-    isRequesting: false,
-    messages: [] as AssistantMessageRecord[],
-    editAndResend: createAsyncVoidMock(),
-    pendingApprovals: [],
-    regenerateResponse: createAsyncVoidMock(),
-    retryLastResponse: createAsyncVoidMock(),
-    submitApproval: createAsyncVoidMock(),
-    ...overrides,
-  };
-}
 
 function createAssistantSessionsViewModel(overrides = {}) {
   return {
@@ -136,8 +168,8 @@ function createAssistantSessionsViewModel(overrides = {}) {
     isDeletingSession: false,
     isSessionMutating: false,
     isSessionsLoading: false,
-    setCurrentSessionId: createVoidMock(),
-    setSessionLabel: createVoidMock(),
+    setCurrentSessionId: vi.fn(),
+    setSessionLabel: vi.fn(),
     updateSessionLabel: vi.fn<() => Promise<boolean>>().mockResolvedValue(true),
     ...overrides,
   };
@@ -147,6 +179,16 @@ describe('AssistantPage browser visual regression', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(Date.prototype, 'getHours').mockReturnValue(15);
+    const hc = mocks.harnessConversation;
+    hc.activeConversation = 'session-1';
+    hc.approvals = [];
+    hc.approvalStatusByItemId = new Map();
+    hc.error = null;
+    hc.isHistoryLoading = false;
+    hc.liveOutputByItemId = new Map();
+    hc.livePatchByItemId = new Map();
+    hc.restoredMessages = [];
+    hc.restoredThreadId = 'thread-1';
     mockUseAssistantLocale.mockReturnValue({
       approvalFailed: 'Approval failed',
       approvalNotDelivered: 'Approval not delivered',
@@ -164,7 +206,6 @@ describe('AssistantPage browser visual regression', () => {
   });
 
   it('captures the assistant page empty state', async () => {
-    mockUseAssistantAgent.mockReturnValue(createAssistantAgentViewModel());
     mockUseAssistantSessions.mockReturnValue(
       createAssistantSessionsViewModel({
         conversationList: [
@@ -187,12 +228,7 @@ describe('AssistantPage browser visual regression', () => {
   });
 
   it('captures the assistant page loading state', async () => {
-    mockUseAssistantAgent.mockReturnValue(
-      createAssistantAgentViewModel({
-        isHistoryLoading: true,
-        messages: [],
-      }),
-    );
+    mocks.harnessConversation.isHistoryLoading = true;
     mockUseAssistantSessions.mockReturnValue(
       createAssistantSessionsViewModel({
         conversationList: [],
@@ -207,30 +243,18 @@ describe('AssistantPage browser visual regression', () => {
   });
 
   it('captures the assistant page with messages', async () => {
-    const mockMessages: AssistantMessageRecord[] = [
-      createMockMessage({
+    mocks.harnessConversation.restoredMessages = [
+      {
         id: 'msg-1',
-        message: {
-          content: 'What is the capital of France?',
-          role: 'user',
-        },
-        status: 'success',
-      }),
-      createMockMessage({
+        parts: [{ type: 'text', text: 'What is the capital of France?' }],
+        role: 'user',
+      },
+      {
         id: 'msg-2',
-        message: {
-          content: 'The capital of France is Paris.',
-          role: 'assistant',
-        },
-        status: 'success',
-      }),
+        parts: [{ type: 'text', text: 'The capital of France is Paris.' }],
+        role: 'assistant',
+      },
     ];
-
-    mockUseAssistantAgent.mockReturnValue(
-      createAssistantAgentViewModel({
-        messages: mockMessages,
-      }),
-    );
     mockUseAssistantSessions.mockReturnValue(
       createAssistantSessionsViewModel({
         conversationList: [
@@ -250,46 +274,38 @@ describe('AssistantPage browser visual regression', () => {
   });
 
   it('captures active agent thought chain and approval', async () => {
-    const mockMessages: AssistantMessageRecord[] = [
-      createMockMessage({
+    mocks.harnessConversation.restoredMessages = [
+      {
         id: 'msg-1',
-        message: {
-          content: 'Inspect the repository status',
-          role: 'user',
-        },
-        status: 'success',
-      }),
-      createMockMessage({
+        parts: [{ type: 'text', text: 'Inspect the repository status' }],
+        role: 'user',
+      },
+      {
         id: 'msg-2',
-        message: {
-          content: '<think>Checking the workspace before answering.</think>',
-          role: 'assistant',
-          thoughts: [
-            {
-              callId: 'call-1',
-              detail: 'git status --short',
-              id: 'call-1',
-              pendingApproval: {
-                callId: 'call-1',
-                command: 'git status --short',
-                toolName: 'shell',
-              },
-              status: 'loading',
-              title: 'shell approval',
-              toolName: 'shell',
-            },
-          ],
-        },
-        status: 'loading',
-      }),
+        parts: [
+          { state: 'done', text: 'Checking the workspace before answering.', type: 'reasoning' },
+          {
+            input: { command: 'git status --short' },
+            state: 'input-available',
+            toolCallId: 'call-1',
+            type: 'tool-commandExecution',
+          },
+        ],
+        role: 'assistant',
+      },
     ];
-
-    mockUseAssistantAgent.mockReturnValue(
-      createAssistantAgentViewModel({
-        isRequesting: true,
-        messages: mockMessages,
-      }),
-    );
+    mocks.harnessConversation.approvals = [
+      {
+        itemId: 'call-1',
+        threadId: 'thread-1',
+        kind: 'command',
+        command: 'git status --short',
+        cwd: '/repo',
+        status: 'pending',
+        allowedScopes: ['run_once', 'always_in_workspace', 'deny'],
+      },
+    ];
+    mocks.harnessConversation.approvalStatusByItemId = new Map([['call-1', 'pending']]);
     mockUseAssistantSessions.mockReturnValue(
       createAssistantSessionsViewModel({
         conversationList: [

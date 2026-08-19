@@ -142,7 +142,7 @@ function scheduleUiStateBatchFlush() {
   setTimeout(flushUiStateBatch, 0);
 }
 
-function flushUiStateBatch() {
+async function flushUiStateBatch() {
   const batch = pendingUiStateBatch;
   pendingUiStateBatch = null;
   uiStateBatchFlushScheduled = false;
@@ -151,37 +151,39 @@ function flushUiStateBatch() {
   }
 
   const keys = [...batch.keys];
-  apiClient
-    .GET('/v1/ui-state', { params: { query: { keys: keys.join(',') } } })
-    .then((result) => {
-      if (!result) {
-        batch.resolve(new Map(keys.map((key) => [key, null])));
-        return;
-      }
-      const { data, response } = result;
-      if (!responseOk(response)) {
-        throw toHttpError(response);
-      }
-
-      const found = new Map<string, string | null>();
-      for (const entry of data?.entries ?? []) {
-        found.set(entry.key, typeof entry.value === 'string' ? entry.value : null);
-      }
-      const results = new Map<string, string | null>(
-        keys.map((key) => [key, found.get(key) ?? null]),
-      );
-      clearPersistenceFailure();
-      batch.resolve(results);
-    })
-    .catch((error: unknown) => {
-      // Batch failed (e.g. server error). Resolve every waiter with null so
-      // hydration still completes with defaults. Listeners dedupe the visible
-      // "Unable to load UI preferences" notification across keys.
-      for (const key of keys) {
-        recordPersistenceFailure('load', key, error);
-      }
-      batch.resolve(new Map(keys.map((key) => [key, null])));
+  try {
+    const result = await apiClient.GET('/v1/ui-state', {
+      params: { query: { keys: keys.join(',') } },
     });
+    if (!result) {
+      // Mirrors flushWrite: a client (or test double) that yields nothing is
+      // treated as "no saved state", not as a load failure.
+      batch.resolve(new Map(keys.map((key) => [key, null])));
+      return;
+    }
+    const { data, response } = result;
+    if (!responseOk(response)) {
+      throw toHttpError(response);
+    }
+
+    const found = new Map<string, string | null>();
+    for (const entry of data?.entries ?? []) {
+      found.set(entry.key, typeof entry.value === 'string' ? entry.value : null);
+    }
+    const results = new Map<string, string | null>(
+      keys.map((key) => [key, found.get(key) ?? null]),
+    );
+    clearPersistenceFailure();
+    batch.resolve(results);
+  } catch (error) {
+    // Batch failed (e.g. server error). Resolve every waiter with null so
+    // hydration still completes with defaults. Listeners dedupe the visible
+    // "Unable to load UI preferences" notification across keys.
+    for (const key of keys) {
+      recordPersistenceFailure('load', key, error);
+    }
+    batch.resolve(new Map(keys.map((key) => [key, null])));
+  }
 }
 
 function readUiStateBatched(key: string): Promise<string | null> {

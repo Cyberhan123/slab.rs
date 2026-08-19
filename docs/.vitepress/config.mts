@@ -7,6 +7,15 @@ export default defineConfig({
   titleTemplate: ':title | Slab',
   description: 'Local-first AI workspaces for chat, speech, image generation, and shared runtime contracts.',
   cleanUrls: true,
+  // Development notes under docs/development reference repository files
+  // (crates/, packages/, bin/, models/, AGENTS.md) for repo browsing; those
+  // targets sit outside the VitePress source tree and are expected to be
+  // unreachable from the built site. Markdown-to-markdown links inside docs/
+  // (e.g. docs/development/audits/**) remain dead-link checked.
+  ignoreDeadLinks: [
+    /^(?:\.\/)?(?:\.\.\/)*(?:crates|packages|bin|models|scripts|plugins|python|testdata)\//,
+    /^(?:\.\/)?(?:\.\.\/)*AGENTS$/,
+  ],
   lastUpdated: true,
   sitemap: {
     hostname: 'https://slab.reorgix.com',

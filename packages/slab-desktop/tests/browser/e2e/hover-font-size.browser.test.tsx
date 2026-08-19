@@ -7,6 +7,7 @@ import Layout from '@slab/ui/layouts';
 import { WorkspaceTreeRow } from '@slab/ui/pages/workspace/components/workspace-tree-row';
 import type { WorkspaceTreeNode } from '@slab/ui/pages/workspace/lib/workspace-page-utils';
 import { staticDesktopRoutes } from '@slab/ui/routes';
+import { useHeader } from '@slab/ui/hooks/use-header';
 import { renderDesktopScene } from '../test-utils';
 
 vi.mock('@slab/ui/pages/plugins/hooks/use-runtime-plugins', () => ({
@@ -16,7 +17,15 @@ vi.mock('@slab/ui/pages/plugins/hooks/use-runtime-plugins', () => ({
   })),
 }));
 
+// Module-scope so the config (and its onClick) keeps a stable reference —
+// `useHeader` diffs registrations field-by-field and an inline literal would
+// loop setState ("Maximum update depth exceeded").
+const routeMarkerHistory = { onClick: () => undefined, title: 'History' };
+
 function RouteMarker() {
+  // The bare marker route registers no header of its own, so the history
+  // control would never render; register one like real pages do.
+  useHeader({ history: routeMarkerHistory });
   return <div className="p-4">Workspace route</div>;
 }
 

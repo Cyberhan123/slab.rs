@@ -350,7 +350,7 @@ const SETTINGS_MIGRATIONS: &[Migration] = &[
 
 - [11_desktop_frontend.md](./11_desktop_frontend.md) - 桌面前端如何消费配置
 - [12_mcp_protocol.md](./12_mcp_protocol.md) - MCP 协议的配置集成
-- [01_global_map.md](./01_global_map.md) - 系统整体架构
+- [00_global_map.md](./00_global_map.md) - 系统整体架构
 
 ---
 
