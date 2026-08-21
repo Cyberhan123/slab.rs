@@ -42,6 +42,7 @@ const mobileStringsZhCn = <String, String>{
   'mobile.td.open': '开',
   'mobile.td.close': '关',
   'mobile.td.reset': '重置',
+  'mobile.td.picker': '选择器',
   'mobile.td.other': '其它',
   'mobile.td.loading': '加载中',
   'mobile.td.loadingWithPoint': '加载中…',

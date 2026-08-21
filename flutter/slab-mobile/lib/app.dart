@@ -29,7 +29,7 @@ class SlabApp extends ConsumerWidget {
         // and refreshed with the live context on every rebuild.
         final container = ProviderScope.containerOf(context);
         final delegate = SlabResourceDelegate(container);
-        TDTheme.setResourceBuilder(
+        setTResourceBuilder(
           (ctx) => delegate..updateContext(ctx),
           needAlwaysBuild: true,
         );

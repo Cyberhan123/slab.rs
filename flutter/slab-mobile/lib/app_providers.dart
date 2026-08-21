@@ -12,7 +12,7 @@ import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:tdesign_flutter/tdesign_flutter.dart' show TDThemeData;
+import 'package:tdesign_flutter/tdesign_flutter.dart' show TThemeData;
 
 import 'conversation/conversation_controller.dart';
 import 'data/connection_config.dart';
@@ -29,9 +29,9 @@ class Catalogs {
 
 final catalogsProvider = Provider<Catalogs>((ref) => throw UnimplementedError('overridden in main'));
 
-/// The TDesign theme (light + dark in one TDThemeData), loaded from the
+/// The TDesign theme (light + dark in one TThemeData), loaded from the
 /// generated asset in `main()` and injected like the catalogs.
-final slabTdThemeProvider = Provider<TDThemeData>(
+final slabTdThemeProvider = Provider<TThemeData>(
   (ref) => throw UnimplementedError('overridden in main'),
 );
 

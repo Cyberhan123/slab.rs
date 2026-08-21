@@ -5,7 +5,6 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import 'app.dart';
 import 'app_providers.dart';
@@ -20,12 +19,8 @@ Future<void> main() async {
     zh: await SlabCatalog.loadDefault('zh-CN'),
   );
 
-  // Multi-theme mode: TDTheme resolves per-context from the MaterialApp
-  // theme extensions (light/dark) instead of a global singleton.
-  TDTheme.needMultiTheme();
-  // TDText centers text vertically via padding heuristics that mis-center on
-  // the post-3.16 rendering engine — disable to match plain Text.
-  kTextForceVerticalCenterEnable = false;
+  // tdesign_flutter 1.0 resolves the theme per-context from the MaterialApp
+  // theme extensions (light/dark); no global multi-theme bootstrap needed.
   final tdTheme = await loadSlabTheme();
 
   final container = ProviderContainer(

@@ -13,7 +13,7 @@ class HealthIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final td = TDTheme.of(context);
+    final td = context.tTheme;
     final color = online ? td.successNormalColor : td.errorNormalColor;
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -24,7 +24,7 @@ class HealthIndicator extends StatelessWidget {
           decoration: BoxDecoration(shape: BoxShape.circle, color: color),
         ),
         const SizedBox(width: 6),
-        TDText(
+        TText(
           online ? onlineLabel : offlineLabel,
           style: TextStyle(fontSize: 11, color: color),
         ),

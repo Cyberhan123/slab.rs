@@ -64,7 +64,7 @@ class _SetupGatePageState extends ConsumerState<SetupGatePage> {
     return Scaffold(
       body: Column(
         children: [
-          TDNavBar(title: t('mobile.setup.title'), useDefaultBack: false),
+          TNavBar(title: t('mobile.setup.title'), useDefaultBack: false),
           Expanded(
             child: Center(
               child: ConstrainedBox(
@@ -77,20 +77,20 @@ class _SetupGatePageState extends ConsumerState<SetupGatePage> {
                     children: [
                       Row(
                         children: [
-                          const TDLoading(size: TDLoadingSize.small, icon: TDLoadingIcon.circle),
+                          const TLoading(size: TLoadingSize.small, icon: TLoadingIcon.circle),
                           const SizedBox(width: 12),
-                          TDText(t('mobile.setup.checking'), style: const TextStyle(fontSize: 11)),
+                          TText(t('mobile.setup.checking'), style: const TextStyle(fontSize: 11)),
                         ],
                       ),
                       const SizedBox(height: 16),
-                      TDText(t('mobile.setup.description'), style: const TextStyle(fontSize: 13, height: 1.5)),
+                      TText(t('mobile.setup.description'), style: const TextStyle(fontSize: 13, height: 1.5)),
                       const SizedBox(height: 16),
-                      TDButton(
-                        text: mobileT(locale, 'common.actions.tryAgain'),
-                        icon: TDIcons.refresh,
-                        type: TDButtonType.outline,
-                        size: TDButtonSize.small,
-                        onTap: _check,
+                      TButton(
+                        icon: Icon(TIcons.refresh),
+                        variant: TButtonVariant.outline,
+                        size: TButtonSize.small,
+                        onPressed: _check,
+                        child: Text(mobileT(locale, 'common.actions.tryAgain')),
                       ),
                     ],
                   ),

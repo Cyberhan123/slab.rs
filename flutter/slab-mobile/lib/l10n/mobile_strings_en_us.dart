@@ -47,6 +47,7 @@ const mobileStringsEnUs = <String, String>{
   'mobile.td.open': 'On',
   'mobile.td.close': 'Off',
   'mobile.td.reset': 'Reset',
+  'mobile.td.picker': 'Picker',
   'mobile.td.other': 'Other',
   'mobile.td.loading': 'Loading…',
   'mobile.td.loadingWithPoint': 'Loading…',

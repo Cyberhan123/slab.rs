@@ -48,9 +48,9 @@ const _session = SessionRecord(
   updatedAt: '2026-01-02T00:00:00Z',
 );
 
-TDThemeData _tdTheme() {
+TThemeData _tdTheme() {
   final json = File('assets/theme/tdesign-theme.json').readAsStringSync();
-  return TDThemeData.fromJson('slab', json, darkName: 'slabDark')!;
+  return TThemeData.fromJson('slab', json, darkName: 'slabDark')!;
 }
 
 /// Loaded once in `setUpAll` — asset loads are real async I/O that can stall
@@ -119,9 +119,9 @@ void main() {
       UncontrolledProviderScope(container: container, child: SlabAppShell(home: const ConnectPage())),
     );
     await tester.pump();
-    expect(find.byType(TDNavBar), findsOneWidget);
-    expect(find.byType(TDInput), findsNWidgets(2));
-    expect(find.byType(TDButton), findsNWidgets(2));
+    expect(find.byType(TNavBar), findsOneWidget);
+    expect(find.byType(TInput), findsNWidgets(2));
+    expect(find.byType(TButton), findsNWidgets(2));
     await _drainTimers(tester);
   });
 
@@ -132,9 +132,9 @@ void main() {
       UncontrolledProviderScope(container: container, child: SlabAppShell(home: const SetupGatePage())),
     );
     await tester.pump();
-    expect(find.byType(TDNavBar), findsOneWidget);
-    expect(find.byType(TDLoading), findsOneWidget);
-    expect(find.byType(TDButton), findsOneWidget);
+    expect(find.byType(TNavBar), findsOneWidget);
+    expect(find.byType(TLoading), findsOneWidget);
+    expect(find.byType(TButton), findsOneWidget);
     await _drainTimers(tester);
   });
 
@@ -146,15 +146,15 @@ void main() {
     );
     await tester.pump();
     await tester.pump();
-    expect(find.byType(TDNavBar), findsOneWidget);
-    expect(find.byType(TDCell), findsOneWidget);
-    expect(find.byType(TDSwipeCell), findsOneWidget);
-    expect(find.byType(TDFab), findsOneWidget);
+    expect(find.byType(TNavBar), findsOneWidget);
+    expect(find.byType(TCell), findsOneWidget);
+    expect(find.byType(TSwipeCell), findsOneWidget);
+    expect(find.byType(TFab), findsOneWidget);
     expect(find.text('Session One'), findsOneWidget);
     await _drainTimers(tester);
   });
 
-  testWidgets('sessions page shows TDEmpty for a fresh server', (tester) async {
+  testWidgets('sessions page shows TEmpty for a fresh server', (tester) async {
     final container = _container(restClient: FakeSlabRestClient(sessions: const []));
     addTearDown(container.dispose);
     await tester.pumpWidget(
@@ -162,7 +162,7 @@ void main() {
     );
     await tester.pump();
     await tester.pump();
-    expect(find.byType(TDEmpty), findsOneWidget);
+    expect(find.byType(TEmpty), findsOneWidget);
     await _drainTimers(tester);
   });
 
@@ -191,9 +191,9 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.byType(TDNavBar), findsOneWidget);
-    expect(find.byType(TDTextarea), findsOneWidget);
-    expect(find.byType(TDButton), findsOneWidget);
+    expect(find.byType(TNavBar), findsOneWidget);
+    expect(find.byType(TTextarea), findsOneWidget);
+    expect(find.byType(TButton), findsOneWidget);
     expect(find.text('Session One'), findsOneWidget);
     await _drainTimers(tester);
   });

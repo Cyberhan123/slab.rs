@@ -1,7 +1,7 @@
 /// tdesign_flutter component chrome strings, routed through the slab
 /// catalogs.
 ///
-/// `TDResourceDelegate` is deliberately fully abstract ("so users notice new
+/// `TResourceDelegate` is deliberately fully abstract ("so users notice new
 /// fields"), so every getter is implemented: the interactive chrome (dialogs,
 /// refresh, loading) resolves via `mobileT`/the shared catalog; calendar-only
 /// internals — unreachable in the current screens — resolve from the small
@@ -15,7 +15,7 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 import '../app_providers.dart';
 import 'mobile_strings.dart';
 
-class SlabResourceDelegate extends TDResourceDelegate {
+class SlabResourceDelegate extends TResourceDelegate {
   SlabResourceDelegate(this.container);
 
   final ProviderContainer container;
@@ -50,6 +50,14 @@ class SlabResourceDelegate extends TDResourceDelegate {
 
   @override
   String get other => _t('mobile.td.other');
+
+  @override
+  String get picker => _t('mobile.td.picker');
+
+  /// Picker a11y column label (unreachable in current screens; mirrors the
+  /// package default, zh-aware like the calendar internals below).
+  @override
+  String pickerColumn(int colIndex) => _locale == 'zh-CN' ? '第 $colIndex 列' : 'Column $colIndex';
 
   @override
   String get loading => _t('mobile.td.loading');

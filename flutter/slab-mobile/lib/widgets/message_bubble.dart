@@ -21,7 +21,7 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final extras = slabExtras(context);
-    final td = TDTheme.of(context);
+    final td = context.tTheme;
     final fromUser = message.fromUser;
     final bubble = fromUser ? extras.userBubble : extras.aiBubble;
     final foreground = fromUser ? extras.userBubbleForeground : extras.aiBubbleForeground;
@@ -56,7 +56,7 @@ class MessageBubble extends StatelessWidget {
     UiPart part,
     int index,
     Color foreground,
-    TDThemeData td,
+    TThemeData td,
     SlabExtras extras,
   ) {
     switch (part) {
@@ -76,10 +76,10 @@ class MessageBubble extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(TDIcons.lightbulb, size: 14, color: td.textColorSecondary),
+                Icon(TIcons.lightbulb, size: 14, color: td.textColorSecondary),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: TDText(
+                  child: TText(
                     part.streaming ? '${part.text} …' : part.text,
                     maxLines: part.streaming ? 4 : 8,
                     overflow: TextOverflow.ellipsis,
@@ -105,10 +105,10 @@ class MessageBubble extends StatelessWidget {
           padding: EdgeInsets.only(top: index == 0 ? 0 : 6),
           child: Row(
             children: [
-              Icon(TDIcons.error_circle, size: 14, color: td.errorNormalColor),
+              Icon(TIcons.error_circle, size: 14, color: td.errorNormalColor),
               const SizedBox(width: 6),
               Expanded(
-                child: TDText(
+                child: TText(
                   part.text,
                   style: TextStyle(fontSize: SlabMetrics.textCaption, color: td.errorNormalColor),
                 ),

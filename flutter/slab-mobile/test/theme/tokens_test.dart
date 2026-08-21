@@ -10,7 +10,7 @@ void main() {
   // File() (not rootBundle) so the test reads the committed artifact directly
   // without an asset bundle — this is the CI drift surface.
   final themeJson = File('assets/theme/tdesign-theme.json').readAsStringSync();
-  final td = TDThemeData.fromJson('slab', themeJson, darkName: 'slabDark');
+  final td = TThemeData.fromJson('slab', themeJson, darkName: 'slabDark');
 
   test('generated light/dark token sets carry identical keys', () {
     expect(SlabTokensLight.tokenNames, SlabTokensDark.tokenNames);
@@ -54,7 +54,7 @@ void main() {
     for (final brightness in Brightness.values) {
       final built = buildSlabTdTheme(theme, brightness);
       expect(built.extensions.values.whereType<SlabExtras>().single, isNotNull);
-      expect(built.extensions.values.whereType<TDThemeData>().single, isNotNull);
+      expect(built.extensions.values.whereType<TThemeData>().single, isNotNull);
       expect(built.colorScheme.brightness, brightness);
     }
     // Distinct bubble tokens resolve per brightness (chat UI consumes these).
@@ -62,8 +62,8 @@ void main() {
       buildSlabTdTheme(theme, Brightness.light).extension<SlabExtras>()!.userBubble,
       isNot(buildSlabTdTheme(theme, Brightness.dark).extension<SlabExtras>()!.userBubble),
     );
-    // Dark theme carries the dark TDThemeData (not a light leak).
+    // Dark theme carries the dark TThemeData (not a light leak).
     final darkTheme = buildSlabTdTheme(theme, Brightness.dark);
-    expect(darkTheme.extension<TDThemeData>()!.bgColorPage, SlabTokensDark.background);
+    expect(darkTheme.extension<TThemeData>()!.bgColorPage, SlabTokensDark.background);
   });
 }

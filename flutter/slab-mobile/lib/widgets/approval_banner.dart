@@ -1,5 +1,5 @@
 /// Pending-approval banner: one card per pending request with approve / deny
-/// (scope = the first the server allows; shared catalog strings, TDButtons).
+/// (scope = the first the server allows; shared catalog strings, TButtons).
 library;
 
 import 'package:flutter/material.dart';
@@ -49,7 +49,7 @@ class ApprovalBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final td = TDTheme.of(context);
+    final td = context.tTheme;
     final extras = slabExtras(context);
     if (approvals.isEmpty) return const SizedBox.shrink();
 
@@ -69,12 +69,12 @@ class ApprovalBanner extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TDText(
+                  TText(
                     '${t('pages.assistant.approval.title')} · ${_kindLabel(request.kind)}',
                     style: TextStyle(fontSize: SlabMetrics.textCaption, color: extras.brandGold),
                   ),
                   const SizedBox(height: 4),
-                  TDText(
+                  TText(
                     _detail(request),
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
@@ -87,19 +87,19 @@ class ApprovalBanner extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      TDButton(
-                        text: mobileDeny(),
-                        size: TDButtonSize.small,
-                        theme: TDButtonTheme.defaultTheme,
-                        type: TDButtonType.outline,
-                        onTap: () => onResolve(request, false),
+                      TButton(
+                        size: TButtonSize.small,
+                        colorScheme: TButtonColorScheme.defaultTheme,
+                        variant: TButtonVariant.outline,
+                        onPressed: () => onResolve(request, false),
+                        child: Text(mobileDeny()),
                       ),
                       const SizedBox(width: 8),
-                      TDButton(
-                        text: t('pages.assistant.approval.runOnce'),
-                        size: TDButtonSize.small,
-                        theme: TDButtonTheme.primary,
-                        onTap: () => onResolve(request, true),
+                      TButton(
+                        size: TButtonSize.small,
+                        colorScheme: TButtonColorScheme.primary,
+                        onPressed: () => onResolve(request, true),
+                        child: Text(t('pages.assistant.approval.runOnce')),
                       ),
                     ],
                   ),

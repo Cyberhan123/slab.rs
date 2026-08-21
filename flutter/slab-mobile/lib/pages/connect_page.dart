@@ -63,46 +63,43 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
   @override
   Widget build(BuildContext context) {
     final locale = ref.watch(localeProvider);
-    final td = TDTheme.of(context);
+    final td = context.tTheme;
     String t(String key, [Map<String, String> args = const {}]) => mobileT(locale, key, args);
     final probe = _probe;
 
     return Scaffold(
       body: Column(
         children: [
-          TDNavBar(title: t('mobile.connect.title'), useDefaultBack: false),
+          TNavBar(title: t('mobile.connect.title'), useDefaultBack: false),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                TDInput(
+                TInput(
                   controller: _url,
                   hintText: kDefaultBaseUrl,
-                  leftLabel: t('mobile.connect.baseUrl'),
+                  label: t('mobile.connect.baseUrl'),
                   inputType: TextInputType.url,
-                  size: TDInputSize.small,
                 ),
                 const SizedBox(height: 12),
-                TDInput(
+                TInput(
                   controller: _token,
-                  leftLabel: t('mobile.connect.token'),
+                  label: t('mobile.connect.token'),
                   obscureText: true,
-                  size: TDInputSize.small,
                 ),
                 const SizedBox(height: 16),
                 Row(
                   children: [
-                    TDButton(
-                      text: _testing ? t('mobile.connect.testing') : t('mobile.connect.test'),
-                      type: TDButtonType.outline,
-                      size: TDButtonSize.medium,
-                      disabled: _testing,
-                      onTap: _testing ? null : _test,
+                    TButton(
+                      variant: TButtonVariant.outline,
+                      size: TButtonSize.medium,
+                      onPressed: _testing ? null : _test,
+                      child: Text(_testing ? t('mobile.connect.testing') : t('mobile.connect.test')),
                     ),
                     const SizedBox(width: 12),
                     if (probe != null)
                       Expanded(
-                        child: TDText(
+                        child: TText(
                           probe.ok
                               ? t('mobile.connect.ok', {'version': probe.version ?? '?'})
                               : t('mobile.connect.unreachable'),
@@ -115,13 +112,16 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                TDButton(
-                  text: t('mobile.connect.save'),
-                  theme: TDButtonTheme.primary,
-                  size: TDButtonSize.large,
-                  isBlock: true,
-                  icon: TDIcons.arrow_right,
-                  onTap: _save,
+                // `isBlock` is gone in 1.0 — stretch via SizedBox instead.
+                SizedBox(
+                  width: double.infinity,
+                  child: TButton(
+                    colorScheme: TButtonColorScheme.primary,
+                    size: TButtonSize.large,
+                    icon: Icon(TIcons.arrow_right),
+                    onPressed: _save,
+                    child: Text(t('mobile.connect.save')),
+                  ),
                 ),
               ],
             ),

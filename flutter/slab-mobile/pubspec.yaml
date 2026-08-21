@@ -13,10 +13,10 @@ dependencies:
 
   # State: Riverpod Notifier for the conversation state machine (mirrors the
   # TS ConversationController external-store pattern 1:1).
-  flutter_riverpod: ^2.6.1
+  flutter_riverpod: ^3.4.2
   # Declarative redirect ladder (connect gate → setup gate), the analog of
   # SetupGuard/app-guards.
-  go_router: ^16.2.1
+  go_router: ^17.5.0
   # Harness WS (JSON-RPC 2.0). The client takes an injectable factory for tests.
   web_socket_channel: ^3.0.3
   # Six REST endpoints; dio's interceptors buy nothing here.
@@ -25,10 +25,12 @@ dependencies:
   shared_preferences: ^2.5.3
   # LLM-streaming-tolerant markdown (survives unterminated fences mid-delta).
   gpt_markdown: ^1.1.2
-  # UI component library (TDNavBar/TDCell/TDButton/TDDialog/…). Exact pin on
-  # purpose: the lib is 0.x (alpha maturity) — range re-resolution could pull
-  # breaking 0.2.x API churn; upgrades are deliberate diffs.
-  tdesign_flutter: 0.2.7
+  # UI component library (TNavBar/TCell/TButton/TDialog/…). Exact pin on
+  # purpose: the lib is pre-1.0-stable (alpha maturity) — range re-resolution
+  # could pull breaking API churn; upgrades are deliberate diffs.
+  # 1.0.0-alpha.1: TD*→T* rename, IconData-final fix, icons split into
+  # tdesign_flutter_icons (auto-pulled), EasyRefresh vendored inside.
+  tdesign_flutter: 1.0.0-alpha.1
   # Pull-to-refresh shell around TDesign's TDRefreshHeader (tdesign_flutter
   # itself only ships the header); mirrored constraint from its pubspec.
   easy_refresh: ^3.4.0

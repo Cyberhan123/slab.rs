@@ -65,23 +65,23 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         bottom: false,
         child: Column(
           children: [
-            TDNavBar(
+            TNavBar(
               title: widget.sessionName ?? catalog.t('pages.assistant.runtime.newChat'),
               useDefaultBack: true,
               onBack: () => context.go('/sessions'),
-              rightBarItems: [
-                TDNavBarItem(
-                  iconWidget: ListenableBuilder(
+              actions: [
+                TNavBarItem(
+                  customWidget: ListenableBuilder(
                     listenable: controller,
                     builder: (context, _) {
                       final state = controller.state;
                       switch (state.connection) {
                         case ConnectionPhase.connecting:
-                          return _StatusTag(label: t('mobile.chat.connecting'), theme: TDTagTheme.primary);
+                          return _StatusTag(label: t('mobile.chat.connecting'), colorScheme: TTagColorScheme.primary);
                         case ConnectionPhase.reconnecting:
-                          return _StatusTag(label: t('mobile.chat.reconnecting'), theme: TDTagTheme.warning);
+                          return _StatusTag(label: t('mobile.chat.reconnecting'), colorScheme: TTagColorScheme.warning);
                         case ConnectionPhase.idle when state.error != null:
-                          return _StatusTag(label: catalog.t('common.status.error'), theme: TDTagTheme.danger);
+                          return _StatusTag(label: catalog.t('common.status.error'), colorScheme: TTagColorScheme.danger);
                         default:
                           return const SizedBox.shrink();
                       }
@@ -117,15 +117,15 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         if (offset == 0 && state.isHistoryLoading) {
                           return const Padding(
                             padding: EdgeInsets.all(16),
-                            child: Center(child: TDLoading(size: TDLoadingSize.small, icon: TDLoadingIcon.circle)),
+                            child: Center(child: TLoading(size: TLoadingSize.small, icon: TLoadingIcon.circle)),
                           );
                         }
                         return Padding(
                           padding: const EdgeInsets.all(12),
-                          child: TDText(
+                          child: TText(
                             t('mobile.chat.restoreFailed', {'message': state.error ?? ''}),
                             textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: SlabMetrics.textCaption, color: TDTheme.of(context).errorNormalColor),
+                            style: TextStyle(fontSize: SlabMetrics.textCaption, color: context.tTheme.errorNormalColor),
                           ),
                         );
                       },
@@ -146,9 +146,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         padding: const EdgeInsets.only(bottom: 4, left: 12, right: 12),
                         child: Row(
                           children: [
-                            const TDLoading(size: TDLoadingSize.small, icon: TDLoadingIcon.circle),
+                            const TLoading(size: TLoadingSize.small, icon: TLoadingIcon.circle),
                             const SizedBox(width: 8),
-                            TDText(t('mobile.chat.modelLoading'), style: TextStyle(fontSize: SlabMetrics.textCaption, color: TDTheme.of(context).textColorSecondary)),
+                            TText(t('mobile.chat.modelLoading'), style: TextStyle(fontSize: SlabMetrics.textCaption, color: context.tTheme.textColorSecondary)),
                           ],
                         ),
                       ),
@@ -199,28 +199,27 @@ class _Composer extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: TDTextarea(
+                child: TTextarea(
                   controller: composer,
                   minLines: 1,
                   maxLines: 5,
                   hintText: t('mobile.chat.inputHint'),
-                  backgroundColor: TDTheme.of(context).bgColorContainer,
                   onSubmitted: (_) => onSend(),
                 ),
               ),
               const SizedBox(width: 8),
               running
-                  ? TDButton(
-                      icon: TDIcons.stop_circle,
-                      size: TDButtonSize.small,
-                      theme: TDButtonTheme.danger,
-                      onTap: controller.interrupt,
+                  ? TButton(
+                      icon: Icon(TIcons.stop_circle),
+                      size: TButtonSize.small,
+                      colorScheme: TButtonColorScheme.danger,
+                      onPressed: controller.interrupt,
                     )
-                  : TDButton(
-                      icon: TDIcons.send,
-                      size: TDButtonSize.small,
-                      theme: TDButtonTheme.primary,
-                      onTap: onSend,
+                  : TButton(
+                      icon: Icon(TIcons.send),
+                      size: TButtonSize.small,
+                      colorScheme: TButtonColorScheme.primary,
+                      onPressed: onSend,
                     ),
             ],
           ),
@@ -231,13 +230,19 @@ class _Composer extends StatelessWidget {
 }
 
 class _StatusTag extends StatelessWidget {
-  const _StatusTag({required this.label, required this.theme});
+  const _StatusTag({required this.label, required this.colorScheme});
 
   final String label;
-  final TDTagTheme theme;
+  final TTagColorScheme colorScheme;
 
   @override
   Widget build(BuildContext context) {
-    return TDTag(label, size: TDTagSize.small, theme: theme, isLight: true);
+    // `isLight` moved from the TTag ctor into the TTagThemeData extension.
+    return Theme(
+      data: Theme.of(context).copyWith(
+        extensions: [TTagThemeData(isLight: true)],
+      ),
+      child: TTag(label, size: TTagSize.small, colorScheme: colorScheme),
+    );
   }
 }

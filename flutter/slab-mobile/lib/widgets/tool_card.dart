@@ -1,4 +1,4 @@
-/// In-stream tool card: name, one-line input summary, phase badge (TDTag),
+/// In-stream tool card: name, one-line input summary, phase badge (TTag),
 /// live or finalized output. Colors come from the `SlabExtras` tokens
 /// (`ai-tool`) plus the TDesign functional scales.
 library;
@@ -34,7 +34,7 @@ class ToolCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final extras = slabExtras(context);
-    final td = TDTheme.of(context);
+    final td = context.tTheme;
     String t(String key) => mobileT(locale, key);
 
     final String badge;
@@ -71,10 +71,10 @@ class ToolCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(TDIcons.terminal, size: 14, color: extras.aiToolForeground),
+              Icon(TIcons.terminal, size: 14, color: extras.aiToolForeground),
               const SizedBox(width: 6),
               Expanded(
-                child: TDText(
+                child: TText(
                   '${part.toolName}  ${_inputSummary()}',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -86,17 +86,19 @@ class ToolCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              TDTag(
-                badge,
-                size: TDTagSize.small,
-                isOutline: true,
-                textColor: badgeColor,
+              // `isOutline`/`textColor` moved from the TTag ctor into the
+              // TTagThemeData extension (per-phase color rides the wrap).
+              Theme(
+                data: Theme.of(context).copyWith(
+                  extensions: [TTagThemeData(isOutline: true, textColor: badgeColor)],
+                ),
+                child: TTag(badge, size: TTagSize.small),
               ),
             ],
           ),
           if (output.isNotEmpty) ...[
             const SizedBox(height: 8),
-            TDText(
+            TText(
               output,
               maxLines: 8,
               overflow: TextOverflow.ellipsis,

@@ -1,16 +1,16 @@
 /// TDesign theme over the generated design tokens.
 ///
 /// The component library (tdesign_flutter) reads its theme from a
-/// `TDThemeData` ThemeExtension. Values come from
+/// `TThemeData` ThemeExtension. Values come from
 /// `assets/theme/tdesign-theme.json` — the third generated artifact of the
 /// one-way pipeline (`bun run gen:mobile` ← globals.css); never hand-edit it.
 /// Missing JSON keys would silently fall back to the package's built-in LIGHT
 /// palette, so the exporter emits the complete palette for both modes.
 ///
 /// Tokens with no TDesign slot (chat bubbles, tool surfaces, brand gold) ride
-/// the `SlabExtras` extension alongside `TDThemeData`. Everything else —
+/// the `SlabExtras` extension alongside `TThemeData`. Everything else —
 /// brand/error/warning/success, surfaces, text, radii — is TDesign theme
-/// authority: read it via `TDTheme.of(context)`.
+/// authority: read it via `context.tTheme`.
 library;
 
 import 'package:flutter/material.dart';
@@ -75,31 +75,29 @@ const int slabTransitionMs = 180; // --default-transition-duration
 
 /// Loads the generated TDesign theme asset (`slab` light + `slabDark` dark).
 /// Falls back to the package default so a malformed asset cannot brick boot.
-Future<TDThemeData> loadSlabTheme() async {
+Future<TThemeData> loadSlabTheme() async {
   const assetPath = 'assets/theme/tdesign-theme.json';
   try {
     final json = await rootBundle.loadString(assetPath);
-    final theme = TDThemeData.fromJson('slab', json, darkName: 'slabDark');
+    final theme = TThemeData.fromJson('slab', json, darkName: 'slabDark');
     if (theme != null) return theme;
     FlutterError.reportError(
-      FlutterErrorDetails(exception: StateError('TDThemeData.fromJson returned null for $assetPath')),
+      FlutterErrorDetails(exception: StateError('TThemeData.fromJson returned null for $assetPath')),
     );
   } on FlutterError catch (error) {
     FlutterError.reportError(FlutterErrorDetails(exception: error, library: 'td_theme', context: ErrorDescription('while loading $assetPath')));
   }
-  return TDThemeData.defaultData();
+  return TThemeData.defaultData();
 }
 
 /// MaterialApp `theme`/`darkTheme` for one brightness: the package-built
-/// ThemeData (colorScheme/scaffold from the TDTheme tokens) plus our two
-/// extensions and slab's font stacks. No Material component themes — the
-/// component library is TDesign now.
-ThemeData buildSlabTdTheme(TDThemeData td, Brightness brightness) {
+/// ThemeData (`TThemeBuilder` — colorScheme/scaffold from the tokens, with
+/// `TThemeData` injected as extension) plus our `SlabExtras` and slab's font
+/// stacks. No Material component themes — the component library is TDesign now.
+ThemeData buildSlabTdTheme(TThemeData td, Brightness brightness) {
   final isLight = brightness == Brightness.light;
   final data = isLight ? td : (td.dark ?? td);
-  final base = isLight
-      ? (td.systemThemeDataLight ?? ThemeData.light())
-      : (td.systemThemeDataDark ?? td.systemThemeDataLight ?? ThemeData.dark());
+  final base = isLight ? TThemeBuilder.light(td) : TThemeBuilder.dark(td);
   return base.copyWith(
     extensions: {data, isLight ? SlabExtras.light : SlabExtras.dark},
     textTheme: base.textTheme.apply(
