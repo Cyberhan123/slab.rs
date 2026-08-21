@@ -13,6 +13,14 @@ command/file-change approvals.
 - **Architecture position**: the mobile sibling of the `slab-web` shell.
   It does NOT share `@slab/ui` code — visual unity comes from the
   one-way design-token pipeline below, not shared React components.
+- **UI library**: [tdesign_flutter](https://tdesign.tencent.com/flutter) (exact
+  pin `0.2.7` — 0.x alpha-stage lib; range re-resolution could pull breaking
+  API churn, so upgrades are deliberate diffs). Pages are built from TDesign
+  components (TDNavBar/TDCell/TDButton/TDInputDialog/TDSwipeCell/TDEasyRefresh
+  …); chat bubbles / markdown / tool cards stay custom but source every color
+  from `TDTheme.of(context)` or `SlabExtras`. `easy_refresh` (mirrored
+  constraint) provides the pull-to-refresh shell around TDesign's
+  `TDRefreshHeader`.
 - **Flutter SDK**: 3.38.x stable (pinned by CI; Dart 3.10). Android-first —
   the `ios/` skeleton is committed but building it requires macOS.
 
@@ -20,16 +28,17 @@ command/file-change approvals.
 
 ```
 lib/
-  main.dart / app.dart            entrypoint, MaterialApp.router, token themes
+  main.dart / app.dart            entrypoint, MaterialApp.router, TDesign theme
   theme/slab_tokens.g.dart        GENERATED — regenerate with `bun run gen:mobile`
-  theme/slab_theme.dart           hand-written mapping of tokens → Material
-  l10n/catalog.dart + mobile_strings.dart
+  theme/td_theme.dart             hand-written: TDThemeData load + SlabExtras extension
+  l10n/catalog.dart + mobile_strings.dart (+ _en_us/_zh_cn tables) + td_resource_delegate.dart (TDesign component chrome)
   proto/  json_rpc / harness_methods / harness_types / harness_client (+reconnect)
   data/   rest_client / connection_config
   conversation/ turn_items (history+live projection) / conversation_controller
   routes/ app_router (connect → setup gate → sessions → chat)
   pages/ + widgets/
 design/tokens.json                GENERATED — inspectable token intermediate
+assets/theme/tdesign-theme.json   GENERATED — tdesign_flutter theme (slab light + slabDark)
 assets/i18n/{en-US,zh-CN}.json    GENERATED — flat catalogs from @slab/i18n
 ```
 
@@ -54,12 +63,18 @@ bun run dev:mobile -- --dart-define=SLAB_API_BASE_URL=http://10.0.2.2:3000
 
 ## Generated artifacts — do not hand-edit
 
-`lib/theme/slab_tokens.g.dart`, `design/tokens.json`, `assets/i18n/*.json` are
-produced by `bun run gen:mobile` (`scripts/design/export-tokens.ts` +
+`lib/theme/slab_tokens.g.dart`, `design/tokens.json`,
+`assets/theme/tdesign-theme.json`, `assets/i18n/*.json` are produced by
+`bun run gen:mobile` (`scripts/design/export-tokens.ts` +
 `scripts/i18n/export-mobile-locales.ts`) and drift-checked in CI with
-`git diff --exit-code`. Colors in Dart app code must come from
-`SlabTokens*`/`SlabExtras` — the design guard bans `Color(0x…)`/`Colors.*`
-outside the generated file, exactly as it bans raw hex in TSX.
+`git diff --exit-code`. The TDesign theme JSON carries the COMPLETE palette
+for both modes — tdesign_flutter falls back to its built-in light blue for
+missing keys even in dark mode, so the exporter asserts key parity, scale
+monotonicity, and anchor equality (e.g. light `brandColor7` == `--primary`).
+Colors in Dart app code must come from `TDTheme.of(context)` / `SlabTokens*` /
+`SlabExtras` — the design guard bans `Color(0x…)`/`Colors.*` (and, as a
+substring side effect, `TDColors.*`) outside the generated file, exactly as it
+bans raw hex in TSX.
 
 ## Hard boundaries
 

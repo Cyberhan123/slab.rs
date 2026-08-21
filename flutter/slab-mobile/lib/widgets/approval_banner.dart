@@ -1,11 +1,12 @@
 /// Pending-approval banner: one card per pending request with approve / deny
-/// (scope = the first the server allows; shared catalog strings).
+/// (scope = the first the server allows; shared catalog strings, TDButtons).
 library;
 
 import 'package:flutter/material.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../proto/harness_types.dart' as proto;
-import '../theme/slab_theme.dart';
+import '../theme/td_theme.dart';
 import '../theme/slab_tokens.g.dart';
 
 class ApprovalBanner extends StatelessWidget {
@@ -48,13 +49,13 @@ class ApprovalBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final td = TDTheme.of(context);
     final extras = slabExtras(context);
     if (approvals.isEmpty) return const SizedBox.shrink();
 
     return Container(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
+        color: td.bgColorContainer,
         borderRadius: BorderRadius.circular(SlabMetrics.radiusLg),
         border: Border.all(color: extras.brandGold),
       ),
@@ -68,12 +69,12 @@ class ApprovalBanner extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
+                  TDText(
                     '${t('pages.assistant.approval.title')} · ${_kindLabel(request.kind)}',
                     style: TextStyle(fontSize: SlabMetrics.textCaption, color: extras.brandGold),
                   ),
                   const SizedBox(height: 4),
-                  Text(
+                  TDText(
                     _detail(request),
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
@@ -86,14 +87,19 @@ class ApprovalBanner extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      OutlinedButton(
-                        onPressed: () => onResolve(request, false),
-                        child: Text(mobileDeny()),
+                      TDButton(
+                        text: mobileDeny(),
+                        size: TDButtonSize.small,
+                        theme: TDButtonTheme.defaultTheme,
+                        type: TDButtonType.outline,
+                        onTap: () => onResolve(request, false),
                       ),
                       const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: () => onResolve(request, true),
-                        child: Text(t('pages.assistant.approval.runOnce')),
+                      TDButton(
+                        text: t('pages.assistant.approval.runOnce'),
+                        size: TDButtonSize.small,
+                        theme: TDButtonTheme.primary,
+                        onTap: () => onResolve(request, true),
                       ),
                     ],
                   ),

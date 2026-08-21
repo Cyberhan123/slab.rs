@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:slab_mobile/l10n/catalog.dart';
 import 'package:slab_mobile/l10n/mobile_strings.dart';
+import 'package:slab_mobile/l10n/mobile_strings_en_us.dart';
+import 'package:slab_mobile/l10n/mobile_strings_zh_cn.dart';
 
 const enJson = '''
 {
@@ -71,6 +73,16 @@ void main() {
       expect(mobileT('en-US', 'mobile.chat.send'), 'Send');
       expect(mobileT('en-US', 'mobile.connect.ok', {'version': '1.2'}), 'Connected — slab-server v1.2');
       expect(mobileT('en-US', 'mobile.unknown.key'), 'mobile.unknown.key');
+    });
+
+    // The en→zh fallback in mobileT would silently mask a missing zh key, so
+    // parity is asserted directly (mirrors the exporter guard on the
+    // generated catalogs).
+    test('en-US and zh-CN mobile string tables keep key parity', () {
+      final enKeys = mobileStringsEnUs.keys.toSet();
+      final zhKeys = mobileStringsZhCn.keys.toSet();
+      expect(enKeys.difference(zhKeys), isEmpty, reason: 'keys missing from zh-CN');
+      expect(zhKeys.difference(enKeys), isEmpty, reason: 'keys missing from en-US');
     });
   });
 }

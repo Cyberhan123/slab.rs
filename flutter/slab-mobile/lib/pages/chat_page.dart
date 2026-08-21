@@ -1,11 +1,12 @@
 /// Chat screen: history + live turn projection (ListenableBuilder over the
 /// framework-free `ConversationController`), approval banner, composer with
-/// send / interrupt, connection-phase chip.
+/// send / interrupt, connection-phase tag.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../app_providers.dart';
 import '../conversation/conversation_controller.dart';
@@ -60,34 +61,35 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     String t(String key, [Map<String, String> args = const {}]) => mobileT(locale, key, args);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.sessionName ?? catalog.t('pages.assistant.runtime.newChat')),
-        leading: BackButton(onPressed: () => context.go('/sessions')),
-        actions: [
-          ListenableBuilder(
-            listenable: controller,
-            builder: (context, _) {
-              final state = controller.state;
-              final Widget chip;
-              switch (state.connection) {
-                case ConnectionPhase.connecting:
-                  chip = _StatusChip(label: t('mobile.chat.connecting'), active: true);
-                case ConnectionPhase.reconnecting:
-                  chip = _StatusChip(label: t('mobile.chat.reconnecting'), active: true, warn: true);
-                case ConnectionPhase.idle when state.error != null:
-                  chip = _StatusChip(label: catalog.t('common.status.error'), active: true, warn: true);
-                default:
-                  chip = const SizedBox.shrink();
-              }
-              return chip;
-            },
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
+            TDNavBar(
+              title: widget.sessionName ?? catalog.t('pages.assistant.runtime.newChat'),
+              useDefaultBack: true,
+              onBack: () => context.go('/sessions'),
+              rightBarItems: [
+                TDNavBarItem(
+                  iconWidget: ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) {
+                      final state = controller.state;
+                      switch (state.connection) {
+                        case ConnectionPhase.connecting:
+                          return _StatusTag(label: t('mobile.chat.connecting'), theme: TDTagTheme.primary);
+                        case ConnectionPhase.reconnecting:
+                          return _StatusTag(label: t('mobile.chat.reconnecting'), theme: TDTagTheme.warning);
+                        case ConnectionPhase.idle when state.error != null:
+                          return _StatusTag(label: catalog.t('common.status.error'), theme: TDTagTheme.danger);
+                        default:
+                          return const SizedBox.shrink();
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
             Expanded(
               child: NotificationListener<ScrollNotification>(
                 onNotification: (notification) {
@@ -115,15 +117,15 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         if (offset == 0 && state.isHistoryLoading) {
                           return const Padding(
                             padding: EdgeInsets.all(16),
-                            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                            child: Center(child: TDLoading(size: TDLoadingSize.small, icon: TDLoadingIcon.circle)),
                           );
                         }
                         return Padding(
                           padding: const EdgeInsets.all(12),
-                          child: Text(
+                          child: TDText(
                             t('mobile.chat.restoreFailed', {'message': state.error ?? ''}),
                             textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: SlabMetrics.textCaption, color: Theme.of(context).colorScheme.error),
+                            style: TextStyle(fontSize: SlabMetrics.textCaption, color: TDTheme.of(context).errorNormalColor),
                           ),
                         );
                       },
@@ -144,9 +146,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         padding: const EdgeInsets.only(bottom: 4, left: 12, right: 12),
                         child: Row(
                           children: [
-                            const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5)),
+                            const TDLoading(size: TDLoadingSize.small, icon: TDLoadingIcon.circle),
                             const SizedBox(width: 8),
-                            Text(t('mobile.chat.modelLoading'), style: Theme.of(context).textTheme.bodySmall),
+                            TDText(t('mobile.chat.modelLoading'), style: TextStyle(fontSize: SlabMetrics.textCaption, color: TDTheme.of(context).textColorSecondary)),
                           ],
                         ),
                       ),
@@ -187,7 +189,6 @@ class _Composer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
@@ -198,27 +199,28 @@ class _Composer extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: TextField(
+                child: TDTextarea(
                   controller: composer,
                   minLines: 1,
                   maxLines: 5,
-                  textInputAction: TextInputAction.newline,
-                  decoration: InputDecoration(hintText: t('mobile.chat.inputHint')),
+                  hintText: t('mobile.chat.inputHint'),
+                  backgroundColor: TDTheme.of(context).bgColorContainer,
                   onSubmitted: (_) => onSend(),
                 ),
               ),
               const SizedBox(width: 8),
               running
-                  ? IconButton.filled(
-                      style: IconButton.styleFrom(backgroundColor: scheme.error),
-                      tooltip: t('mobile.chat.stop'),
-                      onPressed: () => controller.interrupt(),
-                      icon: const Icon(Icons.stop),
+                  ? TDButton(
+                      icon: TDIcons.stop_circle,
+                      size: TDButtonSize.small,
+                      theme: TDButtonTheme.danger,
+                      onTap: controller.interrupt,
                     )
-                  : IconButton.filled(
-                      tooltip: t('mobile.chat.send'),
-                      onPressed: onSend,
-                      icon: const Icon(Icons.arrow_upward),
+                  : TDButton(
+                      icon: TDIcons.send,
+                      size: TDButtonSize.small,
+                      theme: TDButtonTheme.primary,
+                      onTap: onSend,
                     ),
             ],
           ),
@@ -228,24 +230,14 @@ class _Composer extends StatelessWidget {
   }
 }
 
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.label, required this.active, this.warn = false});
+class _StatusTag extends StatelessWidget {
+  const _StatusTag({required this.label, required this.theme});
 
   final String label;
-  final bool active;
-  final bool warn;
+  final TDTagTheme theme;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    if (!active) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(SlabMetrics.radiusSm),
-        border: Border.all(color: warn ? scheme.error : scheme.outline),
-      ),
-      child: Text(label, style: TextStyle(fontSize: SlabMetrics.textMicro, color: warn ? scheme.error : scheme.onSurfaceVariant)),
-    );
+    return TDTag(label, size: TDTagSize.small, theme: theme, isLight: true);
   }
 }

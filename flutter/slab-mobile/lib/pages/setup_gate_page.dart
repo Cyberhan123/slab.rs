@@ -11,6 +11,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../app_providers.dart';
 import '../data/rest_client.dart';
@@ -58,43 +59,46 @@ class _SetupGatePageState extends ConsumerState<SetupGatePage> {
   @override
   Widget build(BuildContext context) {
     final locale = ref.watch(localeProvider);
-    final scheme = Theme.of(context).colorScheme;
     String t(String key) => mobileT(locale, key);
 
     return Scaffold(
-      appBar: AppBar(title: Text(t('mobile.setup.title'))),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(t('mobile.setup.checking'), style: Theme.of(context).textTheme.bodySmall),
-                  ],
+      body: Column(
+        children: [
+          TDNavBar(title: t('mobile.setup.title'), useDefaultBack: false),
+          Expanded(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const TDLoading(size: TDLoadingSize.small, icon: TDLoadingIcon.circle),
+                          const SizedBox(width: 12),
+                          TDText(t('mobile.setup.checking'), style: const TextStyle(fontSize: 11)),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      TDText(t('mobile.setup.description'), style: const TextStyle(fontSize: 13, height: 1.5)),
+                      const SizedBox(height: 16),
+                      TDButton(
+                        text: mobileT(locale, 'common.actions.tryAgain'),
+                        icon: TDIcons.refresh,
+                        type: TDButtonType.outline,
+                        size: TDButtonSize.small,
+                        onTap: _check,
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 16),
-                Text(t('mobile.setup.description'), style: Theme.of(context).textTheme.bodyMedium),
-                const SizedBox(height: 16),
-                TextButton.icon(
-                  onPressed: _check,
-                  icon: Icon(Icons.refresh, size: 16, color: scheme.primary),
-                  label: Text(mobileT(locale, 'common.actions.tryAgain')),
-                ),
-              ],
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

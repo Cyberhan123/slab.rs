@@ -1,0 +1,63 @@
+/// English (en-US) mobile-only chrome strings. See `mobile_strings.dart`
+/// for ownership rules; the zh-CN counterpart lives in
+/// `mobile_strings_zh_cn.dart` (key sets must stay in parity — guarded by
+/// `catalog_test`).
+library;
+
+const mobileStringsEnUs = <String, String>{
+  'mobile.connect.title': 'Connect to slab-server',
+  'mobile.connect.baseUrl': 'Server URL',
+  'mobile.connect.token': 'Access token (optional)',
+  'mobile.connect.test': 'Test connection',
+  'mobile.connect.testing': 'Testing…',
+  'mobile.connect.ok': 'Connected — slab-server v{{version}}',
+  'mobile.connect.unreachable': 'Could not reach the server',
+  'mobile.connect.save': 'Save and continue',
+  'mobile.connect.invalidUrl': 'Enter a valid http(s) URL',
+  'mobile.sessions.title': 'Conversations',
+  'mobile.sessions.empty': 'No conversations yet',
+  'mobile.sessions.new': 'New conversation',
+  'mobile.sessions.rename': 'Rename',
+  'mobile.sessions.delete': 'Delete',
+  'mobile.sessions.nameLabel': 'Name',
+  'mobile.sessions.serverOffline': 'Server offline — retrying',
+  'mobile.sessions.serverOnline': 'Connected',
+  'mobile.setup.title': 'Server setup required',
+  'mobile.setup.description':
+      'This slab-server has not finished its one-time setup. Complete it on the desktop app (or the web shell), then this screen advances automatically.',
+  'mobile.setup.checking': 'Checking server state…',
+  'mobile.chat.inputHint': 'Message slab…',
+  'mobile.chat.send': 'Send',
+  'mobile.chat.stop': 'Stop',
+  'mobile.chat.connecting': 'Connecting…',
+  'mobile.chat.reconnecting': 'Reconnecting…',
+  'mobile.chat.modelLoading': 'Loading model…',
+  'mobile.chat.restoreFailed': 'Could not restore the conversation: {{message}}',
+  'mobile.chat.denied': 'Denied',
+  'mobile.chat.approve': 'Approve',
+  'mobile.tool.running': 'Running',
+  'mobile.tool.awaitingApproval': 'Awaiting approval',
+  'mobile.tool.done': 'Done',
+  'mobile.tool.failed': 'Failed',
+  'mobile.tool.output': 'Output',
+  // tdesign_flutter component chrome (dialog buttons, refresh, loading) —
+  // wired through SlabResourceDelegate. Calendar-internal labels stay in the
+  // delegate file; only interactive chrome lives here.
+  'mobile.common.confirm': 'OK',
+  'mobile.td.open': 'On',
+  'mobile.td.close': 'Off',
+  'mobile.td.reset': 'Reset',
+  'mobile.td.other': 'Other',
+  'mobile.td.loading': 'Loading…',
+  'mobile.td.loadingWithPoint': 'Loading…',
+  'mobile.td.knew': 'Got it',
+  'mobile.td.refreshing': 'Refreshing',
+  'mobile.td.releaseRefresh': 'Release to refresh',
+  'mobile.td.pullToRefresh': 'Pull to refresh',
+  'mobile.td.completeRefresh': 'Refreshed',
+  'mobile.td.back': 'Back',
+  'mobile.td.top': 'Top',
+  'mobile.td.emptyData': 'No data yet',
+  'mobile.td.notRated': 'Not rated',
+  'mobile.td.cascadeLabel': 'Select an option',
+};

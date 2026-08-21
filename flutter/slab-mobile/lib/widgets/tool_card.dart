@@ -1,12 +1,14 @@
-/// In-stream tool card: name, one-line input summary, phase badge, live or
-/// finalized output. Colors come from the `SlabExtras` tokens (`ai-tool`).
+/// In-stream tool card: name, one-line input summary, phase badge (TDTag),
+/// live or finalized output. Colors come from the `SlabExtras` tokens
+/// (`ai-tool`) plus the TDesign functional scales.
 library;
 
 import 'package:flutter/material.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../conversation/turn_items.dart';
 import '../l10n/mobile_strings.dart';
-import '../theme/slab_theme.dart';
+import '../theme/td_theme.dart';
 import '../theme/slab_tokens.g.dart';
 
 class ToolCard extends StatelessWidget {
@@ -32,7 +34,7 @@ class ToolCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final extras = slabExtras(context);
-    final scheme = Theme.of(context).colorScheme;
+    final td = TDTheme.of(context);
     String t(String key) => mobileT(locale, key);
 
     final String badge;
@@ -40,16 +42,16 @@ class ToolCard extends StatelessWidget {
     switch (part.phase) {
       case ToolPhase.running:
         badge = t('mobile.tool.running');
-        badgeColor = scheme.primary;
+        badgeColor = td.brandNormalColor;
       case ToolPhase.awaitingApproval:
         badge = t('mobile.tool.awaitingApproval');
         badgeColor = extras.brandGold;
       case ToolPhase.outputAvailable:
         badge = t('mobile.tool.done');
-        badgeColor = extras.success;
+        badgeColor = td.successNormalColor;
       case ToolPhase.outputError:
         badge = t('mobile.tool.failed');
-        badgeColor = scheme.error;
+        badgeColor = td.errorNormalColor;
     }
 
     final output = part.liveOutput.isNotEmpty
@@ -62,17 +64,17 @@ class ToolCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: extras.aiTool,
         borderRadius: BorderRadius.circular(SlabMetrics.radiusMd),
-        border: Border.all(color: scheme.outline),
+        border: Border.all(color: td.componentStrokeColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.terminal, size: 14, color: extras.aiToolForeground),
+              Icon(TDIcons.terminal, size: 14, color: extras.aiToolForeground),
               const SizedBox(width: 6),
               Expanded(
-                child: Text(
+                child: TDText(
                   '${part.toolName}  ${_inputSummary()}',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -84,15 +86,17 @@ class ToolCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
+              TDTag(
                 badge,
-                style: TextStyle(fontSize: SlabMetrics.textMicro, color: badgeColor),
+                size: TDTagSize.small,
+                isOutline: true,
+                textColor: badgeColor,
               ),
             ],
           ),
           if (output.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
+            TDText(
               output,
               maxLines: 8,
               overflow: TextOverflow.ellipsis,

@@ -5,11 +5,14 @@
  * into the Flutter mobile app — the one-way pipeline that keeps slab-mobile
  * visually unified with web/desktop without sharing UI code.
  *
- * Outputs (both committed, both deterministic; regenerate with `bun run gen:mobile`):
+ * Outputs (all committed, all deterministic; regenerate with `bun run gen:mobile`):
  *   flutter/slab-mobile/design/tokens.json          — inspectable intermediate
  *                                                      (keeps the raw oklch strings for a
  *                                                      future wide-gamut upgrade)
  *   flutter/slab-mobile/lib/theme/slab_tokens.g.dart — `SlabTokensLight/Dark` + `SlabMetrics`
+ *   flutter/slab-mobile/assets/theme/tdesign-theme.json — tdesign_flutter theme
+ *                                                      (`"slab"` light + `"slabDark"` dark;
+ *                                                      see the TDesign section below)
  *
  * Color conversion mirrors the browser family of algorithms: oklch →
  * `culori.clampChroma` (chroma-reducing gamut clip) → sRGB hex. Compound CSS
@@ -35,6 +38,10 @@ const JSON_OUT = path.join(repoRoot, "flutter/slab-mobile/design/tokens.json");
 const DART_OUT = path.join(
   repoRoot,
   "flutter/slab-mobile/lib/theme/slab_tokens.g.dart",
+);
+const TD_OUT = path.join(
+  repoRoot,
+  "flutter/slab-mobile/assets/theme/tdesign-theme.json",
 );
 const REM_TO_PX = 16;
 const CHECK = process.argv.includes("--check");
@@ -312,6 +319,308 @@ const dartText = [
   dartMetricsClass(),
 ].join("\n");
 
+// ── Emit: tdesign-theme.json ────────────────────────────────────────────────
+//
+// The tdesign_flutter component library reads its theme from a TDThemeData
+// ThemeExtension loaded from JSON: `{ "slab": { color, radius }, "slabDark": … }`.
+// Semantics (verified against tdesign_flutter 0.2.7 source):
+//   * Missing keys fall back to the package's built-in LIGHT defaults in BOTH
+//     modes (`TDMap` factory fallback) — so both modes must carry the complete
+//     palette; partial JSON would leak TDesign blue in dark mode.
+//   * Hex strings: 6-digit `#RRGGBB` (opaque) or 8-digit `#AARRGGBB` (alpha in
+//     the high byte — matches `Color(int.parse(..., radix: 16))`).
+//   * Scale conventions mirrored from the package defaults: functional scales
+//     (brand/error/warning/success) run light→dark in light mode and invert in
+//     dark mode; the gray ramp runs light→dark in both modes (dark surfaces
+//     pick the high indices). Semantic anchors per mode: brand normal = stop 7
+//     (light) / 8 (dark), error normal = stop 6, warning/success normal = stop 5.
+//
+// Every value is derived from slab tokens — no TDesign default is imported.
+// slab has no `--warning` token; `--chart-3` (amber) is the sanctioned anchor.
+// `--brand-gold` stays out of the scales (bespoke approval chrome via SlabExtras).
+
+type Oklch = { l: number; c: number; h: number };
+
+/** Fallback hue when a neutral token carries none (c=0): the page background's
+ * cool tint keeps gray interpolation inside slab's palette family. */
+function modeHue(mode: ModeTokens): number {
+  const parsed = parse(mode.colors.get("--background")!.raw);
+  const hue = parsed?.h;
+  return Number.isFinite(hue as number) ? (hue as number) : 247.86;
+}
+
+const oklchCache = new Map<string, Oklch>();
+
+/** Parsed oklch anchors for one mode, keyed by CSS token name. */
+function oklchOf(mode: ModeTokens, name: string): Oklch {
+  const key = `${mode === light ? "L" : "D"}:${name}`;
+  const cached = oklchCache.get(key);
+  if (cached) return cached;
+  const token = mode.colors.get(name);
+  if (token === undefined) throw new Error(`token ${name} missing for TDesign theme`);
+  const parsed = parse(token.raw);
+  if (parsed === null) throw new Error(`cannot parse oklch for ${name}: ${token.raw}`);
+  const fallbackHue = modeHue(mode);
+  const value: Oklch = {
+    l: parsed.l ?? 0,
+    c: parsed.c ?? 0,
+    h: Number.isFinite(parsed.h as number) ? (parsed.h as number) : fallbackHue,
+  };
+  oklchCache.set(key, value);
+  return value;
+}
+
+/** oklch → opaque `#RRGGBB` through the same clampChroma pipeline as Dart. */
+function hex6(l: number, c: number, h: number): string {
+  const argb = toArgb(`oklch(${(l * 100).toFixed(6)}% ${c.toFixed(6)} ${h.toFixed(6)})`);
+  if (argb === null) throw new Error(`oklch→hex conversion failed for ${l} ${c} ${h}`);
+  return `#${argb.slice(3)}`;
+}
+
+/** Opaque `#RRGGBB` of a slab token in one mode. */
+function tokenHex6(mode: ModeTokens, name: string): string {
+  const token = mode.colors.get(name);
+  if (token === undefined) throw new Error(`token ${name} missing for TDesign theme`);
+  return `#${token.argb.slice(3)}`;
+}
+
+/** oklch → 8-digit `#AARRGGBB` (alpha 0..1 in the high byte). */
+function hex8(l: number, c: number, h: number, alpha: number): string {
+  const base = hex6(l, c, h).slice(1);
+  const aa = Math.round(alpha * 255)
+    .toString(16)
+    .padStart(2, "0")
+    .toUpperCase();
+  return `#${aa}${base}`;
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function mixOklch(a: Oklch, b: Oklch, t: number): Oklch {
+  return { l: lerp(a.l, b.l, t), c: lerp(a.c, b.c, t), h: lerp(a.h, b.h, t) };
+}
+
+/**
+ * Two-segment 10-stop ramp around a slab anchor: exact at the anchor index,
+ * interpolating lightness out to the mode's ramp ends. Chroma/hue stay at the
+ * anchor's (gamut-clamped per stop) — the scale is slab's hue at slab's reach.
+ */
+function scale10(anchor: Oklch, anchorIndex: number, isDark: boolean): string[] {
+  const [lMin, lMax] = isDark ? [0.2, 0.97] : [0.97, 0.16];
+  const stops: string[] = [];
+  for (let i = 1; i <= 10; i += 1) {
+    const l = i <= anchorIndex
+      ? lerp(lMin, anchor.l, (i - 1) / (anchorIndex - 1))
+      : lerp(anchor.l, lMax, (i - anchorIndex) / (10 - anchorIndex));
+    stops.push(hex6(l, anchor.c, anchor.h));
+  }
+  return stops;
+}
+
+/**
+ * 14-stop gray ramp from pinned slab neutrals, piecewise-interpolated in
+ * oklch. Light and dark pin sets differ on purpose: slab's dark neutrals are
+ * independently cooler than an index-shift of the light ramp, and TDesign's
+ * dark surfaces consume the high indices (page=g14, container=g13, stroke=g11).
+ */
+function grayRamp(mode: ModeTokens, pins: Array<[number, string]>): string[] {
+  const anchors = pins.map(([index, name]) => ({ index, ok: oklchOf(mode, name) }));
+  const stops: string[] = [];
+  for (let i = 1; i <= 14; i += 1) {
+    let hi = anchors.findIndex((pin) => pin.index >= i);
+    if (hi === -1) hi = anchors.length - 1;
+    const lo = Math.max(0, hi - 1);
+    const span = anchors[hi].index - anchors[lo].index;
+    const t = span === 0 ? 0 : Math.min(1, Math.max(0, (i - anchors[lo].index) / span));
+    const mixed = mixOklch(anchors[lo].ok, anchors[hi].ok, t);
+    stops.push(hex6(mixed.l, mixed.c, mixed.h));
+  }
+  return stops;
+}
+
+/** Per-mode complete TDesign palette (sorted keys, deterministic). */
+function buildTdPalette(mode: ModeTokens, isDark: boolean): Record<string, string | number> {
+  const color: Record<string, string> = {};
+  const set = (key: string, value: string) => {
+    if (color[key] !== undefined) throw new Error(`duplicate TDesign key ${key}`);
+    color[key] = value;
+  };
+
+  // Functional scales. slab anchors: brand=--primary, error=--destructive,
+  // warning=--chart-3 (slab has no warning token — amber chart color),
+  // success=--success. Hover/click stops follow TDesign's per-mode defaults.
+  const families: Array<{
+    prefix: string;
+    anchor: string;
+    normalStop: number;
+    hoverStop: number;
+    clickStop: number;
+  }> = [
+    // brand: light normal@7 hover@6 click@8; dark normal@8 hover@7 click@9
+    { prefix: "brand", anchor: "--primary", normalStop: isDark ? 8 : 7, hoverStop: isDark ? 7 : 6, clickStop: isDark ? 9 : 8 },
+    // error: normal@6 hover@5 click@7 in both modes
+    { prefix: "error", anchor: "--destructive", normalStop: 6, hoverStop: 5, clickStop: 7 },
+    // warning/success: normal@5 hover@4 click@6 in both modes
+    { prefix: "warning", anchor: "--chart-3", normalStop: 5, hoverStop: 4, clickStop: 6 },
+    { prefix: "success", anchor: "--success", normalStop: 5, hoverStop: 4, clickStop: 6 },
+  ];
+  for (const family of families) {
+    const anchor = oklchOf(mode, family.anchor);
+    const stops = scale10(anchor, family.normalStop, isDark);
+    stops.forEach((hex, i) => set(`${family.prefix}Color${i + 1}`, hex));
+    const direct = tokenHex6(mode, family.anchor);
+    set(`${family.prefix}NormalColor`, direct);
+    set(`${family.prefix}HoverColor`, stops[family.hoverStop - 1]);
+    set(`${family.prefix}ActiveColor`, stops[family.clickStop - 1]);
+    set(`${family.prefix}ClickColor`, stops[family.clickStop - 1]);
+    set(`${family.prefix}LightColor`, stops[0]);
+    set(`${family.prefix}FocusColor`, stops[1]);
+    set(`${family.prefix}DisabledColor`, stops[2]);
+    set(`${family.prefix}ColorLightHover`, stops[1]);
+    if (stops[family.normalStop - 1] !== direct) {
+      throw new Error(`${family.prefix} anchor stop ${family.normalStop} != direct token`);
+    }
+  }
+
+  // Gray ramp: pinned per mode (see grayRamp doc). Both ramps run
+  // light→dark; dark surfaces pick the high indices per TDesign convention.
+  const grayPins: Array<[number, string]> = isDark
+    ? [[1, "--foreground"], [5, "--muted-foreground"], [11, "--border"], [12, "--secondary"], [13, "--card"], [14, "--background"]]
+    : [[1, "--card"], [2, "--background"], [3, "--secondary"], [4, "--border"], [7, "--muted-foreground"], [14, "--foreground"]];
+  grayRamp(mode, grayPins).forEach((hex, i) => set(`grayColor${i + 1}`, hex));
+
+  // Text-on-neutral ladder: foreground → muted-foreground, dimming toward the
+  // page background at the disabled end.
+  const fg = oklchOf(mode, "--foreground");
+  const mf = oklchOf(mode, "--muted-foreground");
+  const bg = oklchOf(mode, "--background");
+  const gyStops = [fg, mixOklch(fg, mf, 0.4), mf, mixOklch(mf, bg, 0.35)];
+  gyStops.forEach((stop, i) => set(`fontGyColor${i + 1}`, hex6(stop.l, stop.c, stop.h)));
+
+  // Text-on-color ladder: white in light mode, slab's (near-white) foreground
+  // in dark mode, with a descending alpha ramp.
+  const whBase = isDark ? fg : { l: 1, c: 0, h: modeHue(mode) };
+  const whAlphas = [1, 0.9, 0.75, 0.65];
+  whAlphas.forEach((alpha, i) => set(`fontWhColor${i + 1}`, hex8(whBase.l, whBase.c, whBase.h, alpha)));
+  set("whiteColor1", isDark ? tokenHex6(mode, "--foreground") : "#FFFFFF");
+
+  // Surfaces.
+  set("bgColorPage", tokenHex6(mode, "--background"));
+  set("bgColorContainer", tokenHex6(mode, "--card"));
+  set("bgColorContainerHover", tokenHex6(mode, "--secondary"));
+  set("bgColorContainerActive", tokenHex6(mode, "--accent"));
+  set("bgColorContainerSelect", tokenHex6(mode, "--accent"));
+  set("bgColorSecondaryContainer", tokenHex6(mode, "--secondary"));
+  set("bgColorSecondaryContainerHover", tokenHex6(mode, "--accent"));
+  set("bgColorSecondaryContainerActive", tokenHex6(mode, "--accent"));
+  set("bgColorComponent", tokenHex6(mode, "--secondary"));
+  set("bgColorComponentHover", tokenHex6(mode, "--accent"));
+  set("bgColorComponentActive", tokenHex6(mode, "--accent"));
+  set("bgColorComponentDisabled", tokenHex6(mode, "--muted"));
+  set("bgColorSecondaryComponent", tokenHex6(mode, "--accent"));
+  set("bgColorSecondaryComponentHover", tokenHex6(mode, "--accent"));
+  set("bgColorSecondaryComponentActive", tokenHex6(mode, "--border"));
+  set("bgColorSpecialComponent", tokenHex6(mode, "--popover"));
+
+  // Text + strokes.
+  set("textColorPrimary", tokenHex6(mode, "--foreground"));
+  set("textColorSecondary", tokenHex6(mode, "--muted-foreground"));
+  set("textColorPlaceholder", tokenHex6(mode, "--muted-foreground"));
+  set("textDisabledColor", tokenHex6(mode, "--muted-foreground"));
+  set("textColorBrand", tokenHex6(mode, "--primary"));
+  set("textColorLink", tokenHex6(mode, "--primary"));
+  set("textColorAnti", tokenHex6(mode, "--primary-foreground"));
+  set("componentStrokeColor", tokenHex6(mode, "--border"));
+  set("componentBorderColor", tokenHex6(mode, "--border"));
+
+  // Radius: slab's rounded scale replaces TDesign's 3/6/9/12 defaults.
+  // (Pill/circle radii keep package defaults — non-color, no leak risk.)
+  const radius: Record<string, number> = {
+    radiusSmall: metrics.get("radiusSm") as number,
+    radiusDefault: metrics.get("radiusMd") as number,
+    radiusLarge: metrics.get("radiusLg") as number,
+    radiusExtraLarge: metrics.get("radiusXl") as number,
+  };
+
+  const sortedColor: Record<string, string> = {};
+  for (const key of Object.keys(color).sort()) sortedColor[key] = color[key];
+  return { color: sortedColor, radius };
+}
+
+const tdLight = buildTdPalette(light, false);
+const tdDark = buildTdPalette(dark, true);
+
+// ── TDesign assertions (loud failures, mirrors of the locale parity guard) ──
+
+{
+  const lightKeys = Object.keys(tdLight.color).sort().join(",");
+  const darkKeys = Object.keys(tdDark.color).sort().join(",");
+  if (lightKeys !== darkKeys) throw new Error("tdesign theme light/dark key parity broken");
+
+  // Every color key the package getters read must be present (missing keys
+  // would silently fall back to built-in TDesign light blue).
+  const REQUIRED_KEYS = [
+    ...["brand", "error", "warning", "success"].flatMap((p) => [
+      ...Array.from({ length: 10 }, (_, i) => `${p}Color${i + 1}`),
+      `${p}NormalColor`, `${p}HoverColor`, `${p}ClickColor`, `${p}LightColor`, `${p}FocusColor`, `${p}DisabledColor`,
+    ]),
+    ...Array.from({ length: 14 }, (_, i) => `grayColor${i + 1}`),
+    ...Array.from({ length: 4 }, (_, i) => `fontGyColor${i + 1}`),
+    ...Array.from({ length: 4 }, (_, i) => `fontWhColor${i + 1}`),
+    "whiteColor1",
+    "bgColorPage", "bgColorContainer", "bgColorContainerHover", "bgColorContainerActive", "bgColorContainerSelect",
+    "bgColorSecondaryContainer", "bgColorSecondaryContainerHover", "bgColorSecondaryContainerActive",
+    "bgColorComponent", "bgColorComponentHover", "bgColorComponentActive", "bgColorComponentDisabled",
+    "textColorPrimary", "textColorSecondary", "textColorPlaceholder", "textColorBrand", "textColorLink", "textColorAnti",
+    "textDisabledColor", "componentStrokeColor", "componentBorderColor",
+  ];
+  for (const key of REQUIRED_KEYS) {
+    if (!(key in tdLight.color)) throw new Error(`tdesign theme missing required key: ${key}`);
+  }
+
+  // Spot anchors: the theme MUST carry slab's exact brand/page values.
+  const spotChecks: Array<[Record<string, string>, string, string]> = [
+    [tdLight.color as Record<string, string>, "brandNormalColor", tokenHex6(light, "--primary")],
+    [tdDark.color as Record<string, string>, "brandNormalColor", tokenHex6(dark, "--primary")],
+    [tdLight.color as Record<string, string>, "bgColorPage", tokenHex6(light, "--background")],
+    [tdDark.color as Record<string, string>, "bgColorPage", tokenHex6(dark, "--background")],
+  ];
+  for (const [palette, key, expected] of spotChecks) {
+    if (palette[key] !== expected) throw new Error(`tdesign theme spot check failed: ${key} ${palette[key]} != ${expected}`);
+  }
+
+  // Scale lightness must be monotonic (ramp direction inverts per mode; the
+  // gray ramp runs light→dark in both). Catches token drift that would make
+  // e.g. hover lighter than normal in dark mode.
+  const toOklchL = (hex: string): number => {
+    const converted = converter("oklch")(parse(hex)!);
+    return converted.l ?? 0;
+  };
+  const ramps: Array<[string, string, Record<string, string>, number, "up" | "down"]> = [
+    ...(["brand", "error", "warning", "success"] as const).flatMap((p) => [
+      [p, "light", tdLight.color as Record<string, string>, 10, "down"] as [string, string, Record<string, string>, number, "up" | "down"],
+      [p, "dark", tdDark.color as Record<string, string>, 10, "up"] as [string, string, Record<string, string>, number, "up" | "down"],
+    ]),
+    ["gray", "light", tdLight.color as Record<string, string>, 14, "down"] as [string, string, Record<string, string>, number, "up" | "down"],
+    ["gray", "dark", tdDark.color as Record<string, string>, 14, "down"] as [string, string, Record<string, string>, number, "up" | "down"],
+  ];
+  for (const [prefix, modeName, palette, len, dir] of ramps) {
+    const key = (i: number) => `${prefix}Color${i + 1}`;
+    const ls = Array.from({ length: len }, (_, i) => toOklchL(palette[key(i)]));
+    const ok = ls.every((v, i) => i === 0 || (dir === "down" ? v <= ls[i - 1] + 1e-6 : v >= ls[i - 1] - 1e-6));
+    if (!ok) throw new Error(`tdesign theme ${prefix} (${modeName}) lightness not monotonic ${dir}: ${ls.map((v) => v.toFixed(3)).join(" ")}`);
+  }
+}
+
+const tdJson = {
+  _generatedBy: "bun run gen:mobile — scripts/design/export-tokens.ts (do not edit); TDThemeData.fromJson('slab', …, darkName: 'slabDark')",
+  slab: tdLight,
+  slabDark: tdDark,
+};
+const tdText = `${JSON.stringify(tdJson, null, 2)}\n`;
+
 // ── Write or drift-check ────────────────────────────────────────────────────
 
 async function writeOrCheck(outPath: string, expected: string): Promise<string[]> {
@@ -328,6 +637,7 @@ async function writeOrCheck(outPath: string, expected: string): Promise<string[]
 const drift = [
   ...(await writeOrCheck(JSON_OUT, jsonText)),
   ...(await writeOrCheck(DART_OUT, dartText)),
+  ...(await writeOrCheck(TD_OUT, tdText)),
 ];
 
 if (drift.length > 0) {
@@ -339,6 +649,6 @@ if (drift.length > 0) {
 
 if (!CHECK) {
   console.log(
-    `Exported ${light.colors.size} light / ${dark.colors.size} dark colors + ${metrics.size} metrics → flutter/slab-mobile (tokens.json + slab_tokens.g.dart).`,
+    `Exported ${light.colors.size} light / ${dark.colors.size} dark colors + ${metrics.size} metrics + tdesign theme (${Object.keys(tdLight.color).length} keys/mode) → flutter/slab-mobile (tokens.json + slab_tokens.g.dart + assets/theme/tdesign-theme.json).`,
   );
 }

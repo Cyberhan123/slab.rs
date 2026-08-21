@@ -1,9 +1,8 @@
-/// Server health dot + label (success / destructive tokens only — no raw colors).
+/// Server health dot + label (TDesign success/error theme tokens only).
 library;
 
 import 'package:flutter/material.dart';
-
-import '../theme/slab_theme.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 class HealthIndicator extends StatelessWidget {
   const HealthIndicator({super.key, required this.online, required this.onlineLabel, required this.offlineLabel});
@@ -14,25 +13,20 @@ class HealthIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final extras = slabExtras(context);
-    final scheme = Theme.of(context).colorScheme;
+    final td = TDTheme.of(context);
+    final color = online ? td.successNormalColor : td.errorNormalColor;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           width: 8,
           height: 8,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: online ? extras.success : scheme.error,
-          ),
+          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
         ),
         const SizedBox(width: 6),
-        Text(
+        TDText(
           online ? onlineLabel : offlineLabel,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: online ? extras.success : scheme.error,
-              ),
+          style: TextStyle(fontSize: 11, color: color),
         ),
       ],
     );

@@ -25,6 +25,13 @@ dependencies:
   shared_preferences: ^2.5.3
   # LLM-streaming-tolerant markdown (survives unterminated fences mid-delta).
   gpt_markdown: ^1.1.2
+  # UI component library (TDNavBar/TDCell/TDButton/TDDialog/…). Exact pin on
+  # purpose: the lib is 0.x (alpha maturity) — range re-resolution could pull
+  # breaking 0.2.x API churn; upgrades are deliberate diffs.
+  tdesign_flutter: 0.2.7
+  # Pull-to-refresh shell around TDesign's TDRefreshHeader (tdesign_flutter
+  # itself only ships the header); mirrored constraint from its pubspec.
+  easy_refresh: ^3.4.0
 
 dev_dependencies:
   flutter_test:
@@ -35,3 +42,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/i18n/
+    - assets/theme/

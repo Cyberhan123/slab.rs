@@ -5,9 +5,10 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../conversation/turn_items.dart';
-import '../theme/slab_theme.dart';
+import '../theme/td_theme.dart';
 import '../theme/slab_tokens.g.dart';
 import 'tool_card.dart';
 
@@ -20,7 +21,7 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final extras = slabExtras(context);
-    final scheme = Theme.of(context).colorScheme;
+    final td = TDTheme.of(context);
     final fromUser = message.fromUser;
     final bubble = fromUser ? extras.userBubble : extras.aiBubble;
     final foreground = fromUser ? extras.userBubbleForeground : extras.aiBubbleForeground;
@@ -43,7 +44,7 @@ class MessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final (index, part) in message.parts.indexed) _buildPart(context, part, index, foreground, scheme, extras),
+            for (final (index, part) in message.parts.indexed) _buildPart(context, part, index, foreground, td, extras),
           ],
         ),
       ),
@@ -55,7 +56,7 @@ class MessageBubble extends StatelessWidget {
     UiPart part,
     int index,
     Color foreground,
-    ColorScheme scheme,
+    TDThemeData td,
     SlabExtras extras,
   ) {
     switch (part) {
@@ -75,14 +76,14 @@ class MessageBubble extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.psychology, size: 14, color: scheme.onSurfaceVariant),
+                Icon(TDIcons.lightbulb, size: 14, color: td.textColorSecondary),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: Text(
+                  child: TDText(
                     part.streaming ? '${part.text} …' : part.text,
                     maxLines: part.streaming ? 4 : 8,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: SlabMetrics.textCaption, height: 1.4, color: scheme.onSurfaceVariant),
+                    style: TextStyle(fontSize: SlabMetrics.textCaption, height: 1.4, color: td.textColorSecondary),
                   ),
                 ),
               ],
@@ -104,12 +105,12 @@ class MessageBubble extends StatelessWidget {
           padding: EdgeInsets.only(top: index == 0 ? 0 : 6),
           child: Row(
             children: [
-              Icon(Icons.error_outline, size: 14, color: scheme.error),
+              Icon(TDIcons.error_circle, size: 14, color: td.errorNormalColor),
               const SizedBox(width: 6),
               Expanded(
-                child: Text(
+                child: TDText(
                   part.text,
-                  style: TextStyle(fontSize: SlabMetrics.textCaption, color: scheme.error),
+                  style: TextStyle(fontSize: SlabMetrics.textCaption, color: td.errorNormalColor),
                 ),
               ),
             ],
