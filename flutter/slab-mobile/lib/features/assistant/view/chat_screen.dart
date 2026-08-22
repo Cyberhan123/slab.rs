@@ -27,6 +27,7 @@ import '../model/model_cubit.dart';
 import '../model/model_repository.dart';
 import '../model/model_status_label.dart';
 import 'widgets/approval_banner.dart';
+import 'widgets/composer/composer_bar.dart';
 import 'widgets/composer/model_switch_dialog.dart';
 import 'widgets/messages/message_list.dart';
 import 'widgets/messages/token_usage_indicator.dart';
@@ -55,7 +56,6 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final _composer = TextEditingController();
   final _scroll = ScrollController();
   bool _autoScroll = true;
   late final ConversationController _controller;
@@ -98,7 +98,6 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _controller.removeListener(_onControllerChanged);
-    _composer.dispose();
     _scroll.dispose();
     if (_ownsController) _controller.dispose();
     super.dispose();
@@ -113,21 +112,11 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Future<void> _send() async {
-    final text = _composer.text.trim();
-    if (text.isEmpty) return;
-    _composer.clear();
-    final modelId = context.read<ModelCubit>().state.selectedId;
-    await _controller.sendText(text, modelId: modelId);
-    // First-prompt auto-title when the server name is still a default label.
+  /// First-prompt auto-title when the server name is still a default label.
+  Future<void> _autoTitle(String text) async {
     final serverName = widget.sessionName;
-    if (serverName != null &&
-        GetIt.I.isRegistered<SessionMetaDao>() &&
-        isDefaultSessionLabel(serverName)) {
-      await getIt<SessionMetaDao>().upsertLabel(
-        widget.sessionId,
-        createConversationLabel(text, serverName),
-      );
+    if (serverName != null && GetIt.I.isRegistered<SessionMetaDao>() && isDefaultSessionLabel(serverName)) {
+      await getIt<SessionMetaDao>().upsertLabel(widget.sessionId, createConversationLabel(text, serverName));
     }
   }
 
@@ -414,11 +403,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   );
                 },
               ),
-              _Composer(
+              ComposerBar(
                 controller: _controller,
-                composer: _composer,
-                onSend: _send,
-                t: t,
+                sessionId: widget.sessionId,
+                locale: locale,
+                catalog: catalog,
+                onSubmitted: _autoTitle,
               ),
             ],
           ),
@@ -481,60 +471,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
-class _Composer extends StatelessWidget {
-  const _Composer({
-    required this.controller,
-    required this.composer,
-    required this.onSend,
-    required this.t,
-  });
-
-  final ConversationController controller;
-  final TextEditingController composer;
-  final Future<void> Function() onSend;
-  final String Function(String key, [Map<String, String> args]) t;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) {
-        final running = controller.state.turnPhase != TurnPhase.idle;
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: TTextarea(
-                  controller: composer,
-                  minLines: 1,
-                  maxLines: 5,
-                  hintText: t('mobile.chat.inputHint'),
-                  onSubmitted: (_) => onSend(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              running
-                  ? TButton(
-                      icon: Icon(TIcons.stop_circle),
-                      size: TButtonSize.small,
-                      colorScheme: TButtonColorScheme.danger,
-                      onPressed: controller.interrupt,
-                    )
-                  : TButton(
-                      icon: Icon(TIcons.send),
-                      size: TButtonSize.small,
-                      colorScheme: TButtonColorScheme.primary,
-                      onPressed: onSend,
-                    ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
 
 class _StatusTag extends StatelessWidget {
   const _StatusTag({required this.label, required this.colorScheme});

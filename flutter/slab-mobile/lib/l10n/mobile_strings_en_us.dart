@@ -32,6 +32,7 @@ const mobileStringsEnUs = <String, String>{
   'mobile.chat.connecting': 'Connecting…',
   'mobile.chat.reconnecting': 'Reconnecting…',
   'mobile.chat.modelLoading': 'Loading model…',
+  'mobile.chat.effortAuto': 'Auto',
   'mobile.chat.copied': 'Copied',
   'mobile.chat.rollbackTitle': 'Retract this message?',
   'mobile.chat.rollbackBody': 'This message and everything after it will be removed from the thread.',

@@ -30,6 +30,7 @@ const mobileStringsZhCn = <String, String>{
   'mobile.chat.connecting': '连接中…',
   'mobile.chat.reconnecting': '重连中…',
   'mobile.chat.modelLoading': '模型加载中…',
+  'mobile.chat.effortAuto': '自动',
   'mobile.chat.copied': '已复制',
   'mobile.chat.rollbackTitle': '撤回到这条消息？',
   'mobile.chat.rollbackBody': '这条消息及其后的所有内容将从会话中移除。',

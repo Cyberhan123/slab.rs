@@ -13,6 +13,8 @@ import 'package:slab_mobile/features/assistant/view/widgets/messages/message_lis
 import 'package:slab_mobile/features/assistant/view/widgets/messages/plan_card.dart';
 import 'package:slab_mobile/features/assistant/view/widgets/messages/terminal_card.dart';
 import 'package:slab_mobile/features/assistant/bootstrap/session_labels.dart';
+import 'package:slab_mobile/features/assistant/commands/command_registry.dart';
+import 'package:slab_mobile/proto/harness_types.dart' as proto;
 
 void main() {
   group('parseAnsi', () {
@@ -183,6 +185,42 @@ void main() {
       expect(createConversationLabel('', 'fallback'), 'fallback');
       final long = 'a' * 50;
       expect(createConversationLabel(long, 'fallback'), '${'a' * 42}...');
+    });
+  });
+
+  group('slash-command dispatch', () {
+    final commands = [
+      proto.CommandInfo(name: 'compact', aliases: const ['summarize'], description: '', kind: proto.CommandKind.control, source: proto.CommandSource.builtin, controlAction: 'compact'),
+      proto.CommandInfo(name: 'fork', aliases: const [], description: '', kind: proto.CommandKind.control, source: proto.CommandSource.builtin, controlAction: 'fork'),
+      proto.CommandInfo(name: 'plan', aliases: const [], description: '', kind: proto.CommandKind.prompt, source: proto.CommandSource.builtin),
+      proto.CommandInfo(name: 'explain', aliases: const [], description: '', kind: proto.CommandKind.prompt, source: proto.CommandSource.skill),
+    ];
+
+    test('parses name and args; bare or non-slash input is not a command', () {
+      expect(parseAssistantCommand('/compact')!.name, 'compact');
+      expect(parseAssistantCommand('/review  this   file ')!.args, 'this file');
+      expect(parseAssistantCommand('hello'), isNull);
+      expect(parseAssistantCommand('/'), isNull);
+      expect(parseAssistantCommand('  '), isNull);
+    });
+
+    test('control commands resolve to host actions and never send', () {
+      expect(resolveCommandDispatch('/compact', commands), isA<ControlDispatch>()
+          .having((d) => d.controlAction, 'action', 'compact'));
+      // Alias lookup works too.
+      expect(resolveCommandDispatch('/summarize', commands), isA<ControlDispatch>());
+      expect(resolveCommandDispatch('/fork now', commands), isA<ControlDispatch>()
+          .having((d) => d.controlAction, 'action', 'fork'));
+    });
+
+    test('/plan toggles plan mode client-side', () {
+      expect(resolveCommandDispatch('/plan', commands), isA<TogglePlanDispatch>());
+    });
+
+    test('prompt commands and unknown text fall through to send', () {
+      expect(resolveCommandDispatch('/explain rust', commands), isA<SendDispatch>());
+      expect(resolveCommandDispatch('just chatting', commands), isA<SendDispatch>());
+      expect(resolveCommandDispatch('/unknown', commands), isA<SendDispatch>());
     });
   });
 }
