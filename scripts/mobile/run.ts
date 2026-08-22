@@ -6,9 +6,10 @@
  * (same spawn pattern as `scripts/cargo/run.ts` / `gen/generate-harness-bindings.ts`).
  *
  * Usage: bun ./scripts/mobile/run.ts <flutter args...>
- *   bun run dev:mobile   → run
  *   bun run check:mobile → analyze
  *   bun run test:mobile  → test
+ *
+ * `dev:mobile` uses scripts/mobile/dev.ts instead (server + flutter run).
  */
 
 import { spawn } from "node:child_process";

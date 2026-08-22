@@ -48,12 +48,13 @@ assets/i18n/{en-US,zh-CN}.json    GENERATED — flat catalogs from @slab/i18n
 bun run gen:mobile       # regenerate tokens + locale assets (NO Flutter SDK needed)
 bun run check:mobile     # flutter analyze
 bun run test:mobile      # flutter test (52 unit tests; no device needed)
-bun run dev:mobile       # flutter run; pass defines through:
+bun run dev:server       # headless slab-server alone (mobile clients can target it)
+bun run dev:mobile       # dev:server in the background + flutter run; pass defines through:
 bun run dev:mobile -- --dart-define=SLAB_API_BASE_URL=http://10.0.2.2:3000
 ```
 
-- **Android emulator**: `10.0.2.2` is the host loopback — a desktop
-  `slab-server` on `127.0.0.1:3000` is reachable as above.
+- **Android emulator**: `10.0.2.2` is the host loopback — the `dev:server` /
+  `dev:mobile` `slab-server` on `127.0.0.1:3000` is reachable as above.
 - **Physical device**: start slab-server with `--gateway-bind 0.0.0.0:3000`
   (see `bin/slab-server/README.md`), allow it through the firewall, then
   connect to `http://<LAN-IP>:3000`.

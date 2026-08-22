@@ -160,7 +160,7 @@ let sidecarBuildPromise: Promise<void> | undefined
  * `target/debug/`: `slab-server` plus its `managed_children` siblings
  * `slab-runtime` and `slab-js-runtime` (slab-server resolves those as siblings
  * next to its own exe via `resolve_sibling_sidecar_exe`). This mirrors
- * `dev:app`'s `build:sidecars` prefix so `bun run test:e2e` is self-sufficient:
+ * `dev:desktop`'s `build:sidecars` prefix so `bun run test:e2e` is self-sufficient:
  * no manual pre-build required, and a stale binary is rebuilt (cargo incremental
  * makes an up-to-date build a near no-op). Memoized per process.
  */

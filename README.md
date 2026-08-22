@@ -125,10 +125,13 @@ Use these commands from the repository root for the most common day-to-day workf
 
 ```sh
 # Start the main development stack (desktop host + sidecars + server/runtime)
-bun run dev:app
-
-# Start the desktop frontend only
 bun run dev:desktop
+
+# Run the headless slab-server alone (default bind 127.0.0.1:3000)
+bun run dev:server
+
+# Start the desktop frontend only (Vite, no desktop host)
+bun run dev:desktop:ui
 ```
 
 ### Build
@@ -150,13 +153,13 @@ bun run test:browser
 bun run test:e2e
 
 # Build the desktop frontend only
-bun run build:desktop
+bun run build:desktop:ui
 
 # Build and stage desktop sidecars
 bun run build:sidecars
 
 # Build the desktop app binary without an installer bundle
-bun run build:app
+bun run build:desktop
 
 # Build the Windows full installer
 bun run build:windows-installer

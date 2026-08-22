@@ -59,8 +59,9 @@ Use this as the repo-wide AI reference for architecture boundaries, workflow, an
 ```sh
 bun install
 
-bun run dev:app
 bun run dev:desktop
+bun run dev:server
+bun run dev:desktop:ui
 
 bun run lint
 bun run lint:fix
@@ -80,10 +81,10 @@ bun run test:components
 bun run test:server
 
 bun run build:desktop
+bun run build:desktop:ui
 bun run build:language-servers
 bun run build:sidecars
 bun run build:sidecars:release
-bun run build:app
 bun run build:windows-installer
 
 bun run gen:api
@@ -101,7 +102,7 @@ bun run test:mobile
 bun run dev:mobile
 ```
 
-`gen:mobile` regenerates the mobile token/locale assets and needs only Bun. The other mobile scripts wrap the Flutter SDK inside `flutter/slab-mobile` (see `flutter/slab-mobile/README.md`).
+`gen:mobile` regenerates the mobile token/locale assets and needs only Bun. The other mobile scripts wrap the Flutter SDK inside `flutter/slab-mobile` (see `flutter/slab-mobile/README.md`). `dev`/`dev:desktop` run the Tauri desktop stack (Tauri spawns `slab-server` itself); `dev:server` runs the headless server standalone; `dev:mobile` runs that server plus `flutter run`.
 
 ## Reference Map
 

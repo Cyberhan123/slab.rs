@@ -479,12 +479,12 @@ SLAB_BACKEND_CAPACITY=4           # Max concurrent requests per backend
 ### Development Build
 ```bash
 bun install
-bun run dev:app
+bun run dev:desktop
 ```
 
 ### Production Build
 ```bash
-bun run build:app
+bun run build:desktop
 ```
 
 ### Distribution

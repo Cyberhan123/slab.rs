@@ -45,7 +45,7 @@ Bun-managed frontend package.
 
 - PR CI keeps the fast desktop gate in `bun run check:frontend`, `bun run test:frontend`, `bun run test:browser`, contract drift checks, schema drift checks, and `bun run check:bundle-budget`.
 - Fullstack release-risk flows stay in `bun run test:e2e` and are run from release, manual, or nightly CI paths.
-- Desktop bundle budgets are tracked in `bundle-budget.json`; run `bun run build:desktop` before `bun run check:bundle-budget`.
+- Desktop bundle budgets are tracked in `bundle-budget.json`; run `bun run build:desktop:ui` before `bun run check:bundle-budget`.
 - Runtime rollback flags are exposed through settings PMIDs:
   - `guardrails.assistant_sse_resume`
   - `guardrails.workspace_monaco_lazy`
