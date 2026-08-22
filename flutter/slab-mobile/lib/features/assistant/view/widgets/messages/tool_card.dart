@@ -6,10 +6,10 @@ library;
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../conversation/turn_items.dart';
-import '../../../../l10n/mobile_strings.dart';
-import '../../../../theme/slab_tokens.g.dart';
-import '../../../../theme/td_theme.dart';
+import '../../../../../conversation/turn_items.dart';
+import '../../../../../l10n/mobile_strings.dart';
+import '../../../../../theme/slab_tokens.g.dart';
+import '../../../../../theme/td_theme.dart';
 
 class ToolCard extends StatelessWidget {
   const ToolCard({super.key, required this.part, required this.locale});

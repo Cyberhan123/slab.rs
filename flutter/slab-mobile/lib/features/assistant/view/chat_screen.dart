@@ -1,6 +1,7 @@
-/// Chat screen: history + live turn projection (ListenableBuilder over the
-/// framework-free `ConversationController`), approval banner, composer with
-/// send / interrupt, connection-phase tag.
+/// Chat screen: timeline (history markers, compaction dividers, model-load
+/// indicator via [MessageList]) over the framework-free conversation
+/// controller, approval banner, composer with send / interrupt, token-usage
+/// indicator, rollback affordance with a danger confirm.
 ///
 /// The controller is page-owned: one per navigation onto `/chat/:sessionId`
 /// (pristine state per session, mirroring the TS hook keyed on sessionId).
@@ -17,7 +18,8 @@ import '../../../conversation/conversation_controller.dart';
 import '../../../l10n/mobile_strings.dart';
 import '../../../theme/slab_tokens.g.dart';
 import 'widgets/approval_banner.dart';
-import 'widgets/message_bubble.dart';
+import 'widgets/messages/message_list.dart';
+import 'widgets/messages/token_usage_indicator.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key, required this.sessionId, this.sessionName, this.controller});
@@ -39,6 +41,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _autoScroll = true;
   late final ConversationController _controller;
   bool _ownsController = false;
+  String? _lastActionErrorKey;
 
   @override
   void initState() {
@@ -52,10 +55,22 @@ class _ChatScreenState extends State<ChatScreen> {
       _controller = ConversationController(sessionId: widget.sessionId, baseUrl: config.baseUrl)..start();
       _ownsController = true;
     }
+    _controller.addListener(_onControllerChanged);
+  }
+
+  void _onControllerChanged() {
+    // One-shot action errors (compact/fork failures) surface as toasts.
+    final actionError = _controller.state.actionError;
+    if (actionError == null) return;
+    final key = '${actionError.kind}:${actionError.message}';
+    if (key == _lastActionErrorKey) return;
+    _lastActionErrorKey = key;
+    TToast.showText(actionError.message, context: context);
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_onControllerChanged);
     _composer.dispose();
     _scroll.dispose();
     if (_ownsController) _controller.dispose();
@@ -76,6 +91,30 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty) return;
     _composer.clear();
     await _controller.sendText(text);
+  }
+
+  /// Danger confirm before retracting a turn (desktop parity).
+  Future<void> _confirmRollback(int turnIndex) async {
+    final localeCubit = context.read<LocaleCubit>();
+    final locale = localeCubit.state;
+    final confirmed = await TDialog.show<bool>(
+      context,
+      dialog: TDialog(
+        title: Text(mobileT(locale, 'mobile.chat.rollbackTitle')),
+        content: Text(mobileT(locale, 'mobile.chat.rollbackBody')),
+        actions: [
+          TDialogAction(child: Text(mobileT(locale, 'common.actions.cancel')), result: false),
+          TDialogAction(
+            child: Text(mobileT(locale, 'pages.assistant.message.rollback')),
+            result: true,
+            role: TDialogActionRole.destructive,
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await _controller.rollbackFromTurn(turnIndex);
+    }
   }
 
   @override
@@ -129,31 +168,23 @@ class _ChatScreenState extends State<ChatScreen> {
                   builder: (context, _) {
                     final state = _controller.state;
                     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeAutoScroll());
-                    return ListView.builder(
-                      controller: _scroll,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      itemCount: state.messages.length + (state.isHistoryLoading ? 1 : 0) + (state.error != null ? 1 : 0),
-                      itemBuilder: (context, index) {
-                        final messages = state.messages;
-                        if (index < messages.length) {
-                          return MessageBubble(message: messages[index], locale: locale);
-                        }
-                        final offset = index - messages.length;
-                        if (offset == 0 && state.isHistoryLoading) {
-                          return const Padding(
-                            padding: EdgeInsets.all(16),
-                            child: Center(child: TLoading(size: TLoadingSize.small, icon: TLoadingIcon.circle)),
-                          );
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: TText(
-                            t('mobile.chat.restoreFailed', {'message': state.error ?? ''}),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: SlabMetrics.textCaption, color: context.tTheme.errorNormalColor),
-                          ),
-                        );
-                      },
+                    final rows = buildScrollerRows(
+                      messages: state.messages,
+                      compactionMarkers: state.compactionMarkers,
+                      historyCount: state.historyCount,
+                      sessionLoading: state.isHistoryLoading,
+                      modelLoad: state.modelLoad,
+                    );
+                    if (state.error != null) {
+                      rows.add(ErrorRow(message: t('mobile.chat.restoreFailed', {'message': state.error ?? ''})));
+                    }
+                    return MessageList(
+                      rows: rows,
+                      locale: locale,
+                      catalog: catalog,
+                      userMessageTurnIndex: state.userMessageTurnIndex,
+                      onRollback: _confirmRollback,
+                      scrollController: _scroll,
                     );
                   },
                 ),
@@ -188,6 +219,22 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                       ),
                   ],
+                );
+              },
+            ),
+            ListenableBuilder(
+              listenable: _controller,
+              builder: (context, _) {
+                final state = _controller.state;
+                final usage = state.turnUsage;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: usage != null
+                        ? TokenUsageIndicator(usage: usage, catalog: context.read<LocaleCubit>().catalog)
+                        : const SizedBox.shrink(),
+                  ),
                 );
               },
             ),

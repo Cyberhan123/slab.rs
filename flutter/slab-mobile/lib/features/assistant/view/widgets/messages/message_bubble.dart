@@ -1,22 +1,28 @@
 /// Chat bubble: user bubbles right-aligned (`user-bubble` tokens), assistant
-/// bubbles left (`ai-bubble` tokens); markdown text, tool cards, images,
-/// reasoning and error parts.
+/// bubbles left (`ai-bubble` tokens); markdown text, reasoning, images,
+/// errors, and the tool cards (terminal / file-change / plan / generic).
 library;
 
 import 'package:flutter/material.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../conversation/turn_items.dart';
-import '../../../../theme/slab_tokens.g.dart';
-import '../../../../theme/td_theme.dart';
+import '../../../../../../conversation/turn_items.dart';
+import '../../../../../../l10n/catalog.dart';
+import '../../../../../theme/slab_tokens.g.dart';
+import '../../../../../theme/td_theme.dart';
+import 'file_change_card.dart';
+import 'plan_card.dart';
+import 'reasoning_part.dart';
+import 'terminal_card.dart';
 import 'tool_card.dart';
 
 class MessageBubble extends StatelessWidget {
-  const MessageBubble({super.key, required this.message, required this.locale});
+  const MessageBubble({super.key, required this.message, required this.locale, required this.catalog});
 
   final ChatMessage message;
   final String locale;
+  final SlabCatalog catalog;
 
   @override
   Widget build(BuildContext context) {
@@ -70,27 +76,10 @@ class MessageBubble extends StatelessWidget {
       case ReasoningUiPart():
         return Padding(
           padding: EdgeInsets.only(top: index == 0 ? 0 : 6),
-          child: Opacity(
-            opacity: 0.75,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(TIcons.lightbulb, size: 14, color: td.textColorSecondary),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: TText(
-                    part.streaming ? '${part.text} …' : part.text,
-                    maxLines: part.streaming ? 4 : 8,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: SlabMetrics.textCaption, height: 1.4, color: td.textColorSecondary),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          child: Opacity(opacity: 0.85, child: ReasoningPart(part: part, catalog: catalog)),
         );
       case ToolUiPart():
-        return ToolCard(part: part, locale: locale);
+        return _toolCard(part);
       case ImageUiPart():
         return Padding(
           padding: EdgeInsets.only(top: index == 0 ? 0 : 6),
@@ -115,6 +104,23 @@ class MessageBubble extends StatelessWidget {
             ],
           ),
         );
+    }
+  }
+
+  /// Route tool cards by tool name — the specialized assistant tools get
+  /// their cards, everything else (mcp tools, webSearch, unknown) the
+  /// generic one.
+  Widget _toolCard(ToolUiPart part) {
+    switch (part.toolName) {
+      case 'commandExecution':
+        return TerminalCard(part: part);
+      case 'fileChange':
+        return FileChangeCard(part: part);
+      case 'plan':
+        final plan = decodePlan(part.input);
+        return plan != null ? PlanCard(plan: plan) : ToolCard(part: part, locale: locale);
+      default:
+        return ToolCard(part: part, locale: locale);
     }
   }
 }

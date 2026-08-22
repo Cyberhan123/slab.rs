@@ -92,6 +92,7 @@ class ConversationState {
     this.isForking = false,
     this.isRollingBack = false,
     this.restoreVersion = 0,
+    this.historyCount = 0,
   });
 
   final List<ChatMessage> messages;
@@ -123,6 +124,10 @@ class ConversationState {
   final bool isForking;
   final bool isRollingBack;
 
+  /// Number of leading [ConversationState.messages] restored from history;
+  /// the history-restored marker renders after them.
+  final int historyCount;
+
   /// Bumped on fork/rollback re-binds (the desktop remounts the pane on it;
   /// mobile uses it to reset per-thread UI state like drafts).
   final int restoreVersion;
@@ -150,6 +155,7 @@ class ConversationState {
     bool? isForking,
     bool? isRollingBack,
     int? restoreVersion,
+    int? historyCount,
   }) =>
       ConversationState(
         messages: messages ?? this.messages,
@@ -171,6 +177,7 @@ class ConversationState {
         isForking: isForking ?? this.isForking,
         isRollingBack: isRollingBack ?? this.isRollingBack,
         restoreVersion: restoreVersion ?? this.restoreVersion,
+        historyCount: historyCount ?? this.historyCount,
       );
 }
 
@@ -316,6 +323,7 @@ class ConversationController implements Listenable {
       _emit(_state.copyWith(
         threadId: thread.id,
         messages: List.unmodifiable(_history),
+        historyCount: _history.length,
         approvals: const [],
         approvalStatusByItemId: const {},
         userMessageTurnIndex: _userMessageTurnIndex,
@@ -396,7 +404,7 @@ class ConversationController implements Listenable {
       boundThreadId: threadId,
       threshold: client.lastTurnIndex,
     );
-    _emit(_state.copyWith(messages: List.unmodifiable(history), turnPhase: TurnPhase.running, clearError: true));
+    _emit(_state.copyWith(messages: List.unmodifiable(history), historyCount: _history.length, turnPhase: TurnPhase.running, clearError: true));
 
     try {
       await client.turnStart(
@@ -499,6 +507,7 @@ class ConversationController implements Listenable {
       _emit(_state.copyWith(
         threadId: thread.id,
         messages: List.unmodifiable(_history),
+        historyCount: _history.length,
         userMessageTurnIndex: _userMessageTurnIndex,
         compactionMarkers: [
           for (final marker in state.compactionMarkers)
@@ -532,6 +541,7 @@ class ConversationController implements Listenable {
       _emit(_state.copyWith(
         threadId: thread.id,
         messages: List.unmodifiable(_history),
+        historyCount: _history.length,
         userMessageTurnIndex: _userMessageTurnIndex,
         restoreVersion: state.restoreVersion + 1,
         isForking: false,
@@ -557,6 +567,7 @@ class ConversationController implements Listenable {
       _emit(_state.copyWith(
         threadId: thread.id,
         messages: List.unmodifiable(_history),
+        historyCount: _history.length,
         userMessageTurnIndex: _userMessageTurnIndex,
         restoreVersion: state.restoreVersion + 1,
         isRollingBack: false,
@@ -637,7 +648,7 @@ class ConversationController implements Listenable {
     final projector = _projector;
     if (projector == null) return;
     final terminated = projector.feed(notification);
-    _emit(_state.copyWith(messages: List.unmodifiable([..._history, ...projector.messages])));
+    _emit(_state.copyWith(messages: List.unmodifiable([..._history, ...projector.messages]), historyCount: _history.length));
     if (terminated) {
       _projector = projector.finished && projector.messages.isEmpty ? null : projector;
     }
