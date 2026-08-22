@@ -151,6 +151,53 @@ final RegExp thinkBlockPattern = RegExp(r'<think\b[^>]*>[\s\S]*?</think>', caseS
 
 String stripThinkBlocks(String text) => text.replaceAll(thinkBlockPattern, '').trim();
 
+/// Trailing lines some local models leak into the assistant text at the end
+/// of a turn: tool-call syntax (`tool_call:` / `tool_call_id:`) and raw
+/// stop-token fragments. Port of the TS `stripTrailingAssistantTurnArtifacts`
+/// (leading/middle artifacts are content — only the tail is chatty scaffolding).
+final RegExp _artifactLinePattern = RegExp(
+  r'^\s*(?:tool_call(?:\s+id=[^:]+)?:\s*[A-Za-z0-9_.-]+\(.*\)|tool_call_id:\s*.+)\s*$',
+  caseSensitive: false,
+);
+
+String stripTrailingAssistantTurnArtifacts(String value) {
+  final cleaned = value
+      .replaceAll(RegExp(r'<\|endoftext\|>\s*<\|im_start\|>[\s\S]*$'), '')
+      .replaceAll(RegExp(r'<\|endoftext\|>\s*$'), '')
+      .replaceAll(RegExp(r'<\|im_end\|>\s*$'), '')
+      .replaceAll(RegExp(r'<\|eot_id\|>\s*$'), '');
+
+  final lines = cleaned.split(RegExp(r'\r?\n'));
+  var end = lines.length;
+  while (end > 0 && lines[end - 1].trim().isEmpty) {
+    end -= 1;
+  }
+  final artifactEnd = end;
+  while (end > 0 && _artifactLinePattern.hasMatch(lines[end - 1])) {
+    end -= 1;
+  }
+  if (end == artifactEnd) return cleaned;
+  while (end > 0 && lines[end - 1].trim().isEmpty) {
+    end -= 1;
+  }
+  return lines.sublist(0, end).join('\n').trimRight();
+}
+
+/// userMessage itemId → numeric turn index for the bound thread. Drives the
+/// per-user-bubble rollback affordance: rolling back to that message
+/// retracts it and every later turn (`thread/rollback` with `toTurnId: n-1`).
+Map<String, int> buildUserMessageTurnIndex(proto.Thread thread) {
+  final index = <String, int>{};
+  for (final turn in thread.turns) {
+    final numeric = turn.numericId;
+    if (numeric == null) continue;
+    for (final item in turn.items) {
+      if (item is proto.UserMessageItem) index[item.id] = numeric;
+    }
+  }
+  return index;
+}
+
 /// Resolve an image reference into a URL the app can fetch: `data:` URIs and
 /// absolute http(s) URLs pass through; slab-server artifact paths (`/v1/...`)
 /// resolve against the API base; bare filesystem paths cannot be fetched by a
@@ -170,7 +217,7 @@ String? resolveImageUrl(String pathOrUrl, Uri baseUrl) {
 List<UiPart> _turnItemToUiParts(proto.TurnItem item, Uri baseUrl) {
   switch (item) {
     case proto.AgentMessageItem():
-      final text = stripThinkBlocks(item.text);
+      final text = stripTrailingAssistantTurnArtifacts(stripThinkBlocks(item.text));
       return text.isEmpty ? const [] : [TextUiPart(text: text)];
     case proto.ReasoningItem():
       return item.content.isEmpty ? const [] : [ReasoningUiPart(text: item.content)];
@@ -352,7 +399,7 @@ class LiveTurnProjector {
         // self-heals a bubble whose deltas were missed across a reconnect).
         final found = _findPart(item.id);
         final accumulated = found != null && found.$3 is TextUiPart ? (found.$3 as TextUiPart).text : '';
-        final stripped = stripThinkBlocks(item.text);
+        final stripped = stripTrailingAssistantTurnArtifacts(stripThinkBlocks(item.text));
         final finalText = stripped.isNotEmpty ? stripped : accumulated;
         if (found != null) {
           _replacePartAt(found.$1, found.$2, TextUiPart(text: finalText));

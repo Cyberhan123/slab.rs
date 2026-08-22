@@ -34,6 +34,33 @@ enum ConnectionPhase { idle, connecting, ready, reconnecting }
 
 enum TurnPhase { idle, running, modelLoading }
 
+/// Whether a compaction marker represents an automatic run or a manual
+/// `/compact` invocation.
+enum CompactionMode { auto, manual }
+
+enum CompactionPhase { compacting, compacted }
+
+/// A session-scoped compaction divider rendered in the message stream.
+/// Survives reconnects (state lives in the controller, mirroring TS).
+class CompactionMarker {
+  const CompactionMarker({required this.id, required this.mode, required this.phase, required this.threadId});
+  final String id;
+  final CompactionMode mode;
+  final CompactionPhase phase;
+  final String threadId;
+
+  CompactionMarker copyWith({CompactionPhase? phase}) =>
+      CompactionMarker(id: id, mode: mode, phase: phase ?? this.phase, threadId: threadId);
+}
+
+/// One-shot error from a stream action (compact/fork) surfaced as a toast;
+/// distinct from `error` (restore/turn failures rendered in-stream).
+class ActionError {
+  const ActionError({required this.kind, required this.message});
+  final String kind; // "compact" | "fork"
+  final String message;
+}
+
 /// Transient model-load indicator state (`model/load/delta` + `completed`).
 class ModelLoadState {
   const ModelLoadState({required this.phase, this.modelId, this.downloadedBytes, this.totalBytes});
@@ -56,6 +83,15 @@ class ConversationState {
     this.turnUsage,
     this.turnPhase = TurnPhase.idle,
     this.connection = ConnectionPhase.idle,
+    this.planMode = false,
+    this.commands = const [],
+    this.compactionMarkers = const [],
+    this.userMessageTurnIndex = const {},
+    this.actionError,
+    this.isCompacting = false,
+    this.isForking = false,
+    this.isRollingBack = false,
+    this.restoreVersion = 0,
   });
 
   final List<ChatMessage> messages;
@@ -68,6 +104,28 @@ class ConversationState {
   final proto.TurnUsage? turnUsage;
   final TurnPhase turnPhase;
   final ConnectionPhase connection;
+
+  /// Plan mode: turns are sent with `agentType: "plan"`; approving a plan
+  /// approval clears it (rejection keeps it on).
+  final bool planMode;
+
+  /// `/`-command registry snapshot from `command/list` (drives the menu).
+  final List<proto.CommandInfo> commands;
+
+  /// In-stream compaction dividers (auto + manual), oldest first.
+  final List<CompactionMarker> compactionMarkers;
+
+  /// userMessage itemId → numeric turn index (rollback affordance driver).
+  final Map<String, int> userMessageTurnIndex;
+
+  final ActionError? actionError;
+  final bool isCompacting;
+  final bool isForking;
+  final bool isRollingBack;
+
+  /// Bumped on fork/rollback re-binds (the desktop remounts the pane on it;
+  /// mobile uses it to reset per-thread UI state like drafts).
+  final int restoreVersion;
 
   ConversationState copyWith({
     List<ChatMessage>? messages,
@@ -82,6 +140,16 @@ class ConversationState {
     proto.TurnUsage? turnUsage,
     TurnPhase? turnPhase,
     ConnectionPhase? connection,
+    bool? planMode,
+    List<proto.CommandInfo>? commands,
+    List<CompactionMarker>? compactionMarkers,
+    Map<String, int>? userMessageTurnIndex,
+    ActionError? actionError,
+    bool clearActionError = false,
+    bool? isCompacting,
+    bool? isForking,
+    bool? isRollingBack,
+    int? restoreVersion,
   }) =>
       ConversationState(
         messages: messages ?? this.messages,
@@ -94,6 +162,15 @@ class ConversationState {
         turnUsage: turnUsage ?? this.turnUsage,
         turnPhase: turnPhase ?? this.turnPhase,
         connection: connection ?? this.connection,
+        planMode: planMode ?? this.planMode,
+        commands: commands ?? this.commands,
+        compactionMarkers: compactionMarkers ?? this.compactionMarkers,
+        userMessageTurnIndex: userMessageTurnIndex ?? this.userMessageTurnIndex,
+        actionError: clearActionError ? null : (actionError ?? this.actionError),
+        isCompacting: isCompacting ?? this.isCompacting,
+        isForking: isForking ?? this.isForking,
+        isRollingBack: isRollingBack ?? this.isRollingBack,
+        restoreVersion: restoreVersion ?? this.restoreVersion,
       );
 }
 
@@ -133,6 +210,7 @@ class ConversationController implements Listenable {
   StreamSubscription<HarnessStatus>? _statusSub;
   LiveTurnProjector? _projector;
   List<ChatMessage> _history = const [];
+  Map<String, int> _userMessageTurnIndex = const {};
   int _generation = 0;
   bool _sawDrop = false;
 
@@ -204,6 +282,15 @@ class ConversationController implements Listenable {
         }
       }
       if (!isCurrent()) return;
+
+      // Fetch the command-registry snapshot (drives the `/`-menu). Fire-and-
+      // forget: commands must not gate the restore path, and a failure just
+      // leaves the menu on its last (possibly empty) snapshot.
+      unawaited(client.commandList().then((commands) {
+        if (!isCurrent()) return;
+        _emit(_state.copyWith(commands: commands));
+      }).catchError((Object _) {}));
+
       await _resumeAndProject(generation: generation);
     } catch (restoreError) {
       if (!isCurrent()) return;
@@ -231,6 +318,7 @@ class ConversationController implements Listenable {
         messages: List.unmodifiable(_history),
         approvals: const [],
         approvalStatusByItemId: const {},
+        userMessageTurnIndex: _userMessageTurnIndex,
         connection: ConnectionPhase.ready,
       ));
     } catch (resumeError) {
@@ -248,11 +336,13 @@ class ConversationController implements Listenable {
       if (!isCurrent()) return;
       _history = const [];
       _projector = null;
+      _userMessageTurnIndex = const {};
       _emit(_state.copyWith(
         messages: const [],
         threadId: null,
         approvals: const [],
         approvalStatusByItemId: const {},
+        userMessageTurnIndex: const {},
         connection: ConnectionPhase.ready,
       ));
     }
@@ -262,13 +352,21 @@ class ConversationController implements Listenable {
     client.currentThreadId = thread.id;
     client.lastTurnIndex = computeLastTurnIndex(thread);
     _history = projectItems(thread.turns.expand((turn) => turn.items), baseUrl);
+    _userMessageTurnIndex = buildUserMessageTurnIndex(thread);
     _projector = null;
   }
 
-  /// Programmatically start a turn for the given user text: ensures the socket
-  /// is open, lazily binds a thread (`thread/start` on a fresh session), and
-  /// fires `turn/start` with the text input mapping.
-  Future<void> sendText(String text, {String? modelId}) async {
+  /// Programmatically start a turn: ensures the socket is open, lazily binds a
+  /// thread (`thread/start` on a fresh session), and fires `turn/start` with
+  /// text + image inputs and the composer's turn options. Plan mode rides
+  /// along as `agentType: "plan"`.
+  Future<void> send({
+    required String text,
+    List<String> imageUrls = const [],
+    String? effort,
+    String? permissionMode,
+    String? modelId,
+  }) async {
     final effectiveModel = modelId ?? model;
     await client.open();
 
@@ -282,10 +380,15 @@ class ConversationController implements Listenable {
 
     // The optimistic user bubble (the live userMessage item is a no-op in the
     // projector, mirroring the TS stream machine).
+    final parts = <UiPart>[
+      if (text.isNotEmpty) TextUiPart(text: text),
+      for (final url in imageUrls)
+        if (resolveImageUrl(url, baseUrl) case final resolved?) ImageUiPart(url: resolved),
+    ];
     final userMessage = ChatMessage(
       id: 'local-${DateTime.now().microsecondsSinceEpoch}',
       fromUser: true,
-      parts: [TextUiPart(text: text)],
+      parts: parts,
     );
     final history = [..._history, ...?_projector?.messages, userMessage];
     _projector = LiveTurnProjector(
@@ -298,13 +401,26 @@ class ConversationController implements Listenable {
     try {
       await client.turnStart(
         threadId: threadId,
-        input: [proto.textUserInput(text)],
+        input: [
+          if (text.isNotEmpty) proto.textUserInput(text),
+          for (final url in imageUrls) proto.imageUserInput(url),
+        ],
         model: effectiveModel,
+        effort: effort,
+        permissionMode: permissionMode,
+        agentType: state.planMode ? 'plan' : null,
       );
     } catch (turnError) {
       _emit(_state.copyWith(error: turnError.toString(), turnPhase: TurnPhase.idle));
     }
   }
+
+  /// Text-only convenience wrapper over [send].
+  Future<void> sendText(String text, {String? modelId}) =>
+      send(text: text, modelId: modelId);
+
+  /// Toggle plan mode. Resolving a plan approval clears it atomically.
+  void setPlanMode(bool enabled) => _emit(_state.copyWith(planMode: enabled));
 
   /// Interrupt the live turn on the bound thread (best-effort).
   Future<void> interrupt() async {
@@ -324,6 +440,12 @@ class ConversationController implements Listenable {
     if (entry == null) return;
     entry.status = approved ? proto.ApprovalStatus.approved : proto.ApprovalStatus.denied;
     _commitApprovals();
+    // Approving a plan clears plan mode: the next turn/start carries no
+    // `agentType`, so it runs as the default agent with the full tool set.
+    // Rejection keeps plan mode on.
+    if (approved && entry.kind == proto.ApprovalKind.plan) {
+      _emit(_state.copyWith(planMode: false));
+    }
 
     final scope = entry.allowedScopes.isNotEmpty ? entry.allowedScopes.first : proto.ApprovalScope.runOnce;
     try {
@@ -342,6 +464,105 @@ class ConversationController implements Listenable {
       entry.status = proto.ApprovalStatus.pending;
       _commitApprovals();
       rethrow;
+    }
+  }
+
+  /// Manually compact the bound thread (`/compact`): `thread/compact/start`
+  /// then re-resume so the pane re-renders with the compacted history. A
+  /// manual marker rides the stream; failure drops it and surfaces an
+  /// action error.
+  Future<void> compactThread() async {
+    final threadId = client.currentThreadId;
+    if (threadId == null) {
+      _emit(_state.copyWith(actionError: const ActionError(kind: 'compact', message: 'no active thread')));
+      return;
+    }
+    _emit(_state.copyWith(
+      clearError: true,
+      clearActionError: true,
+      isCompacting: true,
+      compactionMarkers: [
+        ...state.compactionMarkers,
+        CompactionMarker(
+          id: 'manual:$threadId:${DateTime.now().millisecondsSinceEpoch}',
+          mode: CompactionMode.manual,
+          phase: CompactionPhase.compacting,
+          threadId: threadId,
+        ),
+      ],
+    ));
+    final markerId = state.compactionMarkers.last.id;
+    try {
+      await client.threadCompactStart(threadId: threadId);
+      final thread = await client.threadResume(threadId: threadId);
+      _bindThread(thread);
+      _emit(_state.copyWith(
+        threadId: thread.id,
+        messages: List.unmodifiable(_history),
+        userMessageTurnIndex: _userMessageTurnIndex,
+        compactionMarkers: [
+          for (final marker in state.compactionMarkers)
+            if (marker.id == markerId) marker.copyWith(phase: CompactionPhase.compacted) else marker,
+        ],
+        isCompacting: false,
+      ));
+    } catch (compactError) {
+      _emit(_state.copyWith(
+        compactionMarkers: [for (final marker in state.compactionMarkers) if (marker.id != markerId) marker],
+        isCompacting: false,
+        actionError: ActionError(kind: 'compact', message: compactError.toString()),
+      ));
+    }
+  }
+
+  /// Fork the bound thread (`/fork`): the child lives under the same slab
+  /// session; the socket re-binds to it and its (copied) history re-renders.
+  /// The parent is retained server-side but unreachable from the UI.
+  Future<void> forkThread() async {
+    final threadId = client.currentThreadId;
+    if (threadId == null) {
+      _emit(_state.copyWith(actionError: const ActionError(kind: 'fork', message: 'no active thread')));
+      return;
+    }
+    _emit(_state.copyWith(clearError: true, clearActionError: true, isForking: true));
+    try {
+      final child = await client.threadFork(threadId: threadId);
+      final thread = await client.threadResume(threadId: child.id);
+      _bindThread(thread);
+      _emit(_state.copyWith(
+        threadId: thread.id,
+        messages: List.unmodifiable(_history),
+        userMessageTurnIndex: _userMessageTurnIndex,
+        restoreVersion: state.restoreVersion + 1,
+        isForking: false,
+      ));
+    } catch (forkError) {
+      _emit(_state.copyWith(
+        isForking: false,
+        actionError: ActionError(kind: 'fork', message: forkError.toString()),
+      ));
+    }
+  }
+
+  /// Retract `turnIndex` and every later turn (`thread/rollback` with
+  /// `toTurnId: n-1`), then re-resume. Turn 0 is a no-op.
+  Future<void> rollbackFromTurn(int turnIndex) async {
+    final threadId = client.currentThreadId;
+    if (threadId == null || turnIndex <= 0) return;
+    _emit(_state.copyWith(clearError: true, isRollingBack: true));
+    try {
+      await client.threadRollback(threadId: threadId, toTurnId: (turnIndex - 1).toString());
+      final thread = await client.threadResume(threadId: threadId);
+      _bindThread(thread);
+      _emit(_state.copyWith(
+        threadId: thread.id,
+        messages: List.unmodifiable(_history),
+        userMessageTurnIndex: _userMessageTurnIndex,
+        restoreVersion: state.restoreVersion + 1,
+        isRollingBack: false,
+      ));
+    } catch (rollbackError) {
+      _emit(_state.copyWith(error: rollbackError.toString(), isRollingBack: false));
     }
   }
 
@@ -394,6 +615,12 @@ class ConversationController implements Listenable {
       case HarnessNotification.modelLoadCompleted:
         _emit(_state.copyWith(clearModelLoad: true, turnPhase: TurnPhase.running));
         return;
+      case HarnessNotification.contextCompacting:
+        _onContextCompacting(params);
+        return;
+      case HarnessNotification.contextCompacted:
+        _onContextCompacted(params);
+        return;
       case HarnessNotification.turnCompleted:
         final usage = proto.TurnUsage.fromJson(params['usage']);
         _emit(_state.copyWith(turnUsage: usage, turnPhase: TurnPhase.idle));
@@ -413,6 +640,56 @@ class ConversationController implements Listenable {
     _emit(_state.copyWith(messages: List.unmodifiable([..._history, ...projector.messages])));
     if (terminated) {
       _projector = projector.finished && projector.messages.isEmpty ? null : projector;
+    }
+  }
+
+  /// Context-compaction lifecycle: an in-progress auto-compaction adds a
+  /// "compacting" marker (one per thread); the terminal event flips it to
+  /// "compacted" or removes it (status "skipped" = a started compaction that
+  /// didn't shrink).
+  void _onContextCompacting(Map<String, Object?> params) {
+    final threadId = _string(params['threadId']);
+    if (threadId != client.currentThreadId) return;
+    final alreadyCompacting = state.compactionMarkers.any(
+      (marker) =>
+          marker.mode == CompactionMode.auto && marker.phase == CompactionPhase.compacting && marker.threadId == threadId,
+    );
+    if (alreadyCompacting) return;
+    _emit(_state.copyWith(
+      compactionMarkers: [
+        ...state.compactionMarkers,
+        CompactionMarker(
+          id: 'auto:$threadId:${DateTime.now().millisecondsSinceEpoch}',
+          mode: CompactionMode.auto,
+          phase: CompactionPhase.compacting,
+          threadId: threadId,
+        ),
+      ],
+    ));
+  }
+
+  void _onContextCompacted(Map<String, Object?> params) {
+    final threadId = _string(params['threadId']);
+    if (threadId != client.currentThreadId) return;
+    if (_string(params['status']) == 'skipped') {
+      // Started but did not compact — drop the in-progress marker.
+      _emit(_state.copyWith(
+        compactionMarkers: [
+          for (final marker in state.compactionMarkers)
+            if (!(marker.mode == CompactionMode.auto && marker.threadId == threadId && marker.phase == CompactionPhase.compacting))
+              marker,
+        ],
+      ));
+    } else {
+      _emit(_state.copyWith(
+        compactionMarkers: [
+          for (final marker in state.compactionMarkers)
+            if (marker.mode == CompactionMode.auto && marker.threadId == threadId && marker.phase == CompactionPhase.compacting)
+              marker.copyWith(phase: CompactionPhase.compacted)
+            else
+              marker,
+        ],
+      ));
     }
   }
 

@@ -302,4 +302,68 @@ void main() {
       expect(resolveImageUrl('', baseUri), isNull);
     });
   });
+
+  test('stripTrailingAssistantTurnArtifacts drops trailing tool_call lines', () {
+    expect(stripTrailingAssistantTurnArtifacts('Answer.\n\ntool_call: foo(1)'), 'Answer.');
+    expect(stripTrailingAssistantTurnArtifacts('A\ntool_call id=1: bar(x, y)'), 'A');
+    expect(stripTrailingAssistantTurnArtifacts('A\ntool_call_id: call_123'), 'A');
+  });
+
+  test('stripTrailingAssistantTurnArtifacts keeps mid-text tool_call mentions', () {
+    expect(stripTrailingAssistantTurnArtifacts('tool_call: foo(1)\nAnswer.'), 'tool_call: foo(1)\nAnswer.');
+  });
+
+  test('stripTrailingAssistantTurnArtifacts strips raw stop tokens at the tail', () {
+    expect(stripTrailingAssistantTurnArtifacts('done<|endoftext|>'), 'done');
+    expect(stripTrailingAssistantTurnArtifacts('a<|im_end|>'), 'a');
+    expect(stripTrailingAssistantTurnArtifacts('b<|eot_id|>'), 'b');
+  });
+
+  test('stripTrailingAssistantTurnArtifacts truncates at endoftext+im_start leaks', () {
+    expect(stripTrailingAssistantTurnArtifacts('A<|endoftext|> <|im_start|>user\nleaked'), 'A');
+  });
+
+  test('stripTrailingAssistantTurnArtifacts leaves clean text untouched', () {
+    expect(stripTrailingAssistantTurnArtifacts('plain answer'), 'plain answer');
+    expect(stripTrailingAssistantTurnArtifacts(''), '');
+  });
+
+  test('buildUserMessageTurnIndex maps user items to their turn numbers', () {
+    final thread = proto.Thread.fromJson({
+      'id': 't1',
+      'preview': '',
+      'modelProvider': '',
+      'createdAt': 0,
+      'turns': [
+        {
+          'id': '0',
+          'status': 'completed',
+          'items': [
+            {
+              'type': 'userMessage',
+              'id': 'u0',
+              'content': [
+                {'type': 'text', 'text': 'a'},
+              ],
+            },
+          ],
+        },
+        {
+          'id': '1',
+          'status': 'completed',
+          'items': [
+            {
+              'type': 'userMessage',
+              'id': 'u1',
+              'content': [
+                {'type': 'text', 'text': 'b'},
+              ],
+            },
+            {'type': 'agentMessage', 'id': 'a1', 'text': 'r'},
+          ],
+        },
+      ],
+    });
+    expect(buildUserMessageTurnIndex(thread), {'u0': 0, 'u1': 1});
+  });
 }
