@@ -309,23 +309,37 @@ final class ImageContent extends UserMessageContent {
   final String? mimeType;
 }
 
-/// Builds the harness `UserInput` text variant for `turn/start` (phase 1 is
-/// text-only; image input lands with the native picker later).
+/// Builds the harness `UserInput` text variant for `turn/start`.
 Map<String, Object?> textUserInput(String text) => {
       'type': 'text',
       'text': text,
       'textElements': const <Object?>[],
     };
 
-/// `turn/start` request params (phase-1 subset).
+/// Builds the `UserInput` image variant (data: or http(s) URL; mobile picks
+/// gallery images and sends data URLs — the server never sees a native path).
+Map<String, Object?> imageUserInput(String imageUrl) => {
+      'type': 'image',
+      'imageUrl': imageUrl,
+      'detail': 'auto',
+    };
+
+/// `turn/start` request params. `effort`/`permissionMode`/`agentType` ride
+/// the composer state (agentType `"plan"` marks a plan-mode turn).
 Map<String, Object?> turnStartParams({
   required String threadId,
   required List<Map<String, Object?>> input,
   required String model,
+  String? effort,
+  String? permissionMode,
+  String? agentType,
 }) => {
       'threadId': threadId,
       'input': input,
       'model': model,
+      'effort': ?effort,
+      'permissionMode': ?permissionMode,
+      'agentType': ?agentType,
     };
 
 /// `thread/start` request params (optional model selection).
@@ -343,6 +357,156 @@ Map<String, Object?> turnInterruptParams({required String threadId, required Str
       'threadId': threadId,
       'turnId': turnId,
     };
+
+/// `thread/fork` request params (`sandboxOverride` stays a wire string — the
+/// mobile client never sets it).
+Map<String, Object?> threadForkParams({required String threadId, String? modelOverride}) => {
+      'threadId': threadId,
+      'modelOverride': ?modelOverride,
+    };
+
+/// `thread/rollback` request params — `toTurnId` is the turn to roll back TO
+/// (the controller sends `n - 1` for a user bubble at turn `n`).
+Map<String, Object?> threadRollbackParams({required String threadId, required String toTurnId}) => {
+      'threadId': threadId,
+      'toTurnId': toTurnId,
+    };
+
+/// `thread/compact/start` request params.
+Map<String, Object?> threadCompactStartParams({required String threadId, String? modelOverride}) => {
+      'threadId': threadId,
+      'modelOverride': ?modelOverride,
+    };
+
+/// `thread/compact/start` result.
+class ThreadCompactStartResult {
+  ThreadCompactStartResult({required this.thread, required this.removedMessages, required this.outputTokens});
+  final Thread thread;
+  final int removedMessages;
+  final int outputTokens;
+
+  static ThreadCompactStartResult fromJson(Map<String, Object?> json) => ThreadCompactStartResult(
+        thread: Thread.fromJson(json['thread'] is Map<String, Object?> ? json['thread']! as Map<String, Object?> : const {}),
+        removedMessages: json['removedMessages'] is int ? json['removedMessages']! as int : 0,
+        outputTokens: json['outputTokens'] is int ? json['outputTokens']! as int : 0,
+      );
+}
+
+// ── Model catalog (model/list) ──────────────────────────────────────────────
+
+/// One selectable reasoning effort with its user-facing description.
+class ReasoningEffortOption {
+  ReasoningEffortOption({required this.reasoningEffort, required this.description});
+  final String reasoningEffort;
+  final String description;
+
+  static ReasoningEffortOption fromJson(Map<String, Object?> json) => ReasoningEffortOption(
+        reasoningEffort: json['reasoningEffort'] is String ? json['reasoningEffort']! as String : '',
+        description: json['description'] is String ? json['description']! as String : '',
+      );
+}
+
+/// A model entry from `model/list` (local or cloud).
+class ModelInfo {
+  ModelInfo({
+    required this.id,
+    required this.model,
+    required this.displayName,
+    required this.description,
+    required this.supportedReasoningEfforts,
+    required this.defaultReasoningEffort,
+    required this.isDefault,
+  });
+  final String id;
+  final String model;
+  final String displayName;
+  final String description;
+  final List<ReasoningEffortOption> supportedReasoningEfforts;
+  final String defaultReasoningEffort;
+  final bool isDefault;
+
+  static ModelInfo fromJson(Map<String, Object?> json) => ModelInfo(
+        id: json['id'] is String ? json['id']! as String : '',
+        model: json['model'] is String ? json['model']! as String : '',
+        displayName: json['displayName'] is String ? json['displayName']! as String : '',
+        description: json['description'] is String ? json['description']! as String : '',
+        supportedReasoningEfforts: (json['supportedReasoningEfforts'] is List ? json['supportedReasoningEfforts']! as List : const [])
+            .whereType<Map<String, Object?>>()
+            .map(ReasoningEffortOption.fromJson)
+            .toList(growable: false),
+        defaultReasoningEffort: json['defaultReasoningEffort'] is String ? json['defaultReasoningEffort']! as String : '',
+        isDefault: json['isDefault'] is bool ? json['isDefault']! as bool : false,
+      );
+}
+
+/// `model/list` result (paged; the mobile picker loads the first page).
+class ModelListResult {
+  ModelListResult({required this.data, this.nextCursor});
+  final List<ModelInfo> data;
+  final String? nextCursor;
+
+  static ModelListResult fromJson(Map<String, Object?> json) => ModelListResult(
+        data: (json['data'] is List ? json['data']! as List : const [])
+            .whereType<Map<String, Object?>>()
+            .map(ModelInfo.fromJson)
+            .toList(growable: false),
+        nextCursor: json['nextCursor'] is String ? json['nextCursor']! as String : null,
+      );
+}
+
+// ── Command registry (command/list) ─────────────────────────────────────────
+
+/// How a `/`-command dispatches on the client (host callback vs prompt text).
+enum CommandKind {
+  control('control'),
+  prompt('prompt');
+
+  const CommandKind(this.wire);
+  final String wire;
+
+  static CommandKind fromWire(String? value) =>
+      CommandKind.values.where((k) => k.wire == value).firstOrNull ?? CommandKind.prompt;
+}
+
+/// Where a command was registered.
+enum CommandSource {
+  builtin('builtin'),
+  skill('skill');
+
+  const CommandSource(this.wire);
+  final String wire;
+
+  static CommandSource fromWire(String? value) =>
+      CommandSource.values.where((s) => s.wire == value).firstOrNull ?? CommandSource.builtin;
+}
+
+/// A user-facing `/`-command surfaced by `command/list`. `controlAction` is
+/// the host-callback key for `control`-kind commands (e.g. "compact").
+class CommandInfo {
+  CommandInfo({
+    required this.name,
+    required this.aliases,
+    required this.description,
+    required this.kind,
+    required this.source,
+    this.controlAction,
+  });
+  final String name;
+  final List<String> aliases;
+  final String description;
+  final CommandKind kind;
+  final CommandSource source;
+  final String? controlAction;
+
+  static CommandInfo fromJson(Map<String, Object?> json) => CommandInfo(
+        name: json['name'] is String ? json['name']! as String : '',
+        aliases: (json['aliases'] is List ? json['aliases']! as List : const []).whereType<String>().toList(growable: false),
+        description: json['description'] is String ? json['description']! as String : '',
+        kind: CommandKind.fromWire(json['kind'] is String ? json['kind']! as String : null),
+        source: CommandSource.fromWire(json['source'] is String ? json['source']! as String : null),
+        controlAction: json['controlAction'] is String ? json['controlAction']! as String : null,
+      );
+}
 
 // ── Notification params ─────────────────────────────────────────────────────
 

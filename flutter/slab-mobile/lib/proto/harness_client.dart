@@ -250,13 +250,57 @@ class HarnessClient {
   }
 
   /// `turn/start` → the ack; the turn's events arrive as notifications.
-  Future<void> turnStart({required String threadId, required List<Map<String, Object?>> input, required String model}) async {
-    await sendRequest(HarnessMethod.turnStart, proto.turnStartParams(threadId: threadId, input: input, model: model));
+  /// `effort`/`permissionMode`/`agentType` are optional turn-level overrides
+  /// (agentType `"plan"` runs the turn as the plan agent).
+  Future<void> turnStart({
+    required String threadId,
+    required List<Map<String, Object?>> input,
+    required String model,
+    String? effort,
+    String? permissionMode,
+    String? agentType,
+  }) async {
+    await sendRequest(HarnessMethod.turnStart, proto.turnStartParams(
+          threadId: threadId,
+          input: input,
+          model: model,
+          effort: effort,
+          permissionMode: permissionMode,
+          agentType: agentType,
+        ));
   }
 
   /// `turn/interrupt` (best-effort; turnId "0" mirrors the TS client).
   Future<void> turnInterrupt({required String threadId}) async {
     await sendRequest(HarnessMethod.turnInterrupt, proto.turnInterruptParams(threadId: threadId, turnId: '0'));
+  }
+
+  /// `thread/fork` → the child thread (the socket re-binds to it).
+  Future<proto.Thread> threadFork({required String threadId, String? modelOverride}) async =>
+      proto.Thread.fromJson(_threadBody(await sendRequest(
+          HarnessMethod.threadFork, proto.threadForkParams(threadId: threadId, modelOverride: modelOverride))));
+
+  /// `thread/rollback` → the thread rolled back to `toTurnId`.
+  Future<proto.Thread> threadRollback({required String threadId, required String toTurnId}) async =>
+      proto.Thread.fromJson(_threadBody(await sendRequest(
+          HarnessMethod.threadRollback, proto.threadRollbackParams(threadId: threadId, toTurnId: toTurnId))));
+
+  /// `thread/compact/start` → compaction result (thread + counters).
+  Future<proto.ThreadCompactStartResult> threadCompactStart({required String threadId, String? modelOverride}) async =>
+      proto.ThreadCompactStartResult.fromJson(_expectObject(await sendRequest(
+          HarnessMethod.threadCompactStart, proto.threadCompactStartParams(threadId: threadId, modelOverride: modelOverride))));
+
+  /// `model/list` → selectable models (first page).
+  Future<proto.ModelListResult> modelList() async =>
+      proto.ModelListResult.fromJson(_expectObject(await sendRequest(HarnessMethod.modelList)));
+
+  /// `command/list` → the `/`-command registry driving the command menu.
+  Future<List<proto.CommandInfo>> commandList() async {
+    final result = _expectObject(await sendRequest(HarnessMethod.commandList));
+    return (result['data'] is List ? result['data']! as List : const [])
+        .whereType<Map<String, Object?>>()
+        .map(proto.CommandInfo.fromJson)
+        .toList(growable: false);
   }
 
   /// `approval/resolve` with a persistence scope.
@@ -292,4 +336,10 @@ class HarnessRpcException implements Exception {
 Map<String, Object?> _expectObject(Object? value) {
   if (value is Map<String, Object?>) return value;
   throw const FormatException('harness response was not an object');
+}
+
+/// Unwraps the `{"thread": {...}}` result body shared by thread mutations.
+Map<String, Object?> _threadBody(Object? value) {
+  final body = _expectObject(value);
+  return body['thread'] is Map<String, Object?> ? body['thread']! as Map<String, Object?> : const <String, Object?>{};
 }
