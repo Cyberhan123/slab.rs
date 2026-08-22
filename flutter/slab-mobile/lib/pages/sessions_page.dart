@@ -183,7 +183,7 @@ class _SessionsPageState extends ConsumerState<SessionsPage> {
                   ),
                   TNavBarItem(
                     icon: TIcons.setting,
-                    onTap: () => context.go('/connect'),
+                    onTap: () => context.go('/connect?edit=1'),
                   ),
                 ],
               ),

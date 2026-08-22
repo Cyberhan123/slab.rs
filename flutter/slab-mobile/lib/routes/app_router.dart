@@ -21,7 +21,11 @@ GoRouter buildAppRouter(Ref ref) => GoRouter(
       redirect: (context, state) {
         final configured = ref.read(connectionConfigProvider) != null;
         if (!configured && state.matchedLocation != '/connect') return '/connect';
-        if (configured && state.matchedLocation == '/connect') return '/sessions';
+        // `/connect?edit=1` (settings gear on the sessions page) reopens the
+        // connect screen to edit the saved URL; a plain `/connect` (cold start
+        // via initialLocation) still bounces to the sessions list.
+        final editing = state.uri.queryParameters['edit'] == '1';
+        if (configured && state.matchedLocation == '/connect' && !editing) return '/sessions';
         return null;
       },
       routes: [
