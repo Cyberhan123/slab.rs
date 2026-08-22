@@ -18,6 +18,7 @@ import 'package:slab_mobile/core/db/app_database.dart';
 import 'package:slab_mobile/core/db/session_meta_dao.dart';
 import 'package:slab_mobile/data/model_types.dart';
 import 'package:slab_mobile/data/rest_client.dart';
+import 'package:slab_mobile/data/settings_types.dart';
 import 'package:slab_mobile/features/assistant/model/model_cubit.dart';
 import 'package:slab_mobile/features/assistant/model/model_repository.dart';
 import 'package:slab_mobile/features/assistant/view/chat_screen.dart';
@@ -64,6 +65,10 @@ class FakeSlabRestClient extends SlabRestClient {
 
   @override
   Future<List<AiModelRecord>> listModels() async => const [];
+
+  @override
+  Future<SettingsDocumentView> getSettingsDocument() async =>
+      const SettingsDocumentView(schemaVersion: 1, settingsPath: '');
 
   @override
   void dispose() {}

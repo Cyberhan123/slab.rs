@@ -16,6 +16,7 @@ import 'package:slab_mobile/core/app/locale_cubit.dart';
 import 'package:slab_mobile/core/db/app_database.dart';
 import 'package:slab_mobile/core/db/session_meta_dao.dart';
 import 'package:slab_mobile/data/rest_client.dart';
+import 'package:slab_mobile/data/settings_types.dart';
 import 'package:slab_mobile/l10n/catalog.dart';
 import 'package:slab_mobile/routes/app_router.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
@@ -37,6 +38,10 @@ class FakeSlabRestClient extends SlabRestClient {
 
   @override
   Future<List<SessionRecord>> listSessions() async => [...sessions, ..._created];
+
+  @override
+  Future<SettingsDocumentView> getSettingsDocument() async =>
+      const SettingsDocumentView(schemaVersion: 1, settingsPath: '');
 
   @override
   Future<SessionRecord> createSession({String? name}) async {
@@ -116,9 +121,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     // Sessions navbar went offstage (its tab label stays); the settings
-    // navbar + empty-state copy joined its tab label.
+    // navbar joined its tab label; the empty document renders TEmpty.
     expect(find.text('Conversations'), findsNWidgets(1));
-    expect(find.text('Settings'), findsNWidgets(3));
+    expect(find.text('Settings'), findsNWidgets(2));
     expect(find.byType(TEmpty), findsOneWidget);
 
     // Unmount inside the body so the shell's BlocProviders finish their
