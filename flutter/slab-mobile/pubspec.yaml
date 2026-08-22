@@ -28,6 +28,24 @@ dependencies:
   # Responsive scaling for the ported screens (assistant/settings); legacy
   # screens stay in logical pixels, so extensions are used opt-in per widget.
   flutter_screenutil: ^5.9.3
+  # Local relational store: session labels, current session pointer,
+  # composer drafts. Connection config + language stay in shared_preferences.
+  drift: ^2.34.3
+  # sqlite3 3.x bundles the native library for every platform via native
+  # assets — the old sqlite3_flutter_libs companion package is EOL.
+  sqlite3: ^3.5.2
+  path_provider: ^2.1.6
+  path: ^1.9.1
+  # Fixed-size spacing slots (SizedBox.shrink ergonomics).
+  gap: ^3.0.1
+  # Image parts over http(s) (/v1/... refs); data: URLs decode to bytes.
+  cached_network_image: ^3.4.1
+  # Gallery image attachments -> data-URL turn inputs. Exact pin mirrors
+  # tdesign_flutter_adaptation's own constraint (it hard-pins 1.1.2).
+  image_picker: 1.1.2
+  # Immutable models for the settings/models wire types + bloc states.
+  freezed_annotation: ^3.1.0
+  json_annotation: ^4.12.0
   # Service locator for infra + app-wide cubits (composition root).
   get_it: ^9.2.1
   # Connection config + language preference storage.
@@ -50,6 +68,12 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   # cubit/bloc unit tests (blocTest helper).
   bloc_test: ^10.0.0
+  # Codegen: drift schema, freezed models, json_serializable wire codecs.
+  # Generated files are committed (same policy as slab_tokens.g.dart).
+  build_runner: ^2.16.0
+  drift_dev: ^2.34.5
+  freezed: ^4.0.0
+  json_serializable: ^6.14.1
 
 flutter:
   uses-material-design: true

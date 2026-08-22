@@ -16,6 +16,9 @@ import 'package:tdesign_flutter/tdesign_flutter.dart' show TThemeData;
 import '../../l10n/catalog.dart';
 import '../app/connection_cubit.dart';
 import '../app/locale_cubit.dart';
+import '../db/app_database.dart';
+import '../db/drafts_dao.dart';
+import '../db/session_meta_dao.dart';
 
 GetIt get getIt => GetIt.instance;
 
@@ -32,4 +35,9 @@ Future<void> configureDependencies({required Catalogs catalogs, required TThemeD
   final connection = ConnectionCubit();
   await connection.load();
   getIt.registerSingleton<ConnectionCubit>(connection);
+
+  final db = openAppDatabase();
+  getIt.registerSingleton<AppDatabase>(db);
+  getIt.registerSingleton<SessionMetaDao>(SessionMetaDao(db));
+  getIt.registerSingleton<DraftsDao>(DraftsDao(db));
 }
