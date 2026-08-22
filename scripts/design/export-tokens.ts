@@ -9,7 +9,7 @@
  *   flutter/slab-mobile/design/tokens.json          — inspectable intermediate
  *                                                      (keeps the raw oklch strings for a
  *                                                      future wide-gamut upgrade)
- *   flutter/slab-mobile/lib/theme/slab_tokens.g.dart — `SlabTokensLight/Dark` + `SlabMetrics`
+ *   flutter/slab-mobile/lib/core/theme/slab_tokens.g.dart — `SlabTokensLight/Dark` + `SlabMetrics`
  *   flutter/slab-mobile/assets/theme/tdesign-theme.json — tdesign_flutter theme
  *                                                      (`"slab"` light + `"slabDark"` dark;
  *                                                      see the TDesign section below)
@@ -37,7 +37,7 @@ const GLOBALS_PATH = path.join(
 const JSON_OUT = path.join(repoRoot, "flutter/slab-mobile/design/tokens.json");
 const DART_OUT = path.join(
   repoRoot,
-  "flutter/slab-mobile/lib/theme/slab_tokens.g.dart",
+  "flutter/slab-mobile/lib/core/theme/slab_tokens.g.dart",
 );
 const TD_OUT = path.join(
   repoRoot,

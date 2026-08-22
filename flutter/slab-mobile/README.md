@@ -93,7 +93,7 @@ bun run dev:mobile -- --dart-define=SLAB_API_BASE_URL=http://10.0.2.2:3000
 
 ## Generated artifacts — do not hand-edit
 
-`lib/theme/slab_tokens.g.dart`, `design/tokens.json`,
+`lib/core/theme/slab_tokens.g.dart`, `design/tokens.json`,
 `assets/theme/tdesign-theme.json`, `assets/i18n/*.json` are produced by
 `bun run gen:mobile` (`scripts/design/export-tokens.ts` +
 `scripts/i18n/export-mobile-locales.ts`) and drift-checked in CI with
@@ -114,7 +114,7 @@ bans raw hex in TSX.
   `approval/resolve`/`model/list`/`command/list`).
 - **No code sharing with `@slab/ui`**; token values flow one way from
   `packages/slab-components/src/styles/globals.css`.
-- **Harness constants** (`lib/proto/harness_methods.dart`) mirror
+- **Harness constants** (`lib/data/harness/harness_methods.dart`) mirror
   `crates/slab-proto`; `bun run gen:harness` fails on drift.
 - **Connection secrets**: stored in plain `shared_preferences` (LAN tool). The
   documented upgrade path is `flutter_secure_storage` once tokens protect
@@ -122,4 +122,4 @@ bans raw hex in TSX.
 - **On-device Rust (phase 3, not started)**: will land behind a reserved
   `crates/slab-mobile-ffi` facade (flutter_rust_bridge over a hand-picked
   subset of `slab-app-core`). Do NOT create that crate speculatively; the Dart
-  seam already isolates it at `lib/proto/` + `lib/data/`.
+  seam already isolates it at `lib/data/harness/` + `lib/data/rest/`.

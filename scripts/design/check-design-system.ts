@@ -78,7 +78,7 @@ const DART_RAW_COLOR_RULES = [
 
 const DART_COLOR_ALLOWLIST = [
   // The one legitimate source of literal colors: the generated token file.
-  /^flutter\/slab-mobile\/lib\/theme\/slab_tokens\.g\.dart$/,
+  /^flutter\/slab-mobile\/lib\/core\/theme\/slab_tokens\.g\.dart$/,
 ]
 
 async function main() {

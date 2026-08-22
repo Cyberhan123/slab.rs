@@ -191,17 +191,23 @@ async function assertMethodConstantsInSync(): Promise<void> {
     "flutter",
     "slab-mobile",
     "lib",
-    "proto",
+    "data",
+    "harness",
     "harness_methods.dart",
   );
   const dartSource = await readFile(dartPath, "utf8").catch(() => null);
-  if (dartSource !== null) {
-    const dartDrift = [...tsValues.values()].filter((value) => !dartSource.includes(`'${value}'`));
-    if (dartDrift.length > 0) {
-      throw new Error(
-        `HARNESS_METHOD values missing from flutter/slab-mobile/lib/proto/harness_methods.dart:\n${dartDrift.map((v) => `  ${v}`).join("\n")}`,
-      );
-    }
+  if (dartSource === null) {
+    // A missing file must fail loudly — silently skipping would turn the
+    // drift check into a no-op after any future move.
+    throw new Error(
+      `flutter/slab-mobile/lib/data/harness/harness_methods.dart not found — the harness-constant mirror moved or was deleted; update this script.`,
+    );
+  }
+  const dartDrift = [...tsValues.values()].filter((value) => !dartSource.includes(`'${value}'`));
+  if (dartDrift.length > 0) {
+    throw new Error(
+      `HARNESS_METHOD values missing from flutter/slab-mobile/lib/data/harness/harness_methods.dart:\n${dartDrift.map((v) => `  ${v}`).join("\n")}`,
+    );
   }
   console.log(`Method constants in sync (${rustConsts.size} consts checked).`);
 }
