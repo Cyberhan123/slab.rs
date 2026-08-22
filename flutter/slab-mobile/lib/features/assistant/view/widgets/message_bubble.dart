@@ -7,9 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../conversation/turn_items.dart';
-import '../theme/td_theme.dart';
-import '../theme/slab_tokens.g.dart';
+import '../../../../conversation/turn_items.dart';
+import '../../../../theme/slab_tokens.g.dart';
+import '../../../../theme/td_theme.dart';
 import 'tool_card.dart';
 
 class MessageBubble extends StatelessWidget {
@@ -44,7 +44,7 @@ class MessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final (index, part) in message.parts.indexed) _buildPart(context, part, index, foreground, td, extras),
+            for (final (index, part) in message.parts.indexed) _buildPart(context, part, index, foreground, td),
           ],
         ),
       ),
@@ -57,7 +57,6 @@ class MessageBubble extends StatelessWidget {
     int index,
     Color foreground,
     TThemeData td,
-    SlabExtras extras,
   ) {
     switch (part) {
       case TextUiPart():

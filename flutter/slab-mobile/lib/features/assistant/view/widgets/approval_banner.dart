@@ -5,9 +5,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../proto/harness_types.dart' as proto;
-import '../theme/td_theme.dart';
-import '../theme/slab_tokens.g.dart';
+import '../../../../proto/harness_types.dart' as proto;
+import '../../../../theme/slab_tokens.g.dart';
+import '../../../../theme/td_theme.dart';
 
 class ApprovalBanner extends StatelessWidget {
   const ApprovalBanner({

@@ -9,23 +9,22 @@
 library;
 
 import 'package:flutter/widgets.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../app_providers.dart';
+import '../core/app/locale_cubit.dart';
 import 'mobile_strings.dart';
 
 class SlabResourceDelegate extends TResourceDelegate {
-  SlabResourceDelegate(this.container);
+  SlabResourceDelegate(this.localeCubit);
 
-  final ProviderContainer container;
+  final LocaleCubit localeCubit;
 
   /// Updated on every `setResourceBuilder` call (needs the fresh context).
   BuildContext? context;
 
   void updateContext(BuildContext value) => context = value;
 
-  String get _locale => container.read(localeProvider);
+  String get _locale => localeCubit.state;
 
   String _t(String key) => mobileT(_locale, key);
 
@@ -34,7 +33,7 @@ class SlabResourceDelegate extends TResourceDelegate {
   // ── Interactive chrome (mobile_strings / shared catalog) ────────────────────
 
   @override
-  String get cancel => container.read(catalogProvider).t('common.actions.cancel');
+  String get cancel => localeCubit.catalog.t('common.actions.cancel');
 
   @override
   String get confirm => _t('mobile.common.confirm');

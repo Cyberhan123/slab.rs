@@ -1,14 +1,16 @@
-/// slab-mobile entrypoint: loads catalogs + TDesign theme + persisted config
-/// + language preference, then runs the app under a ProviderScope with the
-/// catalogs injected.
+/// slab-mobile entrypoint: loads catalogs + TDesign theme, configures the
+/// service locator (which also restores the persisted language preference and
+/// connection config so the router redirect runs against real state), then
+/// runs the app.
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
-import 'app_providers.dart';
+import 'core/app/connection_cubit.dart';
+import 'core/di/service_locator.dart';
 import 'l10n/catalog.dart';
+import 'routes/app_router.dart';
 import 'theme/td_theme.dart';
 
 Future<void> main() async {
@@ -23,17 +25,7 @@ Future<void> main() async {
   // theme extensions (light/dark); no global multi-theme bootstrap needed.
   final tdTheme = await loadSlabTheme();
 
-  final container = ProviderContainer(
-    overrides: [
-      catalogsProvider.overrideWithValue(catalogs),
-      slabTdThemeProvider.overrideWithValue(tdTheme),
-    ],
-  );
-  await container.read(languagePrefProvider.notifier).load();
-  await container.read(connectionConfigProvider.notifier).load();
+  await configureDependencies(catalogs: catalogs, tdTheme: tdTheme);
 
-  runApp(UncontrolledProviderScope(
-    container: container,
-    child: const SlabApp(),
-  ));
+  runApp(SlabApp(router: buildAppRouter(connection: getIt<ConnectionCubit>())));
 }

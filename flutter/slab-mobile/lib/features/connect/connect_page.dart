@@ -1,31 +1,40 @@
 /// First-run connect screen: server base URL (+ optional bearer token),
-/// health probe, then persist and continue.
+/// health probe, then persist and continue. A plain stateful page — the only
+/// app wiring it touches is [ConnectionCubit] (save + prefill).
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../app_providers.dart';
-import '../data/connection_config.dart';
-import '../data/rest_client.dart';
-import '../l10n/mobile_strings.dart';
-import '../theme/slab_tokens.g.dart';
+import '../../core/app/connection_cubit.dart';
+import '../../core/app/locale_cubit.dart';
+import '../../data/connection_config.dart';
+import '../../data/rest_client.dart';
+import '../../l10n/mobile_strings.dart';
+import '../../theme/slab_tokens.g.dart';
 
-class ConnectPage extends ConsumerStatefulWidget {
+class ConnectPage extends StatefulWidget {
   const ConnectPage({super.key});
 
   @override
-  ConsumerState<ConnectPage> createState() => _ConnectPageState();
+  State<ConnectPage> createState() => _ConnectPageState();
 }
 
-class _ConnectPageState extends ConsumerState<ConnectPage> {
-  late final TextEditingController _url =
-      TextEditingController(text: ref.read(connectionConfigProvider)?.baseUrl.toString() ?? kDefaultBaseUrl);
+class _ConnectPageState extends State<ConnectPage> {
+  late final TextEditingController _url;
   final TextEditingController _token = TextEditingController();
   HealthStatus? _probe;
   bool _testing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _url = TextEditingController(
+      text: context.read<ConnectionCubit>().state?.baseUrl.toString() ?? kDefaultBaseUrl,
+    );
+  }
 
   @override
   void dispose() {
@@ -54,7 +63,7 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
   Future<void> _save() async {
     final uri = Uri.tryParse(_url.text.trim());
     if (uri == null || !uri.hasScheme) return;
-    await ref.read(connectionConfigProvider.notifier).save(
+    await context.read<ConnectionCubit>().save(
           ConnectionConfig(baseUrl: uri, bearerToken: _token.text.trim()),
         );
     if (mounted) context.go('/sessions');
@@ -62,7 +71,7 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
 
   @override
   Widget build(BuildContext context) {
-    final locale = ref.watch(localeProvider);
+    final locale = context.watch<LocaleCubit>().state;
     final td = context.tTheme;
     String t(String key, [Map<String, String> args = const {}]) => mobileT(locale, key, args);
     final probe = _probe;

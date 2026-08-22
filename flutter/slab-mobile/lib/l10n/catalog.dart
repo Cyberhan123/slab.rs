@@ -10,6 +10,14 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart' show AssetBundle, rootBundle;
 
+/// Both catalogs, loaded in `main()` before `runApp` and registered in the
+/// service locator (en-US doubles as the fallback chain root).
+class Catalogs {
+  const Catalogs({required this.en, required this.zh});
+  final SlabCatalog en;
+  final SlabCatalog zh;
+}
+
 class SlabCatalog {
   SlabCatalog._(this.locale, this._entries, this._fallback);
   final String locale;

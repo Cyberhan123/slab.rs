@@ -1,39 +1,64 @@
 /// Chat screen: history + live turn projection (ListenableBuilder over the
 /// framework-free `ConversationController`), approval banner, composer with
 /// send / interrupt, connection-phase tag.
+///
+/// The controller is page-owned: one per navigation onto `/chat/:sessionId`
+/// (pristine state per session, mirroring the TS hook keyed on sessionId).
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../app_providers.dart';
-import '../conversation/conversation_controller.dart';
-import '../l10n/mobile_strings.dart';
-import '../theme/slab_tokens.g.dart';
-import '../widgets/approval_banner.dart';
-import '../widgets/message_bubble.dart';
+import '../../../core/app/connection_cubit.dart';
+import '../../../core/app/locale_cubit.dart';
+import '../../../conversation/conversation_controller.dart';
+import '../../../l10n/mobile_strings.dart';
+import '../../../theme/slab_tokens.g.dart';
+import 'widgets/approval_banner.dart';
+import 'widgets/message_bubble.dart';
 
-class ChatPage extends ConsumerStatefulWidget {
-  const ChatPage({super.key, required this.sessionId, this.sessionName});
+class ChatScreen extends StatefulWidget {
+  const ChatScreen({super.key, required this.sessionId, this.sessionName, this.controller});
 
   final String sessionId;
   final String? sessionName;
 
+  /// Test seam: an inert injected controller keeps the WS stack (and its
+  /// uncancellable 5s timeout timer) out of widget tests under FakeAsync.
+  final ConversationController? controller;
+
   @override
-  ConsumerState<ChatPage> createState() => _ChatPageState();
+  State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatPageState extends ConsumerState<ChatPage> {
+class _ChatScreenState extends State<ChatScreen> {
   final _composer = TextEditingController();
   final _scroll = ScrollController();
   bool _autoScroll = true;
+  late final ConversationController _controller;
+  bool _ownsController = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final injected = widget.controller;
+    if (injected != null) {
+      _controller = injected;
+    } else {
+      final config = context.read<ConnectionCubit>().state;
+      if (config == null) throw StateError('no connection config');
+      _controller = ConversationController(sessionId: widget.sessionId, baseUrl: config.baseUrl)..start();
+      _ownsController = true;
+    }
+  }
 
   @override
   void dispose() {
     _composer.dispose();
     _scroll.dispose();
+    if (_ownsController) _controller.dispose();
     super.dispose();
   }
 
@@ -46,18 +71,18 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     );
   }
 
-  Future<void> _send(ConversationController controller) async {
+  Future<void> _send() async {
     final text = _composer.text.trim();
     if (text.isEmpty) return;
     _composer.clear();
-    await controller.sendText(text);
+    await _controller.sendText(text);
   }
 
   @override
   Widget build(BuildContext context) {
-    final controller = ref.watch(conversationControllerProvider(widget.sessionId));
-    final locale = ref.watch(localeProvider);
-    final catalog = ref.watch(catalogProvider);
+    final localeCubit = context.watch<LocaleCubit>();
+    final locale = localeCubit.state;
+    final catalog = localeCubit.catalog;
     String t(String key, [Map<String, String> args = const {}]) => mobileT(locale, key, args);
 
     return Scaffold(
@@ -72,9 +97,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               actions: [
                 TNavBarItem(
                   customWidget: ListenableBuilder(
-                    listenable: controller,
+                    listenable: _controller,
                     builder: (context, _) {
-                      final state = controller.state;
+                      final state = _controller.state;
                       switch (state.connection) {
                         case ConnectionPhase.connecting:
                           return _StatusTag(label: t('mobile.chat.connecting'), colorScheme: TTagColorScheme.primary);
@@ -100,9 +125,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                   return false;
                 },
                 child: ListenableBuilder(
-                  listenable: controller,
+                  listenable: _controller,
                   builder: (context, _) {
-                    final state = controller.state;
+                    final state = _controller.state;
                     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeAutoScroll());
                     return ListView.builder(
                       controller: _scroll,
@@ -135,9 +160,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               ),
             ),
             ListenableBuilder(
-              listenable: controller,
+              listenable: _controller,
               builder: (context, _) {
-                final state = controller.state;
+                final state = _controller.state;
                 return Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -157,7 +182,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
                         child: ApprovalBanner(
                           approvals: state.approvals,
-                          onResolve: (request, approved) => controller.resolveApproval(request.itemId, approved),
+                          onResolve: (request, approved) => _controller.resolveApproval(request.itemId, approved),
                           t: catalog.t,
                           locale: locale,
                         ),
@@ -167,9 +192,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               },
             ),
             _Composer(
-              controller: controller,
+              controller: _controller,
               composer: _composer,
-              onSend: () => _send(controller),
+              onSend: _send,
               t: t,
             ),
           ],

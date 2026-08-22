@@ -9,22 +9,23 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../app_providers.dart';
-import '../data/rest_client.dart';
-import '../l10n/mobile_strings.dart';
+import '../../core/app/connection_cubit.dart';
+import '../../core/app/locale_cubit.dart';
+import '../../data/rest_client.dart';
+import '../../l10n/mobile_strings.dart';
 
-class SetupGatePage extends ConsumerStatefulWidget {
+class SetupGatePage extends StatefulWidget {
   const SetupGatePage({super.key});
 
   @override
-  ConsumerState<SetupGatePage> createState() => _SetupGatePageState();
+  State<SetupGatePage> createState() => _SetupGatePageState();
 }
 
-class _SetupGatePageState extends ConsumerState<SetupGatePage> {
+class _SetupGatePageState extends State<SetupGatePage> {
   Timer? _poll;
   bool _advanceGuard = false;
 
@@ -42,7 +43,7 @@ class _SetupGatePageState extends ConsumerState<SetupGatePage> {
   }
 
   Future<void> _check() async {
-    final client = ref.read(restClientProvider);
+    final client = context.read<ConnectionCubit>().client;
     if (client == null) return;
     try {
       final setup = await client.getSetupStatus();
@@ -58,7 +59,7 @@ class _SetupGatePageState extends ConsumerState<SetupGatePage> {
 
   @override
   Widget build(BuildContext context) {
-    final locale = ref.watch(localeProvider);
+    final locale = context.watch<LocaleCubit>().state;
     String t(String key) => mobileT(locale, key);
 
     return Scaffold(

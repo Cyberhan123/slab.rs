@@ -3,23 +3,20 @@
 /// `/sessions` (list) and `/chat/:sessionId`.
 library;
 
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../app_providers.dart';
-import '../pages/chat_page.dart';
-import '../pages/connect_page.dart';
-import '../pages/sessions_page.dart';
-import '../pages/setup_gate_page.dart';
+import '../core/app/connection_cubit.dart';
+import '../features/assistant/view/chat_screen.dart';
+import '../features/connect/connect_page.dart';
+import '../features/sessions/view/sessions_page.dart';
+import '../features/setup/setup_gate_page.dart';
 
-final appRouterProvider = Provider<GoRouter>((ref) => buildAppRouter(ref));
-
-/// Kept as a plain function (instead of only a provider) so tests can build a
-/// router against a custom container.
-GoRouter buildAppRouter(Ref ref) => GoRouter(
+/// Takes the connection cubit as a parameter (instead of reading the service
+/// locator) so tests can build a router against a custom cubit.
+GoRouter buildAppRouter({required ConnectionCubit connection}) => GoRouter(
       initialLocation: '/connect',
       redirect: (context, state) {
-        final configured = ref.read(connectionConfigProvider) != null;
+        final configured = connection.state != null;
         if (!configured && state.matchedLocation != '/connect') return '/connect';
         // `/connect?edit=1` (settings gear on the sessions page) reopens the
         // connect screen to edit the saved URL; a plain `/connect` (cold start
@@ -43,7 +40,7 @@ GoRouter buildAppRouter(Ref ref) => GoRouter(
         ),
         GoRoute(
           path: '/chat/:sessionId',
-          builder: (context, state) => ChatPage(
+          builder: (context, state) => ChatScreen(
             sessionId: state.pathParameters['sessionId']!,
             sessionName: state.uri.queryParameters['name'],
           ),
