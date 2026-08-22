@@ -13,6 +13,7 @@ import '../core/network/auth_interceptor.dart';
 import '../core/network/slab_api_error.dart';
 import '../core/network/slab_dio.dart';
 import 'model_types.dart';
+import 'settings_types.dart';
 
 export '../core/network/slab_api_error.dart';
 
@@ -184,6 +185,46 @@ class SlabRestClient {
 
   Future<void> unloadModel(String modelId) => _run(() async {
         await _dio.postUri<Object?>(_uri('/v1/models/unload'), data: {'model_id': modelId});
+      });
+
+  /// `GET /v1/settings` — the schema-driven settings document.
+  Future<SettingsDocumentView> getSettingsDocument() => _run(() async {
+        final response = await _dio.getUri<Object?>(_uri('/v1/settings'));
+        final body = response.data;
+        if (body is! Map<String, Object?>) {
+          throw const SlabRestException('unexpected settings document shape', null);
+        }
+        return SettingsDocumentView.fromJson(body);
+      });
+
+  /// `GET /v1/settings/{pmid}` — one property.
+  Future<SettingPropertyView> getSetting(String pmid) => _run(() async {
+        final response = await _dio.getUri<Object?>(_uri('/v1/settings/${Uri.encodeComponent(pmid)}'));
+        final body = _decode(response);
+        return SettingPropertyView.fromJson(body);
+      });
+
+  /// `PUT /v1/settings/{pmid}` — set (with value) or unset (reset to default).
+  /// A 400 with a validation payload throws [SettingValidationException].
+  Future<SettingPropertyView> updateSetting({required String pmid, required bool set, Object? value}) => _run(() async {
+        try {
+          final response = await _dio.putUri<Object?>(
+            _uri('/v1/settings/${Uri.encodeComponent(pmid)}'),
+            data: updateSettingBody(set: set, value: value),
+          );
+          return SettingPropertyView.fromJson(_decode(response));
+        } on DioException catch (error) {
+          final inner = error.error;
+          if (inner is SlabRestException && inner.statusCode == 400) {
+            // Re-decode the raw body for the structured validation payload.
+            final validation = SettingValidationErrorData.fromJson(
+                error.response?.data is Map<String, Object?> ? error.response!.data as Map<String, Object?> : null);
+            if (validation != null) {
+              throw SettingValidationException(validation, 400);
+            }
+          }
+          rethrow;
+        }
       });
 
   /// `GET /v1/tasks/{id}` — polled until a terminal status.

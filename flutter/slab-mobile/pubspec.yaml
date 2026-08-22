@@ -43,9 +43,6 @@ dependencies:
   # Gallery image attachments -> data-URL turn inputs. Exact pin mirrors
   # tdesign_flutter_adaptation's own constraint (it hard-pins 1.1.2).
   image_picker: 1.1.2
-  # Immutable models for the settings/models wire types + bloc states.
-  freezed_annotation: ^3.1.0
-  json_annotation: ^4.12.0
   # Service locator for infra + app-wide cubits (composition root).
   get_it: ^9.2.1
   # Connection config + language preference storage.
@@ -68,12 +65,13 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   # cubit/bloc unit tests (blocTest helper).
   bloc_test: ^10.0.0
-  # Codegen: drift schema, freezed models, json_serializable wire codecs.
-  # Generated files are committed (same policy as slab_tokens.g.dart).
+  # Codegen: drift schema (generated files are committed, same policy as
+  # slab_tokens.g.dart). build_runner stays for drift_dev. The freezed /
+  # json_serializable experiment was dropped — every wire codec in this
+  # codebase is hand-written (harness_types / model_types / settings_types),
+  # which the generators could not express more safely.
   build_runner: ^2.16.0
   drift_dev: ^2.34.5
-  freezed: ^4.0.0
-  json_serializable: ^6.14.1
 
 flutter:
   uses-material-design: true
