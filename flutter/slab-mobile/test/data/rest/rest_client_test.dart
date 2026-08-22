@@ -9,7 +9,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:slab_mobile/core/network/slab_dio.dart';
-import 'package:slab_mobile/data/rest_client.dart';
+import 'package:slab_mobile/data/rest/rest_client.dart';
 
 class FakeAdapter implements HttpClientAdapter {
   FakeAdapter(this.responder);

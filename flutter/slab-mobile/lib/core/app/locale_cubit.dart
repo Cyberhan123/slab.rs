@@ -8,7 +8,7 @@ import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../l10n/catalog.dart';
+import '../l10n/catalog.dart';
 
 class LocaleCubit extends Cubit<String> {
   LocaleCubit({required Catalogs catalogs}) : _catalogs = catalogs, super('auto');

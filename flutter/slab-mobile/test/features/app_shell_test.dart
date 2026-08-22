@@ -13,11 +13,11 @@ import 'package:slab_mobile/app.dart';
 import 'package:slab_mobile/core/app/connection_cubit.dart';
 import 'package:drift/native.dart';
 import 'package:slab_mobile/core/app/locale_cubit.dart';
-import 'package:slab_mobile/core/db/app_database.dart';
-import 'package:slab_mobile/core/db/session_meta_dao.dart';
-import 'package:slab_mobile/data/rest_client.dart';
-import 'package:slab_mobile/data/settings_types.dart';
-import 'package:slab_mobile/l10n/catalog.dart';
+import 'package:slab_mobile/data/local/app_database.dart';
+import 'package:slab_mobile/data/local/session_meta_dao.dart';
+import 'package:slab_mobile/data/rest/rest_client.dart';
+import 'package:slab_mobile/data/rest/settings_types.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
 import 'package:slab_mobile/routes/app_router.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 

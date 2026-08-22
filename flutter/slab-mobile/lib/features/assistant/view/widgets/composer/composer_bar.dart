@@ -17,13 +17,13 @@ import 'package:get_it/get_it.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../../../conversation/conversation_controller.dart';
-import '../../../../../../core/db/drafts_dao.dart';
-import '../../../../../../l10n/catalog.dart';
-import '../../../../../../l10n/mobile_strings.dart';
-import '../../../../../../theme/slab_tokens.g.dart';
+import 'package:slab_mobile/domain/conversation/conversation_controller.dart';
+import 'package:slab_mobile/data/local/drafts_dao.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
+import 'package:slab_mobile/core/l10n/mobile_strings.dart';
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
 import '../../../commands/command_registry.dart';
-import '../../../model/model_cubit.dart' show ModelCubit;
+import '../../../models/model_cubit.dart' show ModelCubit;
 
 /// Max gallery attachments per turn — bounds the JSON-RPC frame size
 /// (base64 inflates payloads ~33%).

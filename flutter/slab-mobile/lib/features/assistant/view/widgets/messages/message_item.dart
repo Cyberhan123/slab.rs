@@ -8,10 +8,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../../../conversation/turn_items.dart';
-import '../../../../../l10n/catalog.dart';
-import '../../../../../l10n/mobile_strings.dart';
-import '../../../../../theme/slab_tokens.g.dart';
+import 'package:slab_mobile/domain/conversation/turn_items.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
+import 'package:slab_mobile/core/l10n/mobile_strings.dart';
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
 import 'message_bubble.dart';
 
 class MessageItem extends StatefulWidget {

@@ -5,7 +5,7 @@ library;
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../../data/model_types.dart';
+import 'package:slab_mobile/data/rest/model_types.dart';
 import 'model_repository.dart';
 
 class ModelState {

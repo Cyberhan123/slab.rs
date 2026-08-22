@@ -6,8 +6,8 @@ library;
 
 import 'dart:async';
 
-import '../../../data/model_types.dart';
-import '../../../data/rest_client.dart';
+import 'package:slab_mobile/data/rest/model_types.dart';
+import 'package:slab_mobile/data/rest/rest_client.dart';
 
 /// Task poll cadence mirrors the desktop task page constants.
 const modelDownloadPollInterval = Duration(seconds: 2);

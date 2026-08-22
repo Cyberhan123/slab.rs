@@ -8,8 +8,8 @@ library;
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../data/connection_config.dart';
-import '../../data/rest_client.dart';
+import 'package:slab_mobile/data/local/connection_config.dart';
+import 'package:slab_mobile/data/rest/rest_client.dart';
 
 class ConnectionCubit extends Cubit<ConnectionConfig?> {
   /// [client] is a test seam: an injected fake replaces the config-built

@@ -7,10 +7,10 @@ import 'package:flutter/material.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../../../conversation/turn_items.dart';
-import '../../../../../../l10n/catalog.dart';
-import '../../../../../theme/slab_tokens.g.dart';
-import '../../../../../theme/td_theme.dart';
+import 'package:slab_mobile/domain/conversation/turn_items.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
+import 'package:slab_mobile/core/theme/td_theme.dart';
 import 'file_change_card.dart';
 import 'plan_card.dart';
 import 'reasoning_part.dart';

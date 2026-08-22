@@ -4,9 +4,9 @@ library;
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:slab_mobile/core/db/app_database.dart';
-import 'package:slab_mobile/core/db/drafts_dao.dart';
-import 'package:slab_mobile/core/db/session_meta_dao.dart';
+import 'package:slab_mobile/data/local/app_database.dart';
+import 'package:slab_mobile/data/local/drafts_dao.dart';
+import 'package:slab_mobile/data/local/session_meta_dao.dart';
 
 void main() {
   late AppDatabase db;

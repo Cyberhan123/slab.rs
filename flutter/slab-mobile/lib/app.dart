@@ -9,11 +9,11 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import 'core/app/connection_cubit.dart';
-import 'core/app/locale_cubit.dart';
-import 'core/di/service_locator.dart';
-import 'l10n/td_resource_delegate.dart';
-import 'theme/td_theme.dart';
+import 'package:slab_mobile/core/app/connection_cubit.dart';
+import 'package:slab_mobile/core/app/locale_cubit.dart';
+import 'package:slab_mobile/core/di/service_locator.dart';
+import 'package:slab_mobile/core/l10n/td_resource_delegate.dart';
+import 'package:slab_mobile/core/theme/td_theme.dart';
 
 class SlabApp extends StatelessWidget {
   const SlabApp({super.key, required this.router});

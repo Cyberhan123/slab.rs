@@ -1,6 +1,6 @@
 /// Thin REST client for the slab-server `/v1` surface the mobile app needs
 /// (health probe, setup gate, session management). The harness WS lives in
-/// `lib/proto/harness_client.dart`; this file deliberately stays HTTP-only.
+/// `lib/data/harness/harness_client.dart`; this file deliberately stays HTTP-only.
 ///
 /// Transport is dio (auth + error-envelope interceptors live in
 /// `lib/core/network/`); `SlabRestException` is re-exported so existing import
@@ -9,13 +9,13 @@ library;
 
 import 'package:dio/dio.dart';
 
-import '../core/network/auth_interceptor.dart';
-import '../core/network/slab_api_error.dart';
-import '../core/network/slab_dio.dart';
+import 'package:slab_mobile/core/network/auth_interceptor.dart';
+import 'package:slab_mobile/core/network/slab_api_error.dart';
+import 'package:slab_mobile/core/network/slab_dio.dart';
 import 'model_types.dart';
 import 'settings_types.dart';
 
-export '../core/network/slab_api_error.dart';
+export 'package:slab_mobile/core/network/slab_api_error.dart';
 
 /// `GET /health` → `{"status": "ok", "version": "..."}`.
 class HealthStatus {

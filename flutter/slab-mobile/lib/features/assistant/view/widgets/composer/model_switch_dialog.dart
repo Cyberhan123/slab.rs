@@ -6,8 +6,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../../l10n/catalog.dart';
-import '../../../../../theme/slab_tokens.g.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
 
 class ModelSwitchDialog extends StatelessWidget {
   const ModelSwitchDialog({

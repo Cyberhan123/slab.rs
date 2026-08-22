@@ -6,12 +6,12 @@ library;
 
 import 'package:go_router/go_router.dart';
 
-import '../core/app/connection_cubit.dart';
-import '../features/assistant/view/chat_screen.dart';
-import '../features/connect/connect_page.dart';
-import '../features/sessions/view/sessions_page.dart';
-import '../features/settings/view/settings_page.dart';
-import '../features/setup/setup_gate_page.dart';
+import 'package:slab_mobile/core/app/connection_cubit.dart';
+import 'package:slab_mobile/features/assistant/view/chat_screen.dart';
+import 'package:slab_mobile/features/connect/connect_page.dart';
+import 'package:slab_mobile/features/sessions/view/sessions_page.dart';
+import 'package:slab_mobile/features/settings/view/settings_page.dart';
+import 'package:slab_mobile/features/setup/setup_gate_page.dart';
 import 'home_shell.dart';
 
 /// Takes the connection cubit as a parameter (instead of reading the service

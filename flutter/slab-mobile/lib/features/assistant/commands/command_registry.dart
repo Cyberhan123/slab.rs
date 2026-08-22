@@ -3,7 +3,7 @@
 /// client holds the full command list, so name/alias lookup is authoritative.
 library;
 
-import '../../../proto/harness_types.dart' as proto;
+import 'package:slab_mobile/data/harness/harness_types.dart' as proto;
 
 class ParsedCommand {
   const ParsedCommand({required this.name, required this.args});

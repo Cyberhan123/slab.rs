@@ -2,8 +2,8 @@
 /// `getSelectedModelStatusLabel`. Returns the composed navbar subtitle.
 library;
 
-import '../../../data/model_types.dart';
-import '../../../l10n/catalog.dart';
+import 'package:slab_mobile/data/rest/model_types.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
 
 String getSelectedModelStatusLabel({
   required bool sessionReady,

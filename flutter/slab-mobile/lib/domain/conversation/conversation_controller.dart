@@ -17,10 +17,10 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show Listenable;
 
-import '../proto/harness_client.dart';
-import '../proto/harness_methods.dart';
-import '../proto/harness_types.dart' as proto;
-import '../proto/json_rpc.dart';
+import 'package:slab_mobile/data/harness/harness_client.dart';
+import 'package:slab_mobile/data/harness/harness_methods.dart';
+import 'package:slab_mobile/data/harness/harness_types.dart' as proto;
+import 'package:slab_mobile/data/harness/json_rpc.dart';
 import 'turn_items.dart';
 
 typedef Listener = void Function();

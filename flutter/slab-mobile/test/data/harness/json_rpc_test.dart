@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:slab_mobile/proto/json_rpc.dart';
+import 'package:slab_mobile/data/harness/json_rpc.dart';
 
 void main() {
   group('classifyInbound', () {

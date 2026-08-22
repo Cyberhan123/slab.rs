@@ -8,11 +8,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import 'app.dart';
-import 'core/app/connection_cubit.dart';
-import 'core/di/service_locator.dart';
-import 'l10n/catalog.dart';
-import 'routes/app_router.dart';
-import 'theme/td_theme.dart';
+import 'package:slab_mobile/core/app/connection_cubit.dart';
+import 'package:slab_mobile/core/di/service_locator.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
+import 'package:slab_mobile/routes/app_router.dart';
+import 'package:slab_mobile/core/theme/td_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

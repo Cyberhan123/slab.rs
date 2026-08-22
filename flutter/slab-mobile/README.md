@@ -34,32 +34,42 @@ debounced autosave, structured JSON editor, cloud-provider registry editor).
 ```
 lib/
   main.dart / app.dart            entrypoint (ScreenUtilInit + get_it bootstrap), MaterialApp.router
-  core/
+  core/                           feature-agnostic foundation (see lib/core/README.md)
     app/                          app-wide cubits: LocaleCubit, ConnectionCubit
     di/service_locator.dart       composition root (get_it)
     network/                      buildSlabDio + auth/error interceptors + SlabRestException
-    db/                           drift store (kv / session labels / drafts) + DAOs
+    theme/                        td_theme + GENERATED slab_tokens.g.dart
+    l10n/                         catalog + mobile_strings + TDesign resource delegate
     utils/ansi.dart               ANSI SGR → TextSpan parser (terminal cards)
     widgets/                      shared chrome (health indicator)
-  features/
-    sessions/                     conversations tab (cubit + page)
-    assistant/                    bootstrap (labels) · model (lifecycle) · commands
-                                  (slash dispatch) · view (chat screen, messages/,
-                                  composer/, approval)
+  data/                           outside-world adapters (see lib/data/README.md)
+    local/                        drift store (kv / session labels / drafts) + DAOs
+                                  + connection_config (shared_preferences)
+    rest/                         rest_client (dio) / model_types / settings_types
+    harness/                      json_rpc / harness_methods / harness_types /
+                                  harness_client (+reconnect)
+  domain/                         framework-free logic (see lib/domain/README.md)
+    conversation/                 turn_items (history+live projection) /
+                                  conversation_controller
+    session_labels.dart           canonical session label set
+  features/                       feature root = cubit + domain modules; UI in view/
+    sessions/                     conversations tab (sessions_cubit + view/)
+    assistant/                    models/ (lifecycle) · commands/ (slash dispatch) ·
+                                  view/ (chat screen, messages/, composer/, approval)
     settings/                     settings_cubit · autosave/ · cloud/ (provider
-                                  registry) · view (page + field cards +
+                                  registry) · view/ (page + field cards +
                                   structured editor)
     connect/, setup/              gate screens
-  l10n/                           catalog + mobile_strings + TDesign resource delegate
-  proto/                          json_rpc / harness_methods / harness_types / harness_client (+reconnect)
-  data/                           rest_client (dio) / model_types / settings_types / connection_config
-  conversation/                   turn_items (history+live projection) / conversation_controller
   routes/                         app_router (shell + gates + full-screen chat) / home_shell (TTabBar)
 design/tokens.json                GENERATED — inspectable token intermediate
 assets/theme/tdesign-theme.json   GENERATED — tdesign_flutter theme (slab light + slabDark)
 assets/i18n/{en-US,zh-CN}.json    GENERATED — flat catalogs from @slab/i18n (incl. the server ns)
-lib/core/db/*.g.dart              GENERATED — drift (dart run build_runner build)
+lib/data/local/*.g.dart           GENERATED — drift (dart run build_runner build)
 ```
+
+Import style: cross top-level domain (`core/` `data/` `domain/` `features/`
+`routes/`) uses `package:slab_mobile/…` absolute imports; within one domain,
+relative.
 
 ## Local validation
 

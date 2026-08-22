@@ -10,9 +10,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../../../conversation/turn_items.dart';
-import '../../../../../core/utils/ansi.dart';
-import '../../../../../theme/slab_tokens.g.dart';
+import 'package:slab_mobile/domain/conversation/turn_items.dart';
+import 'package:slab_mobile/core/utils/ansi.dart';
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
 
 /// Parsed `SandboxedOutput` (the shell tool's aggregated output envelope).
 class SandboxedOutput {

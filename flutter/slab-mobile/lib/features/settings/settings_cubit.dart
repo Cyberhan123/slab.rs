@@ -9,8 +9,8 @@ import 'dart:convert';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../data/rest_client.dart';
-import '../../data/settings_types.dart';
+import 'package:slab_mobile/data/rest/rest_client.dart';
+import 'package:slab_mobile/data/rest/settings_types.dart';
 import 'autosave/request_body.dart';
 
 enum FieldStatus { dirty, saving, saved, error }

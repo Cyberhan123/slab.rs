@@ -4,20 +4,20 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:slab_mobile/conversation/conversation_controller.dart';
-import 'package:slab_mobile/conversation/turn_items.dart';
+import 'package:slab_mobile/domain/conversation/conversation_controller.dart';
+import 'package:slab_mobile/domain/conversation/turn_items.dart';
 import 'package:slab_mobile/core/utils/ansi.dart';
 import 'package:slab_mobile/features/assistant/view/widgets/messages/diff_view.dart';
 import 'package:slab_mobile/features/assistant/view/widgets/messages/file_change_card.dart';
 import 'package:slab_mobile/features/assistant/view/widgets/messages/message_list.dart';
 import 'package:slab_mobile/features/assistant/view/widgets/messages/plan_card.dart';
 import 'package:slab_mobile/features/assistant/view/widgets/messages/terminal_card.dart';
-import 'package:slab_mobile/features/assistant/bootstrap/session_labels.dart';
+import 'package:slab_mobile/domain/session_labels.dart';
 import 'package:slab_mobile/core/network/slab_api_error.dart';
-import 'package:slab_mobile/l10n/catalog.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
 import 'package:slab_mobile/features/assistant/commands/command_registry.dart';
 import 'package:slab_mobile/features/assistant/commands/request_errors.dart';
-import 'package:slab_mobile/proto/harness_types.dart' as proto;
+import 'package:slab_mobile/data/harness/harness_types.dart' as proto;
 
 void main() {
   group('parseAnsi', () {

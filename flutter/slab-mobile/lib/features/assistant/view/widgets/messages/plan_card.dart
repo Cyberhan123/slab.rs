@@ -6,7 +6,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../../theme/slab_tokens.g.dart';
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
 
 enum PlanStepStatus { pending, inProgress, completed, blocked }
 

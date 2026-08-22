@@ -8,9 +8,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../proto/harness_types.dart' as proto;
-import '../../../../theme/slab_tokens.g.dart';
-import '../../../../theme/td_theme.dart';
+import 'package:slab_mobile/data/harness/harness_types.dart' as proto;
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
+import 'package:slab_mobile/core/theme/td_theme.dart';
 import 'messages/diff_view.dart';
 import 'messages/plan_card.dart';
 

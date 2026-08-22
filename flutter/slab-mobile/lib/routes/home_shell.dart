@@ -8,8 +8,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../core/app/locale_cubit.dart';
-import '../l10n/mobile_strings.dart';
+import 'package:slab_mobile/core/app/locale_cubit.dart';
+import 'package:slab_mobile/core/l10n/mobile_strings.dart';
 
 class HomeShell extends StatelessWidget {
   const HomeShell({super.key, required this.shell});

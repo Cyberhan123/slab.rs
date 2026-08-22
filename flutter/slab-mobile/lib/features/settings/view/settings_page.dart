@@ -9,11 +9,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../core/app/connection_cubit.dart';
-import '../../../core/app/locale_cubit.dart';
-import '../../../data/settings_types.dart';
-import '../../../l10n/catalog.dart';
-import '../../../theme/slab_tokens.g.dart';
+import 'package:slab_mobile/core/app/connection_cubit.dart';
+import 'package:slab_mobile/core/app/locale_cubit.dart';
+import 'package:slab_mobile/data/rest/settings_types.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
 import '../autosave/request_body.dart';
 import '../settings_cubit.dart';
 import 'widgets/field_card.dart';

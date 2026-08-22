@@ -5,8 +5,8 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:slab_mobile/data/rest_client.dart';
-import 'package:slab_mobile/data/settings_types.dart';
+import 'package:slab_mobile/data/rest/rest_client.dart';
+import 'package:slab_mobile/data/rest/settings_types.dart';
 import 'package:slab_mobile/features/settings/autosave/request_body.dart';
 import 'package:slab_mobile/features/settings/settings_cubit.dart';
 

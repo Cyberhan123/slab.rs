@@ -13,10 +13,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../core/app/connection_cubit.dart';
-import '../../core/app/locale_cubit.dart';
-import '../../data/rest_client.dart';
-import '../../l10n/mobile_strings.dart';
+import 'package:slab_mobile/core/app/connection_cubit.dart';
+import 'package:slab_mobile/core/app/locale_cubit.dart';
+import 'package:slab_mobile/data/rest/rest_client.dart';
+import 'package:slab_mobile/core/l10n/mobile_strings.dart';
 
 class SetupGatePage extends StatefulWidget {
   const SetupGatePage({super.key});

@@ -2,8 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:slab_mobile/theme/slab_tokens.g.dart';
-import 'package:slab_mobile/theme/td_theme.dart';
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
+import 'package:slab_mobile/core/theme/td_theme.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 void main() {

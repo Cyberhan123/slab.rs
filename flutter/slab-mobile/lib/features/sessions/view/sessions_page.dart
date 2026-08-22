@@ -9,13 +9,13 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../core/app/connection_cubit.dart';
-import '../../../core/db/session_meta_dao.dart';
-import '../../../core/di/service_locator.dart';
-import '../../../core/app/locale_cubit.dart';
-import '../../../core/widgets/health_indicator.dart';
-import '../../../data/rest_client.dart';
-import '../../../l10n/mobile_strings.dart';
+import 'package:slab_mobile/core/app/connection_cubit.dart';
+import 'package:slab_mobile/data/local/session_meta_dao.dart';
+import 'package:slab_mobile/core/di/service_locator.dart';
+import 'package:slab_mobile/core/app/locale_cubit.dart';
+import 'package:slab_mobile/core/widgets/health_indicator.dart';
+import 'package:slab_mobile/data/rest/rest_client.dart';
+import 'package:slab_mobile/core/l10n/mobile_strings.dart';
 import '../sessions_cubit.dart';
 
 class SessionsPage extends StatelessWidget {

@@ -6,8 +6,8 @@
 /// — the mobile assistant talks the harness WS exclusively).
 library;
 
-import '../../../core/network/slab_api_error.dart';
-import '../../../l10n/catalog.dart';
+import 'package:slab_mobile/core/network/slab_api_error.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
 
 /// Translate a REST error for display.
 String describeRestError(SlabRestException error, SlabCatalog catalog) {

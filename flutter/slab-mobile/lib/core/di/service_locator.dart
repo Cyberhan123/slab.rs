@@ -13,12 +13,12 @@ library;
 import 'package:get_it/get_it.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart' show TThemeData;
 
-import '../../l10n/catalog.dart';
+import '../l10n/catalog.dart';
 import '../app/connection_cubit.dart';
 import '../app/locale_cubit.dart';
-import '../db/app_database.dart';
-import '../db/drafts_dao.dart';
-import '../db/session_meta_dao.dart';
+import 'package:slab_mobile/data/local/app_database.dart';
+import 'package:slab_mobile/data/local/drafts_dao.dart';
+import 'package:slab_mobile/data/local/session_meta_dao.dart';
 
 GetIt get getIt => GetIt.instance;
 

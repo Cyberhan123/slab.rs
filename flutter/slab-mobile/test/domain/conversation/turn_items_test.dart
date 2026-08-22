@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:slab_mobile/conversation/turn_items.dart';
-import 'package:slab_mobile/proto/harness_methods.dart';
-import 'package:slab_mobile/proto/harness_types.dart' as proto;
-import 'package:slab_mobile/proto/json_rpc.dart';
+import 'package:slab_mobile/domain/conversation/turn_items.dart';
+import 'package:slab_mobile/data/harness/harness_methods.dart';
+import 'package:slab_mobile/data/harness/harness_types.dart' as proto;
+import 'package:slab_mobile/data/harness/json_rpc.dart';
 
 const base = 'http://127.0.0.1:3000';
 final baseUri = Uri.parse(base);

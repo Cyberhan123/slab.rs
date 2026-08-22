@@ -8,8 +8,8 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:slab_mobile/core/network/slab_dio.dart';
-import 'package:slab_mobile/data/rest_client.dart';
-import 'package:slab_mobile/data/settings_types.dart';
+import 'package:slab_mobile/data/rest/rest_client.dart';
+import 'package:slab_mobile/data/rest/settings_types.dart';
 
 const _document = {
   'schema_version': 3,

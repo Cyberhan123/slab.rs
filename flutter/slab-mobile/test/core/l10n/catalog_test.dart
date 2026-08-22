@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:slab_mobile/l10n/catalog.dart';
-import 'package:slab_mobile/l10n/mobile_strings.dart';
-import 'package:slab_mobile/l10n/mobile_strings_en_us.dart';
-import 'package:slab_mobile/l10n/mobile_strings_zh_cn.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
+import 'package:slab_mobile/core/l10n/mobile_strings.dart';
+import 'package:slab_mobile/core/l10n/mobile_strings_en_us.dart';
+import 'package:slab_mobile/core/l10n/mobile_strings_zh_cn.dart';
 
 const enJson = '''
 {

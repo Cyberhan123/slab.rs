@@ -7,9 +7,9 @@ import 'dart:async';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../core/db/session_meta_dao.dart';
-import '../assistant/bootstrap/session_labels.dart';
-import '../../data/rest_client.dart';
+import 'package:slab_mobile/data/local/session_meta_dao.dart';
+import 'package:slab_mobile/domain/session_labels.dart';
+import 'package:slab_mobile/data/rest/rest_client.dart';
 
 class SessionsState {
   const SessionsState({

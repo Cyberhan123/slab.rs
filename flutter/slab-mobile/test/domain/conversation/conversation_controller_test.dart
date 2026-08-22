@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:slab_mobile/conversation/conversation_controller.dart';
-import 'package:slab_mobile/conversation/turn_items.dart';
-import 'package:slab_mobile/proto/harness_client.dart';
-import 'package:slab_mobile/proto/harness_methods.dart';
+import 'package:slab_mobile/domain/conversation/conversation_controller.dart';
+import 'package:slab_mobile/domain/conversation/turn_items.dart';
+import 'package:slab_mobile/data/harness/harness_client.dart';
+import 'package:slab_mobile/data/harness/harness_methods.dart';
 
-import '../proto/fake_slab_socket.dart';
+import '../../data/harness/fake_slab_socket.dart';
 
 Map<String, Object?> threadPayload() => {
       'thread': {

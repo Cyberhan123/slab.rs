@@ -6,8 +6,8 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:slab_mobile/proto/harness_client.dart';
-import 'package:slab_mobile/proto/harness_methods.dart';
+import 'package:slab_mobile/data/harness/harness_client.dart';
+import 'package:slab_mobile/data/harness/harness_methods.dart';
 
 class FakeSlabSocket implements SlabSocket {
   FakeSlabSocket({this.onRequest});

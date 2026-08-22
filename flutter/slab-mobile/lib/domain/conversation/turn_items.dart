@@ -7,9 +7,9 @@
 /// item maps to UI parts — the TS repo's core invariant.
 library;
 
-import '../proto/harness_methods.dart';
-import '../proto/harness_types.dart' as proto;
-import '../proto/json_rpc.dart';
+import 'package:slab_mobile/data/harness/harness_methods.dart';
+import 'package:slab_mobile/data/harness/harness_types.dart' as proto;
+import 'package:slab_mobile/data/harness/json_rpc.dart';
 
 // ── UI model ────────────────────────────────────────────────────────────────
 

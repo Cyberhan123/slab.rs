@@ -6,8 +6,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../../../proto/harness_types.dart' as proto;
-import '../../../../../l10n/catalog.dart';
+import 'package:slab_mobile/data/harness/harness_types.dart' as proto;
+import 'package:slab_mobile/core/l10n/catalog.dart';
 
 class TokenUsageIndicator extends StatelessWidget {
   const TokenUsageIndicator({super.key, required this.usage, required this.catalog, this.contextWindowTokens});

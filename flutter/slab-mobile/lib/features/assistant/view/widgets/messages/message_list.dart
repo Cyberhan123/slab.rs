@@ -7,10 +7,10 @@ library;
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../../../conversation/conversation_controller.dart';
-import '../../../../../../conversation/turn_items.dart';
-import '../../../../../l10n/catalog.dart';
-import '../../../../../theme/slab_tokens.g.dart';
+import 'package:slab_mobile/domain/conversation/conversation_controller.dart';
+import 'package:slab_mobile/domain/conversation/turn_items.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
 import 'message_item.dart';
 
 /// A timeline row: a real message or a synthetic status marker.

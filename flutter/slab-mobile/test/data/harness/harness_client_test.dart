@@ -1,7 +1,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:slab_mobile/proto/harness_client.dart';
-import 'package:slab_mobile/proto/harness_methods.dart';
+import 'package:slab_mobile/data/harness/harness_client.dart';
+import 'package:slab_mobile/data/harness/harness_methods.dart';
 
 import 'fake_slab_socket.dart';
 

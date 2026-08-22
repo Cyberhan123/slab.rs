@@ -6,7 +6,7 @@ library;
 
 import 'dart:convert';
 
-import '../../../data/settings_types.dart';
+import 'package:slab_mobile/data/rest/settings_types.dart';
 
 final _integerPattern = RegExp(r'^-?\d+$');
 final _unsignedPattern = RegExp(r'^\d+$');

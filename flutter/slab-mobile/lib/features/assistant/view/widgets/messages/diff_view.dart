@@ -9,7 +9,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../../theme/slab_tokens.g.dart';
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
 
 /// Visual class per classified diff line.
 enum DiffLineKind { add, del, context, meta, hunk, plain }

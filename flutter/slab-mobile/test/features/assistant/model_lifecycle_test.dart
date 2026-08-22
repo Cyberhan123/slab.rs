@@ -10,11 +10,11 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:slab_mobile/core/network/slab_dio.dart';
-import 'package:slab_mobile/data/model_types.dart';
-import 'package:slab_mobile/data/rest_client.dart';
-import 'package:slab_mobile/features/assistant/model/model_repository.dart';
-import 'package:slab_mobile/features/assistant/model/model_status_label.dart';
-import 'package:slab_mobile/l10n/catalog.dart';
+import 'package:slab_mobile/data/rest/model_types.dart';
+import 'package:slab_mobile/data/rest/rest_client.dart';
+import 'package:slab_mobile/features/assistant/models/model_repository.dart';
+import 'package:slab_mobile/features/assistant/models/model_status_label.dart';
+import 'package:slab_mobile/core/l10n/catalog.dart';
 
 Map<String, Object?> _model(String id, {
   String kind = 'local',

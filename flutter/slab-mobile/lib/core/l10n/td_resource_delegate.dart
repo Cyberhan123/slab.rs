@@ -11,7 +11,7 @@ library;
 import 'package:flutter/widgets.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../core/app/locale_cubit.dart';
+import '../app/locale_cubit.dart';
 import 'mobile_strings.dart';
 
 class SlabResourceDelegate extends TResourceDelegate {

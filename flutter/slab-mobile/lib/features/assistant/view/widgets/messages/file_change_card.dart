@@ -9,8 +9,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../../../../../../conversation/turn_items.dart';
-import '../../../../../theme/slab_tokens.g.dart';
+import 'package:slab_mobile/domain/conversation/turn_items.dart';
+import 'package:slab_mobile/core/theme/slab_tokens.g.dart';
 import 'diff_view.dart';
 
 /// One committed file parsed from a live output JSON line.
