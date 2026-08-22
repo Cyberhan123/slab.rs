@@ -1,11 +1,19 @@
 /// Thin REST client for the slab-server `/v1` surface the mobile app needs
 /// (health probe, setup gate, session management). The harness WS lives in
 /// `lib/proto/harness_client.dart`; this file deliberately stays HTTP-only.
+///
+/// Transport is dio (auth + error-envelope interceptors live in
+/// `lib/core/network/`); `SlabRestException` is re-exported so existing import
+/// sites are untouched.
 library;
 
-import 'dart:convert';
+import 'package:dio/dio.dart';
 
-import 'package:http/http.dart' as http;
+import '../core/network/auth_interceptor.dart';
+import '../core/network/slab_api_error.dart';
+import '../core/network/slab_dio.dart';
+
+export '../core/network/slab_api_error.dart';
 
 /// `GET /health` → `{"status": "ok", "version": "..."}`.
 class HealthStatus {
@@ -44,40 +52,31 @@ class SessionRecord {
       );
 }
 
-class SlabRestException implements Exception {
-  const SlabRestException(this.message, this.statusCode);
-  final String message;
-  final int? statusCode;
-  @override
-  String toString() => statusCode == null ? message : '$message (HTTP $statusCode)';
-}
-
 class SlabRestClient {
-  SlabRestClient({required Uri baseUrl, String? bearerToken, http.Client? httpClient})
+  /// [dio] is injectable for tests; when omitted a default client is built
+  /// (and closed again by [dispose]).
+  SlabRestClient({required Uri baseUrl, String? bearerToken, Dio? dio})
       : _baseUrl = baseUrl,
-        _headers = {
-          if (bearerToken != null && bearerToken.isNotEmpty) 'Authorization': 'Bearer $bearerToken',
-        },
-        _httpClient = httpClient ?? http.Client();
+        _dio = dio ?? buildSlabDio(baseUrl: baseUrl),
+        _ownsDio = dio == null {
+    if (bearerToken != null && bearerToken.isNotEmpty) {
+      _dio.interceptors.insert(0, SlabAuthInterceptor(tokenProvider: () => bearerToken));
+    }
+  }
 
   final Uri _baseUrl;
-  final Map<String, String> _headers;
-  final http.Client _httpClient;
+  final Dio _dio;
+  final bool _ownsDio;
 
   Uri _uri(String path) => _baseUrl.replace(path: path, query: '', fragment: '');
 
-  Map<String, Object?> _decode(http.Response response) {
-    Object? body;
-    try {
-      body = jsonDecode(utf8.decode(response.bodyBytes));
-    } catch (_) {
-      body = null;
-    }
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final message = body is Map<String, Object?> && body['message'] is String
-          ? body['message']! as String
-          : 'request failed';
-      throw SlabRestException(message, response.statusCode);
+  /// dio already decoded the JSON body; this guards status + envelope shape
+  /// for the handful of endpoints that must return an object.
+  Map<String, Object?> _decode(Response<Object?> response) {
+    final body = response.data;
+    final status = response.statusCode;
+    if (status == null || status < 200 || status >= 300) {
+      throw SlabRestException(slabApiErrorMessage(body), status);
     }
     if (body is! Map<String, Object?>) {
       throw const SlabRestException('unexpected response shape', null);
@@ -85,12 +84,26 @@ class SlabRestClient {
     return body;
   }
 
+  /// Unwraps dio failures: the error interceptor has already mapped them to
+  /// [SlabRestException]; anything unmapped degrades to a transport error.
+  Future<T> _run<T>(Future<T> Function() action) async {
+    try {
+      return await action();
+    } on DioException catch (e) {
+      final inner = e.error;
+      if (inner is SlabRestException) throw inner;
+      throw SlabRestException(e.message ?? 'request failed', null);
+    }
+  }
+
   /// Heartbeat probe — `false` on any transport error (never throws).
   Future<HealthStatus> probeHealth() async {
     try {
-      final response = await _httpClient.get(_uri('/health'), headers: _headers).timeout(const Duration(seconds: 4));
+      final response = await _dio
+          .getUri<Object?>(_uri('/health'))
+          .timeout(const Duration(seconds: 4));
       if (response.statusCode != 200) return const HealthStatus(ok: false);
-      final body = jsonDecode(utf8.decode(response.bodyBytes));
+      final body = response.data;
       return HealthStatus(
         ok: body is Map<String, Object?> && body['status'] == 'ok',
         version: body is Map<String, Object?> && body['version'] is String ? body['version']! as String : null,
@@ -100,46 +113,48 @@ class SlabRestClient {
     }
   }
 
-  Future<SetupStatus> getSetupStatus() async {
-    final response = await _httpClient.get(_uri('/v1/setup/status'), headers: _headers);
-    return SetupStatus.fromJson(_decode(response));
-  }
+  Future<SetupStatus> getSetupStatus() => _run(() async {
+        final response = await _dio.getUri<Object?>(_uri('/v1/setup/status'));
+        return SetupStatus.fromJson(_decode(response));
+      });
 
-  Future<List<SessionRecord>> listSessions() async {
-    final response = await _httpClient.get(_uri('/v1/sessions'), headers: _headers);
-    final body = jsonDecode(utf8.decode(response.bodyBytes));
-    if (body is List) {
-      return body.whereType<Map<String, Object?>>().map(SessionRecord.fromJson).toList(growable: false);
-    }
-    if (body is Map<String, Object?> && body['data'] is List) {
-      return (body['data']! as List).whereType<Map<String, Object?>>().map(SessionRecord.fromJson).toList(growable: false);
-    }
-    throw const SlabRestException('unexpected sessions response shape', null);
-  }
+  Future<List<SessionRecord>> listSessions() => _run(() async {
+        final response = await _dio.getUri<Object?>(_uri('/v1/sessions'));
+        final body = response.data;
+        if (body is List) {
+          return body.whereType<Map<String, Object?>>().map(SessionRecord.fromJson).toList(growable: false);
+        }
+        if (body is Map<String, Object?> && body['data'] is List) {
+          return (body['data']! as List).whereType<Map<String, Object?>>().map(SessionRecord.fromJson).toList(growable: false);
+        }
+        throw const SlabRestException('unexpected sessions response shape', null);
+      });
 
   /// Create a session; its `id` doubles as the harness WS `?token=`.
-  Future<SessionRecord> createSession({String? name}) async {
-    final response = await _httpClient.post(
-      _uri('/v1/sessions'),
-      headers: {..._headers, 'Content-Type': 'application/json'},
-      body: jsonEncode({if (name != null && name.isNotEmpty) 'name': name}),
-    );
-    return SessionRecord.fromJson(_decode(response));
-  }
+  Future<SessionRecord> createSession({String? name}) => _run(() async {
+        final response = await _dio.postUri<Object?>(
+          _uri('/v1/sessions'),
+          data: {if (name != null && name.isNotEmpty) 'name': name},
+        );
+        return SessionRecord.fromJson(_decode(response));
+      });
 
-  Future<SessionRecord> renameSession({required String id, required String name}) async {
-    final response = await _httpClient.put(
-      _uri('/v1/sessions/$id'),
-      headers: {..._headers, 'Content-Type': 'application/json'},
-      body: jsonEncode({'name': name}),
-    );
-    return SessionRecord.fromJson(_decode(response));
-  }
+  Future<SessionRecord> renameSession({required String id, required String name}) => _run(() async {
+        final response = await _dio.putUri<Object?>(
+          _uri('/v1/sessions/$id'),
+          data: {'name': name},
+        );
+        return SessionRecord.fromJson(_decode(response));
+      });
 
-  Future<void> deleteSession(String id) async {
-    final response = await _httpClient.delete(_uri('/v1/sessions/$id'), headers: _headers);
-    _decode(response);
-  }
+  Future<void> deleteSession(String id) => _run(() async {
+        final response = await _dio.deleteUri<Object?>(_uri('/v1/sessions/$id'));
+        _decode(response);
+      });
 
-  void dispose() => _httpClient.close();
+  /// Only closes a client this constructor built; injected clients belong to
+  /// their owner (tests reuse them across cases).
+  void dispose() {
+    if (_ownsDio) _dio.close();
+  }
 }
