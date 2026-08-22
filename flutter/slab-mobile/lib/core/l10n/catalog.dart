@@ -1,5 +1,7 @@
-/// Locale catalog over the generated flat JSON (`assets/i18n/*.json`,
-/// exported from `packages/slab-i18n` TS catalogs by `bun run gen:mobile`).
+/// Locale catalog over the generated flat entries
+/// (`lib/core/l10n/catalog_entries.g.dart`, exported from `packages/slab-i18n`
+/// TS catalogs by `bun run gen:mobile`; the asset-JSON loading below is the
+/// legacy channel kept until the const maps fully take over).
 ///
 /// `t(key, args)` keeps i18next `{{var}}` interpolation; language resolution
 /// ports `normalizeLanguage` from `packages/slab-i18n/src/index.ts`
@@ -10,6 +12,8 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart' show AssetBundle, rootBundle;
 
+import 'catalog_entries.g.dart';
+
 /// Both catalogs, loaded in `main()` before `runApp` and registered in the
 /// service locator (en-US doubles as the fallback chain root).
 class Catalogs {
@@ -18,8 +22,19 @@ class Catalogs {
   final SlabCatalog zh;
 }
 
+/// Catalogs built from the generated const maps — no asset bundle needed.
+const defaultCatalogs = Catalogs(en: slabCatalogEn, zh: slabCatalogZh);
+
+/// en-US is the fallback-chain root.
+const slabCatalogEn = SlabCatalog('en-US', slabCatalogEnUs);
+
+const slabCatalogZh = SlabCatalog('zh-CN', slabCatalogZhCn, slabCatalogEn);
+
+/// The catalog for a canonical tag ('en-US' | 'zh-CN'); anything else → en.
+SlabCatalog slabCatalogForTag(String tag) => tag == 'zh-CN' ? slabCatalogZh : slabCatalogEn;
+
 class SlabCatalog {
-  SlabCatalog._(this.locale, this._entries, this._fallback);
+  const SlabCatalog(this.locale, this._entries, [this._fallback]);
   final String locale;
   final Map<String, String> _entries;
   final SlabCatalog? _fallback;
@@ -33,7 +48,7 @@ class SlabCatalog {
         if (value is String) entries[key] = value;
       });
     }
-    return SlabCatalog._(locale, entries, fallback);
+    return SlabCatalog(locale, entries, fallback);
   }
 
   /// Load an asset bundle catalog; en-US is the fallback chain root.

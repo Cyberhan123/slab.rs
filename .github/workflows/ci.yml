@@ -170,7 +170,9 @@ jobs:
           git diff --exit-code flutter/slab-mobile/design/tokens.json \
             flutter/slab-mobile/lib/core/theme/slab_tokens.g.dart \
             flutter/slab-mobile/assets/theme/tdesign-theme.json \
-            flutter/slab-mobile/assets/i18n
+            flutter/slab-mobile/assets/i18n \
+            flutter/slab-mobile/lib/core/l10n/arb \
+            flutter/slab-mobile/lib/core/l10n/catalog_entries.g.dart
 
       - name: flutter pub get
         run: bun ./scripts/mobile/run.ts pub get

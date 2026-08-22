@@ -94,10 +94,16 @@ bun run dev:mobile -- --dart-define=SLAB_API_BASE_URL=http://10.0.2.2:3000
 ## Generated artifacts — do not hand-edit
 
 `lib/core/theme/slab_tokens.g.dart`, `design/tokens.json`,
-`assets/theme/tdesign-theme.json`, `assets/i18n/*.json` are produced by
-`bun run gen:mobile` (`scripts/design/export-tokens.ts` +
+`assets/theme/tdesign-theme.json`, `assets/i18n/*.json`,
+`lib/core/l10n/arb/*.arb`, `lib/core/l10n/catalog_entries.g.dart` are produced
+by `bun run gen:mobile` (`scripts/design/export-tokens.ts` +
 `scripts/i18n/export-mobile-locales.ts`) and drift-checked in CI with
-`git diff --exit-code`. The TDesign theme JSON carries the COMPLETE palette
+`git diff --exit-code`. The ARB files are the translation-tooling interchange
+format — dot keys verbatim, i18next `{{var}}` placeholders; gen-l10n cannot
+consume them (keys must be Dart identifiers) so the runtime catalog is the
+generated const map (`catalog_entries.g.dart`), keeping the string-key
+`catalog.t()` API for the runtime-downloaded `server.*` namespace.
+The TDesign theme JSON carries the COMPLETE palette
 for both modes — tdesign_flutter falls back to its built-in light blue for
 missing keys even in dark mode, so the exporter asserts key parity, scale
 monotonicity, and anchor equality (e.g. light `brandColor7` == `--primary`).

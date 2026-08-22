@@ -23,7 +23,7 @@ Use this as the repo-wide AI reference for architecture boundaries, workflow, an
 - Inference stays behind `bin/slab-app -> bin/slab-server -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime -> crates/slab-runtime-core`.
 - The desktop host starts `slab-server`; product API traffic stays on HTTP; Tauri commands stay host-only.
 - Extend the existing `/v1/*` API surface instead of adding a parallel API tree.
-- `flutter/slab-mobile` (Flutter) is a pure network client over the existing `/v1` + harness WS surface; mobile work must not add a parallel API tree. Design tokens flow one-way from `packages/slab-components/src/styles/globals.css` via `bun run gen:mobile`; never hand-edit generated mobile files (`slab_tokens.g.dart`, `design/tokens.json`, `assets/theme/tdesign-theme.json`, `assets/i18n/*`).
+- `flutter/slab-mobile` (Flutter) is a pure network client over the existing `/v1` + harness WS surface; mobile work must not add a parallel API tree. Design tokens flow one-way from `packages/slab-components/src/styles/globals.css` via `bun run gen:mobile`; never hand-edit generated mobile files (`slab_tokens.g.dart`, `design/tokens.json`, `assets/theme/tdesign-theme.json`, `assets/i18n/*`, `lib/core/l10n/arb/*`, `lib/core/l10n/catalog_entries.g.dart`).
 - Backend API shape changes require `bun run gen:api` to refresh `packages/api/src/v1.d.ts`.
 - Prefer `crates/slab-types` and `crates/slab-proto` for contracts that cross crate boundaries.
 - Keep `crates/slab-app-core` HTTP-free. Keep `bin/slab-runtime` as the runtime composition root. Keep `crates/slab-runtime-core` limited to scheduler and backend protocol concerns.
