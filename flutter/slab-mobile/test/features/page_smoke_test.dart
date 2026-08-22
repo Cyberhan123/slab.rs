@@ -13,7 +13,10 @@ import 'package:go_router/go_router.dart';
 import 'package:slab_mobile/conversation/conversation_controller.dart';
 import 'package:slab_mobile/core/app/connection_cubit.dart';
 import 'package:slab_mobile/core/app/locale_cubit.dart';
+import 'package:slab_mobile/data/model_types.dart';
 import 'package:slab_mobile/data/rest_client.dart';
+import 'package:slab_mobile/features/assistant/model/model_cubit.dart';
+import 'package:slab_mobile/features/assistant/model/model_repository.dart';
 import 'package:slab_mobile/features/assistant/view/chat_screen.dart';
 import 'package:slab_mobile/features/connect/connect_page.dart';
 import 'package:slab_mobile/features/sessions/sessions_cubit.dart';
@@ -39,6 +42,9 @@ class FakeSlabRestClient extends SlabRestClient {
 
   @override
   Future<List<SessionRecord>> listSessions() async => sessions;
+
+  @override
+  Future<List<AiModelRecord>> listModels() async => const [];
 
   @override
   void dispose() {}
@@ -180,8 +186,16 @@ void main() {
       baseUrl: Uri.parse('http://127.0.0.1:9'),
     );
     addTearDown(controller.dispose);
+    final modelCubit = ModelCubit(repository: ModelRepository(client: FakeSlabRestClient()));
     await tester.pumpWidget(
-      SlabAppShell(home: ChatScreen(sessionId: 's1', sessionName: 'Session One', controller: controller)),
+      SlabAppShell(
+        home: ChatScreen(
+          sessionId: 's1',
+          sessionName: 'Session One',
+          controller: controller,
+          modelCubit: modelCubit,
+        ),
+      ),
     );
     await tester.pump();
     expect(find.byType(TNavBar), findsOneWidget);

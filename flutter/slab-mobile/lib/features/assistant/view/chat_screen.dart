@@ -17,12 +17,16 @@ import '../../../core/app/locale_cubit.dart';
 import '../../../conversation/conversation_controller.dart';
 import '../../../l10n/mobile_strings.dart';
 import '../../../theme/slab_tokens.g.dart';
+import '../model/model_cubit.dart';
+import '../model/model_repository.dart';
+import '../model/model_status_label.dart';
 import 'widgets/approval_banner.dart';
+import 'widgets/composer/model_switch_dialog.dart';
 import 'widgets/messages/message_list.dart';
 import 'widgets/messages/token_usage_indicator.dart';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key, required this.sessionId, this.sessionName, this.controller});
+  const ChatScreen({super.key, required this.sessionId, this.sessionName, this.controller, this.modelCubit});
 
   final String sessionId;
   final String? sessionName;
@@ -30,6 +34,9 @@ class ChatScreen extends StatefulWidget {
   /// Test seam: an inert injected controller keeps the WS stack (and its
   /// uncancellable 5s timeout timer) out of widget tests under FakeAsync.
   final ConversationController? controller;
+
+  /// Test seam: a pre-built model cubit replaces the page-owned one.
+  final ModelCubit? modelCubit;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -90,7 +97,38 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _composer.text.trim();
     if (text.isEmpty) return;
     _composer.clear();
-    await _controller.sendText(text);
+    final modelId = context.read<ModelCubit>().state.selectedId;
+    await _controller.sendText(text, modelId: modelId);
+  }
+
+  /// New-session action (navbar + switch-dialog "create").
+  Future<void> _createSession() async {
+    final client = context.read<ConnectionCubit>().client;
+    if (client == null) return;
+    final record = await client.createSession();
+    if (!mounted) return;
+    context.go('/chat/${record.id}?name=${Uri.encodeQueryComponent(record.name)}');
+  }
+
+  /// Open the model picker sheet; a selection on a populated session goes
+  /// through the switch dialog (keep vs new session).
+  Future<void> _openModelPicker(BuildContext context) async {
+    final cubit = context.read<ModelCubit>();
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: BlocProvider<ModelCubit>.value(
+          value: cubit,
+          child: _ModelPickerSheet(cubit: cubit),
+        ),
+      ),
+    );
+    if (picked == null || picked == cubit.state.selectedId) return;
+    if (_controller.state.messages.isNotEmpty) {
+      cubit.requestSwitch(picked);
+    } else {
+      await cubit.select(picked);
+    }
   }
 
   /// Danger confirm before retracting a turn (desktop parity).
@@ -117,14 +155,16 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildScreen(BuildContext context) {
     final localeCubit = context.watch<LocaleCubit>();
     final locale = localeCubit.state;
     final catalog = localeCubit.catalog;
     String t(String key, [Map<String, String> args = const {}]) => mobileT(locale, key, args);
 
-    return Scaffold(
+    return BlocListener<ModelCubit, ModelState>(
+      listenWhen: (previous, current) => previous.pendingSwitchTo != current.pendingSwitchTo && current.pendingSwitchTo != null,
+      listener: (context, state) => _showSwitchDialog(context, state.pendingSwitchTo!),
+      child: Scaffold(
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -152,7 +192,51 @@ class _ChatScreenState extends State<ChatScreen> {
                     },
                   ),
                 ),
+                TNavBarItem(icon: TIcons.add_circle, onTap: _createSession),
               ],
+            ),
+            // Slim model bar: current model + lifecycle status; tap opens the
+            // picker (desktop header-select parity).
+            Builder(
+              builder: (context) {
+                final cubit = context.watch<ModelCubit>();
+                final controllerState = _controller.state;
+                final label = getSelectedModelStatusLabel(
+                  sessionReady: true,
+                  isHistoryLoading: controllerState.isHistoryLoading,
+                  isCreatingSession: false,
+                  isDeletingSession: false,
+                  modelLoading: cubit.state.loading,
+                  isPreparingModel: cubit.state.preparing,
+                  eventsConnected: controllerState.connection == ConnectionPhase.ready,
+                  selectedModel: cubit.state.selected,
+                  catalog: context.read<LocaleCubit>().catalog,
+                );
+                return InkWell(
+                  onTap: () => _openModelPicker(context),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+                    child: Row(
+                      children: [
+                        Icon(TIcons.setting_1, size: 13, color: context.tTheme.textColorSecondary),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 11, color: context.tTheme.textColorSecondary),
+                          ),
+                        ),
+                        if (cubit.state.preparing) ...[
+                          const SizedBox(width: 6),
+                          const TLoading(size: TLoadingSize.small, icon: TLoadingIcon.circle),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
             Expanded(
               child: NotificationListener<ScrollNotification>(
@@ -232,7 +316,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Align(
                     alignment: Alignment.centerLeft,
                     child: usage != null
-                        ? TokenUsageIndicator(usage: usage, catalog: context.read<LocaleCubit>().catalog)
+                        ? TokenUsageIndicator(usage: usage, catalog: context.read<LocaleCubit>().catalog, contextWindowTokens: context.read<ModelCubit>().state.loadedContextLength)
                         : const SizedBox.shrink(),
                   ),
                 );
@@ -247,7 +331,57 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
       ),
+      ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provided = widget.modelCubit;
+    final child = Builder(builder: _buildScreen);
+    if (provided != null) {
+      return MultiBlocProvider(
+        providers: [BlocProvider<ModelCubit>.value(value: provided)],
+        child: child,
+      );
+    }
+    final client = context.read<ConnectionCubit>().client;
+    if (client == null) throw StateError('no connection client');
+    return BlocProvider(
+      create: (context) => ModelCubit(repository: ModelRepository(client: client))..load(),
+      child: child,
+    );
+  }
+
+  /// Keep-vs-new-session dialog for a model switch on a populated session.
+  Future<void> _showSwitchDialog(BuildContext context, String targetId) async {
+    final cubit = context.read<ModelCubit>();
+    final target = cubit.state.models.where((m) => m.id == targetId).firstOrNull;
+    if (target == null) return;
+    final catalog = context.read<LocaleCubit>().catalog;
+    await TDialog.show(
+      context,
+      dialog: ModelSwitchDialog(
+        catalog: catalog,
+        fromLabel: cubit.state.selected?.displayName ?? cubit.state.selectedId ?? '',
+        toLabel: target.displayName,
+        messageCount: _controller.state.messages.length,
+        creating: false,
+        onKeepSession: () {
+          Navigator.of(context).pop();
+          cubit.applyPendingSwitch();
+        },
+        onCreateSession: () async {
+          Navigator.of(context).pop();
+          await _createSession();
+        },
+      ),
+    );
+    // A dismissed dialog (tap outside / cancel action) never resolved —
+    // clear the pending switch so the next pick starts clean.
+    if (cubit.state.pendingSwitchTo == targetId) {
+      cubit.cancelPendingSwitch();
+    }
   }
 }
 
@@ -315,6 +449,62 @@ class _StatusTag extends StatelessWidget {
         extensions: [TTagThemeData(isLight: true)],
       ),
       child: TTag(label, size: TTagSize.small, colorScheme: colorScheme),
+    );
+  }
+}
+
+/// Bottom sheet listing the chat-capable models; tapping a row pops with
+/// the model id.
+class _ModelPickerSheet extends StatelessWidget {
+  const _ModelPickerSheet({required this.cubit});
+
+  final ModelCubit cubit;
+
+  @override
+  Widget build(BuildContext context) {
+    final catalog = context.read<LocaleCubit>().catalog;
+    final td = context.tTheme;
+    final state = cubit.state;
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text(
+              catalog.t('pages.assistant.modelPicker.groupLabel'),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+          if (state.loading)
+            const Padding(padding: EdgeInsets.all(16), child: Center(child: TLoading(size: TLoadingSize.small, icon: TLoadingIcon.circle))),
+          if (!state.loading && state.models.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(catalog.t('pages.assistant.modelPicker.emptyLabel')),
+            ),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final model in state.models)
+                  TCell(
+                    title: Text(model.displayName),
+                    subtitle: Text(
+                      model.kind == 'local'
+                          ? (model.downloaded ? model.status : catalog.t('pages.assistant.status.needsDownload'))
+                          : catalog.t('pages.assistant.status.cloudModel'),
+                      style: TextStyle(fontSize: 11, color: td.textColorPlaceholder),
+                    ),
+                    arrow: false,
+                    onTap: () => Navigator.of(context).pop(model.id),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

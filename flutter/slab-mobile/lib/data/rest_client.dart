@@ -12,6 +12,7 @@ import 'package:dio/dio.dart';
 import '../core/network/auth_interceptor.dart';
 import '../core/network/slab_api_error.dart';
 import '../core/network/slab_dio.dart';
+import 'model_types.dart';
 
 export '../core/network/slab_api_error.dart';
 
@@ -150,6 +151,46 @@ class SlabRestClient {
   Future<void> deleteSession(String id) => _run(() async {
         final response = await _dio.deleteUri<Object?>(_uri('/v1/sessions/$id'));
         _decode(response);
+      });
+
+  // ── Models & tasks (assistant model lifecycle) ─────────────────────────────
+
+  /// `GET /v1/models` — accepts both a bare array and a `{data: []}` envelope.
+  Future<List<AiModelRecord>> listModels() => _run(() async {
+        final response = await _dio.getUri<Object?>(_uri('/v1/models'));
+        final body = response.data;
+        final List<Object?> raw = body is List
+            ? body
+            : body is Map<String, Object?> && body['data'] is List
+                ? body['data']! as List
+                : const [];
+        return raw.whereType<Map<String, Object?>>().map(AiModelRecord.fromJson).toList(growable: false);
+      });
+
+  /// `POST /v1/models/download` → the task envelope (`operation_id`/`task_id`).
+  Future<Map<String, Object?>> downloadModel(String modelId) => _run(() async {
+        final response = await _dio.postUri<Object?>(_uri('/v1/models/download'), data: {'model_id': modelId});
+        final body = response.data;
+        return body is Map<String, Object?> ? body : const <String, Object?>{};
+      });
+
+  Future<void> loadModel(String modelId) => _run(() async {
+        await _dio.postUri<Object?>(_uri('/v1/models/load'), data: {'model_id': modelId});
+      });
+
+  Future<void> switchModel(String modelId) => _run(() async {
+        await _dio.postUri<Object?>(_uri('/v1/models/switch'), data: {'model_id': modelId});
+      });
+
+  Future<void> unloadModel(String modelId) => _run(() async {
+        await _dio.postUri<Object?>(_uri('/v1/models/unload'), data: {'model_id': modelId});
+      });
+
+  /// `GET /v1/tasks/{id}` — polled until a terminal status.
+  Future<TaskRecord> getTask(String id) => _run(() async {
+        final response = await _dio.getUri<Object?>(_uri('/v1/tasks/$id'));
+        final body = _decode(response);
+        return TaskRecord.fromJson(body);
       });
 
   /// Only closes a client this constructor built; injected clients belong to
