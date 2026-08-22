@@ -4,9 +4,14 @@ Flutter mobile client for a running slab-server. A **pure network client** over 
 existing `/v1` REST surface + the `/v1/agents/harness` JSON-RPC WebSocket — zero
 backend changes, zero Rust on the device (phase 3 reserves that path, see below).
 
-Phase 1 scope (it supersedes the removed `@slab/h5` mobile-web shell): connect
-config → setup gate → conversation list → streaming chat with tool cards and
-command/file-change approvals.
+Scope (it supersedes the removed `@slab/h5` mobile-web shell): the full
+assistant surface ported from the desktop web UI — connect config → setup gate
+→ two-tab shell (conversations / settings) → full-screen streaming chat with
+terminal / file-change / plan tool cards, command-fileChange-plan approvals
+with scopes, model lifecycle (list/download/load + switch dialog), plan mode,
+`/compact`+`/fork`+rollback, slash-command menu, gallery image attachments,
+token-usage indicator — plus the schema-driven settings module (per-field
+debounced autosave, structured JSON editor, cloud-provider registry editor).
 
 ## Role
 
@@ -28,18 +33,32 @@ command/file-change approvals.
 
 ```
 lib/
-  main.dart / app.dart            entrypoint, MaterialApp.router, TDesign theme
-  theme/slab_tokens.g.dart        GENERATED — regenerate with `bun run gen:mobile`
-  theme/td_theme.dart             hand-written: TDThemeData load + SlabExtras extension
-  l10n/catalog.dart + mobile_strings.dart (+ _en_us/_zh_cn tables) + td_resource_delegate.dart (TDesign component chrome)
-  proto/  json_rpc / harness_methods / harness_types / harness_client (+reconnect)
-  data/   rest_client / connection_config
-  conversation/ turn_items (history+live projection) / conversation_controller
-  routes/ app_router (connect → setup gate → sessions → chat)
-  pages/ + widgets/
+  main.dart / app.dart            entrypoint (ScreenUtilInit + get_it bootstrap), MaterialApp.router
+  core/
+    app/                          app-wide cubits: LocaleCubit, ConnectionCubit
+    di/service_locator.dart       composition root (get_it)
+    network/                      buildSlabDio + auth/error interceptors + SlabRestException
+    db/                           drift store (kv / session labels / drafts) + DAOs
+    utils/ansi.dart               ANSI SGR → TextSpan parser (terminal cards)
+    widgets/                      shared chrome (health indicator)
+  features/
+    sessions/                     conversations tab (cubit + page)
+    assistant/                    bootstrap (labels) · model (lifecycle) · commands
+                                  (slash dispatch) · view (chat screen, messages/,
+                                  composer/, approval)
+    settings/                     settings_cubit · autosave/ · cloud/ (provider
+                                  registry) · view (page + field cards +
+                                  structured editor)
+    connect/, setup/              gate screens
+  l10n/                           catalog + mobile_strings + TDesign resource delegate
+  proto/                          json_rpc / harness_methods / harness_types / harness_client (+reconnect)
+  data/                           rest_client (dio) / model_types / settings_types / connection_config
+  conversation/                   turn_items (history+live projection) / conversation_controller
+  routes/                         app_router (shell + gates + full-screen chat) / home_shell (TTabBar)
 design/tokens.json                GENERATED — inspectable token intermediate
 assets/theme/tdesign-theme.json   GENERATED — tdesign_flutter theme (slab light + slabDark)
-assets/i18n/{en-US,zh-CN}.json    GENERATED — flat catalogs from @slab/i18n
+assets/i18n/{en-US,zh-CN}.json    GENERATED — flat catalogs from @slab/i18n (incl. the server ns)
+lib/core/db/*.g.dart              GENERATED — drift (dart run build_runner build)
 ```
 
 ## Local validation
@@ -47,7 +66,7 @@ assets/i18n/{en-US,zh-CN}.json    GENERATED — flat catalogs from @slab/i18n
 ```sh
 bun run gen:mobile       # regenerate tokens + locale assets (NO Flutter SDK needed)
 bun run check:mobile     # flutter analyze
-bun run test:mobile      # flutter test (52 unit tests; no device needed)
+bun run test:mobile      # flutter test (136 unit/widget tests; no device needed)
 bun run dev:server       # headless slab-server alone (mobile clients can target it)
 bun run dev:mobile       # dev:server in the background + flutter run; pass defines through:
 bun run dev:mobile -- --dart-define=SLAB_API_BASE_URL=http://10.0.2.2:3000
@@ -80,8 +99,9 @@ bans raw hex in TSX.
 ## Hard boundaries
 
 - **No parallel API tree**: only the documented `/v1` + harness subset
-  (health, setup/status, sessions CRUD; harness `initialize`/`thread/*`/
-  `turn/*`/`approval/resolve`/`model/list`).
+  (health, setup/status, sessions CRUD, models + tasks, settings document +
+  per-pmid updates; harness `initialize`/`thread/*`/`turn/*`/
+  `approval/resolve`/`model/list`/`command/list`).
 - **No code sharing with `@slab/ui`**; token values flow one way from
   `packages/slab-components/src/styles/globals.css`.
 - **Harness constants** (`lib/proto/harness_methods.dart`) mirror
