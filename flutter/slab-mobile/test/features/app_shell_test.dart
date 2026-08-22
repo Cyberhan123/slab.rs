@@ -67,7 +67,7 @@ const _session = SessionRecord(
   updatedAt: '2026-01-02T00:00:00Z',
 );
 
-late final Catalogs _catalogs;
+const Catalogs _catalogs = defaultCatalogs;
 
 TThemeData _tdTheme() {
   final json = File('assets/theme/tdesign-theme.json').readAsStringSync();
@@ -80,7 +80,6 @@ Future<ConnectionCubit> _configure({SlabRestClient? client}) async {
   SharedPreferences.setMockInitialValues({'slab.mobile.connection.baseUrl': 'http://127.0.0.1:9'});
   GetIt.asNewInstance();
   final getIt = GetIt.I;
-  getIt.registerSingleton<Catalogs>(_catalogs);
   getIt.registerSingleton<TThemeData>(_tdTheme());
   getIt.registerSingleton<LocaleCubit>(LocaleCubit(catalogs: _catalogs));
   final database = AppDatabase(NativeDatabase.memory());
@@ -95,13 +94,6 @@ Future<ConnectionCubit> _configure({SlabRestClient? client}) async {
 }
 
 void main() {
-  setUpAll(() async {
-    _catalogs = Catalogs(
-      en: await SlabCatalog.loadDefault('en-US'),
-      zh: await SlabCatalog.loadDefault('zh-CN'),
-    );
-  });
-
   testWidgets('shell shows both tabs and switches branches', (tester) async {
     final connection = await _configure();
     await tester.pumpWidget(SlabApp(router: buildAppRouter(connection: connection)));

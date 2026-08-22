@@ -88,16 +88,15 @@ TThemeData _tdTheme() {
   return TThemeData.fromJson('slab', json, darkName: 'slabDark')!;
 }
 
-/// Loaded once in `setUpAll` — asset loads are real async I/O that can stall
-/// under `testWidgets` FakeAsync, so tests only read the completed value.
-late final Catalogs _catalogs;
+/// Compile-time const maps — the same catalogs production serves (no async
+/// loading to sequence around FakeAsync).
+const Catalogs _catalogs = defaultCatalogs;
 
 /// Fresh get_it per test with the app-wide singletons; [client] doubles as
 /// the transport fake seam (mirrors production wiring).
 GetIt _configure({SlabRestClient? client}) {
   GetIt.asNewInstance();
   final getIt = GetIt.I;
-  getIt.registerSingleton<Catalogs>(_catalogs);
   getIt.registerSingleton<TThemeData>(_tdTheme());
   getIt.registerSingleton<LocaleCubit>(LocaleCubit(catalogs: _catalogs));
   final database = AppDatabase(NativeDatabase.memory());
@@ -158,13 +157,6 @@ Future<void> _drainTimers(WidgetTester tester) async {
 }
 
 void main() {
-  setUpAll(() async {
-    _catalogs = Catalogs(
-      en: await SlabCatalog.loadDefault('en-US'),
-      zh: await SlabCatalog.loadDefault('zh-CN'),
-    );
-  });
-
   testWidgets('connect page renders TDesign chrome', (tester) async {
     _configure();
     await tester.pumpWidget(const SlabAppShell(home: ConnectPage()));

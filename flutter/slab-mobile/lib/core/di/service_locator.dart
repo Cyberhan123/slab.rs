@@ -13,7 +13,6 @@ library;
 import 'package:get_it/get_it.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart' show TThemeData;
 
-import '../l10n/catalog.dart';
 import '../app/connection_cubit.dart';
 import '../app/locale_cubit.dart';
 import 'package:slab_mobile/data/local/app_database.dart';
@@ -24,11 +23,10 @@ GetIt get getIt => GetIt.instance;
 
 /// Loads persisted preferences (language, connection) so the router redirect
 /// runs against real state; call exactly once from `main()` before `runApp`.
-Future<void> configureDependencies({required Catalogs catalogs, required TThemeData tdTheme}) async {
-  getIt.registerSingleton<Catalogs>(catalogs);
+Future<void> configureDependencies({required TThemeData tdTheme}) async {
   getIt.registerSingleton<TThemeData>(tdTheme);
 
-  final locale = LocaleCubit(catalogs: catalogs);
+  final locale = LocaleCubit();
   await locale.load();
   getIt.registerSingleton<LocaleCubit>(locale);
 

@@ -1,0 +1,11 @@
+# ARB interchange location for translation tooling — co-located with the
+# .arb files on purpose. This file is INTENTIONALLY NOT at the project root:
+# as of Flutter 3.38 a root l10n.yaml auto-runs the gen_localizations build
+# target regardless of the pubspec `generate` flag, and gen-l10n cannot
+# consume these files (i18next dot keys are not legal gen-l10n identifiers,
+# and i18next {{var}} placeholders are ICU syntax errors — both verified by
+# the 2026-08 gen-l10n spike). The runtime catalog is the generated
+# catalog_entries.g.dart next to this file; `catalog.t(key)` stays string-keyed
+# for the runtime-downloaded server.* namespace.
+arb-dir: arb
+template-arb-file: app_en.arb

@@ -36,12 +36,11 @@ void main() {
       expect(zh.t('missing.key'), 'missing.key');
     });
 
-    test('generated asset catalogs are loadable and share key parity', () async {
-      // flutter test exposes declared package assets through rootBundle.
-      final en = await SlabCatalog.loadDefault('en-US');
-      final zh = await SlabCatalog.loadDefault('zh-CN');
-      expect(en.t('pages.assistant.approval.title'), 'Approval required');
-      expect(zh.t('pages.assistant.approval.title'), contains('审批'));
+    test('default const catalogs translate the same shared keys', () {
+      // Committed-artifact coverage now lives in arb_parity_test; this pins
+      // the const-map default catalogs (what LocaleCubit actually serves).
+      expect(slabCatalogEn.t('pages.assistant.approval.title'), 'Approval required');
+      expect(slabCatalogZh.t('pages.assistant.approval.title'), contains('审批'));
     });
   });
 

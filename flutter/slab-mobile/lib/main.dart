@@ -1,7 +1,8 @@
-/// slab-mobile entrypoint: loads catalogs + TDesign theme, configures the
-/// service locator (which also restores the persisted language preference and
+/// slab-mobile entrypoint: loads the TDesign theme, configures the service
+/// locator (which also restores the persisted language preference and
 /// connection config so the router redirect runs against real state), then
-/// runs the app.
+/// runs the app. Locale catalogs are compile-time const maps — nothing to
+/// load here.
 library;
 
 import 'package:flutter/material.dart';
@@ -10,23 +11,17 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'app.dart';
 import 'package:slab_mobile/core/app/connection_cubit.dart';
 import 'package:slab_mobile/core/di/service_locator.dart';
-import 'package:slab_mobile/core/l10n/catalog.dart';
 import 'package:slab_mobile/routes/app_router.dart';
 import 'package:slab_mobile/core/theme/td_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final catalogs = Catalogs(
-    en: await SlabCatalog.loadDefault('en-US'),
-    zh: await SlabCatalog.loadDefault('zh-CN'),
-  );
-
   // tdesign_flutter 1.0 resolves the theme per-context from the MaterialApp
   // theme extensions (light/dark); no global multi-theme bootstrap needed.
   final tdTheme = await loadSlabTheme();
 
-  await configureDependencies(catalogs: catalogs, tdTheme: tdTheme);
+  await configureDependencies(tdTheme: tdTheme);
 
   runApp(
     ScreenUtilInit(

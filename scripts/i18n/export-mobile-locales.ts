@@ -2,14 +2,11 @@
 
 /**
  * Exports the slab-i18n catalogs (TypeScript modules — bun imports them
- * natively, no build step) into the Flutter mobile app. Because all outputs
+ * natively, no build step) into the Flutter mobile app. Because both outputs
  * derive from the same source in the same commit, mobile strings can never
  * drift from web/desktop.
  *
  * Output (committed, deterministic; regenerate with `bun run gen:mobile`):
- *   flutter/slab-mobile/assets/i18n/{en-US,zh-CN}.json
- *   — flat JSON catalogs (runtime asset channel; superseded by the Dart
- *     const maps below once the asset channel retires).
  *   flutter/slab-mobile/lib/core/l10n/arb/app_{en,zh}.arb
  *   — ARB interchange format for translation tooling: deep-flattened dot
  *     keys verbatim (gen-l10n itself cannot consume them — its keys must be
@@ -20,7 +17,7 @@
  *     by SlabCatalog (keeps the `catalog.t(key)` string-key API, including
  *     the runtime-downloaded `server.*` namespace that error envelopes use).
  *
- * All three carry deep-flattened dot keys over the `common` / `layouts` /
+ * Both carry deep-flattened dot keys over the `common` / `layouts` /
  * `pages` / `server` namespaces.
  *
  * Usage: bun ./scripts/i18n/export-mobile-locales.ts [--check]
@@ -36,7 +33,6 @@ import { zhCN } from "../../packages/slab-i18n/src/locales/zh-CN";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
-const OUT_DIR = path.join(repoRoot, "flutter/slab-mobile/assets/i18n");
 const ARB_DIR = path.join(repoRoot, "flutter/slab-mobile/lib/core/l10n/arb");
 const ENTRIES_OUT = path.join(
   repoRoot,
@@ -102,11 +98,6 @@ if (enKeys.length !== zhKeys.length || enKeys.some((key, i) => key !== zhKeys[i]
   );
 }
 
-function jsonText(entries: Map<string, string>): string {
-  const doc = Object.fromEntries([...entries.keys()].toSorted().map((key) => [key, entries.get(key)]));
-  return `${JSON.stringify(doc, null, 2)}\n`;
-}
-
 function arbText(locale: string, entries: Map<string, string>): string {
   // @@locale first (insertion order is preserved); no per-key @-metadata —
   // gen-l10n never consumes these files, metadata would only bloat them.
@@ -136,12 +127,6 @@ function entriesText(catalogs: { tag: string; entries: Map<string, string> }[]):
 }
 
 const artifacts = [
-  ...flattened.map(({ tag, entries }) => ({
-    label: `flutter/slab-mobile/assets/i18n/${tag}.json`,
-    outPath: path.join(OUT_DIR, `${tag}.json`),
-    text: jsonText(entries),
-    count: entries.size,
-  })),
   ...flattened.map(({ entries }, index) => ({
     label: `flutter/slab-mobile/lib/core/l10n/arb/${LOCALES[index].arbName}.arb`,
     outPath: path.join(ARB_DIR, `${LOCALES[index].arbName}.arb`),
@@ -171,7 +156,7 @@ if (CHECK) {
   }
 } else {
   await Promise.all(
-    [OUT_DIR, ARB_DIR, path.dirname(ENTRIES_OUT)].map((dir) => mkdir(dir, { recursive: true })),
+    [ARB_DIR, path.dirname(ENTRIES_OUT)].map((dir) => mkdir(dir, { recursive: true })),
   );
   await Promise.all(artifacts.map(({ outPath, text }) => writeFile(outPath, text, "utf8")));
   for (const { label, count } of artifacts) {

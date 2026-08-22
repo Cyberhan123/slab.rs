@@ -1,7 +1,6 @@
 /// Locale catalog over the generated flat entries
 /// (`lib/core/l10n/catalog_entries.g.dart`, exported from `packages/slab-i18n`
-/// TS catalogs by `bun run gen:mobile`; the asset-JSON loading below is the
-/// legacy channel kept until the const maps fully take over).
+/// TS catalogs by `bun run gen:mobile`).
 ///
 /// `t(key, args)` keeps i18next `{{var}}` interpolation; language resolution
 /// ports `normalizeLanguage` from `packages/slab-i18n/src/index.ts`
@@ -9,8 +8,6 @@
 library;
 
 import 'dart:convert';
-
-import 'package:flutter/services.dart' show AssetBundle, rootBundle;
 
 import 'catalog_entries.g.dart';
 
@@ -50,16 +47,6 @@ class SlabCatalog {
     }
     return SlabCatalog(locale, entries, fallback);
   }
-
-  /// Load an asset bundle catalog; en-US is the fallback chain root.
-  static Future<SlabCatalog> load(AssetBundle bundle, String locale) async {
-    final en = SlabCatalog.fromJson('en-US', await bundle.loadString('assets/i18n/en-US.json'));
-    if (locale == 'en-US') return en;
-    final zh = SlabCatalog.fromJson(locale, await bundle.loadString('assets/i18n/$locale.json'), en);
-    return zh;
-  }
-
-  static Future<SlabCatalog> loadDefault(String locale) => load(rootBundle, locale);
 
   /// Resolve a platform locale to a supported one (port of `normalizeLanguage`).
   static String resolveLocale(String? platformLocale) {

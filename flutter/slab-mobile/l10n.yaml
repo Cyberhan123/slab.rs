@@ -1,8 +1,0 @@
-# ARB interchange location for translation tooling. The Flutter build does NOT
-# run gen-l10n: the i18next dot keys are not legal gen-l10n identifiers (keys
-# must be Dart method names), and i18next {{var}} placeholders are ICU syntax
-# errors — both verified by the 2026-08 gen-l10n spike. The runtime catalog is
-# the generated lib/core/l10n/catalog_entries.g.dart (see lib/core/l10n/).
-# Keep `generate: true` out of pubspec.yaml so this stays documentation-only.
-arb-dir: lib/core/l10n/arb
-template-arb-file: app_en.arb
