@@ -12,7 +12,10 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:slab_mobile/conversation/conversation_controller.dart';
 import 'package:slab_mobile/core/app/connection_cubit.dart';
+import 'package:drift/native.dart';
 import 'package:slab_mobile/core/app/locale_cubit.dart';
+import 'package:slab_mobile/core/db/app_database.dart';
+import 'package:slab_mobile/core/db/session_meta_dao.dart';
 import 'package:slab_mobile/data/model_types.dart';
 import 'package:slab_mobile/data/rest_client.dart';
 import 'package:slab_mobile/features/assistant/model/model_cubit.dart';
@@ -40,8 +43,24 @@ class FakeSlabRestClient extends SlabRestClient {
   @override
   Future<SetupStatus> getSetupStatus() async => SetupStatus(initialized: setupInitialized);
 
+  final List<SessionRecord> _created = [];
+  int createCalls = 0;
+
   @override
-  Future<List<SessionRecord>> listSessions() async => sessions;
+  Future<List<SessionRecord>> listSessions() async => [...sessions, ..._created];
+
+  @override
+  Future<SessionRecord> createSession({String? name}) async {
+    createCalls += 1;
+    final record = SessionRecord(
+      id: 'created-$createCalls',
+      name: 'New assistant',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    );
+    _created.add(record);
+    return record;
+  }
 
   @override
   Future<List<AiModelRecord>> listModels() async => const [];
@@ -74,6 +93,10 @@ GetIt _configure({SlabRestClient? client}) {
   getIt.registerSingleton<Catalogs>(_catalogs);
   getIt.registerSingleton<TThemeData>(_tdTheme());
   getIt.registerSingleton<LocaleCubit>(LocaleCubit(catalogs: _catalogs));
+  final database = AppDatabase(NativeDatabase.memory());
+  getIt.registerSingleton<AppDatabase>(database);
+  getIt.registerSingleton<SessionMetaDao>(SessionMetaDao(database));
+  addTearDown(database.close);
   getIt.registerSingleton<ConnectionCubit>(ConnectionCubit(client: client));
   addTearDown(GetIt.I.reset);
   return getIt;
@@ -164,13 +187,17 @@ void main() {
     await cubit.close();
   });
 
-  testWidgets('sessions page shows TEmpty for a fresh server', (tester) async {
+  testWidgets('sessions page auto-creates the first session on a fresh server', (tester) async {
     _configure();
-    final cubit = SessionsCubit(client: FakeSlabRestClient(sessions: const []));
+    final fake = FakeSlabRestClient(sessions: const []);
+    final cubit = SessionsCubit(client: fake);
     await tester.pumpWidget(SlabAppShell(home: SessionsPage(cubit: cubit)));
     await tester.pump();
-    await tester.pump();
-    expect(find.byType(TEmpty), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(fake.createCalls, 1);
+    expect(find.byType(TCell), findsOneWidget);
+    expect(find.text('New assistant'), findsOneWidget);
     await _drainTimers(tester);
     await cubit.close();
   });

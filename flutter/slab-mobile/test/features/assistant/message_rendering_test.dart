@@ -12,6 +12,7 @@ import 'package:slab_mobile/features/assistant/view/widgets/messages/file_change
 import 'package:slab_mobile/features/assistant/view/widgets/messages/message_list.dart';
 import 'package:slab_mobile/features/assistant/view/widgets/messages/plan_card.dart';
 import 'package:slab_mobile/features/assistant/view/widgets/messages/terminal_card.dart';
+import 'package:slab_mobile/features/assistant/bootstrap/session_labels.dart';
 
 void main() {
   group('parseAnsi', () {
@@ -163,6 +164,25 @@ void main() {
         CompactMarkerRow,
         ModelLoadMarkerRow,
       ]);
+    });
+  });
+
+  group('session labels', () {
+    test('default family covers both locales plus legacy names', () {
+      expect(isDefaultSessionLabel('New assistant'), isTrue);
+      expect(isDefaultSessionLabel('新助手'), isTrue);
+      expect(isDefaultSessionLabel('New Conversation'), isTrue);
+      expect(isDefaultSessionLabel('新对话'), isTrue);
+      expect(isDefaultSessionLabel(null), isTrue);
+      expect(isDefaultSessionLabel(''), isTrue);
+      expect(isDefaultSessionLabel('My custom title'), isFalse);
+    });
+
+    test('first-prompt label truncates at 42 chars', () {
+      expect(createConversationLabel('  hello  ', 'fallback'), 'hello');
+      expect(createConversationLabel('', 'fallback'), 'fallback');
+      final long = 'a' * 50;
+      expect(createConversationLabel(long, 'fallback'), '${'a' * 42}...');
     });
   });
 }

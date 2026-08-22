@@ -7,11 +7,14 @@ import 'dart:async';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../core/db/session_meta_dao.dart';
+import '../assistant/bootstrap/session_labels.dart';
 import '../../data/rest_client.dart';
 
 class SessionsState {
   const SessionsState({
     this.sessions,
+    this.labels = const {},
     this.error,
     this.setupChecked = false,
     this.setupRedirect = false,
@@ -19,6 +22,9 @@ class SessionsState {
 
   /// Null while the first load is in flight.
   final List<SessionRecord>? sessions;
+
+  /// Local label overrides (first-prompt titles) keyed by session id.
+  final Map<String, String> labels;
 
   /// Last refresh error (toString'd for display); null when reachable.
   final Object? error;
@@ -32,26 +38,33 @@ class SessionsState {
 
   SessionsState copyWith({
     List<SessionRecord>? sessions,
+    Map<String, String>? labels,
     Object? error,
     bool? setupChecked,
     bool? setupRedirect,
-  }) =>
-      SessionsState(
-        sessions: sessions ?? this.sessions,
-        error: error ?? this.error,
-        setupChecked: setupChecked ?? this.setupChecked,
-        setupRedirect: setupRedirect ?? this.setupRedirect,
-      );
+  }) => SessionsState(
+    sessions: sessions ?? this.sessions,
+    labels: labels ?? this.labels,
+    error: error ?? this.error,
+    setupChecked: setupChecked ?? this.setupChecked,
+    setupRedirect: setupRedirect ?? this.setupRedirect,
+  );
 }
 
 class SessionsCubit extends Cubit<SessionsState> {
-  SessionsCubit({SlabRestClient? client})
-      : _client = client,
-        super(const SessionsState());
+  SessionsCubit({SlabRestClient? client, SessionMetaDao? sessionMeta})
+    : _client = client,
+      _sessionMeta = sessionMeta,
+      super(const SessionsState());
 
   final SlabRestClient? _client;
+
+  /// Local label overrides + the current-session pointer (null in tests that
+  /// don't exercise persistence).
+  final SessionMetaDao? _sessionMeta;
   Timer? _poll;
   bool _started = false;
+  bool _bootstrappedOnce = false;
 
   /// Idempotent so the page's BlocProvider wiring can call it unconditionally.
   void start() {
@@ -64,6 +77,17 @@ class SessionsCubit extends Cubit<SessionsState> {
   Future<void> _bootstrap() async {
     await _checkSetupGate();
     await refresh();
+    // Assistant bootstrap parity: a server with no sessions gets one created
+    // so the chat surface always has a conversation to open (once per page
+    // load, not on every refresh).
+    if (!_bootstrappedOnce) {
+      _bootstrappedOnce = true;
+      final sessions = state.sessions;
+      if (sessions != null && sessions.isEmpty && _client != null) {
+        await _client.createSession();
+        await refresh();
+      }
+    }
   }
 
   Future<void> _checkSetupGate() async {
@@ -87,10 +111,38 @@ class SessionsCubit extends Cubit<SessionsState> {
     if (client == null) return;
     try {
       final sessions = await client.listSessions();
-      emit(SessionsState(sessions: sessions, setupChecked: true, setupRedirect: state.setupRedirect));
+      final labels = await _sessionMeta?.labels() ?? const <String, String>{};
+      // Drop overrides for sessions that no longer exist server-side.
+      await _sessionMeta?.retainOnly(
+        sessions.map((record) => record.id).toSet(),
+      );
+      emit(
+        SessionsState(
+          sessions: sessions,
+          labels: labels,
+          setupChecked: true,
+          setupRedirect: state.setupRedirect,
+        ),
+      );
     } on Object catch (error) {
       emit(state.copyWith(error: error.toString()));
     }
+  }
+
+  /// First-prompt auto-title: only when the server name is still a default.
+  Future<void> noteUserPrompt({
+    required String sessionId,
+    required String prompt,
+    required String serverName,
+  }) async {
+    final dao = _sessionMeta;
+    if (dao == null) return;
+    final existing = state.labels[sessionId];
+    if (existing != null && existing.isNotEmpty) return;
+    if (!isDefaultSessionLabel(serverName)) return;
+    final label = createConversationLabel(prompt, serverName);
+    await dao.upsertLabel(sessionId, label);
+    emit(state.copyWith(labels: {...state.labels, sessionId: label}));
   }
 
   /// Creates a session and returns it (the view navigates to its chat).

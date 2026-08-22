@@ -11,7 +11,10 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slab_mobile/app.dart';
 import 'package:slab_mobile/core/app/connection_cubit.dart';
+import 'package:drift/native.dart';
 import 'package:slab_mobile/core/app/locale_cubit.dart';
+import 'package:slab_mobile/core/db/app_database.dart';
+import 'package:slab_mobile/core/db/session_meta_dao.dart';
 import 'package:slab_mobile/data/rest_client.dart';
 import 'package:slab_mobile/l10n/catalog.dart';
 import 'package:slab_mobile/routes/app_router.dart';
@@ -29,8 +32,24 @@ class FakeSlabRestClient extends SlabRestClient {
   @override
   Future<SetupStatus> getSetupStatus() async => const SetupStatus(initialized: true);
 
+  final List<SessionRecord> _created = [];
+  int createCalls = 0;
+
   @override
-  Future<List<SessionRecord>> listSessions() async => sessions;
+  Future<List<SessionRecord>> listSessions() async => [...sessions, ..._created];
+
+  @override
+  Future<SessionRecord> createSession({String? name}) async {
+    createCalls += 1;
+    final record = SessionRecord(
+      id: 'created-$createCalls',
+      name: 'New assistant',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    );
+    _created.add(record);
+    return record;
+  }
 
   @override
   void dispose() {}
@@ -59,6 +78,10 @@ Future<ConnectionCubit> _configure({SlabRestClient? client}) async {
   getIt.registerSingleton<Catalogs>(_catalogs);
   getIt.registerSingleton<TThemeData>(_tdTheme());
   getIt.registerSingleton<LocaleCubit>(LocaleCubit(catalogs: _catalogs));
+  final database = AppDatabase(NativeDatabase.memory());
+  getIt.registerSingleton<AppDatabase>(database);
+  getIt.registerSingleton<SessionMetaDao>(SessionMetaDao(database));
+  addTearDown(database.close);
   final connection = ConnectionCubit(client: client ?? FakeSlabRestClient(sessions: const [_session]));
   getIt.registerSingleton<ConnectionCubit>(connection);
   addTearDown(GetIt.I.reset);

@@ -10,6 +10,8 @@ import 'package:go_router/go_router.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../../../core/app/connection_cubit.dart';
+import '../../../core/db/session_meta_dao.dart';
+import '../../../core/di/service_locator.dart';
 import '../../../core/app/locale_cubit.dart';
 import '../../../core/widgets/health_indicator.dart';
 import '../../../data/rest_client.dart';
@@ -31,10 +33,16 @@ class SessionsPage extends StatelessWidget {
     final provided = cubit;
     return provided == null
         ? BlocProvider(
-            create: (context) => SessionsCubit(client: context.read<ConnectionCubit>().client)..start(),
+            create: (context) => SessionsCubit(
+              client: context.read<ConnectionCubit>().client,
+              sessionMeta: getIt<SessionMetaDao>(),
+            )..start(),
             child: const _SessionsView(),
           )
-        : BlocProvider.value(value: provided..start(), child: const _SessionsView());
+        : BlocProvider.value(
+            value: provided..start(),
+            child: const _SessionsView(),
+          );
   }
 }
 
@@ -46,7 +54,9 @@ class _SessionsView extends StatelessWidget {
     try {
       final record = await cubit.create();
       if (!context.mounted) return;
-      context.go('/chat/${record.id}?name=${Uri.encodeQueryComponent(record.name)}');
+      context.go(
+        '/chat/${record.id}?name=${Uri.encodeQueryComponent(record.name)}',
+      );
     } on Object {
       // The cubit's refresh already surfaced transport state; creation
       // failures keep the user on the list (health dot goes red).
@@ -63,7 +73,9 @@ class _SessionsView extends StatelessWidget {
         title: Text(mobileT(locale, 'mobile.sessions.rename')),
         content: TextField(
           controller: controller,
-          decoration: InputDecoration(hintText: mobileT(locale, 'mobile.sessions.nameLabel')),
+          decoration: InputDecoration(
+            hintText: mobileT(locale, 'mobile.sessions.nameLabel'),
+          ),
         ),
         actions: [
           TDialogAction(child: Text(mobileT(locale, 'common.actions.cancel'))),
@@ -88,7 +100,10 @@ class _SessionsView extends StatelessWidget {
         title: Text(mobileT(locale, 'mobile.sessions.delete')),
         content: Text(record.name),
         actions: [
-          TDialogAction(child: Text(mobileT(locale, 'common.actions.cancel')), result: false),
+          TDialogAction(
+            child: Text(mobileT(locale, 'common.actions.cancel')),
+            result: false,
+          ),
           TDialogAction(
             child: Text(mobileT(locale, 'mobile.sessions.delete')),
             result: true,
@@ -105,10 +120,12 @@ class _SessionsView extends StatelessWidget {
   Widget build(BuildContext context) {
     final locale = context.watch<LocaleCubit>().state;
     final td = context.tTheme;
-    String t(String key, [Map<String, String> args = const {}]) => mobileT(locale, key, args);
+    String t(String key, [Map<String, String> args = const {}]) =>
+        mobileT(locale, key, args);
 
     return BlocListener<SessionsCubit, SessionsState>(
-      listenWhen: (previous, current) => !previous.setupRedirect && current.setupRedirect,
+      listenWhen: (previous, current) =>
+          !previous.setupRedirect && current.setupRedirect,
       listener: (context, state) => context.go('/setup'),
       child: Scaffold(
         body: Stack(
@@ -131,63 +148,95 @@ class _SessionsView extends StatelessWidget {
                               child: HealthIndicator(
                                 online: reachable,
                                 onlineLabel: t('mobile.sessions.serverOnline'),
-                                offlineLabel: t('mobile.sessions.serverOffline'),
+                                offlineLabel: t(
+                                  'mobile.sessions.serverOffline',
+                                ),
                               ),
                             ),
                           ),
                         ),
-                        TNavBarItem(icon: TIcons.setting, onTap: () => context.go('/connect?edit=1')),
+                        TNavBarItem(
+                          icon: TIcons.setting,
+                          onTap: () => context.go('/connect?edit=1'),
+                        ),
                       ],
                     ),
                     Expanded(
                       child: state.error != null && sessions == null
-                          ? TEmpty(emptyText: t('mobile.sessions.serverOffline'))
+                          ? TEmpty(
+                              emptyText: t('mobile.sessions.serverOffline'),
+                            )
                           : sessions == null
-                              ? const Center(child: TLoading(size: TLoadingSize.medium, icon: TLoadingIcon.circle))
-                              : EasyRefresh(
-                                  header: TRefreshHeader(),
-                                  onRefresh: () => context.read<SessionsCubit>().refresh(),
-                                  child: sessions.isEmpty && state.setupChecked
-                                      ? ListView(
-                                          children: [
-                                            Padding(
-                                              padding: const EdgeInsets.all(24),
-                                              child: Center(child: TEmpty(emptyText: t('mobile.sessions.empty'))),
+                          ? const Center(
+                              child: TLoading(
+                                size: TLoadingSize.medium,
+                                icon: TLoadingIcon.circle,
+                              ),
+                            )
+                          : EasyRefresh(
+                              header: TRefreshHeader(),
+                              onRefresh: () =>
+                                  context.read<SessionsCubit>().refresh(),
+                              child: sessions.isEmpty && state.setupChecked
+                                  ? ListView(
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.all(24),
+                                          child: Center(
+                                            child: TEmpty(
+                                              emptyText: t(
+                                                'mobile.sessions.empty',
+                                              ),
                                             ),
-                                          ],
-                                        )
-                                      : ListView.builder(
-                                          itemCount: sessions.length,
-                                          itemBuilder: (context, index) {
-                                            final record = sessions[index];
-                                            return TSwipeCell(
-                                              end: TSwipeCellPanel(
-                                                children: [
-                                                  TSwipeCellAction(
-                                                    label: t('mobile.sessions.rename'),
-                                                    icon: TIcons.edit,
-                                                    onPressed: (_) => _rename(context, record),
-                                                  ),
-                                                  TSwipeCellAction(
-                                                    label: t('mobile.sessions.delete'),
-                                                    icon: TIcons.delete,
-                                                    backgroundColor: td.errorNormalColor,
-                                                    onPressed: (_) => _delete(context, record),
-                                                  ),
-                                                ],
-                                              ),
-                                              child: TCell(
-                                                prefix: Icon(TIcons.chat_bubble, color: td.textColorSecondary),
-                                                title: Text(record.name),
-                                                subtitle: Text(record.updatedAt),
-                                                onTap: () => context.go(
-                                                  '/chat/${record.id}?name=${Uri.encodeQueryComponent(record.name)}',
-                                                ),
-                                              ),
-                                            );
-                                          },
+                                          ),
                                         ),
-                                ),
+                                      ],
+                                    )
+                                  : ListView.builder(
+                                      itemCount: sessions.length,
+                                      itemBuilder: (context, index) {
+                                        final record = sessions[index];
+                                        final displayLabel =
+                                            state.labels[record.id] ??
+                                            record.name;
+                                        return TSwipeCell(
+                                          end: TSwipeCellPanel(
+                                            children: [
+                                              TSwipeCellAction(
+                                                label: t(
+                                                  'mobile.sessions.rename',
+                                                ),
+                                                icon: TIcons.edit,
+                                                onPressed: (_) =>
+                                                    _rename(context, record),
+                                              ),
+                                              TSwipeCellAction(
+                                                label: t(
+                                                  'mobile.sessions.delete',
+                                                ),
+                                                icon: TIcons.delete,
+                                                backgroundColor:
+                                                    td.errorNormalColor,
+                                                onPressed: (_) =>
+                                                    _delete(context, record),
+                                              ),
+                                            ],
+                                          ),
+                                          child: TCell(
+                                            prefix: Icon(
+                                              TIcons.chat_bubble,
+                                              color: td.textColorSecondary,
+                                            ),
+                                            title: Text(displayLabel),
+                                            subtitle: Text(record.updatedAt),
+                                            onTap: () => context.go(
+                                              '/chat/${record.id}?name=${Uri.encodeQueryComponent(record.name)}',
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                            ),
                     ),
                   ],
                 );
@@ -195,7 +244,10 @@ class _SessionsView extends StatelessWidget {
             ),
             // TFab 1.0 positions itself (Positioned + optional drag/magnet
             // layer), so it rides a body Stack instead of the Scaffold FAB slot.
-            TFab(icon: const Icon(TIcons.add), onPressed: () => _create(context)),
+            TFab(
+              icon: const Icon(TIcons.add),
+              onPressed: () => _create(context),
+            ),
           ],
         ),
       ),
