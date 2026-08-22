@@ -4,16 +4,16 @@ library;
 
 import 'package:dio/dio.dart';
 
-import 'slab_api_error.dart';
+import 'slab_api_error.dart' show SlabRestException, slabApiErrorWithI18n;
 
 class SlabErrorInterceptor extends Interceptor {
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) {
     final mapped = switch (err.type) {
-      DioExceptionType.badResponse when err.response != null => SlabRestException(
-          slabApiErrorMessage(err.response?.data),
-          err.response?.statusCode,
-        ),
+      DioExceptionType.badResponse when err.response != null => () {
+          final (message, i18nKey, i18nParams) = slabApiErrorWithI18n(err.response?.data);
+          return SlabRestException(message, err.response?.statusCode, i18nKey: i18nKey, i18nParams: i18nParams);
+        }(),
       DioExceptionType.connectionTimeout ||
       DioExceptionType.sendTimeout ||
       DioExceptionType.receiveTimeout ||

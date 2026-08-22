@@ -10,7 +10,8 @@
  *   flutter/slab-mobile/assets/i18n/{en-US,zh-CN}.json
  *   — deep-flattened dot keys over the `common` / `layouts` / `pages`
  *     namespaces, preserving i18next `{{var}}` placeholders. The `server`
- *     namespace is a server-field translation map, not a UI catalog — skipped.
+ *     namespace (server-field/error translation map) ships too — the mobile
+ *     app translates server error envelopes (`i18n.message` refs).
  *
  * Usage: bun ./scripts/i18n/export-mobile-locales.ts [--check]
  *   --check regenerates in memory and diffs against disk (exit 1 on drift).
@@ -30,7 +31,7 @@ const LOCALES = [
   { tag: "en-US", catalog: enUS },
   { tag: "zh-CN", catalog: zhCN },
 ] as const;
-const NAMESPACES = ["common", "layouts", "pages"] as const;
+const NAMESPACES = ["common", "layouts", "pages", "server"] as const;
 const CHECK = process.argv.includes("--check");
 
 type Catalog = Record<string, unknown>;

@@ -13,7 +13,10 @@ import 'package:slab_mobile/features/assistant/view/widgets/messages/message_lis
 import 'package:slab_mobile/features/assistant/view/widgets/messages/plan_card.dart';
 import 'package:slab_mobile/features/assistant/view/widgets/messages/terminal_card.dart';
 import 'package:slab_mobile/features/assistant/bootstrap/session_labels.dart';
+import 'package:slab_mobile/core/network/slab_api_error.dart';
+import 'package:slab_mobile/l10n/catalog.dart';
 import 'package:slab_mobile/features/assistant/commands/command_registry.dart';
+import 'package:slab_mobile/features/assistant/commands/request_errors.dart';
 import 'package:slab_mobile/proto/harness_types.dart' as proto;
 
 void main() {
@@ -221,6 +224,45 @@ void main() {
       expect(resolveCommandDispatch('/explain rust', commands), isA<SendDispatch>());
       expect(resolveCommandDispatch('just chatting', commands), isA<SendDispatch>());
       expect(resolveCommandDispatch('/unknown', commands), isA<SendDispatch>());
+    });
+  });
+
+  group('error envelope i18n', () {
+    final catalog = SlabCatalog.fromJson('en-US',
+        '{"server.errors.badRequest":"Bad request: {{detail}}"}');
+
+    test('extraction pulls message + i18n ref from the envelope', () {
+      final (message, key, params) = slabApiErrorWithI18n({
+        'message': 'Bad request',
+        'i18n': {
+          'message': {
+            'key': 'server.errors.badRequest',
+            'params': {'detail': 'x'},
+          },
+        },
+      });
+      expect(message, 'Bad request');
+      expect(key, 'server.errors.badRequest');
+      expect(params, {'detail': 'x'});
+      final (plain, noKey, _) = slabApiErrorWithI18n({'message': 'plain'});
+      expect(plain, 'plain');
+      expect(noKey, isNull);
+    });
+
+    test('describeRestError translates the ref and falls back to the message', () {
+      final localized = describeRestError(
+        const SlabRestException('Bad request', 400,
+            i18nKey: 'server.errors.badRequest',
+            i18nParams: {'detail': 'x'}),
+        catalog,
+      );
+      expect(localized, 'Bad request: x');
+      final fallback = describeRestError(
+        const SlabRestException('Raw failure', null, i18nKey: 'server.errors.missing'),
+        catalog,
+      );
+      expect(fallback, 'Raw failure');
+      expect(describeRestError(const SlabRestException('no i18n', null), catalog), 'no i18n');
     });
   });
 }

@@ -23,6 +23,8 @@ import '../../../conversation/conversation_controller.dart';
 import '../../../l10n/mobile_strings.dart';
 import '../../../theme/slab_tokens.g.dart';
 import '../bootstrap/session_labels.dart';
+import '../../../core/network/slab_api_error.dart' show SlabRestException;
+import '../commands/request_errors.dart';
 import '../model/model_cubit.dart';
 import '../model/model_repository.dart';
 import '../model/model_status_label.dart';
@@ -61,6 +63,7 @@ class _ChatScreenState extends State<ChatScreen> {
   late final ConversationController _controller;
   bool _ownsController = false;
   String? _lastActionErrorKey;
+  String? _lastPrepareError;
 
   @override
   void initState() {
@@ -239,6 +242,19 @@ class _ChatScreenState extends State<ChatScreen> {
               Builder(
                 builder: (context) {
                   final cubit = context.watch<ModelCubit>();
+                  // One-shot localized toast for prepare failures.
+                  final prepareError = cubit.state.prepareError;
+                  if (prepareError != null && prepareError != _lastPrepareError) {
+                    _lastPrepareError = prepareError;
+                    final localeCubit = context.read<LocaleCubit>();
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      final message = describeRestError(
+                        SlabRestException(prepareError, null),
+                        localeCubit.catalog,
+                      );
+                      TToast.showText(message, context: context);
+                    });
+                  }
                   final controllerState = _controller.state;
                   final label = getSelectedModelStatusLabel(
                     sessionReady: true,
