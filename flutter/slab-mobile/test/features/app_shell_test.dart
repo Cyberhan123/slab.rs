@@ -132,6 +132,23 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
   });
 
+  testWidgets('zh preference renders Chinese chrome (locale plumbing e2e)', (tester) async {
+    final connection = await _configure();
+    // set() goes through the mocked shared_preferences (wire format 'zh-CN').
+    await GetIt.I<LocaleCubit>().set(SlabLanguagePreference.zhCn);
+    await tester.pumpWidget(SlabApp(router: buildAppRouter(connection: connection)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Tab label + navbar title resolve the zh mobile-only strings; session
+    // content is untouched by the locale switch.
+    expect(find.text('会话'), findsNWidgets(2));
+    expect(find.text('Session One'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 50));
+  });
+
   test('chat route stays outside the shell (full-screen, no tab bar)', () async {
     final connection = await _configure();
     final router = buildAppRouter(connection: connection);

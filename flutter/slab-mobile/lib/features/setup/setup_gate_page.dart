@@ -59,7 +59,7 @@ class _SetupGatePageState extends State<SetupGatePage> {
 
   @override
   Widget build(BuildContext context) {
-    final locale = context.watch<LocaleCubit>().state;
+    final locale = context.watch<LocaleCubit>().resolvedTag;
     String t(String key) => mobileT(locale, key);
 
     return Scaffold(

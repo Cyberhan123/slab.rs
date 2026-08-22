@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -27,6 +28,7 @@ import 'package:slab_mobile/features/sessions/sessions_cubit.dart';
 import 'package:slab_mobile/features/sessions/view/sessions_page.dart';
 import 'package:slab_mobile/features/setup/setup_gate_page.dart';
 import 'package:slab_mobile/core/l10n/catalog.dart';
+import 'package:slab_mobile/core/l10n/slab_localizations.dart';
 import 'package:slab_mobile/core/theme/td_theme.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
@@ -132,6 +134,15 @@ class SlabAppShell extends StatelessWidget {
         theme: buildSlabTdTheme(getIt<TThemeData>(), Brightness.light),
         darkTheme: buildSlabTdTheme(getIt<TThemeData>(), Brightness.dark),
         routerConfig: _router(home),
+        // Mirror the production SlabApp locale wiring shape.
+        locale: getIt<LocaleCubit>().localeOverride,
+        supportedLocales: const [Locale('en', 'US'), Locale('zh', 'CN')],
+        localizationsDelegates: const [
+          SlabLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
       ),
     );
   }

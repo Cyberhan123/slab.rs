@@ -158,7 +158,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Danger confirm before retracting a turn (desktop parity).
   Future<void> _confirmRollback(int turnIndex) async {
     final localeCubit = context.read<LocaleCubit>();
-    final locale = localeCubit.state;
+    final locale = localeCubit.resolvedTag;
     final confirmed = await TDialog.show<bool>(
       context,
       dialog: TDialog(
@@ -184,7 +184,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildScreen(BuildContext context) {
     final localeCubit = context.watch<LocaleCubit>();
-    final locale = localeCubit.state;
+    final locale = localeCubit.resolvedTag;
     final catalog = localeCubit.catalog;
     String t(String key, [Map<String, String> args = const {}]) =>
         mobileT(locale, key, args);

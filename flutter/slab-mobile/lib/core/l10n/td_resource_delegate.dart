@@ -24,7 +24,9 @@ class SlabResourceDelegate extends TResourceDelegate {
 
   void updateContext(BuildContext value) => context = value;
 
-  String get _locale => localeCubit.state;
+  /// Always the resolved tag ('en-US' | 'zh-CN'), never the 'auto' preference
+  /// — chrome must follow platform resolution exactly like the shared catalog.
+  String get _locale => localeCubit.resolvedTag;
 
   String _t(String key) => mobileT(_locale, key);
 

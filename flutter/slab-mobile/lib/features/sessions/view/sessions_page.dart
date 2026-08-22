@@ -65,7 +65,7 @@ class _SessionsView extends StatelessWidget {
 
   Future<void> _rename(BuildContext context, SessionRecord record) async {
     final cubit = context.read<SessionsCubit>();
-    final locale = context.read<LocaleCubit>().state;
+    final locale = context.read<LocaleCubit>().resolvedTag;
     final controller = TextEditingController(text: record.name);
     final name = await TDialog.show<String>(
       context,
@@ -93,7 +93,7 @@ class _SessionsView extends StatelessWidget {
 
   Future<void> _delete(BuildContext context, SessionRecord record) async {
     final cubit = context.read<SessionsCubit>();
-    final locale = context.read<LocaleCubit>().state;
+    final locale = context.read<LocaleCubit>().resolvedTag;
     final confirmed = await TDialog.show<bool>(
       context,
       dialog: TDialog(
@@ -118,7 +118,7 @@ class _SessionsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final locale = context.watch<LocaleCubit>().state;
+    final locale = context.watch<LocaleCubit>().resolvedTag;
     final td = context.tTheme;
     String t(String key, [Map<String, String> args = const {}]) =>
         mobileT(locale, key, args);

@@ -49,8 +49,8 @@ String getSelectedModelStatusLabel({
 }
 
 String _formatNumber(int value) {
-  // Grouped decimal formatting (Intl.NumberFormat parity) without the
-  // flutter_localizations dependency.
+  // Grouped decimal formatting (Intl.NumberFormat parity) without importing
+  // intl directly (it stays transitive under flutter_localizations).
   final digits = value.toString();
   final buffer = StringBuffer();
   var count = 0;

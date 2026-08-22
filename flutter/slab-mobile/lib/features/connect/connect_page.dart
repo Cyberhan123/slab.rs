@@ -71,7 +71,7 @@ class _ConnectPageState extends State<ConnectPage> {
 
   @override
   Widget build(BuildContext context) {
-    final locale = context.watch<LocaleCubit>().state;
+    final locale = context.watch<LocaleCubit>().resolvedTag;
     final td = context.tTheme;
     String t(String key, [Map<String, String> args = const {}]) => mobileT(locale, key, args);
     final probe = _probe;

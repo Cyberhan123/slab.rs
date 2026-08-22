@@ -11,6 +11,12 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # Material/widgets chrome localizations for the MaterialApp locale wiring
+  # (SlabLocalizations delegate rides the same lifecycle). intl stays
+  # transitive — nothing imports it directly.
+  flutter_localizations:
+    sdk: flutter
+
   # Declarative redirect ladder (connect gate → setup gate), the analog of
   # SetupGuard/app-guards.
   go_router: ^17.5.0

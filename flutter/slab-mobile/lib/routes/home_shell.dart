@@ -29,7 +29,7 @@ class HomeShell extends StatelessWidget {
         navigationTabs: [
           TTabBarItemConfig(
             onTap: () => shell.goBranch(0),
-            tabText: mobileT(localeCubit.state, 'mobile.sessions.title'),
+            tabText: mobileT(localeCubit.resolvedTag, 'mobile.sessions.title'),
             unselectedIcon: const Icon(TIcons.chat_bubble),
             selectedIcon: const Icon(TIcons.chat_bubble_filled),
           ),
