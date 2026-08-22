@@ -5,6 +5,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import 'app.dart';
 import 'core/app/connection_cubit.dart';
@@ -27,5 +28,13 @@ Future<void> main() async {
 
   await configureDependencies(catalogs: catalogs, tdTheme: tdTheme);
 
-  runApp(SlabApp(router: buildAppRouter(connection: getIt<ConnectionCubit>())));
+  runApp(
+    ScreenUtilInit(
+      // Design-space baseline for the ported screens; extension-based usage
+      // (.w/.sp) is opt-in per widget, legacy screens are unaffected.
+      designSize: const Size(375, 812),
+      minTextAdapt: true,
+      builder: (_, _) => SlabApp(router: buildAppRouter(connection: getIt<ConnectionCubit>())),
+    ),
+  );
 }

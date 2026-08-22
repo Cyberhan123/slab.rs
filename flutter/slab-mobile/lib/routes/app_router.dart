@@ -1,6 +1,7 @@
 /// Declarative redirect ladder, the analog of the web `SetupGuard` /
-/// connect flow: no saved config → `/connect`; everything else lives under
-/// `/sessions` (list) and `/chat/:sessionId`.
+/// connect flow: no saved config → `/connect`. The tabbed home is a
+/// `StatefulShellRoute` (sessions + settings branches under the TTabBar);
+/// `/chat/:sessionId` stays a top-level route so it covers the tab bar.
 library;
 
 import 'package:go_router/go_router.dart';
@@ -9,7 +10,9 @@ import '../core/app/connection_cubit.dart';
 import '../features/assistant/view/chat_screen.dart';
 import '../features/connect/connect_page.dart';
 import '../features/sessions/view/sessions_page.dart';
+import '../features/settings/view/settings_page.dart';
 import '../features/setup/setup_gate_page.dart';
+import 'home_shell.dart';
 
 /// Takes the connection cubit as a parameter (instead of reading the service
 /// locator) so tests can build a router against a custom cubit.
@@ -31,12 +34,29 @@ GoRouter buildAppRouter({required ConnectionCubit connection}) => GoRouter(
           builder: (context, state) => const ConnectPage(),
         ),
         GoRoute(
-          path: '/sessions',
-          builder: (context, state) => const SessionsPage(),
-        ),
-        GoRoute(
           path: '/setup',
           builder: (context, state) => const SetupGatePage(),
+        ),
+        StatefulShellRoute.indexedStack(
+          builder: (context, state, shell) => HomeShell(shell: shell),
+          branches: [
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/sessions',
+                  builder: (context, state) => const SessionsPage(),
+                ),
+              ],
+            ),
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/settings',
+                  builder: (context, state) => const SettingsPage(),
+                ),
+              ],
+            ),
+          ],
         ),
         GoRoute(
           path: '/chat/:sessionId',

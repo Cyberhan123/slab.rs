@@ -25,6 +25,9 @@ dependencies:
   # Bloc/Cubit state management: page cubits live in BlocProvider, infra and
   # app-wide cubits in get_it (see lib/core/di/service_locator.dart).
   flutter_bloc: ^9.1.1
+  # Responsive scaling for the ported screens (assistant/settings); legacy
+  # screens stay in logical pixels, so extensions are used opt-in per widget.
+  flutter_screenutil: ^5.9.3
   # Service locator for infra + app-wide cubits (composition root).
   get_it: ^9.2.1
   # Connection config + language preference storage.

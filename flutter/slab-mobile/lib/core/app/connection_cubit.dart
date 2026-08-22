@@ -13,12 +13,15 @@ import '../../data/rest_client.dart';
 
 class ConnectionCubit extends Cubit<ConnectionConfig?> {
   /// [client] is a test seam: an injected fake replaces the config-built
-  /// client (state stays null, no transport is ever touched).
+  /// client and survives `load()`/`save()` swaps (state still tracks the
+  /// persisted config so the router redirect behaves normally).
   ConnectionCubit({SlabRestClient? client})
-      : _client = client,
+      : _injectedClient = client,
+        _client = client,
         super(null);
 
   final ConnectionConfigStore _store = ConnectionConfigStore();
+  final SlabRestClient? _injectedClient;
   SlabRestClient? _client;
 
   /// The current REST client; null while unconfigured (or when a test
@@ -44,6 +47,10 @@ class ConnectionCubit extends Cubit<ConnectionConfig?> {
   }
 
   void _swapClient(ConnectionConfig? config) {
+    if (_injectedClient != null) {
+      _client = _injectedClient;
+      return;
+    }
     _client?.dispose();
     _client = config == null
         ? null
