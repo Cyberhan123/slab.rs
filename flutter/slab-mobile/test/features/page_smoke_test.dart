@@ -234,7 +234,9 @@ void main() {
     );
     await tester.pump();
     expect(find.byType(TNavBar), findsOneWidget);
-    expect(find.byType(TTextarea), findsOneWidget);
+    // Long-text composer card: the field is a TInput.multiline inside a
+    // decorated container (TTextarea was its pre-card alias).
+    expect(find.byType(TInput), findsOneWidget);
     expect(find.byType(TButton), findsOneWidget);
     expect(find.text('Session One'), findsOneWidget);
     await _drainTimers(tester);

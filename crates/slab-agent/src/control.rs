@@ -462,6 +462,33 @@ impl AgentControl {
         Ok(())
     }
 
+    /// Apply (or clear) the reasoning-effort override for the next turn on a
+    /// thread (flows from the harness `turn/start` `effort` param). Same
+    /// read-modify-write as [`Self::apply_agent_override`]: `resume_thread`
+    /// re-reads the persisted `config_json` every turn, so this is the
+    /// chokepoint that carries the per-turn effort into the LLM request.
+    pub async fn set_thread_reasoning_effort(
+        &self,
+        thread_id: &str,
+        effort: Option<slab_types::chat::ChatReasoningEffort>,
+    ) -> Result<(), AgentError> {
+        let snapshot = self
+            .store
+            .get_thread(thread_id)
+            .await?
+            .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+        let mut config =
+            serde_json::from_str::<AgentConfig>(&snapshot.config_json).map_err(|e| {
+                AgentError::Internal(format!("failed to deserialize agent config: {e}"))
+            })?;
+        config.reasoning_effort = effort;
+        let config_json = serde_json::to_string(&config)
+            .map_err(|e| AgentError::Internal(format!("failed to serialize agent config: {e}")))?;
+        let updated = ThreadSnapshot { config_json, ..snapshot };
+        self.store.upsert_thread(&updated).await?;
+        Ok(())
+    }
+
     /// Return a persisted thread snapshot.
     pub async fn thread_snapshot(
         &self,

@@ -141,6 +141,26 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
   });
 
+  testWidgets('shell body clears the status-bar inset (global SafeArea)', (tester) async {
+    final connection = await _configure();
+    tester.view
+      ..devicePixelRatio = 1.0
+      ..padding = FakeViewPadding(top: 44, bottom: 34, left: 0, right: 0);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SlabApp(router: buildAppRouter(connection: connection)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // The shell's SafeArea pushes the branch navbar below the 44px status-bar
+    // inset (the bottom inset is TTabBar's own job, asserted via the tab bar
+    // rendering below the body).
+    final navbarTopLeft = tester.getTopLeft(find.byType(TNavBar).first);
+    expect(navbarTopLeft.dy, greaterThanOrEqualTo(44));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 50));
+  });
+
   test('chat route stays outside the shell (full-screen, no tab bar)', () async {
     final connection = await _configure();
     final router = buildAppRouter(connection: connection);

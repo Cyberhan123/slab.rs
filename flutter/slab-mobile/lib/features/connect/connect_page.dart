@@ -77,65 +77,68 @@ class _ConnectPageState extends State<ConnectPage> {
     final probe = _probe;
 
     return Scaffold(
-      body: Column(
-        children: [
-          TNavBar(title: t('mobile.connect.title'), useDefaultBack: false),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                TInput(
-                  controller: _url,
-                  hintText: kDefaultBaseUrl,
-                  label: t('mobile.connect.baseUrl'),
-                  inputType: TextInputType.url,
-                ),
-                const SizedBox(height: 12),
-                TInput(
-                  controller: _token,
-                  label: t('mobile.connect.token'),
-                  obscureText: true,
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    TButton(
-                      variant: TButtonVariant.outline,
-                      size: TButtonSize.medium,
-                      onPressed: _testing ? null : _test,
-                      child: Text(_testing ? t('mobile.connect.testing') : t('mobile.connect.test')),
-                    ),
-                    const SizedBox(width: 12),
-                    if (probe != null)
-                      Expanded(
-                        child: TText(
-                          probe.ok
-                              ? t('mobile.connect.ok', {'version': probe.version ?? '?'})
-                              : t('mobile.connect.unreachable'),
-                          style: TextStyle(
-                            fontSize: SlabMetrics.textCaption,
-                            color: probe.ok ? td.successNormalColor : td.errorNormalColor,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            TNavBar(title: t('mobile.connect.title'), useDefaultBack: false),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  TInput(
+                    controller: _url,
+                    hintText: kDefaultBaseUrl,
+                    label: t('mobile.connect.baseUrl'),
+                    inputType: TextInputType.url,
+                  ),
+                  const SizedBox(height: 12),
+                  TInput(
+                    controller: _token,
+                    label: t('mobile.connect.token'),
+                    obscureText: true,
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      TButton(
+                        variant: TButtonVariant.outline,
+                        size: TButtonSize.medium,
+                        onPressed: _testing ? null : _test,
+                        child: Text(_testing ? t('mobile.connect.testing') : t('mobile.connect.test')),
+                      ),
+                      const SizedBox(width: 12),
+                      if (probe != null)
+                        Expanded(
+                          child: TText(
+                            probe.ok
+                                ? t('mobile.connect.ok', {'version': probe.version ?? '?'})
+                                : t('mobile.connect.unreachable'),
+                            style: TextStyle(
+                              fontSize: SlabMetrics.textCaption,
+                              color: probe.ok ? td.successNormalColor : td.errorNormalColor,
+                            ),
                           ),
                         ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                // `isBlock` is gone in 1.0 — stretch via SizedBox instead.
-                SizedBox(
-                  width: double.infinity,
-                  child: TButton(
-                    colorScheme: TButtonColorScheme.primary,
-                    size: TButtonSize.large,
-                    icon: Icon(TIcons.arrow_right),
-                    onPressed: _save,
-                    child: Text(t('mobile.connect.save')),
+                    ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 24),
+                  // `isBlock` is gone in 1.0 — stretch via SizedBox instead.
+                  SizedBox(
+                    width: double.infinity,
+                    child: TButton(
+                      colorScheme: TButtonColorScheme.primary,
+                      size: TButtonSize.large,
+                      icon: Icon(TIcons.arrow_right),
+                      onPressed: _save,
+                      child: Text(t('mobile.connect.save')),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

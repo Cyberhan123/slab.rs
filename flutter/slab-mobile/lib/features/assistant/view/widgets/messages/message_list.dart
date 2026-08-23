@@ -107,6 +107,10 @@ class MessageList extends StatelessWidget {
         final row = rows[index];
         return switch (row) {
           MessageRow() => MessageItem(
+              // Keyed by message id so list rebuilds (reconnects, approval
+              // changes) update existing rows instead of replaying the
+              // entry animation from a fresh MessageItem state.
+              key: ValueKey(row.message.id),
               message: row.message,
               locale: locale,
               catalog: catalog,

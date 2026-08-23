@@ -148,6 +148,22 @@ impl HarnessService {
             .map_err(AppCoreError::from)
     }
 
+    /// Apply (or clear) the reasoning-effort override for the next turn on a
+    /// thread (flows from the harness `turn/start` `effort` param). Re-applied
+    /// every turn; `None` clears a previous override.
+    pub async fn set_thread_reasoning_effort(
+        &self,
+        thread_id: &str,
+        effort: Option<slab_types::chat::ChatReasoningEffort>,
+    ) -> Result<(), AppCoreError> {
+        self.0
+            .runtime()
+            .control()
+            .set_thread_reasoning_effort(thread_id, effort)
+            .await
+            .map_err(AppCoreError::from)
+    }
+
     /// Send an approval decision for a pending tool-call.
     ///
     /// Both `thread_id` (from the URL path) and `call_id` must match so that

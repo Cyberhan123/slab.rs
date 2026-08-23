@@ -21,7 +21,9 @@ class HomeShell extends StatelessWidget {
     final localeCubit = context.watch<LocaleCubit>();
     final settingsLabel = localeCubit.catalog.t('layouts.sidebar.items.settings');
     return Scaffold(
-      body: shell,
+      // Top inset here (covers both branch bodies and the Navigator-pushed
+      // settings section pages); the bottom inset is TTabBar's own job.
+      body: SafeArea(bottom: false, child: shell),
       bottomNavigationBar: TTabBar(
         variant: TTabBarVariant.iconText,
         value: shell.currentIndex,

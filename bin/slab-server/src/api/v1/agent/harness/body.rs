@@ -33,8 +33,9 @@ use tokio::sync::mpsc;
 use super::session::HarnessSession;
 use super::transform::Established;
 use super::{
-    build_user_message_from_input, messages_from_input, model_info_from_spec, scan_known_skills,
-    thread_from_snapshot, thread_from_snapshot_with_id, thread_from_timeline,
+    build_user_message_from_input, chat_reasoning_effort_from_proto, messages_from_input,
+    model_info_from_spec, scan_known_skills, thread_from_snapshot, thread_from_snapshot_with_id,
+    thread_from_timeline,
 };
 use crate::api::v1::agent::schema::AgentConfigInput;
 
@@ -96,6 +97,18 @@ pub(crate) async fn turn_start(
                 .apply_agent_override(&real_id, agent_def.as_ref())
                 .await
                 .map_err(|e| e.to_string())?;
+            // Re-apply (or clear) the per-turn reasoning-effort override on the
+            // persisted config BEFORE the turn starts — `resume_thread` re-reads
+            // `config_json` for every turn, so this is what actually reaches the
+            // LLM request. `None` clears a previous override (no sticky state).
+            session
+                .service()
+                .set_thread_reasoning_effort(
+                    &real_id,
+                    params.effort.map(chat_reasoning_effort_from_proto),
+                )
+                .await
+                .map_err(|e| e.to_string())?;
             let known_skills = scan_known_skills(session.state().workspace_root().as_deref());
             // Structured input carries image parts (VLM) through to
             // `send_input_message`; empty input is a silent no-op, mirroring the
@@ -117,6 +130,10 @@ pub(crate) async fn turn_start(
                 config.agent_type = Some(def.agent_type.clone());
                 config.system_prompt = Some(def.system_prompt.clone());
             }
+            // First turn: seed the config with the requested effort directly
+            // (post-into assignment — `AgentConfigInput` carries no effort field
+            // from this path).
+            config.reasoning_effort = params.effort.map(chat_reasoning_effort_from_proto);
             let messages = messages_from_input(&params.input, &known_skills);
             let real_id = session
                 .service()

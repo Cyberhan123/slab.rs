@@ -63,43 +63,46 @@ class _SetupGatePageState extends State<SetupGatePage> {
     String t(String key) => mobileT(locale, key);
 
     return Scaffold(
-      body: Column(
-        children: [
-          TNavBar(title: t('mobile.setup.title'), useDefaultBack: false),
-          Expanded(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 480),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const TLoading(size: TLoadingSize.small, icon: TLoadingIcon.circle),
-                          const SizedBox(width: 12),
-                          TText(t('mobile.setup.checking'), style: const TextStyle(fontSize: 11)),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      TText(t('mobile.setup.description'), style: const TextStyle(fontSize: 13, height: 1.5)),
-                      const SizedBox(height: 16),
-                      TButton(
-                        icon: Icon(TIcons.refresh),
-                        variant: TButtonVariant.outline,
-                        size: TButtonSize.small,
-                        onPressed: _check,
-                        child: Text(mobileT(locale, 'common.actions.tryAgain')),
-                      ),
-                    ],
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            TNavBar(title: t('mobile.setup.title'), useDefaultBack: false),
+            Expanded(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 480),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const TLoading(size: TLoadingSize.small, icon: TLoadingIcon.circle),
+                            const SizedBox(width: 12),
+                            TText(t('mobile.setup.checking'), style: const TextStyle(fontSize: 11)),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        TText(t('mobile.setup.description'), style: const TextStyle(fontSize: 13, height: 1.5)),
+                        const SizedBox(height: 16),
+                        TButton(
+                          icon: Icon(TIcons.refresh),
+                          variant: TButtonVariant.outline,
+                          size: TButtonSize.small,
+                          onPressed: _check,
+                          child: Text(mobileT(locale, 'common.actions.tryAgain')),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -3,6 +3,8 @@
 /// errors, and the tool cards (terminal / file-change / plan / generic).
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
@@ -37,7 +39,10 @@ class MessageBubble extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-        constraints: const BoxConstraints(maxWidth: 560),
+        // 85% of the viewport, capped at the 560 desktop/tablet width.
+        constraints: BoxConstraints(
+          maxWidth: math.min(MediaQuery.sizeOf(context).width * 0.85, 560),
+        ),
         decoration: BoxDecoration(
           color: bubble,
           borderRadius: BorderRadius.only(

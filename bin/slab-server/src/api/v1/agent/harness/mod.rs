@@ -411,6 +411,22 @@ fn standard_reasoning_efforts() -> Vec<ReasoningEffortOption> {
     .collect()
 }
 
+/// Map the harness wire [`ReasoningEffort`] onto the agent-config enum the
+/// LLM adapter consumes. `xhigh` clamps to `High` — the config enum has no
+/// xhigh variant (same closed set the REST `parse_reasoning_effort` accepts).
+pub(crate) fn chat_reasoning_effort_from_proto(
+    effort: ReasoningEffort,
+) -> slab_types::chat::ChatReasoningEffort {
+    match effort {
+        ReasoningEffort::Off => slab_types::chat::ChatReasoningEffort::None,
+        ReasoningEffort::Low => slab_types::chat::ChatReasoningEffort::Low,
+        ReasoningEffort::Medium => slab_types::chat::ChatReasoningEffort::Medium,
+        ReasoningEffort::High | ReasoningEffort::Xhigh => {
+            slab_types::chat::ChatReasoningEffort::High
+        }
+    }
+}
+
 /// Scan workspace + global skills for the active workspace. Used to expand
 /// skills the user names in their message (slash-mention or exact name token).
 fn scan_known_skills(
@@ -748,6 +764,17 @@ mod tests {
                 ReasoningEffort::Xhigh,
             ]
         );
+    }
+
+    #[test]
+    fn chat_reasoning_effort_from_proto_maps_full_wire_set() {
+        use slab_types::chat::ChatReasoningEffort as Config;
+        assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::Off), Config::None);
+        assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::Low), Config::Low);
+        assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::Medium), Config::Medium);
+        assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::High), Config::High);
+        // No xhigh variant on the config side — clamped to High.
+        assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::Xhigh), Config::High);
     }
 
     #[test]

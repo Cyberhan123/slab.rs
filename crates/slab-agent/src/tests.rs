@@ -4152,6 +4152,52 @@ async fn apply_agent_override_sets_and_clears_agent_type_and_prompt() {
     assert!(cfg.system_prompt.is_none(), "system_prompt cleared");
 }
 
+#[tokio::test]
+async fn set_thread_reasoning_effort_sets_and_clears() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port.clone(), notify, approval, router, 8, 4));
+
+    // Seed a default thread (no reasoning_effort).
+    let now = "2026-01-01T00:00:00Z".to_owned();
+    store_port
+        .upsert_thread(&ThreadSnapshot {
+            id: "thread-1".into(),
+            session_id: "session-1".into(),
+            parent_id: None,
+            depth: 0,
+            status: ThreadStatus::Completed,
+            role_name: None,
+            config_json: serde_json::to_string(&AgentConfig::default()).expect("config"),
+            completion_text: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            archived_at: None,
+        })
+        .await
+        .expect("seed thread");
+
+    // Setting the effort persists it on the config the next turn re-reads.
+    control
+        .set_thread_reasoning_effort("thread-1", Some(slab_types::chat::ChatReasoningEffort::High))
+        .await
+        .expect("effort applies");
+    let snap = control.thread_snapshot("thread-1").await.expect("read").expect("thread present");
+    let cfg: AgentConfig = serde_json::from_str(&snap.config_json).expect("config parses");
+    assert_eq!(cfg.reasoning_effort, Some(slab_types::chat::ChatReasoningEffort::High));
+
+    // Clearing removes the override so no sticky effort survives the turn.
+    control.set_thread_reasoning_effort("thread-1", None).await.expect("clear applies");
+    let snap = control.thread_snapshot("thread-1").await.expect("read").expect("thread present");
+    let cfg: AgentConfig = serde_json::from_str(&snap.config_json).expect("config parses");
+    assert!(cfg.reasoning_effort.is_none(), "reasoning_effort cleared");
+}
+
 // ── Error propagation tests ───────────────────────────────────────────────────────────
 
 struct FailingLlm;

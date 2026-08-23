@@ -8,6 +8,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
@@ -60,6 +61,10 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _scroll = ScrollController();
   bool _autoScroll = true;
+
+  /// Whether the scroll-to-end floating button is showing (distance from the
+  /// bottom beyond the auto-scroll threshold — the inverted `TBackTop`).
+  bool _showJumpToEnd = false;
   late final ConversationController _controller;
   bool _ownsController = false;
   String? _lastActionErrorKey;
@@ -111,6 +116,19 @@ class _ChatScreenState extends State<ChatScreen> {
     _scroll.animateTo(
       _scroll.position.maxScrollExtent,
       duration: const Duration(milliseconds: 200),
+      curve: SlabMetrics.easeOutExpo,
+    );
+  }
+
+  /// Scroll-to-end (inverted `TBackTop`): re-engage auto-scroll stickiness so
+  /// streaming deltas keep following after the tap.
+  void _jumpToEnd() {
+    _autoScroll = true;
+    setState(() => _showJumpToEnd = false);
+    if (!_scroll.hasClients) return;
+    _scroll.animateTo(
+      _scroll.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 250),
       curve: SlabMetrics.easeOutExpo,
     );
   }
@@ -196,8 +214,10 @@ class _ChatScreenState extends State<ChatScreen> {
       listener: (context, state) =>
           _showSwitchDialog(context, state.pendingSwitchTo!),
       child: Scaffold(
+        // Full SafeArea: the bottom inset keeps the composer clear of the
+        // gesture bar; the keyboard is handled by Scaffold resizing (so no
+        // maintainBottomViewPadding — that would leave a gap above the IME).
         body: SafeArea(
-          bottom: false,
           child: Column(
             children: [
               TNavBar(
@@ -305,49 +325,65 @@ class _ChatScreenState extends State<ChatScreen> {
                 },
               ),
               Expanded(
-                child: NotificationListener<ScrollNotification>(
-                  onNotification: (notification) {
-                    if (notification is ScrollUpdateNotification &&
-                        _scroll.hasClients) {
-                      final distance =
-                          _scroll.position.maxScrollExtent - _scroll.offset;
-                      _autoScroll = distance < 120;
-                    }
-                    return false;
-                  },
-                  child: ListenableBuilder(
-                    listenable: _controller,
-                    builder: (context, _) {
-                      final state = _controller.state;
-                      WidgetsBinding.instance.addPostFrameCallback(
-                        (_) => _maybeAutoScroll(),
-                      );
-                      final rows = buildScrollerRows(
-                        messages: state.messages,
-                        compactionMarkers: state.compactionMarkers,
-                        historyCount: state.historyCount,
-                        sessionLoading: state.isHistoryLoading,
-                        modelLoad: state.modelLoad,
-                      );
-                      if (state.error != null) {
-                        rows.add(
-                          ErrorRow(
-                            message: t('mobile.chat.restoreFailed', {
-                              'message': state.error ?? '',
-                            }),
-                          ),
-                        );
-                      }
-                      return MessageList(
-                        rows: rows,
-                        locale: locale,
-                        catalog: catalog,
-                        userMessageTurnIndex: state.userMessageTurnIndex,
-                        onRollback: _confirmRollback,
-                        scrollController: _scroll,
-                      );
-                    },
-                  ),
+                child: Stack(
+                  children: [
+                    NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification is ScrollUpdateNotification &&
+                            _scroll.hasClients) {
+                          final distance =
+                              _scroll.position.maxScrollExtent - _scroll.offset;
+                          _autoScroll = distance < 120;
+                          final showJump = distance >= 120;
+                          if (showJump != _showJumpToEnd) {
+                            setState(() => _showJumpToEnd = showJump);
+                          }
+                        }
+                        return false;
+                      },
+                      child: ListenableBuilder(
+                        listenable: _controller,
+                        builder: (context, _) {
+                          final state = _controller.state;
+                          WidgetsBinding.instance.addPostFrameCallback(
+                            (_) => _maybeAutoScroll(),
+                          );
+                          final rows = buildScrollerRows(
+                            messages: state.messages,
+                            compactionMarkers: state.compactionMarkers,
+                            historyCount: state.historyCount,
+                            sessionLoading: state.isHistoryLoading,
+                            modelLoad: state.modelLoad,
+                          );
+                          if (state.error != null) {
+                            rows.add(
+                              ErrorRow(
+                                message: t('mobile.chat.restoreFailed', {
+                                  'message': state.error ?? '',
+                                }),
+                              ),
+                            );
+                          }
+                          return MessageList(
+                            rows: rows,
+                            locale: locale,
+                            catalog: catalog,
+                            userMessageTurnIndex: state.userMessageTurnIndex,
+                            onRollback: _confirmRollback,
+                            scrollController: _scroll,
+                          );
+                        },
+                      ),
+                    ),
+                    Positioned(
+                      right: 12,
+                      bottom: 8,
+                      child: _JumpToEndFab(
+                        visible: _showJumpToEnd,
+                        onTap: _jumpToEnd,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               ListenableBuilder(
@@ -502,6 +538,37 @@ class _StatusTag extends StatelessWidget {
         context,
       ).copyWith(extensions: [TTagThemeData(isLight: true)]),
       child: TTag(label, size: TTagSize.small, colorScheme: colorScheme),
+    );
+  }
+}
+
+/// Scroll-to-end floating button — the inverted `TBackTop` usage: with
+/// `controller: null` the widget never auto-scrolls to offset 0 and the tap is
+/// ours alone, so visibility and the scroll target stay page-owned. Rotated
+/// 180° because `TIcons.backtop` is an up arrow and the circle chrome is
+/// rotation-safe (`halfCircle` would land wrong-side-up).
+class _JumpToEndFab extends StatelessWidget {
+  const _JumpToEndFab({required this.visible, required this.onTap});
+
+  final bool visible;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: !visible,
+      child: AnimatedOpacity(
+        opacity: visible ? 1 : 0,
+        duration: const Duration(milliseconds: 180),
+        child: Transform.rotate(
+          angle: math.pi,
+          child: TBackTop(
+            controller: null,
+            onPressed: onTap,
+            shape: TBackTopShape.circle,
+          ),
+        ),
+      ),
     );
   }
 }

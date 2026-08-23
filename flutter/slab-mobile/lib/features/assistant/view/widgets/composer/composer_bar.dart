@@ -57,9 +57,15 @@ class _ComposerBarState extends State<ComposerBar> {
   final _attachments = <String>[];
   Timer? _draftDebounce;
 
-  /// Turn options riding the composer; null = server default.
-  String? _effort;
+  /// Turn options riding the composer. Deep-think gate + effort level mirror
+  /// the desktop sender (`effort = deepThink ? level : 'off'`); `null`
+  /// permission = server default.
+  bool _deepThink = false;
+  String _effortLevel = 'high';
   String? _permissionMode;
+
+  /// Effective wire effort for `turn/start` (desktop sender.tsx parity).
+  String get _effectiveEffort => _deepThink ? _effortLevel : 'off';
 
   String get _t => widget.locale;
 
@@ -76,7 +82,16 @@ class _ComposerBarState extends State<ComposerBar> {
     if (!mounted || draft == null) return;
     _composer.value = TextEditingValue(text: draft.content);
     setState(() {
-      _effort = draft.effort;
+      // One-way normalization to the desktop model: a stored explicit level
+      // re-enables deep think; legacy null ("Auto") / junk reads as off.
+      switch (draft.effort) {
+        case 'low' || 'medium' || 'high':
+          _deepThink = true;
+          _effortLevel = draft.effort!;
+        case _:
+          _deepThink = false;
+          _effortLevel = 'high';
+      }
       _permissionMode = draft.permissionMode;
       widget.controller.setPlanMode(draft.planMode);
     });
@@ -93,7 +108,7 @@ class _ComposerBarState extends State<ComposerBar> {
       sessionId: widget.sessionId,
       content: _composer.text,
       planMode: widget.controller.state.planMode,
-      effort: _effort,
+      effort: _effectiveEffort,
       permissionMode: _permissionMode,
     );
   }
@@ -135,7 +150,7 @@ class _ComposerBarState extends State<ComposerBar> {
         await widget.controller.send(
           text: text,
           imageUrls: images,
-          effort: _effort,
+          effort: _effectiveEffort,
           permissionMode: _permissionMode,
           modelId: modelId,
         );
@@ -198,6 +213,74 @@ class _ComposerBarState extends State<ComposerBar> {
     if (picked == null) return;
     setState(() => _permissionMode = picked);
     _scheduleDraftSave();
+  }
+
+  /// 深度思考/思考强度 menu (desktop sender parity): deep-think switch + a
+  /// low/medium/high level picker. Every change commits to composer state and
+  /// the draft immediately — scrim-dismiss keeps what was tapped. Tapping a
+  /// level also switches deep think on (desktop ToggleGroup behavior).
+  Future<void> _pickReasoningEffort() async {
+    final t = widget.catalog.t;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            final td = sheetContext.tTheme;
+            final levels = [
+              ('low', t('pages.assistant.composer.reasoning.low')),
+              ('medium', t('pages.assistant.composer.reasoning.medium')),
+              ('high', t('pages.assistant.composer.reasoning.high')),
+            ];
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(t('pages.assistant.composer.reasoningEffort'),
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+                TCell(
+                  title: Text(t('pages.assistant.composer.deepThink')),
+                  arrow: false,
+                  trailing: TSwitch(
+                    value: _deepThink,
+                    onChanged: (value) {
+                      setSheetState(() {});
+                      setState(() => _deepThink = value);
+                      _scheduleDraftSave();
+                    },
+                  ),
+                ),
+                for (final (level, label) in levels)
+                  TCell(
+                    title: Text(
+                      label,
+                      style: _deepThink
+                          ? null
+                          : TextStyle(color: td.textColorPlaceholder),
+                    ),
+                    arrow: false,
+                    trailing: _effortLevel == level && _deepThink
+                        ? Icon(TIcons.check,
+                            size: 18, color: td.brandNormalColor)
+                        : null,
+                    onTap: () {
+                      setSheetState(() {});
+                      setState(() {
+                        _effortLevel = level;
+                        _deepThink = true;
+                      });
+                      _scheduleDraftSave();
+                    },
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
   }
 
   /// Command suggestions for the current `/`-prefixed input.
@@ -317,13 +400,33 @@ class _ComposerBarState extends State<ComposerBar> {
                     ),
                   ),
                   const SizedBox(width: 4),
+                  // Long-text style input (td_input_page `_customLongTextStyle`
+                  // successor): a filled rounded card wrapping the borderless
+                  // multiline field. Enter inserts a newline — the send button
+                  // is the only submit affordance on soft keyboards.
                   Expanded(
-                    child: TTextarea(
-                      controller: _composer,
-                      minLines: 1,
-                      maxLines: 5,
-                      hintText: t('mobile.chat.inputHint'),
-                      onSubmitted: (_) => _submit(),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: td.bgColorContainer,
+                        borderRadius:
+                            BorderRadius.circular(SlabMetrics.radiusLg),
+                        border: Border.all(color: td.componentStrokeColor),
+                      ),
+                      child: TInput.multiline(
+                        controller: _composer,
+                        minLines: 1,
+                        maxLines: 5,
+                        hintText: t('mobile.chat.inputHint'),
+                        onSubmitted: (_) => _submit(),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          disabledBorder: InputBorder.none,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -350,18 +453,16 @@ class _ComposerBarState extends State<ComposerBar> {
     );
   }
 
-  /// Option chips: plan mode, reasoning effort, permission mode. Values are
-  /// composer state, not turn state — they ride the next send.
+  /// Option chips: plan mode, deep think (opens the reasoning-effort menu),
+  /// permission mode. Values are composer state, not turn state — they ride the
+  /// next send.
   Widget _optionsRow(BuildContext context, SlabCatalog catalog) {
     final t = catalog.t;
-    // Effort group: the first chip is the "server default" (Auto) option;
-    // low/medium/high ride turn/start as `effort`.
-    final effortOptions = [
-      (null as String?, '${t('pages.assistant.composer.reasoningEffort')}: ${t('mobile.chat.effortAuto')}'),
-      ('low', t('pages.assistant.composer.reasoning.low')),
-      ('medium', t('pages.assistant.composer.reasoning.medium')),
-      ('high', t('pages.assistant.composer.reasoning.high')),
-    ];
+    final levelLabel = switch (_effortLevel) {
+      'low' => t('pages.assistant.composer.reasoning.low'),
+      'medium' => t('pages.assistant.composer.reasoning.medium'),
+      _ => t('pages.assistant.composer.reasoning.high'),
+    };
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Wrap(
@@ -379,32 +480,16 @@ class _ComposerBarState extends State<ComposerBar> {
               _scheduleDraftSave();
             },
           ),
-          for (final (effort, label) in effortOptions)
-            if (effort == null || effort != _effort)
-              _chip(
-                context: context,
-                selected: false,
-                label: effort == null && _effort == null ? t('mobile.chat.effortAuto') : label,
-                onTap: () {
-                  setState(() => _effort = effort);
-                  _scheduleDraftSave();
-                },
-              ),
-          if (_effort != null)
-            _chip(
-              context: context,
-              selected: true,
-              label: switch (_effort) {
-                'low' => t('pages.assistant.composer.reasoning.low'),
-                'medium' => t('pages.assistant.composer.reasoning.medium'),
-                'high' => t('pages.assistant.composer.reasoning.high'),
-                _ => _effort!,
-              },
-              onTap: () {
-                setState(() => _effort = null);
-                _scheduleDraftSave();
-              },
-            ),
+          _chip(
+            context: context,
+            selected: _deepThink,
+            // The off-label is a mobile-only string — resolve via mobileT, not
+            // the shared catalog (which would fall back to the raw key).
+            label: _deepThink
+                ? '${t('pages.assistant.composer.deepThink')} · $levelLabel'
+                : '${t('pages.assistant.composer.deepThink')} · ${mobileT(widget.locale, 'mobile.td.close')}',
+            onTap: _pickReasoningEffort,
+          ),
           _chip(
             context: context,
             selected: _permissionMode != null,
