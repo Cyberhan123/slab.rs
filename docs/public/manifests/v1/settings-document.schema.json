@@ -624,7 +624,7 @@
       "description": "Shared database configuration.",
       "properties": {
         "url": {
-          "description": "Database connection string.",
+          "description": "Database connection string. Defaults (via the struct `Default`, not a\nfield serde default — that would inline a machine-specific path into the\npublished schema) to the app-home SQLite database; keep it absolute so\nthe URL never resolves against the process CWD.",
           "type": "string"
         }
       },
@@ -706,6 +706,7 @@
           "$ref": "#/$defs/LlamaRuntimeLeafConfig",
           "default": {
             "capacity": {},
+            "context_length": "auto",
             "enabled": true,
             "endpoint": {
               "http": {},
@@ -766,6 +767,7 @@
             },
             "llama": {
               "capacity": {},
+              "context_length": "auto",
               "enabled": true,
               "endpoint": {
                 "http": {},
@@ -909,7 +911,8 @@
               "type": "null"
             }
           ],
-          "description": "Optional context length override (`auto` resolves at load to the largest\ncontext that fits in GPU VRAM)."
+          "default": "auto",
+          "description": "Context window: an explicit token count, or `auto` (resolve at load to\nthe largest context that fits in GPU VRAM). Defaults to `auto`."
         },
         "enabled": {
           "default": true,
@@ -1450,6 +1453,7 @@
               },
               "llama": {
                 "capacity": {},
+                "context_length": "auto",
                 "enabled": true,
                 "endpoint": {
                   "http": {},
@@ -2000,8 +2004,9 @@
     "database": {
       "$ref": "#/$defs/DatabaseConfig",
       "default": {
-        "url": "sqlite://slab.db?mode=rwc"
-      }
+        "url": "sqlite:///slab.db?mode=rwc"
+      },
+      "description": "The runtime default resolves to the app-home SQLite database (absolute,\nCWD-independent). The schemars override keeps that machine-specific path\nout of the published schema, which instead documents a portable example."
     },
     "general": {
       "$ref": "#/$defs/GeneralSettingsConfig",
@@ -2086,6 +2091,7 @@
             },
             "llama": {
               "capacity": {},
+              "context_length": "auto",
               "enabled": true,
               "endpoint": {
                 "http": {},

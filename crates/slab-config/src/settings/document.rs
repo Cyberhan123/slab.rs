@@ -91,7 +91,11 @@ pub struct SettingsDocument {
     pub schema_version: u32,
     #[serde(default)]
     pub general: GeneralSettingsConfig,
+    /// The runtime default resolves to the app-home SQLite database (absolute,
+    /// CWD-independent). The schemars override keeps that machine-specific path
+    /// out of the published schema, which instead documents a portable example.
     #[serde(default)]
+    #[schemars(default = "schema_example_database_config")]
     pub database: DatabaseConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
@@ -161,14 +165,23 @@ impl Default for GeneralSettingsConfig {
 /// Shared database configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DatabaseConfig {
-    /// Database connection string.
+    /// Database connection string. Defaults (via the struct `Default`, not a
+    /// field serde default — that would inline a machine-specific path into the
+    /// published schema) to the app-home SQLite database; keep it absolute so
+    /// the URL never resolves against the process CWD.
     pub url: String,
 }
 
 impl Default for DatabaseConfig {
     fn default() -> Self {
-        Self { url: "sqlite://slab.db?mode=rwc".to_owned() }
+        Self { url: crate::app_config::default_database_url() }
     }
+}
+
+/// Portable placeholder used only as the published schema's documented default
+/// for `database`; the runtime `Default` resolves the real app-home path.
+fn schema_example_database_config() -> DatabaseConfig {
+    DatabaseConfig { url: "sqlite:///slab.db?mode=rwc".to_owned() }
 }
 
 /// Shared logging configuration.
@@ -1079,9 +1092,9 @@ pub struct LlamaRuntimeLeafConfig {
     /// Whether the llama backend is enabled.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// Optional context length override (`auto` resolves at load to the largest
-    /// context that fits in GPU VRAM).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Context window: an explicit token count, or `auto` (resolve at load to
+    /// the largest context that fits in GPU VRAM). Defaults to `auto`.
+    #[serde(default = "default_llama_context_length", skip_serializing_if = "Option::is_none")]
     pub context_length: Option<ContextLengthSpec>,
     /// Whether Flash Attention is enabled for llama contexts.
     #[serde(default = "defaults::flash_attn_enabled")]
@@ -1100,10 +1113,7 @@ impl Default for LlamaRuntimeLeafConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            // Unset = `auto` (resolve at load to the largest context that fits
-            // in GPU VRAM). The explicit default keeps programmatic `default()`
-            // consistent with an absent settings field.
-            context_length: None,
+            context_length: default_llama_context_length(),
             flash_attn: defaults::flash_attn_enabled(),
             source: SourceConfig::default(),
             logging: LoggingOverrideConfig::default(),
@@ -1111,6 +1121,10 @@ impl Default for LlamaRuntimeLeafConfig {
             endpoint: EndpointConfig::default(),
         }
     }
+}
+
+fn default_llama_context_length() -> Option<ContextLengthSpec> {
+    Some(ContextLengthSpec::Auto)
 }
 
 /// Single-node runtime family configuration used for candle and onnx.
