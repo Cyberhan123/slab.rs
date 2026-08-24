@@ -192,7 +192,7 @@
     "cmdk": "^1.1.1",
     "cross-spawn": "^7.0.6",
     "culori": "^4.0.2",
-    "date-fns": "^4.1.0",
+    "date-fns": "^4.4.0",
     "dayjs": "^1.11.20",
     "embla-carousel-react": "^8.6.0",
     "husky": "^9.1.7",
