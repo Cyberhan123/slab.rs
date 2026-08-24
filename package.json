@@ -245,7 +245,7 @@
     "vscode-uri": "~3.1.0",
     "vscode-ws-jsonrpc": "^3.5.0",
     "wtd-core": "~4.0.1",
-    "zod": "^4.3.6",
+    "zod": "^4.4.3",
     "zustand": "^5.0.12",
     "@mantine/hooks": "^9.3.0",
     "lodash-es": "^4.18.1",
