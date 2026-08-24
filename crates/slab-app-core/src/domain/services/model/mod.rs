@@ -15,6 +15,8 @@ pub(crate) use runtime::{
     resolve_local_chat_prompt_profile, resolve_worker_model_backend_or_default, runtime_presets_for,
 };
 
+use std::sync::Arc;
+
 use serde_json::{Map, Value};
 use slab_types::RuntimeBackendId;
 
@@ -23,6 +25,7 @@ use crate::domain::models::{
     CreateModelCommand, ModelConfigDocument, ModelConfigFieldScope, ModelConfigOrigin,
     ModelConfigSectionView, ModelConfigSourceSummary, ModelConfigValueType, UnifiedModel,
 };
+use crate::domain::services::cloud_activation;
 use crate::error::AppCoreError;
 use crate::infra::db::ModelConfigStateStore;
 use crate::infra::model_packs;
@@ -38,11 +41,27 @@ use config_document::{
 pub struct ModelService {
     model_state: ModelState,
     worker_state: WorkerState,
+    /// Live-discovery seam + refresh bookkeeping for the cloud catalog reconcile paths.
+    cloud_catalog: Arc<cloud_activation::CloudCatalogContext>,
 }
 
 impl ModelService {
     pub fn new(model_state: ModelState, worker_state: WorkerState) -> Self {
-        Self { model_state, worker_state }
+        Self {
+            model_state,
+            worker_state,
+            cloud_catalog: Arc::new(cloud_activation::CloudCatalogContext::default()),
+        }
+    }
+
+    /// Replace the live-discovery seam (crate tests inject a scripted lister so cloud-catalog
+    /// reconcile tests never touch the network).
+    #[cfg(test)]
+    pub(crate) fn override_cloud_catalog_for_tests(
+        &mut self,
+        catalog: cloud_activation::CloudCatalogContext,
+    ) {
+        self.cloud_catalog = Arc::new(catalog);
     }
 
     pub async fn get_model_config_document(

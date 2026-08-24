@@ -14,6 +14,11 @@ Single owner of slab's cloud-provider knowledge:
   per `ProviderFamily`, used to activate cloud models as soon as a provider is configured. Returns
   plain `CloudModelSpec` data so callers own the DB writes. (genai 0.6.5's `Client::all_model_names`
   is a live web call that several vendors don't support, so it is not used as the activation source.)
+  Zhipu's `Zai` and `BigModel` families share the same GLM catalog.
+- **Live model discovery** — `list_remote_model_ids` probes an `OpenaiCompatible` provider's
+  `GET {api_base}/models` endpoint via genai's `all_model_names` (Bearer auth, `{data:[{id}]}`
+  shape). A live web call: callers own caching/timeouts, and a failed discovery must keep the
+  previously known catalog.
 
 ## Boundaries
 

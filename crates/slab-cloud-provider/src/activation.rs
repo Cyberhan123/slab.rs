@@ -53,6 +53,13 @@ pub fn default_models_for_provider(provider: &CloudProviderConfig) -> Vec<CloudM
 /// ship new flagship models; it intentionally stays a small, well-known set rather than an
 /// exhaustive (and fast-stale) dump.
 fn catalog_for_family(family: ProviderFamily) -> &'static [(&'static str, &'static str)] {
+    // Zhipu's two endpoints (Z.ai and open.bigmodel.cn) serve the same GLM model ids.
+    const GLM_CATALOG: &[(&str, &str)] = &[
+        ("glm-4.6", "GLM-4.6"),
+        ("glm-4.5", "GLM-4.5"),
+        ("glm-4.5-air", "GLM-4.5 Air"),
+        ("glm-4-flash", "GLM-4 Flash"),
+    ];
     match family {
         ProviderFamily::Openai => &[
             ("gpt-4.1", "GPT-4.1"),
@@ -102,12 +109,7 @@ fn catalog_for_family(family: ProviderFamily) -> &'static [(&'static str, &'stat
             ("moonshot-v1-128k", "Moonshot v1 128K"),
             ("moonshot-v1-32k", "Moonshot v1 32K"),
         ],
-        ProviderFamily::Zai => &[
-            ("glm-4.6", "GLM-4.6"),
-            ("glm-4.5", "GLM-4.5"),
-            ("glm-4.5-air", "GLM-4.5 Air"),
-            ("glm-4-flash", "GLM-4 Flash"),
-        ],
+        ProviderFamily::Zai | ProviderFamily::BigModel => GLM_CATALOG,
         ProviderFamily::Aliyun => {
             &[("qwen-max", "Qwen Max"), ("qwen-plus", "Qwen Plus"), ("qwen-turbo", "Qwen Turbo")]
         }
@@ -130,12 +132,12 @@ fn catalog_for_family(family: ProviderFamily) -> &'static [(&'static str, &'stat
             ("accounts/fireworks/models/llama-v3p1-8b-instruct", "Llama 3.1 8B"),
         ],
         ProviderFamily::MiniMax => &[("MiniMax-M1", "MiniMax M1"), ("abab6.5s-chat", "ABAB 6.5s")],
-        // No curated catalog: the user adds models manually via /v1/models.
+        // No curated catalog: the user adds models manually via /v1/models (or, for
+        // `OpenaiCompatible`, live discovery probes the endpoint's `/models` route).
         ProviderFamily::OpenaiCompatible
         | ProviderFamily::Aihubmix
         | ProviderFamily::Mimo
         | ProviderFamily::Nebius
-        | ProviderFamily::BigModel
         | ProviderFamily::Ollama
         | ProviderFamily::OllamaCloud
         | ProviderFamily::Vertex
@@ -178,6 +180,23 @@ mod tests {
         // Exactly one flagship default per family (the first entry).
         assert_eq!(specs.iter().filter(|spec| spec.is_default).count(), 1);
         assert!(specs.first().is_some_and(|spec| spec.is_default));
+    }
+
+    #[test]
+    fn big_model_catalog_lists_glm_models() {
+        // open.bigmodel.cn serves the same GLM model ids as the Z.ai family.
+        let specs = default_models_for_provider(&provider("glm", ProviderFamily::BigModel));
+        assert!(!specs.is_empty(), "BigModel should expose the curated GLM catalog");
+        assert!(specs.iter().any(|spec| spec.remote_model_id == "glm-4.6"));
+        assert!(specs.first().is_some_and(|spec| spec.is_default));
+        for family in [ProviderFamily::Zai, ProviderFamily::BigModel] {
+            let specs = default_models_for_provider(&provider("p", family));
+            assert_eq!(
+                specs.first().map(|spec| spec.remote_model_id.as_str()),
+                Some("glm-4.6"),
+                "{family:?} flagship should stay glm-4.6"
+            );
+        }
     }
 
     #[test]

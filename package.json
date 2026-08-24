@@ -46,7 +46,7 @@
     "test:sandbox": "bun ./scripts/cargo/validate.ts sandbox",
     "test:browser": "vitest run --project desktop-browser --project components-browser",
     "test:e2e": "bun run build:sidecars:e2e && vitest run --config packages/slab-desktop/vitest.e2e.config.ts",
-    "test:e2e:core": "bun run build:sidecars:e2e && vitest run --config packages/slab-desktop/vitest.e2e.config.ts packages/slab-desktop/tests/e2e/agent.test.ts packages/slab-desktop/tests/e2e/apply-patch.test.ts packages/slab-desktop/tests/e2e/assistant.test.ts packages/slab-desktop/tests/e2e/hub.test.ts",
+    "test:e2e:core": "bun run build:sidecars:e2e && vitest run --config packages/slab-desktop/vitest.e2e.config.ts packages/slab-desktop/tests/e2e/agent.test.ts packages/slab-desktop/tests/e2e/apply-patch.test.ts packages/slab-desktop/tests/e2e/assistant.test.ts packages/slab-desktop/tests/e2e/cloud-models.test.ts packages/slab-desktop/tests/e2e/hub.test.ts",
     "test:e2e:desktop": "bun run build:sidecars:e2e && vitest run --config packages/slab-desktop/vitest.desktop-e2e.config.ts",
     "test:e2e:workspace": "bun run build:sidecars:e2e && vitest run --config packages/slab-desktop/vitest.e2e.workspace.config.ts",
     "test:components": "vitest run --project components-browser",

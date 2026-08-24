@@ -15558,6 +15558,7 @@ dependencies = [
  "serde_json",
  "slab-config",
  "thiserror 2.0.19",
+ "tokio",
  "tracing",
 ]
 

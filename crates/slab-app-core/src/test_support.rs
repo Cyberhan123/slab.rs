@@ -629,7 +629,9 @@ fn write_test_settings(
         id: TEST_PROVIDER_ID.to_owned(),
         family: ProviderFamily::OpenaiCompatible,
         display_name: "OpenAI Test".to_owned(),
-        api_base: "https://api.openai.test/v1".to_owned(),
+        // Non-routable local endpoint: catalog read-reconcile may spawn a live discovery for
+        // this OpenaiCompatible provider, and tests must never leave localhost.
+        api_base: "http://127.0.0.1:9/v1".to_owned(),
         auth: Default::default(),
     });
 

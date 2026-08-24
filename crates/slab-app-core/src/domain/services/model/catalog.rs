@@ -15,6 +15,7 @@ use crate::domain::models::{
     UnifiedModelStatus, UpdateModelCommand, UpdateModelConfigSelectionCommand,
     normalize_model_capabilities,
 };
+use crate::domain::services::cloud_activation;
 use crate::error::AppCoreError;
 use crate::infra::db::{
     ModelConfigStateRecord, ModelConfigStateStore, ModelDownloadStore, ModelStore,
@@ -231,11 +232,25 @@ impl ModelService {
         &self,
         query: ListModelsFilter,
     ) -> Result<Vec<UnifiedModel>, AppCoreError> {
+        // Self-heal the cloud catalog against the configured providers (cheap curated diff +
+        // background live refresh) so external settings edits surface without a restart.
+        cloud_activation::reconcile_catalogs_for_read(self, &self.model_state).await;
         load_models_from_state(&self.model_state, query).await
     }
 
     pub async fn list_chat_models(&self) -> Result<Vec<ChatModelOption>, AppCoreError> {
+        cloud_activation::reconcile_catalogs_for_read(self, &self.model_state).await;
         list_chat_models_from_state(&self.model_state).await
+    }
+
+    /// Bootstrap-time cloud catalog sync: curated models are activated inline; live `/models`
+    /// discovery refreshes are spawned in the background. Follows `sync_model_packs_from_disk`.
+    pub async fn sync_cloud_provider_catalogs(&self) {
+        cloud_activation::bootstrap_cloud_catalogs(self, &self.model_state).await;
+    }
+
+    pub(crate) fn cloud_catalog(&self) -> std::sync::Arc<cloud_activation::CloudCatalogContext> {
+        std::sync::Arc::clone(&self.cloud_catalog)
     }
 
     pub async fn list_available_models(
