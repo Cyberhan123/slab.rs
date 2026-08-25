@@ -456,7 +456,9 @@ mod tests {
         assert_eq!(glm_46["spec"]["provider_id"], "glm-main");
         assert_eq!(glm_46["spec"]["remote_model_id"], "glm-4.6");
 
-        for remote in ["glm-4.5", "glm-4.5-air", "glm-4-flash"] {
+        for remote in
+            ["glm-5.3", "glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.5"]
+        {
             assert!(
                 models.iter().any(|model| model["id"] == format!("cloud:glm-main:{remote}")),
                 "missing curated catalog entry {remote}"

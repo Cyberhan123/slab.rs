@@ -556,10 +556,14 @@ mod tests {
 
         let ids = chat_model_ids(&app).await;
         for expected in [
+            "cloud:glm-main:glm-5.3",
+            "cloud:glm-main:glm-5.2",
+            "cloud:glm-main:glm-5.1",
+            "cloud:glm-main:glm-5",
+            "cloud:glm-main:glm-5-turbo",
+            "cloud:glm-main:glm-4.7",
             "cloud:glm-main:glm-4.6",
             "cloud:glm-main:glm-4.5",
-            "cloud:glm-main:glm-4.5-air",
-            "cloud:glm-main:glm-4-flash",
         ] {
             assert!(ids.iter().any(|id| id == expected), "missing {expected} in {ids:?}");
         }

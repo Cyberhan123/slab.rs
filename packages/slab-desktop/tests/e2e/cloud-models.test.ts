@@ -113,15 +113,24 @@ describe("cloud model catalog e2e", () => {
     await putRegistry([...originalRegistry, bigModelEntry()])
 
     const models = await listChatModels()
-    for (const remote of ["glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4-flash"]) {
+    for (const remote of [
+      "glm-5.3",
+      "glm-5.2",
+      "glm-5.1",
+      "glm-5",
+      "glm-5-turbo",
+      "glm-4.7",
+      "glm-4.6",
+      "glm-4.5",
+    ]) {
       const entry = models.find((model) => model.id === `cloud:${marker}-big:${remote}`)
       expect(entry, `missing curated row cloud:${marker}-big:${remote}`).toBeTruthy()
       expect(entry?.kind).toBe("cloud")
       expect(entry?.spec.provider_id).toBe(`${marker}-big`)
       expect(entry?.spec.remote_model_id).toBe(remote)
     }
-    const flagship = models.find((model) => model.id === `cloud:${marker}-big:glm-4.6`)
-    expect(flagship?.display_name).toBe("GLM-4.6")
+    const flagship = models.find((model) => model.id === `cloud:${marker}-big:glm-5.3`)
+    expect(flagship?.display_name).toBe("GLM-5.3")
   })
 
   it("discovers OpenAI-compatible models live from the provider /models endpoint", async () => {
