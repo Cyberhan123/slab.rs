@@ -39,7 +39,8 @@ use params::{
 use session::{build_messages, persist_session_message};
 use streaming::{
     build_chunk, build_error_chunk, build_finish_chunk, build_reasoning_chunk, build_role_chunk,
-    build_usage_chunk, into_text_completion_stream, with_stream_session_persistence,
+    build_tool_calls_chunk, build_usage_chunk, into_text_completion_stream,
+    with_stream_session_persistence,
 };
 
 const SYSTEM_FINGERPRINT: &str = "b-slab";
@@ -203,7 +204,7 @@ async fn create_chat_completion_with_state(
                 &resolved_model,
                 &resolved_messages,
                 CloudChatRequestConfig {
-                    max_tokens,
+                    max_tokens: sampling.explicit_max_tokens,
                     temperature,
                     top_p: sampling.top_p,
                     structured_output: command.cloud.structured_output.clone(),
@@ -304,7 +305,7 @@ async fn create_chat_completion_with_state(
                 &resolved_model,
                 &resolved_messages,
                 CloudChatRequestConfig {
-                    max_tokens,
+                    max_tokens: sampling.explicit_max_tokens,
                     temperature,
                     top_p: sampling.top_p,
                     structured_output: command.cloud.structured_output.clone(),
@@ -582,7 +583,7 @@ async fn create_text_completion_with_state(
                 &resolved_model,
                 &command.prompt,
                 CloudChatRequestConfig {
-                    max_tokens,
+                    max_tokens: sampling.explicit_max_tokens,
                     temperature,
                     top_p: sampling.top_p,
                     structured_output: command.cloud.structured_output.clone(),
