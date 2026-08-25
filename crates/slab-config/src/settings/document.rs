@@ -553,8 +553,10 @@ fn default_hook_export_name() -> String {
 /// Agent memory pipeline settings.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AgentMemoriesConfig {
-    #[serde(default)]
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default = "default_enabled")]
+    pub recall_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -569,6 +571,8 @@ pub struct AgentMemoriesConfig {
     pub phase1_lease_seconds: u64,
     #[serde(default = "default_memory_phase1_retry_seconds")]
     pub phase1_retry_seconds: u64,
+    #[serde(default = "default_memory_phase1_max_attempts")]
+    pub phase1_max_attempts: u32,
     #[serde(default = "default_memory_phase1_max_age_days")]
     pub phase1_max_age_days: u32,
     #[serde(default = "default_memory_phase2_limit")]
@@ -584,7 +588,8 @@ pub struct AgentMemoriesConfig {
 impl Default for AgentMemoriesConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: default_enabled(),
+            recall_enabled: default_enabled(),
             model: None,
             memory_root: None,
             phase1_scan_limit: default_memory_phase1_scan_limit(),
@@ -592,6 +597,7 @@ impl Default for AgentMemoriesConfig {
             phase1_idle_seconds: default_memory_phase1_idle_seconds(),
             phase1_lease_seconds: default_memory_phase1_lease_seconds(),
             phase1_retry_seconds: default_memory_phase1_retry_seconds(),
+            phase1_max_attempts: default_memory_phase1_max_attempts(),
             phase1_max_age_days: default_memory_phase1_max_age_days(),
             phase2_limit: default_memory_phase2_limit(),
             phase2_lease_seconds: default_memory_phase2_lease_seconds(),
@@ -619,6 +625,10 @@ const fn default_memory_phase1_lease_seconds() -> u64 {
 
 const fn default_memory_phase1_retry_seconds() -> u64 {
     3600
+}
+
+const fn default_memory_phase1_max_attempts() -> u32 {
+    3
 }
 
 const fn default_memory_phase1_max_age_days() -> u32 {
@@ -1985,7 +1995,7 @@ mod tests {
         assert!(settings.agent.debug);
         assert!(!settings.agent.hooks.enabled);
         assert!(settings.agent.hooks.scripts.is_empty());
-        assert!(!settings.agent.memories.enabled);
+        assert!(settings.agent.memories.enabled);
         assert_eq!(settings.agent.memories.phase1_concurrency, 2);
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
         assert_eq!(settings.runtime.launch.server.bind_host, "127.0.0.1");

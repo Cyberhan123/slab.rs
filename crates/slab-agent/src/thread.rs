@@ -338,7 +338,8 @@ impl AgentThread {
                 session_id: self.session_id.clone(),
                 parent_id: self.parent_id.clone(),
                 depth: self.depth,
-                config: self.config.clone(),
+                config: Box::new(self.config.clone()),
+                input_message: latest_user_input(&messages),
             },
         )
         .await;
@@ -833,6 +834,18 @@ fn insert_injected_messages(
     for (offset, message) in injected.into_iter().enumerate() {
         messages.insert(insert_at + offset, message);
     }
+}
+
+/// The run's driving user input: the LAST user-role message without a
+/// fragment `name` tag. Tagged user messages (`slab_agents_md`) are injected
+/// context, not user input, so they are skipped; the tail-most match wins
+/// because a resumed thread's newest request is the task at hand.
+fn latest_user_input(messages: &[ConversationMessage]) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "user" && message.name.is_none())
+        .map(|message| message.content.rendered_text())
 }
 
 /// Replace-by-tag merge of an injected init-context batch into the message

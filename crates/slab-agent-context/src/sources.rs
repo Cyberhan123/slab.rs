@@ -58,5 +58,19 @@ pub trait AgentContextSources: Send + Sync {
     /// Folded read-side memory context, if memory is enabled and a v1 summary
     /// exists. `None` skips the memory fragment. The host bridges from
     /// `slab-agent-memories` so this crate stays free of it.
-    fn memory_context(&self) -> Option<MemoryContext>;
+    ///
+    /// Async + parameterized because the recall path (when enabled) runs a
+    /// small model side query against the thread's first user message; the
+    /// host bounds that call with a timeout and degrades to `relevant_body:
+    /// None` instead of failing agent start.
+    async fn memory_context(
+        &self,
+        thread_id: &str,
+        model_id: &str,
+        input_message: Option<&str>,
+    ) -> Option<MemoryContext>;
+
+    /// Drop per-thread recall state when the thread ends. Default no-op;
+    /// hosts with a recall cache override this to release entries.
+    fn evict_thread(&self, _thread_id: &str) {}
 }

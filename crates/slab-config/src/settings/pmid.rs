@@ -90,6 +90,7 @@ impl SettingsPmidCatalog {
             self.agent.hooks.enabled(),
             self.agent.hooks.scripts(),
             self.agent.memories.enabled(),
+            self.agent.memories.recall_enabled(),
             self.agent.memories.model(),
             self.agent.memories.memory_root(),
             self.agent.memories.phase1_scan_limit(),
@@ -97,6 +98,7 @@ impl SettingsPmidCatalog {
             self.agent.memories.phase1_idle_seconds(),
             self.agent.memories.phase1_lease_seconds(),
             self.agent.memories.phase1_retry_seconds(),
+            self.agent.memories.phase1_max_attempts(),
             self.agent.memories.phase1_max_age_days(),
             self.agent.memories.phase2_limit(),
             self.agent.memories.phase2_lease_seconds(),
@@ -450,6 +452,10 @@ impl AgentMemoriesPmids {
         SettingPmid::from_path("agent.memories.enabled")
     }
 
+    pub fn recall_enabled(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.recall_enabled")
+    }
+
     pub fn model(self) -> SettingPmid {
         SettingPmid::from_path("agent.memories.model")
     }
@@ -476,6 +482,10 @@ impl AgentMemoriesPmids {
 
     pub fn phase1_retry_seconds(self) -> SettingPmid {
         SettingPmid::from_path("agent.memories.phase1_retry_seconds")
+    }
+
+    pub fn phase1_max_attempts(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.phase1_max_attempts")
     }
 
     pub fn phase1_max_age_days(self) -> SettingPmid {

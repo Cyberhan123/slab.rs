@@ -49,6 +49,7 @@ impl ContextInstructionHook {
         model: &str,
         reasoning_effort: Option<ChatReasoningEffort>,
         verbosity: Option<ChatVerbosity>,
+        input_message: Option<&str>,
     ) -> Result<Vec<ConversationMessage>> {
         let env = build_environment();
 
@@ -99,7 +100,7 @@ impl ContextInstructionHook {
         }
         messages.push(tagged(developer.render(&env)?, "slab_skills"));
         // 6. Folded read-side memory (developer, preserves the `slab_memory` name).
-        if let Some(memory) = self.sources.memory_context() {
+        if let Some(memory) = self.sources.memory_context(thread_id, model, input_message).await {
             messages.push(ConversationMessage {
                 role: "developer".to_owned(),
                 content: ConversationMessageContent::Text(memory.body),
@@ -107,6 +108,18 @@ impl ContextInstructionHook {
                 tool_call_id: None,
                 tool_calls: Vec::new(),
             });
+            // 6b. Recall-selected rollout summaries (developer): a separate
+            // tag so the summary fragment and the per-task recall refresh
+            // independently between runs.
+            if let Some(relevant) = memory.relevant_body {
+                messages.push(ConversationMessage {
+                    role: "developer".to_owned(),
+                    content: ConversationMessageContent::Text(relevant),
+                    name: Some("slab_memory_relevant".to_owned()),
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                });
+            }
         }
         // 7. Discovered `AGENTS.md` bodies (user).
         for AgentMdRecord { path, body } in agents_md {
@@ -133,30 +146,39 @@ fn tagged(mut message: ConversationMessage, name: &str) -> ConversationMessage {
 #[async_trait]
 impl AgentHook for ContextInstructionHook {
     async fn on_event(&self, event: &HookEvent) -> HookOutcome {
-        let HookEvent::OnAgentStart { thread_id, config, .. } = event else {
-            return HookOutcome::Continue;
-        };
-        if config.transient {
-            return HookOutcome::Continue;
-        }
-        match self
-            .render_startup_messages(
-                thread_id,
-                &config.model,
-                config.reasoning_effort,
-                config.verbosity,
-            )
-            .await
-        {
-            Ok(messages) if !messages.is_empty() => HookOutcome::Effects {
-                tool_action: HookToolAction::Continue,
-                injected_messages: messages,
-                observations: Vec::new(),
-            },
-            Ok(_) => HookOutcome::Continue,
-            Err(error) => HookOutcome::AppendObservation {
-                observation: format!("context instruction injection skipped: {error}"),
-            },
+        match event {
+            HookEvent::OnAgentStart { thread_id, config, input_message, .. } => {
+                if config.transient {
+                    return HookOutcome::Continue;
+                }
+                match self
+                    .render_startup_messages(
+                        thread_id,
+                        &config.model,
+                        config.reasoning_effort,
+                        config.verbosity,
+                        input_message.as_deref(),
+                    )
+                    .await
+                {
+                    Ok(messages) if !messages.is_empty() => HookOutcome::Effects {
+                        tool_action: HookToolAction::Continue,
+                        injected_messages: messages,
+                        observations: Vec::new(),
+                    },
+                    Ok(_) => HookOutcome::Continue,
+                    Err(error) => HookOutcome::AppendObservation {
+                        observation: format!("context instruction injection skipped: {error}"),
+                    },
+                }
+            }
+            // Release per-thread recall state when the thread finishes; the
+            // surfaced-memory cache must not outlive its thread.
+            HookEvent::OnAgentEnd { thread_id, .. } => {
+                self.sources.evict_thread(thread_id);
+                HookOutcome::Continue
+            }
+            _ => HookOutcome::Continue,
         }
     }
 }
@@ -181,6 +203,8 @@ mod tests {
         template: Option<String>,
         permission: PermissionSnapshot,
         memory: Option<String>,
+        relevant: Option<String>,
+        evicted: std::sync::Mutex<Vec<String>>,
     }
 
     fn permissive_snapshot() -> PermissionSnapshot {
@@ -219,8 +243,19 @@ mod tests {
         fn permission_snapshot(&self, _thread_id: &str) -> PermissionSnapshot {
             self.permission.clone()
         }
-        fn memory_context(&self) -> Option<crate::snapshots::MemoryContext> {
-            self.memory.as_ref().map(|body| crate::snapshots::MemoryContext { body: body.clone() })
+        async fn memory_context(
+            &self,
+            _thread_id: &str,
+            _model_id: &str,
+            _input_message: Option<&str>,
+        ) -> Option<crate::snapshots::MemoryContext> {
+            self.memory.as_ref().map(|body| crate::snapshots::MemoryContext {
+                body: body.clone(),
+                relevant_body: self.relevant.clone(),
+            })
+        }
+        fn evict_thread(&self, thread_id: &str) {
+            self.evicted.lock().expect("evicted lock").push(thread_id.to_owned());
         }
     }
 
@@ -239,6 +274,19 @@ mod tests {
             template: None,
             permission: permissive_snapshot(),
             memory: None,
+            relevant: None,
+            evicted: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn start_event(config: AgentConfig) -> HookEvent {
+        HookEvent::OnAgentStart {
+            thread_id: "t".into(),
+            session_id: "s".into(),
+            parent_id: None,
+            depth: 0,
+            config: Box::new(config),
+            input_message: Some("help me with the parser bug".to_owned()),
         }
     }
 
@@ -255,15 +303,7 @@ mod tests {
         let hook =
             ContextInstructionHook::new(Arc::new(mock_sources(Some(ws.path().to_path_buf()))));
 
-        let outcome = hook
-            .on_event(&HookEvent::OnAgentStart {
-                thread_id: "t".into(),
-                session_id: "s".into(),
-                parent_id: None,
-                depth: 0,
-                config: AgentConfig::default(),
-            })
-            .await;
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
 
         let HookOutcome::Effects { injected_messages, .. } = outcome else {
             panic!("expected effects, got {outcome:?}");
@@ -296,15 +336,7 @@ mod tests {
         sources.memory = Some("memory summary body".to_owned());
         let hook = ContextInstructionHook::new(Arc::new(sources));
 
-        let outcome = hook
-            .on_event(&HookEvent::OnAgentStart {
-                thread_id: "t".into(),
-                session_id: "s".into(),
-                parent_id: None,
-                depth: 0,
-                config: AgentConfig::default(),
-            })
-            .await;
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
 
         let HookOutcome::Effects { injected_messages, .. } = outcome else {
             panic!("expected effects, got {outcome:?}");
@@ -318,16 +350,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn folds_relevant_memory_as_slab_memory_relevant_fragment() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let mut sources = mock_sources(Some(ws.path().to_path_buf()));
+        sources.memory = Some("memory summary body".to_owned());
+        sources.relevant = Some("relevant rollout summaries".to_owned());
+        let hook = ContextInstructionHook::new(Arc::new(sources));
+
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
+
+        let HookOutcome::Effects { injected_messages, .. } = outcome else {
+            panic!("expected effects, got {outcome:?}");
+        };
+        let memory_position = injected_messages
+            .iter()
+            .position(|m| m.name.as_deref() == Some("slab_memory"))
+            .expect("summary fragment present");
+        let relevant_position = injected_messages
+            .iter()
+            .position(|m| m.name.as_deref() == Some("slab_memory_relevant"))
+            .expect("relevant fragment present");
+        let relevant_msg = &injected_messages[relevant_position];
+        assert_eq!(relevant_msg.role, "developer");
+        assert!(relevant_msg.content.rendered_text().contains("relevant rollout summaries"));
+        // 6b sits immediately after slot 6.
+        assert_eq!(relevant_position, memory_position + 1);
+    }
+
+    #[tokio::test]
+    async fn evicts_thread_on_agent_end() {
+        let sources = Arc::new(mock_sources(None));
+        let hook =
+            ContextInstructionHook::new(Arc::clone(&sources) as Arc<dyn AgentContextSources>);
+
+        let outcome = hook
+            .on_event(&HookEvent::OnAgentEnd {
+                thread_id: "t".into(),
+                session_id: "s".into(),
+                status: slab_agent::ThreadStatus::Completed,
+                error: None,
+            })
+            .await;
+
+        assert!(matches!(outcome, HookOutcome::Continue));
+        assert_eq!(
+            sources.evicted.lock().expect("evicted lock").as_slice(),
+            ["t".to_owned()].as_slice()
+        );
+    }
+
+    #[tokio::test]
     async fn skips_transient_threads() {
         let hook = ContextInstructionHook::new(Arc::new(mock_sources(None)));
         let outcome = hook
-            .on_event(&HookEvent::OnAgentStart {
-                thread_id: "t".into(),
-                session_id: "s".into(),
-                parent_id: None,
-                depth: 0,
-                config: AgentConfig { transient: true, ..AgentConfig::default() },
-            })
+            .on_event(&start_event(AgentConfig { transient: true, ..AgentConfig::default() }))
             .await;
         assert!(matches!(outcome, HookOutcome::Continue));
     }
@@ -351,16 +427,10 @@ mod tests {
     async fn emits_reasoning_effort_fragment_when_effort_is_set() {
         let hook = ContextInstructionHook::new(Arc::new(mock_sources(None)));
         let outcome = hook
-            .on_event(&HookEvent::OnAgentStart {
-                thread_id: "t".into(),
-                session_id: "s".into(),
-                parent_id: None,
-                depth: 0,
-                config: AgentConfig {
-                    reasoning_effort: Some(slab_types::ChatReasoningEffort::High),
-                    ..AgentConfig::default()
-                },
-            })
+            .on_event(&start_event(AgentConfig {
+                reasoning_effort: Some(slab_types::ChatReasoningEffort::High),
+                ..AgentConfig::default()
+            }))
             .await;
 
         let HookOutcome::Effects { injected_messages, .. } = outcome else {
