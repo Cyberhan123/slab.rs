@@ -25,6 +25,8 @@ export const assistant = {
   },
   modelPicker: {
     groupLabel: 'Assistant model',
+    localGroupLabel: 'Local models',
+    cloudGroupLabel: 'Cloud providers',
     emptyLabel: 'No assistant models',
   },
   greeting: {

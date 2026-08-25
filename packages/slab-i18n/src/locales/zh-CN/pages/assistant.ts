@@ -25,6 +25,8 @@ export const assistant = {
   },
   modelPicker: {
     groupLabel: '助手模型',
+    localGroupLabel: '本地模型',
+    cloudGroupLabel: '云供应商',
     emptyLabel: '暂无助手模型',
   },
   greeting: {
