@@ -5,7 +5,8 @@
 //! skills + `AGENTS.md`, snapshots the environment + permission state, and
 //! injects a single ordered batch:
 //! `[system, environment, permissions, …reasoning-effort(added later),
-//! developer(skills), memory?, …agents_md]`. `system` is emitted first so the
+//! developer(skills — only when a skill or a model template exists), memory?,
+//! …agents_md]`. `system` is emitted first so the
 //! existing thread-level insertion logic (which places injected messages after
 //! the leading `system` block) lands the rest in the right positions. Skill-body
 //! expansion is NOT done here — hooks can only inject new messages, not mutate
@@ -63,15 +64,18 @@ impl ContextInstructionHook {
         );
         let skill_roots = build_skill_roots(&skills, &agents_md);
 
-        let developer_template = self
-            .sources
-            .instruction_template_for(model)
-            .await
-            .or_else(|| Some(crate::helper::DEFAULT_DEVELOPER_TEMPLATE.to_owned()));
+        let developer_template = self.sources.instruction_template_for(model).await;
 
         let mut messages = Vec::new();
-        // 1. Identity / persona.
-        messages.push(tagged(SystemInstructionFragment.render(&env)?, "slab_system"));
+        // 1. Identity / persona. `workspace_bound` keeps the tool-use guidance
+        //    in the system prompt aligned with the registered tool set (the
+        //    workspace-bound tools, e.g. `apply_patch`, exist only when a
+        //    workspace root is configured).
+        messages.push(tagged(
+            SystemInstructionFragment { workspace_bound: self.sources.workspace_root().is_some() }
+                .render(&env)?,
+            "slab_system",
+        ));
         // 2. Environment facts (cwd / shell / os / time).
         messages.push(tagged(
             EnvironmentContextFragment { snapshot: self.sources.environment_snapshot() }
@@ -93,12 +97,17 @@ impl ContextInstructionHook {
                 "slab_reasoning_effort",
             ));
         }
-        // 5. Skills (developer).
-        let mut developer = DeveloperInstructionFragment::new(skills, skill_roots);
-        if let Some(template_source) = developer_template {
-            developer.template_source = template_source;
+        // 5. Skills (developer) — only when there is something to render.
+        //    An empty skills catalogue would inject a dead instruction block
+        //    describing a skill system with zero entries; a model-provided
+        //    instruction template still injects (it is an explicit override).
+        if !skills.is_empty() || developer_template.is_some() {
+            let mut developer = DeveloperInstructionFragment::new(skills, skill_roots);
+            if let Some(template_source) = developer_template {
+                developer.template_source = template_source;
+            }
+            messages.push(tagged(developer.render(&env)?, "slab_skills"));
         }
-        messages.push(tagged(developer.render(&env)?, "slab_skills"));
         // 6. Folded read-side memory (developer, preserves the `slab_memory` name).
         if let Some(memory) = self.sources.memory_context(thread_id, model, input_message).await {
             messages.push(ConversationMessage {
@@ -327,6 +336,87 @@ mod tests {
             .find(|m| m.content.rendered_text().contains("# workspace rules"))
             .expect("agents_md user message should be injected");
         assert_eq!(agents_msg.role, "user");
+    }
+
+    #[tokio::test]
+    async fn skips_skills_fragment_when_no_skills_exist() {
+        let ws = tempfile::TempDir::new().unwrap();
+        // No SKILL.md written anywhere: workspace + global roots are empty.
+        let hook =
+            ContextInstructionHook::new(Arc::new(mock_sources(Some(ws.path().to_path_buf()))));
+
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
+
+        let HookOutcome::Effects { injected_messages, .. } = outcome else {
+            panic!("expected effects, got {outcome:?}");
+        };
+        // system, environment, permissions, agents_md(root AGENTS.md absent) = 3;
+        // the skills developer message must NOT be injected for an empty catalogue.
+        assert!(
+            injected_messages.iter().all(|m| m.name.as_deref() != Some("slab_skills")),
+            "no slab_skills message should be injected when no skills exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn injects_skills_fragment_for_model_template_even_without_skills() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let mut sources = mock_sources(Some(ws.path().to_path_buf()));
+        sources.template = Some("<skills_instructions>custom</skills_instructions>".to_owned());
+        let hook = ContextInstructionHook::new(Arc::new(sources));
+
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
+
+        let HookOutcome::Effects { injected_messages, .. } = outcome else {
+            panic!("expected effects, got {outcome:?}");
+        };
+        let skills_msg = injected_messages
+            .iter()
+            .find(|m| m.name.as_deref() == Some("slab_skills"))
+            .expect("model-provided template must still be injected");
+        assert!(skills_msg.content.rendered_text().contains("custom"));
+    }
+
+    #[tokio::test]
+    async fn system_prompt_apply_patch_guidance_follows_workspace_binding() {
+        // Without a workspace root the workspace-bound tools (apply_patch …)
+        // are not registered, so the system prompt must not reference them.
+        let unbound_event = start_event(AgentConfig::default());
+        let unbound_hook = ContextInstructionHook::new(Arc::new(mock_sources(None)));
+        let HookOutcome::Effects { injected_messages, .. } =
+            unbound_hook.on_event(&unbound_event).await
+        else {
+            panic!("expected effects");
+        };
+        let system = injected_messages[0].content.rendered_text();
+        assert!(!system.contains("apply_patch"), "unbound system prompt: {system}");
+        assert!(system.contains("no workspace root is configured"));
+
+        // With a workspace root the guidance is present.
+        let ws = tempfile::TempDir::new().unwrap();
+        let bound_event = start_event(AgentConfig::default());
+        let bound_hook =
+            ContextInstructionHook::new(Arc::new(mock_sources(Some(ws.path().to_path_buf()))));
+        let HookOutcome::Effects { injected_messages, .. } =
+            bound_hook.on_event(&bound_event).await
+        else {
+            panic!("expected effects");
+        };
+        let system = injected_messages[0].content.rendered_text();
+        assert!(system.contains("apply_patch"));
+        assert!(system.contains("in the workspace root"));
+    }
+
+    #[tokio::test]
+    async fn environment_fragment_explains_missing_workspace_instead_of_bare_unset() {
+        let hook = ContextInstructionHook::new(Arc::new(mock_sources(None)));
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
+        let HookOutcome::Effects { injected_messages, .. } = outcome else {
+            panic!("expected effects");
+        };
+        let env = injected_messages[1].content.rendered_text();
+        assert!(env.contains("no workspace configured"), "env fragment: {env}");
+        assert!(!env.contains("(unset)"));
     }
 
     #[tokio::test]

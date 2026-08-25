@@ -203,7 +203,11 @@ fn build_agent_control(
         sandbox_driver,
         workspace_root.clone(),
         mcp_client,
-        false,
+        // Git tools ship with the production suite: the plan agent's prompt
+        // names `git_status`/`git_diff` (read-only category, visible even in
+        // read-only exposure) and `git_commit` is FileEdit-gated by the
+        // exec-policy engine, so registration is safe by construction.
+        true,
         web_search_config,
         shell_launcher,
         shell_config.bash_path.clone(),

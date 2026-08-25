@@ -44,8 +44,9 @@ pub enum OsKind {
 #[derive(Debug, Clone, Serialize)]
 pub struct EnvironmentSnapshot {
     /// Absolute workspace root the agent operates in, if any. Serialized as
-    /// `null` when absent so the template can render an "(unset)" fallback
-    /// under minijinja strict-undefined mode.
+    /// `null` when absent so the template can render an explicit
+    /// "no workspace configured" fallback under minijinja strict-undefined
+    /// mode.
     pub cwd: Option<String>,
     pub shell: ShellKind,
     pub os: OsKind,
