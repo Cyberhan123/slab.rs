@@ -363,8 +363,9 @@ mod tests {
 
         assert!(output.timed_out);
         // Both the sandbox driver and PassThroughDriver route timeouts through
-        // `wait_for_child`, which reports exit_code 1 regardless of platform.
-        assert_eq!(output.exit_code, 1);
+        // `wait_for_child`, which reports the fixed timeout exit code (124,
+        // GNU `timeout` convention) regardless of platform.
+        assert_eq!(output.exit_code, 124);
     }
 
     #[test]

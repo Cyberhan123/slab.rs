@@ -59,7 +59,8 @@ impl ToolHandler for ShellTool {
     }
 
     fn description(&self) -> &str {
-        "Execute a shell command and return stdout, stderr, exit_code, and timeout status."
+        "Execute a shell command and return stdout, stderr, exit_code, and timeout status. \
+         On timeout the process tree is killed and exit_code is 124."
     }
 
     fn parameters_schema(&self) -> Value {
