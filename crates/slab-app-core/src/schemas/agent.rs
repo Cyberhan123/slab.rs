@@ -69,6 +69,10 @@ impl From<AgentConfigInput> for AgentConfig {
                 .invalid_tool_call_retries
                 .unwrap_or(defaults.invalid_tool_call_retries)
                 .clamp(0, MAX_INVALID_TOOL_CALL_RETRIES),
+            // LLM retry policy is not (yet) part of the public /responses
+            // input surface — defaults apply; persisted config_json overrides.
+            llm_max_retries: defaults.llm_max_retries,
+            llm_retry_base_delay_ms: defaults.llm_retry_base_delay_ms,
             structured_output: v.structured_output.map(Into::into),
             transient: v.transient.unwrap_or(defaults.transient),
             agent_type: None,

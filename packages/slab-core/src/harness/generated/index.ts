@@ -330,7 +330,7 @@ export type ServerInfo = { name: string, version: string, };
 /**
  * Union of every server → client notification, discriminated by `method`.
  */
-export type ServerNotification = { "method": "thread/started", "params": ThreadStartedParams } | { "method": "turn/started", "params": TurnStartedParams } | { "method": "turn/completed", "params": TurnCompletedParams } | { "method": "context/compacting", "params": ContextCompactingParams } | { "method": "context/compacted", "params": ContextCompactedParams } | { "method": "item/started", "params": ItemStartedParams } | { "method": "item/completed", "params": ItemCompletedParams } | { "method": "item/agentMessage/delta", "params": AgentMessageDeltaParams } | { "method": "item/reasoning/textDelta", "params": ReasoningTextDeltaParams } | { "method": "item/reasoning/summaryTextDelta", "params": ReasoningSummaryTextDeltaParams } | { "method": "item/commandExecution/outputDelta", "params": CommandExecutionOutputDeltaParams } | { "method": "item/fileChange/outputDelta", "params": FileChangeOutputDeltaParams } | { "method": "item/commandExecution/requestApproval", "params": CommandExecutionRequestApprovalParams } | { "method": "item/fileChange/requestApproval", "params": FileChangeRequestApprovalParams } | { "method": "error", "params": ErrorParams } | { "method": "account/updated", "params": AccountUpdatedParams } | { "method": "account/loginCompleted", "params": AccountLoginCompletedParams };
+export type ServerNotification = { "method": "thread/started", "params": ThreadStartedParams } | { "method": "thread/statusChanged", "params": ThreadStatusChangedParams } | { "method": "turn/started", "params": TurnStartedParams } | { "method": "turn/completed", "params": TurnCompletedParams } | { "method": "context/compacting", "params": ContextCompactingParams } | { "method": "context/compacted", "params": ContextCompactedParams } | { "method": "item/started", "params": ItemStartedParams } | { "method": "item/completed", "params": ItemCompletedParams } | { "method": "item/agentMessage/delta", "params": AgentMessageDeltaParams } | { "method": "item/reasoning/textDelta", "params": ReasoningTextDeltaParams } | { "method": "item/reasoning/summaryTextDelta", "params": ReasoningSummaryTextDeltaParams } | { "method": "item/commandExecution/outputDelta", "params": CommandExecutionOutputDeltaParams } | { "method": "item/fileChange/outputDelta", "params": FileChangeOutputDeltaParams } | { "method": "item/commandExecution/requestApproval", "params": CommandExecutionRequestApprovalParams } | { "method": "item/fileChange/requestApproval", "params": FileChangeRequestApprovalParams } | { "method": "error", "params": ErrorParams } | { "method": "account/updated", "params": AccountUpdatedParams } | { "method": "account/loginCompleted", "params": AccountLoginCompletedParams };
 
 // ── ShutdownParams ──
 export type ShutdownParams = { threadId: string, };
@@ -451,6 +451,26 @@ agentType?: string, baseInstructions?: string, developerInstructions?: string, e
 // ── ThreadStartResult ──
 export type ThreadStartResult = { thread: Thread, model: string, modelProvider: string, cwd: string, approvalPolicy: ApprovalPolicy, sandbox: SandboxPolicy, reasoningEffort?: ReasoningEffort, };
 
+// ── ThreadStatusChangedParams ──
+/**
+ * `EventMsg::ThreadStatusChanged` params — projects the authoritative
+ * thread-level status (`AgentThreadStatus`) to clients so the UI derives
+ * busy/terminal state from the server instead of a local heuristic.
+ * Previously `on_status_change` only logged and no thread status ever
+ * reached the wire.
+ */
+export type ThreadStatusChangedParams = { threadId: string, 
+/**
+ * `AgentThreadStatus` wire value: `pending` / `running` / `interrupting`
+ * / `interrupted` / `completed` / `errored` / `shutdown`.
+ */
+status: string, 
+/**
+ * Optional detail (e.g. the termination reason persisted alongside the
+ * status).
+ */
+reason?: string, };
+
 // ── Turn ──
 export type Turn = { id: string, items: Array<TurnItem>, 
 /**
@@ -465,7 +485,13 @@ export type TurnCompletedParams = { threadId: string, turn: Turn,
  * Token usage for the turn (prompt / completion / total). `None` when the
  * backend did not report usage.
  */
-usage?: TurnUsage, };
+usage?: TurnUsage, 
+/**
+ * Why the run ended (`"completed"` on the normal path). Lets clients
+ * render a precise end state instead of guessing. Absent on events
+ * written by older servers.
+ */
+reason?: string, };
 
 // ── TurnError ──
 /**
@@ -506,7 +532,13 @@ permissionMode?: PermissionMode,
 agentType?: string, model?: string, effort?: ReasoningEffort, outputSchema?: JsonValue, };
 
 // ── TurnStartResult ──
-export type TurnStartResult = { turn: Turn, };
+export type TurnStartResult = { turn: Turn, 
+/**
+ * `Some(true)` when the thread was mid-run and the input was QUEUED for
+ * the next iteration boundary (steering) instead of starting a new run.
+ * Absent on servers without steering support.
+ */
+queued?: boolean, };
 
 // ── TurnUsage ──
 /**

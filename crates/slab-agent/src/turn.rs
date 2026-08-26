@@ -1,6 +1,8 @@
 //! Single-turn execution logic (private to the crate).
 
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -14,6 +16,7 @@ use slab_types::{
 };
 
 use crate::{
+    compact::{CompactContext, CompactOutcome, CompactPort},
     config::{AgentConfig, AgentToolChoice},
     error::AgentError,
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
@@ -30,6 +33,7 @@ use crate::{
     risk::ToolRiskAnalyzer,
     tool::{AgentThreadContext, ToolDiscoveryState, ToolRouter},
     tool_validation::{InvalidToolCall, validate_tool_calls},
+    turn_state::{OpenItemTracker, TurnLifecycle, TurnPhase},
     turn_tool_call::{emit_tool_item_failed, handle_tool_calls},
     turn_tool_record::record_failed_tool_call,
 };
@@ -63,6 +67,23 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub cancellation: &'a CancellationToken,
     pub thread_context: &'a AgentThreadContext,
     pub consumed_tokens: u32,
+    /// Per-run turn lifecycle — the typed phase choke point. `execute_turn`
+    /// validates every transition through it; `started_at` for
+    /// `TurnStateChanged` emits comes from here (stamped once per iteration).
+    pub lifecycle: &'a TurnLifecycle,
+    /// Open tool items for this run — guarantees every `ItemStarted` gets a
+    /// terminal `ItemCompleted` even on interrupt/error teardown.
+    pub items: &'a OpenItemTracker,
+    /// Compact port for the context-overflow recovery path (one forced
+    /// compaction per run, then retry the LLM call).
+    pub compact: &'a dyn CompactPort,
+    /// Estimated prompt token count for the iteration (from the pre-iteration
+    /// compaction policy check) — drives the pre-flight token-budget gate.
+    pub prompt_token_estimate: Option<u32>,
+    /// Death-spiral guard: a forced compaction for context overflow may run
+    /// AT MOST ONCE per run. A second overflow after compaction fails the
+    /// turn (compacting again cannot shrink further).
+    pub context_overflow_recovered: &'a AtomicBool,
 }
 
 pub(crate) enum TurnOutcome {
@@ -101,9 +122,15 @@ pub(crate) async fn execute_turn(
     .await;
     insert_injected_messages(messages, llm_start_effects.injected_messages);
     append_observations(messages, llm_start_effects.observations);
+    // Sampling entry snapshot — the per-iteration anchor line. MUST carry the
+    // full input messages: rollout replay uses the last non-empty TurnState to
+    // replace the history, and item attribution advances on TurnContext lines.
+    // The transition also exits a lingering Compacting phase (auto-compaction
+    // ran just before this call).
+    transition_turn(&context, TurnPhase::Sampling).await;
     emit_turn_state_changed(
         &context,
-        "running",
+        TurnPhase::Sampling,
         Some(messages.as_slice()),
         Some(&tool_specs),
         None,
@@ -111,6 +138,42 @@ pub(crate) async fn execute_turn(
         None,
     )
     .await;
+
+    // Pre-flight token-budget gate: refuse BEFORE the request when the
+    // estimated prompt alone would exhaust the budget. The post-response
+    // check below stays as the authoritative accounting; this one prevents
+    // paying for a call whose answer can never be delivered.
+    if let Some(estimate) = context.prompt_token_estimate
+        && token_budget_would_be_exhausted(
+            context.config.token_budget,
+            context.consumed_tokens,
+            estimate,
+        )
+    {
+        transition_turn(&context, TurnPhase::Interrupted).await;
+        emit_turn_state_changed(
+            &context,
+            TurnPhase::Interrupted,
+            Some(messages.as_slice()),
+            None,
+            None,
+            Some("token budget exceeded before request"),
+            Some(Utc::now().to_rfc3339()),
+        )
+        .await;
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "turn_token_budget_preflight_exhausted",
+            serde_json::json!({
+                "prompt_token_estimate": estimate,
+                "consumed_tokens": context.consumed_tokens,
+                "token_budget": context.config.token_budget,
+            }),
+        );
+        return Ok(TurnOutcome::BudgetExceeded { usage: None });
+    }
 
     debug!(thread_id = context.thread_id, turn_index = context.turn_index, "executing turn");
     record_json(
@@ -147,37 +210,139 @@ pub(crate) async fn execute_turn(
         );
     }
 
-    let mut stream_observer = TurnTextDeltaObserver {
-        thread_id: context.thread_id,
-        turn_index: context.turn_index,
-        notify: context.notify,
-        text_started: false,
-    };
-    let response_result = tokio::select! {
-        response = context.llm.chat_completion_streaming(
-            &context.config.model,
-            messages,
-            &tool_specs,
-            context.config,
-            &context.trace_context,
-            &mut stream_observer,
-        ) => response,
-        _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
-    };
-    let response = match response_result {
-        Ok(response) => response,
-        Err(error) => {
-            emit_turn_state_changed(
-                &context,
-                "failed",
-                Some(messages.as_slice()),
-                Some(&tool_specs),
-                None,
-                Some(&error.to_string()),
-                Some(Utc::now().to_rfc3339()),
-            )
-            .await;
-            return Err(error);
+    // LLM call with bounded recovery:
+    // - TRANSIENT failures (transport reset / timeout / 429 / 5xx) retry with
+    //   exponential backoff, at most `llm_max_retries` times.
+    // - Context-overflow failures trigger ONE forced compaction per run, then
+    //   retry (death-spiral guard: a second overflow fails the turn).
+    // - A partially-streamed response is NEVER retried (withhold: the client
+    //   would see the streamed prefix twice).
+    // - No `Error` event is emitted until retries are exhausted — SDK clients
+    //   treat `error` as terminal, and the recovery loop must stay invisible
+    //   while it still has moves left.
+    let max_retries = context.config.effective_llm_max_retries();
+    let mut llm_attempts: u8 = 0;
+    let response = loop {
+        let mut stream_observer = TurnTextDeltaObserver {
+            thread_id: context.thread_id,
+            turn_index: context.turn_index,
+            notify: context.notify,
+            text_started: false,
+            any_delta_emitted: false,
+        };
+        let response_result = tokio::select! {
+            response = context.llm.chat_completion_streaming(
+                &context.config.model,
+                messages,
+                &tool_specs,
+                context.config,
+                &context.trace_context,
+                &mut stream_observer,
+            ) => response,
+            _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+        };
+        match response_result {
+            Ok(response) => break response,
+            Err(error) => {
+                let streamed = stream_observer.any_delta_emitted;
+                let recovery_available = match &error {
+                    AgentError::LlmContextTooLong(_) => {
+                        !context.context_overflow_recovered.load(Ordering::SeqCst)
+                    }
+                    AgentError::LlmTransient(_) => true,
+                    _ => false,
+                };
+                let can_retry = !streamed && llm_attempts < max_retries && recovery_available;
+                if !can_retry {
+                    if streamed {
+                        warn!(
+                            thread_id = context.thread_id,
+                            turn_index = context.turn_index,
+                            error = %error,
+                            "llm failed after partial stream; not retrying (client already saw the prefix)"
+                        );
+                    }
+                    fail_turn_llm(&context, messages, &tool_specs, &error).await;
+                    return Err(error);
+                }
+                llm_attempts += 1;
+                if matches!(error, AgentError::LlmContextTooLong(_)) {
+                    // Claim the one-shot recovery slot (atomic swap; the guard
+                    // above makes the already-claimed branch unreachable, but
+                    // the swap keeps the claim authoritative).
+                    let already_claimed =
+                        context.context_overflow_recovered.swap(true, Ordering::SeqCst);
+                    debug_assert!(!already_claimed, "recovery slot raced");
+                    warn!(
+                        thread_id = context.thread_id,
+                        turn_index = context.turn_index,
+                        error = %error,
+                        "context overflow; forcing compaction then retrying (once per run)"
+                    );
+                    emit_turn_phase(&context, TurnPhase::Compacting).await;
+                    let compact_ctx = CompactContext {
+                        model_id: &context.config.model,
+                        summary_instructions: None,
+                        force: true,
+                        memory_pressure_hint: None,
+                        progress: None,
+                    };
+                    let compacted = match context.compact.compact(messages, &compact_ctx).await {
+                        Ok(CompactOutcome::Replaced { messages, .. }) => Some(messages),
+                        Ok(_) => {
+                            warn!(
+                                thread_id = context.thread_id,
+                                "forced compaction did not replace the message set; failing turn"
+                            );
+                            None
+                        }
+                        Err(compact_error) => {
+                            warn!(
+                                thread_id = context.thread_id,
+                                error = %compact_error,
+                                "forced compaction failed; failing turn"
+                            );
+                            None
+                        }
+                    };
+                    let Some(compacted) = compacted else {
+                        fail_turn_llm(&context, messages, &tool_specs, &error).await;
+                        return Err(error);
+                    };
+                    *messages = compacted;
+                    emit_turn_phase(&context, TurnPhase::Sampling).await;
+                    record_json(
+                        context.trace,
+                        &context.trace_context,
+                        "slab-agent",
+                        "llm_context_overflow_recovered",
+                        serde_json::json!({
+                            "attempt": llm_attempts,
+                            "message_count": messages.len(),
+                        }),
+                    );
+                    // Compaction already took time; retry immediately without
+                    // an additional backoff delay.
+                    continue;
+                }
+                let delay_ms = context
+                    .config
+                    .llm_retry_base_delay_ms
+                    .saturating_mul(2u64.saturating_pow((llm_attempts - 1) as u32));
+                warn!(
+                    thread_id = context.thread_id,
+                    turn_index = context.turn_index,
+                    attempt = llm_attempts,
+                    max_retries,
+                    delay_ms,
+                    error = %error,
+                    "transient llm failure; retrying with backoff"
+                );
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(delay_ms)) => {}
+                    _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+                }
+            }
         }
     };
     if context.cancellation.is_cancelled() {
@@ -197,16 +362,6 @@ pub(crate) async fn execute_turn(
             "usage": response.usage,
         }),
     );
-    emit_turn_state_changed(
-        &context,
-        "llm_completed",
-        Some(messages.as_slice()),
-        Some(&tool_specs),
-        Some(&response),
-        None,
-        None,
-    )
-    .await;
     let llm_end_effects = dispatch_registered_hooks(
         context.hooks,
         &HookEvent::OnLlmEnd {
@@ -228,13 +383,31 @@ pub(crate) async fn execute_turn(
         context.consumed_tokens,
         token_usage,
     ) {
+        // Protocol completeness: the budget path returns BEFORE
+        // `persist_assistant_tool_request`, so a response with tool calls
+        // would vanish with no persisted trace AND leave nothing for the
+        // model to answer. Persist the request + synthesize failed results
+        // so the rollout never carries a dangling tool_calls tail.
+        finalize_unresolved_tool_calls(
+            context.notify,
+            context.thread_id,
+            context.turn_index,
+            messages,
+            Some(&response),
+            "[token budget exceeded]",
+        )
+        .await;
+        // Terminal Interrupted state with the reason recorded — the budget
+        // path previously left the turn in a non-terminal `budget_exhausted`
+        // string with no error detail.
+        transition_turn(&context, TurnPhase::Interrupted).await;
         emit_turn_state_changed(
             &context,
-            "budget_exhausted",
+            TurnPhase::Interrupted,
             Some(messages.as_slice()),
             Some(&tool_specs),
             Some(&response),
-            None,
+            Some("token budget exceeded"),
             Some(Utc::now().to_rfc3339()),
         )
         .await;
@@ -255,9 +428,10 @@ pub(crate) async fn execute_turn(
 
     if response.tool_calls.is_empty() {
         if let Err(error) = reject_missing_required_tool_call(&context) {
+            transition_turn(&context, TurnPhase::Failed).await;
             emit_turn_state_changed(
                 &context,
-                "failed",
+                TurnPhase::Failed,
                 Some(messages.as_slice()),
                 Some(&tool_specs),
                 Some(&response),
@@ -268,9 +442,10 @@ pub(crate) async fn execute_turn(
             return Err(error);
         }
         persist_final_answer(&context, messages, response.content.unwrap_or_default()).await;
+        transition_turn(&context, TurnPhase::Completed).await;
         emit_turn_state_changed(
             &context,
-            "completed",
+            TurnPhase::Completed,
             Some(messages.as_slice()),
             Some(&tool_specs),
             None,
@@ -311,9 +486,10 @@ pub(crate) async fn execute_turn(
             // summary as the final answer and end the run (alongside the
             // existing `tool_calls.is_empty()` Final path).
             persist_final_answer(&context, messages, completion.summary).await;
+            transition_turn(&context, TurnPhase::Completed).await;
             emit_turn_state_changed(
                 &context,
-                "completed",
+                TurnPhase::Completed,
                 Some(messages.as_slice()),
                 Some(&tool_specs),
                 None,
@@ -332,16 +508,10 @@ pub(crate) async fn execute_turn(
         }
     }
 
-    emit_turn_state_changed(
-        &context,
-        "tool_calls_completed",
-        Some(messages.as_slice()),
-        Some(&tool_specs),
-        None,
-        None,
-        Some(Utc::now().to_rfc3339()),
-    )
-    .await;
+    // No intermediate `tool_calls_completed` full snapshot anymore — the
+    // ExecutingTools entry phase is emitted (status-only) inside
+    // `handle_tool_calls`, and the next iteration's Sampling line carries the
+    // authoritative replay snapshot.
     record_json(
         context.trace,
         &context.trace_context,
@@ -363,6 +533,126 @@ fn token_budget_would_be_exhausted(
 ) -> bool {
     token_budget
         .is_some_and(|budget| budget > 0 && consumed_tokens.saturating_add(token_usage) >= budget)
+}
+
+/// Land the terminal Failed turn state for an unrecoverable LLM failure.
+async fn fail_turn_llm(
+    context: &TurnExecutionContext<'_>,
+    messages: &[ConversationMessage],
+    tool_specs: &[ToolSpec],
+    error: &AgentError,
+) {
+    transition_turn(context, TurnPhase::Failed).await;
+    emit_turn_state_changed(
+        context,
+        TurnPhase::Failed,
+        Some(messages),
+        Some(tool_specs),
+        None,
+        Some(&error.to_string()),
+        Some(Utc::now().to_rfc3339()),
+    )
+    .await;
+}
+
+/// Protocol-completeness repair: the persisted history must carry a tool
+/// result for every tool call in the trailing assistant message. Strict
+/// OpenAI-compatible providers REJECT a follow-up request whose history ends
+/// with a dangling `tool_calls` pair — previously both the budget-exceeded
+/// path (assistant request dropped silently) and the interrupt teardown
+/// (assistant request persisted, results never landed) produced exactly that.
+///
+/// Step 1: when the caller still holds an UN-persisted response with tool
+/// calls (the budget path returns before `persist_assistant_tool_request`),
+/// persist the assistant tool-request first.
+/// Step 2: synthesize a `role: "tool"` failed result carrying `note` for
+/// every unanswered call id in the trailing assistant message. Each lands as
+/// a `MessageAppended` event so the rollout true source stays balanced.
+pub(crate) async fn finalize_unresolved_tool_calls(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    messages: &mut Vec<ConversationMessage>,
+    response: Option<&crate::port::LlmResponse>,
+    note: &str,
+) {
+    // Step 1: persist the assistant tool-request when the caller still holds it.
+    if let Some(response) = response
+        && !response.tool_calls.is_empty()
+    {
+        let response_ids: HashSet<&str> =
+            response.tool_calls.iter().map(|call| call.id.as_str()).collect();
+        let already_persisted = messages.iter().any(|message| {
+            message.role == "assistant"
+                && message
+                    .tool_calls
+                    .iter()
+                    .filter_map(|call| call.id.as_deref())
+                    .any(|id| response_ids.contains(id))
+        });
+        if !already_persisted {
+            let assistant_tool_calls: Vec<ConversationToolCall> = response
+                .tool_calls
+                .iter()
+                .map(|tool_call| ConversationToolCall {
+                    id: Some(tool_call.id.clone()),
+                    r#type: "function".to_owned(),
+                    function: ConversationToolFunction {
+                        name: tool_call.name.clone(),
+                        arguments: tool_call.arguments.clone(),
+                    },
+                })
+                .collect();
+            let assistant_message = ConversationMessage {
+                role: "assistant".to_owned(),
+                content: ConversationMessageContent::Text(
+                    response.content.clone().unwrap_or_default(),
+                ),
+                name: None,
+                tool_call_id: None,
+                tool_calls: assistant_tool_calls,
+            };
+            emit_message_appended(notify, thread_id, turn_index, &assistant_message).await;
+            messages.push(assistant_message);
+        }
+    }
+
+    // Step 2: synthesize failed tool results for unanswered calls in the
+    // trailing assistant message with tool calls.
+    let Some(trailing_calls) = messages.iter().rev().find_map(|message| {
+        if message.role == "assistant" && !message.tool_calls.is_empty() {
+            Some(
+                message
+                    .tool_calls
+                    .iter()
+                    .map(|call| (call.id.clone().unwrap_or_default(), call.function.name.clone()))
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        }
+    }) else {
+        return;
+    };
+    let answered: HashSet<String> = messages
+        .iter()
+        .filter(|message| message.role == "tool")
+        .filter_map(|message| message.tool_call_id.clone())
+        .collect();
+    for (call_id, tool_name) in trailing_calls {
+        if call_id.is_empty() || answered.contains(&call_id) {
+            continue;
+        }
+        let tool_result = ConversationMessage {
+            role: "tool".to_owned(),
+            content: ConversationMessageContent::Text(note.to_owned()),
+            name: Some(tool_name),
+            tool_call_id: Some(call_id),
+            tool_calls: Vec::new(),
+        };
+        emit_message_appended(notify, thread_id, turn_index, &tool_result).await;
+        messages.push(tool_result);
+    }
 }
 
 /// External tools that require provider/network reachability and are removed
@@ -631,14 +921,93 @@ pub(crate) async fn emit_message_appended(
     notify.on_event_msg(thread_id, &event).await;
 }
 
+/// Validate a phase transition through the run's [`TurnLifecycle`] before a
+/// terminal emit. Advisory (status-only) callers use [`emit_turn_phase`]
+/// instead; this is for the load-bearing terminal transitions whose failure
+/// should be visible, not silent.
+async fn transition_turn(context: &TurnExecutionContext<'_>, to: TurnPhase) {
+    if let Err(error) = context.lifecycle.transition(to) {
+        warn!(
+            thread_id = context.thread_id,
+            turn_index = context.turn_index,
+            error = %error,
+            "invalid turn phase transition"
+        );
+    }
+}
+
+/// Emit a status-only phase transition (advisory UI state — `executing_tools`
+/// / `awaiting_approval`). Carries an empty `input_messages` vec, which
+/// rollout replay treats as a no-op, so these lines cost a tiny rollout line
+/// without disturbing the replayed history. An invalid transition is logged
+/// and skipped rather than failing the turn.
+pub(crate) async fn emit_turn_phase(context: &TurnExecutionContext<'_>, to: TurnPhase) {
+    if let Err(error) = context.lifecycle.transition(to) {
+        warn!(
+            thread_id = context.thread_id,
+            turn_index = context.turn_index,
+            error = %error,
+            "skipping advisory turn phase transition"
+        );
+        return;
+    }
+    let event = EventMsg::TurnStateChanged(TurnStateChangedParams {
+        thread_id: context.thread_id.to_owned(),
+        turn_index: context.turn_index,
+        status: to.as_str().to_owned(),
+        input_messages: Vec::new(),
+        tool_specs_json: None,
+        llm_response_json: None,
+        error: None,
+        started_at: context.lifecycle.started_at(),
+        completed_at: None,
+    });
+    context.notify.on_event_msg(context.thread_id, &event).await;
+}
+
+/// Emit the terminal turn state from the run teardown in
+/// [`crate::thread::AgentThread::run`] (the interrupt path emits no terminal
+/// state inside `execute_turn`). Skips when the last iteration already
+/// emitted its own terminal state (LLM-error / budget paths).
+pub(crate) async fn emit_run_terminal_turn_state(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    lifecycle: &TurnLifecycle,
+    phase: TurnPhase,
+    messages: &[ConversationMessage],
+    error: Option<&str>,
+) {
+    if lifecycle.phase().is_terminal() {
+        return;
+    }
+    if let Err(err) = lifecycle.transition(phase) {
+        warn!(thread_id, turn_index, error = %err, "run teardown terminal transition rejected");
+        return;
+    }
+    let event = EventMsg::TurnStateChanged(TurnStateChangedParams {
+        thread_id: thread_id.to_owned(),
+        turn_index,
+        status: phase.as_str().to_owned(),
+        input_messages: messages.to_vec(),
+        tool_specs_json: None,
+        llm_response_json: None,
+        error: error.map(str::to_owned),
+        started_at: lifecycle.started_at(),
+        completed_at: Some(Utc::now().to_rfc3339()),
+    });
+    notify.on_event_msg(thread_id, &event).await;
+}
+
 /// Emit a turn-state snapshot as a persistence-grade `TurnStateChanged`
 /// event. The app-core rollout observer lands it in the rollout true source
 /// (`TurnContext::TurnState`), replacing the old slab-agent store-trait
 /// `upsert_turn_state` route. Carries the typed input-messages vec directly (so
-/// the F6 raw-blob recovery path is dead here).
+/// the F6 raw-blob recovery path is dead here). `started_at` comes from the
+/// run's [`TurnLifecycle`] — stamped once per iteration, not per emit.
 async fn emit_turn_state_changed(
     context: &TurnExecutionContext<'_>,
-    status: &str,
+    phase: TurnPhase,
     messages: Option<&[ConversationMessage]>,
     tool_specs: Option<&[ToolSpec]>,
     response: Option<&crate::port::LlmResponse>,
@@ -650,15 +1019,12 @@ async fn emit_turn_state_changed(
     let event = EventMsg::TurnStateChanged(TurnStateChangedParams {
         thread_id: context.thread_id.to_owned(),
         turn_index: context.turn_index,
-        status: status.to_owned(),
+        status: phase.as_str().to_owned(),
         input_messages: messages.unwrap_or(&[]).to_vec(),
         tool_specs_json,
         llm_response_json,
         error: error.map(str::to_owned),
-        // F4: started_at is stamped at emit time (matches the legacy
-        // `persist_turn_state` behavior, which used `Utc::now()` at the persist
-        // call as the turn-start proxy).
-        started_at: Utc::now().to_rfc3339(),
+        started_at: context.lifecycle.started_at(),
         completed_at,
     });
     context.notify.on_event_msg(context.thread_id, &event).await;
@@ -874,6 +1240,10 @@ struct TurnTextDeltaObserver<'a> {
     /// has been emitted. Mirrors the projection's `started_items` dedup: the
     /// first text delta announces the item, later deltas only carry content.
     text_started: bool,
+    /// Whether ANY delta (text or reasoning) reached the client. Gates the
+    /// LLM retry loop: a partially-streamed response must never be retried —
+    /// the client would see the streamed prefix twice.
+    any_delta_emitted: bool,
 }
 
 #[async_trait]
@@ -882,6 +1252,7 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
         if delta.is_empty() {
             return Ok(());
         }
+        self.any_delta_emitted = true;
 
         let item_id = assistant_item_id(self.turn_index);
         if !self.text_started {
@@ -898,6 +1269,7 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
         if delta.is_empty() {
             return Ok(());
         }
+        self.any_delta_emitted = true;
 
         emit_reasoning_delta_msg(
             self.notify,

@@ -68,6 +68,7 @@ mod tests {
                 ..Default::default()
             },
             usage: None,
+            reason: None,
         })
     }
 

@@ -90,6 +90,8 @@ export const assistant = {
     },
     stopGeneratingResponse: '停止生成回复',
     sendMessage: '发送消息',
+    queued_one: '已排队 {{count}} 条消息,将在本轮工具批次后注入',
+    queued_other: '已排队 {{count}} 条消息,将在本轮工具批次后注入',
     deepThink: '深度思考',
     reasoningEffort: '推理',
     reasoning: {
@@ -116,6 +118,15 @@ export const assistant = {
     loading: '思考中...',
     thoughtForAFewSeconds: '思考了几秒钟',
     thoughtForSeconds: '思考了 {{seconds}} 秒',
+  },
+  turn: {
+    abortReason: {
+      interrupted: '本轮已中断',
+      maxTurnsReached: '本轮已停止:达到最大轮数',
+      budgetExhausted: '本轮已停止:token 预算耗尽',
+      repetitionDetected: '本轮已停止:检测到重复工具调用',
+      error: '本轮失败',
+    },
   },
   dialog: {
     title: '为此会话切换模型？',

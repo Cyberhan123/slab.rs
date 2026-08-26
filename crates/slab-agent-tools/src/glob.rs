@@ -35,6 +35,11 @@ impl ToolHandler for FileGlobTool {
         "file_glob"
     }
 
+    /// Pure read — safe to run concurrently with other read-only calls.
+    fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Find files by gitignore-aware glob pattern inside a workspace path."
     }

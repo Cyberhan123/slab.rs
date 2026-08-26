@@ -32,6 +32,7 @@ final class HarnessNotification {
   HarnessNotification._();
 
   static const String threadStarted = 'thread/started';
+  static const String threadStatusChanged = 'thread/statusChanged';
   static const String turnStarted = 'turn/started';
   static const String turnCompleted = 'turn/completed';
   static const String itemStarted = 'item/started';
@@ -56,6 +57,7 @@ final class HarnessNotification {
 /// Every notification method the mobile client routes explicitly.
 const Set<String> kKnownNotifications = {
   HarnessNotification.threadStarted,
+  HarnessNotification.threadStatusChanged,
   HarnessNotification.turnStarted,
   HarnessNotification.turnCompleted,
   HarnessNotification.itemStarted,

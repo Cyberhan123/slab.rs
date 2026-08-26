@@ -122,6 +122,12 @@ type SenderProps = {
   /** When provided while `loading`, the submit button becomes a Stop control. */
   onStop?: () => void
   loading?: boolean
+  /**
+   * Allow submitting WHILE a turn runs (steering): the submit routes to the
+   * queued steering path instead of a second AI-SDK stream. The Stop control
+   * stays available alongside an enabled Send button.
+   */
+  steerable?: boolean
   /** Pending human-approval requests rendered in a slot above the textarea. */
   approvals?: ApprovalRequest[]
   onResolveApproval?: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void> | void
@@ -146,6 +152,7 @@ function Sender({
   onSubmit,
   onStop,
   loading = false,
+  steerable = false,
   approvals,
   onResolveApproval,
   commands,
@@ -179,7 +186,9 @@ function Sender({
   const effort: ReasoningEffort = thinkingEnabled ? effortLevel : "off"
   const isGenerating = loading
   const showStop = isGenerating && onStop
-  const canSend = !isGenerating && (value.trim().length > 0 || attachments.length > 0)
+  // Steerable turns keep submit enabled while generating; plain turns lock it.
+  const canSend =
+    (!isGenerating || steerable) && (value.trim().length > 0 || attachments.length > 0)
 
   const addFiles = (fileList: FileList | File[] | null) => {
     if (!fileList) return
@@ -221,7 +230,7 @@ function Sender({
   const handleSubmit = async (event?: SubmitEvent<HTMLFormElement>) => {
     const message = value.trim()
     if (!message && attachments.length === 0) return
-    if (isGenerating) return
+    if (isGenerating && !steerable) return
 
     // `/plan` toggles client-side plan mode (no message sent). The server runs
     // the next turn as the read-only plan agent via `turn/start` agentType.
@@ -335,7 +344,7 @@ function Sender({
         <InputGroupTextarea
           aria-label="Message"
           data-testid="assistant-composer-input"
-          disabled={loading}
+          disabled={loading && !steerable}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -564,18 +573,36 @@ function Sender({
           </DropdownMenu>
           <div className="ml-auto flex items-center gap-1">
             {showStop ? (
-              <InputGroupButton
-                aria-label={t("pages.assistant.composer.stopGeneratingResponse")}
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                onClick={() => onStop?.()}
-              >
-                <SquareIcon className="size-4" />
-                <span className="sr-only">
-                  {t("pages.assistant.composer.stopGeneratingResponse")}
-                </span>
-              </InputGroupButton>
+              <>
+                <InputGroupButton
+                  aria-label={t("pages.assistant.composer.stopGeneratingResponse")}
+                  data-testid="assistant-stop-button"
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => onStop?.()}
+                >
+                  <SquareIcon className="size-4" />
+                  <span className="sr-only">
+                    {t("pages.assistant.composer.stopGeneratingResponse")}
+                  </span>
+                </InputGroupButton>
+                {steerable ? (
+                  <InputGroupButton
+                    aria-label="Send"
+                    data-testid="assistant-send-button"
+                    type="submit"
+                    variant="default"
+                    size="icon-sm"
+                    disabled={!canSend}
+                  >
+                    {canSend ? <ArrowUpIcon /> : <Spinner />}
+                    <span className="sr-only">
+                      {t("pages.assistant.composer.sendMessage")}
+                    </span>
+                  </InputGroupButton>
+                ) : null}
+              </>
             ) : (
               <InputGroupButton
                 aria-label="Send"

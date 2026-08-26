@@ -54,6 +54,11 @@ impl ToolHandler for GrepTool {
         "grep"
     }
 
+    /// Pure read — safe to run concurrently with other read-only calls.
+    fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Search files for lines matching a regular expression.  Respects \
          .gitignore rules.  Returns up to 200 matches with file path, line \

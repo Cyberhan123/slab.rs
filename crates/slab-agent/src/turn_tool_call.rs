@@ -25,7 +25,8 @@ use crate::{
         PlanRef, ToolApprovalRequest, ToolCallRender, ToolContext, ToolHandler, ToolOutput,
         ToolOutputObserver, ToolOutputStream,
     },
-    turn::TurnExecutionContext,
+    turn::{TurnExecutionContext, emit_turn_phase},
+    turn_state::TurnPhase,
     turn_tool_record::{
         persist_tool_message_record, record_failed_tool_call_without_persisting_message,
     },
@@ -127,7 +128,7 @@ fn workspace_root_of(context: &TurnExecutionContext<'_>) -> Option<String> {
 /// `output` is the tool result text (filled only on completion). The item id is
 /// the provider-assigned `tool_call.id`.
 #[allow(clippy::too_many_arguments)]
-fn render_tool_call_item(
+pub(crate) fn render_tool_call_item(
     handler: Option<&dyn ToolHandler>,
     tool_call: &ParsedToolCall,
     args: &serde_json::Value,
@@ -255,6 +256,7 @@ async fn emit_item_started(context: &TurnExecutionContext<'_>, item: TurnItem) {
 
 /// Emit `EventMsg::ItemCompleted` for `item` on the harness channel.
 async fn emit_item_completed(context: &TurnExecutionContext<'_>, item: TurnItem) {
+    context.items.record_completed(item.id());
     let msg = EventMsg::ItemCompleted(ItemCompletedParams {
         item,
         thread_id: context.thread_id.to_owned(),
@@ -503,6 +505,71 @@ async fn drive_present_plan_approval(
     })
 }
 
+/// A partitioned slice of one assistant tool batch: a maximal run of
+/// consecutive concurrency-safe calls (executed in parallel, bounded by
+/// `max_parallel`), or a single non-safe call (executed alone, strictly
+/// ordered against its neighbors).
+struct ToolCallBatch<'a> {
+    calls: Vec<(usize, &'a ParsedToolCall)>,
+}
+
+/// Partition call indices into parallel/serial batches from precomputed
+/// safety flags. Consecutive safe indices merge into one parallel batch
+/// capped at `max_parallel`; every non-safe index is its own batch. Original
+/// relative order is preserved, so results land in call order exactly as the
+/// old uniform chunking produced.
+fn partition_indices(safe: &[bool], max_parallel: usize) -> Vec<Vec<usize>> {
+    let max_parallel = max_parallel.max(1);
+    let mut batches: Vec<Vec<usize>> = Vec::new();
+    let mut run: Vec<usize> = Vec::new();
+    let flush = |run: &mut Vec<usize>, batches: &mut Vec<Vec<usize>>| {
+        if !run.is_empty() {
+            batches.push(std::mem::take(run));
+        }
+    };
+    for (index, is_safe) in safe.iter().enumerate() {
+        if *is_safe {
+            if run.len() >= max_parallel {
+                flush(&mut run, &mut batches);
+            }
+            run.push(index);
+        } else {
+            flush(&mut run, &mut batches);
+            batches.push(vec![index]);
+        }
+    }
+    flush(&mut run, &mut batches);
+    batches
+}
+
+/// Partition the batch by per-call concurrency safety (see
+/// [`ToolHandler::is_concurrency_safe`]). Read-only calls that arrive
+/// consecutively run in parallel (bounded by the configured
+/// `tool_concurrency`); mutating calls always run alone in original order.
+fn partition_tool_calls<'a>(
+    context: &TurnExecutionContext<'_>,
+    tool_calls: &'a [ParsedToolCall],
+    max_parallel: usize,
+) -> Vec<ToolCallBatch<'a>> {
+    let safe: Vec<bool> = tool_calls
+        .iter()
+        .map(|tool_call| {
+            let args = serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+                .unwrap_or(serde_json::Value::Null);
+            context
+                .tools
+                .get(&tool_call.name)
+                .is_some_and(|handler| handler.is_concurrency_safe(&args))
+        })
+        .collect();
+    partition_indices(&safe, max_parallel)
+        .into_iter()
+        .map(|indices| ToolCallBatch {
+            calls: indices.into_iter().map(|index| (index, &tool_calls[index])).collect(),
+        })
+        .collect()
+}
+
 /// Execute the given tool calls and persist their results.
 ///
 /// Returns `Some(TaskCompletion)` when a `task.complete` tool call succeeded,
@@ -541,12 +608,15 @@ pub(crate) async fn handle_tool_calls(
 
     let concurrency = context.config.effective_tool_concurrency().min(total);
     emit_tool_concurrency_started(context, total, concurrency).await;
+    // Advisory phase: the tool batch is in flight (status-only TurnState —
+    // empty input_messages is a replay no-op).
+    emit_turn_phase(context, TurnPhase::ExecutingTools).await;
 
     let mut results = Vec::with_capacity(total);
     let conversation_context = messages.clone();
-    for (chunk_index, chunk) in tool_calls.chunks(concurrency).enumerate() {
-        let base_index = chunk_index * concurrency;
-        let batch = chunk.iter().enumerate().map(|(offset, tool_call)| {
+    for batch in partition_tool_calls(context, tool_calls, concurrency) {
+        let batch_calls = batch.calls;
+        let batch = batch_calls.iter().map(|(index, tool_call)| {
             let created_at = now.clone();
             let tool_context = tool_context.clone();
             let conversation_messages = conversation_context.as_slice();
@@ -555,7 +625,7 @@ pub(crate) async fn handle_tool_calls(
                     context,
                     &tool_context,
                     conversation_messages,
-                    base_index + offset,
+                    *index,
                     tool_call,
                     &created_at,
                 )
@@ -861,6 +931,10 @@ async fn handle_tool_call(
         None,
         None,
     );
+    // Track the open item so an interrupt/error teardown can still emit its
+    // terminal ItemCompleted (the immediately-paired failure paths above never
+    // register — their start is completed in the same breath).
+    context.items.record_started(context.turn_index, tool_call, &effective_args);
     emit_item_started(context, started_item.clone()).await;
 
     // Stream incremental command output (display-only) while the tool runs. A
@@ -1037,6 +1111,8 @@ async fn run_tool_with_optional_approval(
     let Some(ref request) = run.approval_request else {
         return run_tool_without_approval(&run).await;
     };
+    // Advisory phase: the batch is blocked on a user approval (status-only).
+    emit_turn_phase(run.context, TurnPhase::AwaitingApproval).await;
     emit_approval_request(&run).await;
 
     record_json(
@@ -1318,6 +1394,33 @@ mod tests {
             name: name.to_owned(),
             arguments: "{}".to_owned(),
         }
+    }
+
+    #[test]
+    fn partition_reads_parallel_writes_serial_preserving_order() {
+        // [Grep, Glob, Read, Write, Grep, Read] →
+        // {Grep, Glob, Read} ∥ {Write} serial {Grep, Read} ∥
+        let safe = [true, true, true, false, true, true];
+        let batches = partition_indices(&safe, 4);
+        assert_eq!(
+            batches,
+            vec![vec![0, 1, 2], vec![3], vec![4, 5]],
+            "consecutive safe runs merge; unsafe breaks them and runs alone"
+        );
+    }
+
+    #[test]
+    fn partition_caps_parallel_run_at_max_parallel() {
+        let safe = [true, true, true, true, true];
+        assert_eq!(partition_indices(&safe, 2), vec![vec![0, 1], vec![2, 3], vec![4]]);
+        // cap of 1 degenerates to fully serial.
+        assert_eq!(partition_indices(&safe, 1), vec![vec![0], vec![1], vec![2], vec![3], vec![4]]);
+    }
+
+    #[test]
+    fn partition_all_unsafe_is_fully_serial() {
+        let safe = [false, false, false];
+        assert_eq!(partition_indices(&safe, 4), vec![vec![0], vec![1], vec![2]]);
     }
 
     #[test]

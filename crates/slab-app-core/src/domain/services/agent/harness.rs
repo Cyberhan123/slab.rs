@@ -61,12 +61,14 @@ impl HarnessService {
     }
 
     /// Append a structured user message (e.g. text + image parts for VLM turns)
-    /// to an existing agent thread and run the next turn.
+    /// to an existing agent thread and run the next turn. Returns `true` when
+    /// the thread was mid-run and the input was QUEUED for the next iteration
+    /// boundary (steering) instead of starting a new run.
     pub async fn send_input_message(
         &self,
         thread_id: &str,
         message: ConversationMessage,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<bool, AppCoreError> {
         self.0.send_input_message(thread_id, message).await
     }
 
@@ -103,12 +105,22 @@ impl HarnessService {
     // ----- harness-specific control surface ---------------------------------
 
     /// Gracefully shut down a running agent thread.
+    ///
+    /// Pending approvals are resolved as Rejected BEFORE the control call: the
+    /// cancellation drops the waiting `request_approval` futures, whose own
+    /// cleanup (timeout/decision path) then never runs — without the explicit
+    /// clear the oneshot entries leak in the hub's map forever.
     pub async fn shutdown(&self, thread_id: &str) -> Result<(), AppCoreError> {
+        self.0.events().clear_pending_approvals(thread_id);
         self.0.runtime().shutdown(thread_id).await.map_err(AppCoreError::from)
     }
 
     /// Interrupt the currently running turn while keeping the thread resumable.
+    ///
+    /// Pending approvals are resolved as Rejected before the cancel for the
+    /// same leak reason as [`Self::shutdown`].
     pub async fn interrupt(&self, thread_id: &str) -> Result<(), AppCoreError> {
+        self.0.events().clear_pending_approvals(thread_id);
         self.0.runtime().interrupt(thread_id).await.map_err(AppCoreError::from)
     }
 

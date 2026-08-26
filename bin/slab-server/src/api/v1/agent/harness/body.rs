@@ -88,6 +88,7 @@ pub(crate) async fn turn_start(
     // non-default agent after a plan is approved.
     let agent_def = session.service().resolve_agent_definition(params.agent_type.as_deref());
 
+    let mut queued = false;
     match session.existing_real(&params.thread_id) {
         Some(real_id) => {
             // Re-apply (or clear) the agent override on the persisted config so
@@ -114,7 +115,7 @@ pub(crate) async fn turn_start(
             // `send_input_message`; empty input is a silent no-op, mirroring the
             // prior `join_user_text` → `send_input` text path.
             if let Some(message) = build_user_message_from_input(&params.input, &known_skills) {
-                session
+                queued = session
                     .service()
                     .send_input_message(&real_id, message)
                     .await
@@ -159,9 +160,10 @@ pub(crate) async fn turn_start(
         turn: Turn {
             id: "0".to_owned(),
             items: vec![],
-            status: "inProgress".to_owned(),
+            status: if queued { "queued".to_owned() } else { "inProgress".to_owned() },
             error: None,
         },
+        queued: queued.then_some(true),
     })
 }
 

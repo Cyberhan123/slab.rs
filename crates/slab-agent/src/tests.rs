@@ -16,7 +16,7 @@ use crate::{
     AgentControl, AgentControlLimits, AgentDefinition, AgentError, AgentHook, AgentThreadContext,
     HookEvent, HookOutcome, ModelPolicy, PlanRef, ToolCallRender, ToolConstraint, ToolContext,
     ToolHandler, ToolOutput, ToolRouter, ToolVisibility, WorkspaceRef,
-    compact::{CompactContext, CompactPort, SlidingWindowCompactPort},
+    compact::{CompactContext, CompactOutcome, CompactPort, SlidingWindowCompactPort},
     config::{AgentConfig, AgentToolChoice},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
@@ -2252,7 +2252,7 @@ async fn turn_state_records_running_llm_tool_and_completed_statuses() {
 
     // slab-agent emits `TurnStateChanged` events (no longer writes
     // turn-state records to the store). Assert the emitted events carry the
-    // expected status progression; the app-core observer lands them in rollout.
+    // typed phase progression; the app-core observer lands them in rollout.
     let statuses = notify
         .events
         .lock()
@@ -2263,10 +2263,29 @@ async fn turn_state_records_running_llm_tool_and_completed_statuses() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert!(statuses.contains(&"running".to_owned()));
-    assert!(statuses.contains(&"llm_completed".to_owned()));
-    assert!(statuses.contains(&"tool_calls_completed".to_owned()));
+    // Entry anchor + tool phase + terminal for the tool-calling iteration,
+    // then the entry + terminal of the final iteration. The intermediate
+    // `llm_completed` / `tool_calls_completed` full snapshots are gone
+    // (replay only needs the terminal line per iteration).
+    assert!(statuses.contains(&"sampling".to_owned()));
+    assert!(statuses.contains(&"executing_tools".to_owned()));
     assert!(statuses.contains(&"completed".to_owned()));
+    assert!(!statuses.contains(&"running".to_owned()));
+    assert!(!statuses.contains(&"llm_completed".to_owned()));
+    assert!(!statuses.contains(&"tool_calls_completed".to_owned()));
+    // The terminal event must reference the LAST iteration, not the run's
+    // starting index (regression for the wrong-turn-id defect).
+    let final_completed = notify
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::TurnCompleted(p) => Some((p.turn.id.clone(), p.reason.clone())),
+            _ => None,
+        })
+        .next_back();
+    assert_eq!(final_completed, Some(("1".to_owned(), Some("completed".to_owned()))));
 }
 
 fn message_texts(messages: &[ConversationMessage]) -> Vec<String> {
@@ -4309,6 +4328,928 @@ async fn interrupt_cancels_running_turn_and_allows_follow_up_input() {
     let result = resume_with_input(&store, &control, &thread_id, "continue".into()).await;
     assert!(result.is_ok(), "interrupted thread should accept follow-up input");
     let _ = control.shutdown(&thread_id).await;
+}
+
+/// LLM double that always requests one long-running echo tool call — used to
+/// hold a tool item in flight so an interrupt lands mid-execution.
+struct DelayedToolCallLlm;
+
+#[async_trait]
+impl LlmPort for DelayedToolCallLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        Ok(LlmResponse {
+            content: None,
+            content_already_streamed: false,
+            tool_calls: vec![ParsedToolCall {
+                id: "call-1".into(),
+                name: "echo".into(),
+                arguments: r#"{"message":"slow tool","delay_ms":30000}"#.into(),
+            }],
+            finish_reason: Some("tool_calls".into()),
+            usage: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn interrupt_mid_tool_emits_single_authoritative_abort_and_closes_items() {
+    let llm = Arc::new(DelayedToolCallLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    router.register(Box::new(DelayEchoTool));
+
+    let approval: Arc<dyn ApprovalPort> = notify.clone();
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
+
+    let config = AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-midtool-interrupt".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("use slow tool".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    // Hold until the tool item is genuinely in flight (ItemStarted observed).
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let started =
+                notify.events.lock().unwrap().iter().any(
+                    |event| matches!(event, EventMsg::ItemStarted(p) if p.item.id() == "call-1"),
+                );
+            if started {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("tool item never started");
+
+    control.interrupt(&thread_id).await.expect("interrupt");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Interrupted).await;
+
+    let events = notify.events.lock().unwrap().clone();
+
+    // Exactly ONE TurnAborted — the authoritative one from the run teardown,
+    // referencing the real turn id (regression: the eager controller
+    // placeholder used turn id "current" and the loop emitted nothing).
+    let aborted: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::TurnAborted(p) => Some(p.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(aborted.len(), 1, "expected a single authoritative TurnAborted, got {aborted:?}");
+    assert_eq!(aborted[0].turn.id, "0");
+    assert_eq!(aborted[0].reason.as_deref(), Some("interrupted"));
+
+    // The in-flight item was closed with a synthetic ItemCompleted (no
+    // perpetual "running" card in the timeline).
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, EventMsg::ItemCompleted(p) if p.item.id() == "call-1")),
+        "interrupted in-flight tool item must receive a terminal ItemCompleted"
+    );
+
+    // Terminal interrupted turn state landed (previously NO terminal turn
+    // state was written on the interrupt path).
+    assert!(
+        events.iter().any(
+            |event| matches!(event, EventMsg::TurnStateChanged(p) if p.status == "interrupted")
+        ),
+        "interrupt path must persist a terminal interrupted TurnState"
+    );
+
+    // The authoritative thread status reached the wire: running →
+    // interrupting → interrupted.
+    let statuses: Vec<String> = events
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::ThreadStatusChanged(p) => Some(p.status.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(statuses.contains(&"running".to_owned()), "statuses: {statuses:?}");
+    assert!(statuses.contains(&"interrupting".to_owned()), "statuses: {statuses:?}");
+    assert!(statuses.contains(&"interrupted".to_owned()), "statuses: {statuses:?}");
+
+    // Residue repair: the persisted history ends balanced — the assistant
+    // tool-request IS followed by a synthesized "[interrupted]" tool result,
+    // so a resumed thread never sends a dangling tool_calls tail to strict
+    // providers.
+    let messages = notify.emitted_messages(&thread_id);
+    assert!(
+        messages.iter().any(|m| m.role == "assistant" && !m.tool_calls.is_empty()),
+        "assistant tool-request must be persisted before the tool batch"
+    );
+    assert!(
+        messages.iter().any(|m| m.role == "tool"
+            && m.tool_call_id.as_deref() == Some("call-1")
+            && m.rendered_text().contains("[interrupted]")),
+        "an interrupted in-flight tool call must land a synthesized failed result"
+    );
+
+    let _ = control.shutdown(&thread_id).await;
+}
+
+#[tokio::test]
+async fn llm_error_path_emits_turn_aborted_with_error_reason() {
+    let llm = Arc::new(FailingLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = Arc::new(ToolRouter::new());
+
+    let approval: Arc<dyn ApprovalPort> = notify.clone();
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify.clone(), approval, router, 8, 4));
+
+    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-llm-error-abort".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("will fail".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Errored).await;
+
+    let events = notify.events.lock().unwrap().clone();
+    // The error run still closes its turn on the wire before the terminal
+    // `error` notification (clients treat `error` as stream-terminal).
+    let aborted: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::TurnAborted(p) => Some(p.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(aborted.len(), 1, "got {aborted:?}");
+    assert_eq!(aborted[0].reason.as_deref(), Some("error"));
+    assert_eq!(aborted[0].turn.id, "0");
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, EventMsg::TurnStateChanged(p) if p.status == "failed")),
+        "error path must persist a terminal failed TurnState"
+    );
+}
+
+/// Hook that records every `OnAgentEnd` status — proves the graceful-shutdown
+/// run tail executed (the old hard-abort skipped it entirely).
+struct EndRecordingHook {
+    ends: Mutex<Vec<ThreadStatus>>,
+}
+
+#[async_trait]
+impl AgentHook for EndRecordingHook {
+    async fn on_event(&self, event: &HookEvent) -> HookOutcome {
+        if let HookEvent::OnAgentEnd { status, .. } = event {
+            self.ends.lock().unwrap().push(*status);
+        }
+        HookOutcome::Continue
+    }
+}
+
+#[tokio::test]
+async fn graceful_shutdown_runs_run_tail_and_persists_terminal_status() {
+    let llm = Arc::new(SlowLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = Arc::new(ToolRouter::new());
+    let hook = Arc::new(EndRecordingHook { ends: Mutex::new(Vec::new()) });
+
+    let approval: Arc<dyn ApprovalPort> = notify.clone();
+    let control = Arc::new(AgentControl::new_with_hooks(
+        llm,
+        store_port,
+        notify,
+        approval,
+        router,
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        vec![hook.clone()],
+    ));
+
+    let thread_id = control
+        .spawn(
+            "session-graceful-shutdown".into(),
+            AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() },
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("slow".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    // Hold until the run is genuinely in flight (LLM streaming).
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Running).await;
+
+    control.shutdown(&thread_id).await.expect("shutdown");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Shutdown).await;
+
+    // The run tail executed: OnAgentEnd fired (memory extraction et al. ride
+    // this hook in the host). The old hard-abort killed the task before it.
+    assert!(
+        !hook.ends.lock().unwrap().is_empty(),
+        "graceful shutdown must run the OnAgentEnd hook"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_resume_is_serialized_exactly_one_starts() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+    router.register(Box::new(TestEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store_port, notify, approval, router, 8, 4));
+
+    // Complete a first run so a resumable snapshot exists.
+    let thread_id = control
+        .spawn(
+            "session-toctou".into(),
+            AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() },
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("use tool".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    // Race two resumes on the (currently idle) thread: the registry-slot
+    // reservation is atomic with the busy check, so exactly one wins — the
+    // other observes ThreadBusy instead of double-running the thread.
+    let (first, second) = tokio::join!(
+        resume_with_input(&store, &control, &thread_id, "race one".into()),
+        resume_with_input(&store, &control, &thread_id, "race two".into()),
+    );
+    let outcomes = [first.is_ok(), second.is_ok()];
+    assert_eq!(
+        outcomes.iter().filter(|won| **won).count(),
+        1,
+        "exactly one concurrent resume must win (got {outcomes:?})"
+    );
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+}
+
+// ── S4: LLM resilience ───────────────────────────────────────────────────────
+
+/// Fast-retry config so backoff sleeps stay sub-millisecond in tests.
+fn fast_retry_config() -> AgentConfig {
+    AgentConfig {
+        model: "mock".into(),
+        max_turns: 3,
+        llm_retry_base_delay_ms: 1,
+        ..AgentConfig::default()
+    }
+}
+
+/// Fails the first `failures` calls with a TRANSIENT error, then answers with
+/// plain final text. Counts every call.
+struct TransientThenOkLlm {
+    failures_left: Mutex<u32>,
+    calls: Mutex<u32>,
+}
+
+impl TransientThenOkLlm {
+    fn new(failures: u32) -> Self {
+        Self { failures_left: Mutex::new(failures), calls: Mutex::new(0) }
+    }
+}
+
+#[async_trait]
+impl LlmPort for TransientThenOkLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        *self.calls.lock().unwrap() += 1;
+        let mut left = self.failures_left.lock().unwrap();
+        if *left > 0 {
+            *left -= 1;
+            return Err(AgentError::LlmTransient("HTTP 503 service unavailable".to_owned()));
+        }
+        Ok(LlmResponse {
+            content: Some("recovered after retry".into()),
+            content_already_streamed: false,
+            tool_calls: vec![],
+            finish_reason: Some("stop".into()),
+            usage: None,
+        })
+    }
+}
+
+/// Streams a text delta, THEN fails transiently — the withhold constraint
+/// must refuse to retry (the client already saw the prefix).
+struct PartialStreamThenFailLlm {
+    calls: Mutex<u32>,
+}
+
+#[async_trait]
+impl LlmPort for PartialStreamThenFailLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        unreachable!("streaming path must be used")
+    }
+
+    async fn chat_completion_streaming(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+        observer: &mut dyn crate::port::LlmStreamObserver,
+    ) -> Result<LlmResponse, AgentError> {
+        *self.calls.lock().unwrap() += 1;
+        observer.on_text_delta("partial prefix").await?;
+        Err(AgentError::LlmTransient("HTTP 502 bad gateway".to_owned()))
+    }
+}
+
+/// Test compact port: deterministic shrink to the first message so the
+/// context-overflow recovery path has something to do. Cheap fixed token
+/// estimate (len × 10) drives the pre-flight budget gate deterministically.
+struct ShrinkOnceCompactPort;
+
+#[async_trait]
+impl CompactPort for ShrinkOnceCompactPort {
+    async fn compact(
+        &self,
+        messages: &[ConversationMessage],
+        _ctx: &CompactContext<'_>,
+    ) -> Result<CompactOutcome, AgentError> {
+        let replaced = messages.len().saturating_sub(1);
+        let kept = messages.iter().take(1).cloned().collect();
+        Ok(CompactOutcome::Replaced {
+            messages: kept,
+            output_tokens: 4,
+            replaced_messages: replaced,
+        })
+    }
+
+    fn estimate_tokens(&self, messages: &[ConversationMessage]) -> usize {
+        messages.len().saturating_mul(10)
+    }
+
+    fn threshold_tokens(&self) -> usize {
+        usize::MAX
+    }
+
+    fn policy_name(&self) -> &'static str {
+        "test-shrink"
+    }
+}
+
+async fn run_to_terminal(
+    control: &AgentControl,
+    store: &PersistingStore,
+    thread_id: &str,
+) -> ThreadStatus {
+    let _ = control;
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            // Tolerate the spawn-race window before the run's initial
+            // snapshot lands in the store.
+            if let Some(snapshot) = store.get_thread(thread_id).await.unwrap()
+                && matches!(
+                    snapshot.status,
+                    ThreadStatus::Completed
+                        | ThreadStatus::Errored
+                        | ThreadStatus::Interrupted
+                        | ThreadStatus::Shutdown
+                )
+            {
+                return snapshot.status;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("thread reached a terminal status")
+}
+
+#[tokio::test]
+async fn transient_llm_failures_retry_with_backoff_and_recover() {
+    let llm = Arc::new(TransientThenOkLlm::new(2));
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+
+    let approval = Arc::clone(&notify);
+    let control = AgentControl::new(llm.clone(), store_port, notify, approval, router, 8, 4);
+
+    let thread_id = control
+        .spawn(
+            "session-transient-retry".into(),
+            fast_retry_config(),
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("hello".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    let status = run_to_terminal(&control, &store, &thread_id).await;
+    assert_eq!(status, ThreadStatus::Completed);
+    assert_eq!(*llm.calls.lock().unwrap(), 3, "two transient failures + one success");
+}
+
+#[tokio::test]
+async fn partially_streamed_failure_is_never_retried() {
+    let llm = Arc::new(PartialStreamThenFailLlm { calls: Mutex::new(0) });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+
+    let approval = Arc::clone(&notify);
+    let control = AgentControl::new(llm.clone(), store_port, notify, approval, router, 8, 4);
+
+    let thread_id = control
+        .spawn(
+            "session-withhold".into(),
+            fast_retry_config(),
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("hello".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    let status = run_to_terminal(&control, &store, &thread_id).await;
+    assert_eq!(status, ThreadStatus::Errored);
+    assert_eq!(*llm.calls.lock().unwrap(), 1, "withhold: no retry after a streamed prefix");
+}
+
+#[tokio::test]
+async fn token_budget_preflight_skips_the_llm_call_entirely() {
+    let llm = Arc::new(TransientThenOkLlm::new(0));
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+
+    let approval = Arc::clone(&notify);
+    let control = AgentControl::new_with_ports(
+        llm.clone(),
+        store_port,
+        notify,
+        approval,
+        router,
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        Arc::new(ShrinkOnceCompactPort),
+        Arc::new(crate::risk::BasicToolRiskAnalyzer::default()),
+    );
+
+    // One message × 10 estimated tokens; budget 5 → the pre-flight gate must
+    // refuse BEFORE any LLM request.
+    let config = AgentConfig { token_budget: Some(5), ..fast_retry_config() };
+    let thread_id = control
+        .spawn(
+            "session-budget-preflight".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("hello".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    let status = run_to_terminal(&control, &store, &thread_id).await;
+    assert_eq!(status, ThreadStatus::Interrupted, "budget exhaustion is an interrupted end");
+    assert_eq!(*llm.calls.lock().unwrap(), 0, "preflight must skip the LLM call");
+}
+
+/// Returns a tool call with usage large enough to trip the POST-response
+/// budget gate — exercises the budget-with-tool-calls residue repair.
+struct BudgetExhaustingToolCallLlm;
+
+#[async_trait]
+impl LlmPort for BudgetExhaustingToolCallLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        Ok(LlmResponse {
+            content: None,
+            content_already_streamed: false,
+            tool_calls: vec![ParsedToolCall {
+                id: "call-budget".into(),
+                name: "echo".into(),
+                arguments: r#"{"message":"never runs"}"#.into(),
+            }],
+            finish_reason: Some("tool_calls".into()),
+            usage: Some(LlmUsage {
+                prompt_tokens: 60,
+                completion_tokens: 40,
+                total_tokens: 100,
+                estimated: false,
+            }),
+        })
+    }
+}
+
+#[tokio::test]
+async fn budget_exceeded_with_tool_calls_persists_balanced_history() {
+    let llm = Arc::new(BudgetExhaustingToolCallLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+
+    let approval: Arc<dyn ApprovalPort> = notify.clone();
+    let control =
+        AgentControl::new(llm, store_port, notify.clone(), approval, Arc::new(router), 8, 4);
+
+    let config = AgentConfig { token_budget: Some(100), ..fast_retry_config() };
+    let thread_id = control
+        .spawn(
+            "session-budget-residue".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("use tool".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    let status = run_to_terminal(&control, &store, &thread_id).await;
+    assert_eq!(status, ThreadStatus::Interrupted);
+
+    let messages = notify.emitted_messages(&thread_id);
+    // The assistant tool-request IS persisted (previously dropped silently)...
+    assert!(
+        messages.iter().any(|m| m.role == "assistant" && !m.tool_calls.is_empty()),
+        "assistant tool-request must be persisted on the budget path"
+    );
+    // ...and every requested call has a synthesized failed tool result, so the
+    // replayed history never ends with a dangling tool_calls tail.
+    assert!(
+        messages.iter().any(|m| m.role == "tool"
+            && m.tool_call_id.as_deref() == Some("call-budget")
+            && m.rendered_text().contains("[token budget exceeded]")),
+        "a synthesized tool result must balance the dangling tool call"
+    );
+}
+
+/// Fails the first call with a context-overflow error, then answers.
+struct ContextOverflowOnceLlm {
+    calls: Mutex<u32>,
+}
+
+#[async_trait]
+impl LlmPort for ContextOverflowOnceLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut calls = self.calls.lock().unwrap();
+        *calls += 1;
+        if *calls == 1 {
+            return Err(AgentError::LlmContextTooLong(
+                "this model's maximum context length is 8 tokens".to_owned(),
+            ));
+        }
+        Ok(LlmResponse {
+            content: Some("recovered after compaction".into()),
+            content_already_streamed: false,
+            tool_calls: vec![],
+            finish_reason: Some("stop".into()),
+            usage: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn context_overflow_recovers_via_forced_compaction_once() {
+    let llm = Arc::new(ContextOverflowOnceLlm { calls: Mutex::new(0) });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+
+    let approval = Arc::clone(&notify);
+    let control = AgentControl::new_with_ports(
+        llm.clone(),
+        store_port,
+        notify,
+        approval,
+        router,
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        Arc::new(ShrinkOnceCompactPort),
+        Arc::new(crate::risk::BasicToolRiskAnalyzer::default()),
+    );
+
+    let thread_id = control
+        .spawn(
+            "session-overflow-recovery".into(),
+            fast_retry_config(),
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("hello".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    let status = run_to_terminal(&control, &store, &thread_id).await;
+    assert_eq!(status, ThreadStatus::Completed, "overflow + compact + retry must complete");
+    assert_eq!(*llm.calls.lock().unwrap(), 2);
+}
+
+// ── S3: queued steering ─────────────────────────────────────────────────────
+
+/// Requests a slow echo tool call on the first turn, a final answer after;
+/// captures the messages of every LLM call.
+struct SteeringCaptureLlm {
+    calls: Arc<Mutex<Vec<Vec<ConversationMessage>>>>,
+}
+
+#[async_trait]
+impl LlmPort for SteeringCaptureLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let call_index = {
+            let mut calls = self.calls.lock().unwrap();
+            calls.push(messages.to_vec());
+            calls.len()
+        };
+        if call_index == 1 {
+            return Ok(LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "call-1".into(),
+                    name: "echo".into(),
+                    arguments: r#"{"message":"slow","delay_ms":300}"#.into(),
+                }],
+                finish_reason: Some("tool_calls".into()),
+                usage: None,
+            });
+        }
+        Ok(LlmResponse {
+            content: Some("done after steering".into()),
+            content_already_streamed: false,
+            tool_calls: Vec::new(),
+            finish_reason: Some("stop".into()),
+            usage: None,
+        })
+    }
+}
+
+async fn wait_for_item_started(notify: &RecordingNotify, item_id: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let started =
+                notify.events.lock().unwrap().iter().any(
+                    |event| matches!(event, EventMsg::ItemStarted(p) if p.item.id() == item_id),
+                );
+            if started {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("item never started");
+}
+
+fn user_text_message(text: &str) -> ConversationMessage {
+    ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text(text.into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }
+}
+
+#[tokio::test]
+async fn queued_input_extends_the_run_at_the_iteration_boundary() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(SteeringCaptureLlm { calls: calls.clone() });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    router.register(Box::new(DelayEchoTool));
+
+    let approval: Arc<dyn ApprovalPort> = notify.clone();
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
+
+    let thread_id = control
+        .spawn(
+            "session-steering".into(),
+            AgentConfig { model: "mock".into(), max_turns: 4, ..AgentConfig::default() },
+            vec![user_text_message("first request")],
+        )
+        .await
+        .expect("spawn");
+
+    // Hold until the tool is genuinely in flight, then steer.
+    wait_for_item_started(&notify, "call-1").await;
+    let outcome = control
+        .queue_input(&thread_id, user_text_message("steered mid-run"))
+        .await
+        .expect("queue input on a live thread");
+    assert!(
+        matches!(outcome, crate::SendOutcome::Queued { position: 1 }),
+        "expected Queued, got {outcome:?}"
+    );
+
+    let status = run_to_terminal(&control, &store, &thread_id).await;
+    assert_eq!(status, ThreadStatus::Completed);
+
+    // The second LLM call saw the steered user input (drained after the tool
+    // batch, before the next iteration).
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "run must extend past the tool turn");
+    let second = message_texts(&calls[1]);
+    assert!(
+        second.iter().any(|text| text.contains("steered mid-run")),
+        "second LLM call must carry the steered input: {second:?}"
+    );
+    assert!(
+        second.iter().any(|text| text.contains("first request")),
+        "original input must still be present: {second:?}"
+    );
+
+    // Both user messages are persisted (MessageAppended).
+    let emitted = notify.emitted_messages(&thread_id);
+    assert!(emitted.iter().any(|m| m.rendered_text().contains("steered mid-run")));
+    assert!(emitted.iter().any(|m| m.rendered_text().contains("first request")));
+}
+
+#[tokio::test]
+async fn queued_input_on_idle_thread_signals_needs_resume() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+    router.register(Box::new(TestEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store_port, notify, approval, router, 8, 4));
+
+    // Spawn-and-complete so the thread exists but is idle.
+    let thread_id = control
+        .spawn(
+            "session-steering-idle".into(),
+            AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() },
+            vec![user_text_message("use tool")],
+        )
+        .await
+        .expect("spawn");
+    run_to_terminal(&control, &store, &thread_id).await;
+
+    let outcome = control
+        .queue_input(&thread_id, user_text_message("next"))
+        .await
+        .expect("queue input probe");
+    assert_eq!(outcome, crate::SendOutcome::NeedsResume);
+}
+
+#[tokio::test]
+async fn interrupt_persists_undelivered_queued_input() {
+    let llm = Arc::new(DelayedToolCallLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    router.register(Box::new(DelayEchoTool));
+
+    let approval: Arc<dyn ApprovalPort> = notify.clone();
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
+
+    let thread_id = control
+        .spawn(
+            "session-steering-interrupt".into(),
+            AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() },
+            vec![user_text_message("slow work")],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_item_started(&notify, "call-1").await;
+    control
+        .queue_input(&thread_id, user_text_message("queued but interrupted"))
+        .await
+        .expect("queue");
+    control.interrupt(&thread_id).await.expect("interrupt");
+    run_to_terminal(&control, &store, &thread_id).await;
+
+    // Undelivered steering input is persisted into the history — the next
+    // resume (and rollout replay) sees it instead of silently dropping it.
+    let emitted = notify.emitted_messages(&thread_id);
+    assert!(
+        emitted.iter().any(|m| m.rendered_text().contains("queued but interrupted")),
+        "queued input must be persisted on interrupt, got: {:?}",
+        emitted.iter().map(ConversationMessage::rendered_text).collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]

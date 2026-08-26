@@ -1,11 +1,13 @@
 //! Single agent thread lifecycle.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Utc;
 use tokio::sync::watch;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use slab_agent_tracing::{AgentTraceContext, AgentTraceSink, record_json};
@@ -23,14 +25,19 @@ use crate::{
         ThreadSnapshot, ThreadStatus,
     },
     protocol::{
-        ContextCompactedParams, ContextCompactingParams, ErrorEvent, EventMsg, Turn,
-        TurnAbortedParams, TurnCompletedParams, TurnStartedParams, TurnUsage,
+        ContextCompactedParams, ContextCompactingParams, ErrorEvent, EventMsg,
+        ThreadStatusChangedParams, Turn, TurnAbortedParams, TurnCompletedParams, TurnStartedParams,
+        TurnStateChangedParams, TurnUsage,
     },
     repetition_guard::{RepetitionDetected, RepetitionGuard},
     risk::ToolRiskAnalyzer,
     state::ThreadStateMachine,
     tool::{AgentThreadContext, ToolDiscoveryState, ToolRouter},
-    turn::{TurnExecutionContext, TurnOutcome, emit_message_appended, execute_turn},
+    turn::{
+        TurnExecutionContext, TurnOutcome, emit_message_appended, emit_run_terminal_turn_state,
+        execute_turn, finalize_unresolved_tool_calls,
+    },
+    turn_state::{OpenItemTracker, TerminationReason, TurnLifecycle, TurnPhase},
 };
 
 // ── Harness-protocol (EventMsg) lifecycle emits ───────────────────────────────
@@ -56,19 +63,34 @@ async fn emit_turn_completed(
     thread_id: &str,
     turn_index: u32,
     usage: Option<TurnUsage>,
+    reason: TerminationReason,
 ) {
     let msg = EventMsg::TurnCompleted(TurnCompletedParams {
         thread_id: thread_id.to_owned(),
         turn: harness_turn(turn_index.to_string(), "completed"),
         usage,
+        reason: Some(reason.as_str().to_owned()),
     });
     notify.on_event_msg(thread_id, &msg).await;
 }
 
-async fn emit_turn_aborted(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, turn_index: u32) {
+/// The single authoritative turn-abort terminal event. Emitted ONLY from the
+/// run teardown in [`AgentThread::run`] with the LAST iteration's turn id —
+/// `AgentControl::interrupt` no longer emits an eager placeholder (it used a
+/// bogus `"current"` turn id because the controller does not know the active
+/// turn index).
+async fn emit_turn_aborted(
+    notify: &Arc<dyn AgentNotifyPort>,
+    thread_id: &str,
+    turn_index: u32,
+    reason: TerminationReason,
+    usage: Option<TurnUsage>,
+) {
     let msg = EventMsg::TurnAborted(TurnAbortedParams {
         thread_id: thread_id.to_owned(),
         turn: harness_turn(turn_index.to_string(), "interrupted"),
+        reason: Some(reason.as_str().to_owned()),
+        usage,
     });
     notify.on_event_msg(thread_id, &msg).await;
 }
@@ -79,47 +101,50 @@ async fn emit_turn_error(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, mes
 }
 
 /// [`CompactProgress`] impl that surfaces the auto-compaction lifecycle as
-/// harness events. `on_compacting` emits `ContextCompacting` and arms `fired`;
-/// the caller (`AgentThread::maybe_compact`) reads `fired` after `compact()`
+/// harness events. `on_compacting` emits `ContextCompacting`, transitions the
+/// turn phase to Compacting (status-only TurnState), and arms `fired`; the
+/// caller (`AgentThread::maybe_compact`) reads `fired` after `compact()`
 /// returns so it can emit a terminal `ContextCompacted` even on the rare
 /// summarize-fails→fallback-skips path (no dangling "compacting" indicator).
-struct NotifyingCompactProgress {
+struct NotifyingCompactProgress<'a> {
     notify: Arc<dyn AgentNotifyPort>,
     thread_id: String,
     fired: Arc<AtomicBool>,
+    lifecycle: &'a TurnLifecycle,
+    turn_index: u32,
 }
 
-impl CompactProgress for NotifyingCompactProgress {
+impl CompactProgress for NotifyingCompactProgress<'_> {
     fn on_compacting<'a>(
         &'a self,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
         let notify = self.notify.clone();
         let thread_id = self.thread_id.clone();
         let fired = self.fired.clone();
+        let lifecycle = self.lifecycle;
+        let turn_index = self.turn_index;
         Box::pin(async move {
             fired.store(true, Ordering::SeqCst);
             let msg = EventMsg::ContextCompacting(ContextCompactingParams {
                 thread_id: thread_id.clone(),
             });
             notify.on_event_msg(&thread_id, &msg).await;
+            // Status-only phase line (empty input_messages is a replay no-op).
+            if lifecycle.transition(TurnPhase::Compacting).is_ok() {
+                let phase_msg = EventMsg::TurnStateChanged(TurnStateChangedParams {
+                    thread_id: thread_id.clone(),
+                    turn_index,
+                    status: TurnPhase::Compacting.as_str().to_owned(),
+                    input_messages: Vec::new(),
+                    tool_specs_json: None,
+                    llm_response_json: None,
+                    error: None,
+                    started_at: lifecycle.started_at(),
+                    completed_at: None,
+                });
+                notify.on_event_msg(&thread_id, &phase_msg).await;
+            }
         })
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum TerminationReason {
-    MaxTurns,
-    RepetitionDetected,
-    BudgetExhausted,
-}
-
-impl TerminationReason {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::MaxTurns => "max_turns_reached",
-            Self::RepetitionDetected => "repetition_detected",
-            Self::BudgetExhausted => "budget_exhausted",
-        }
     }
 }
 
@@ -158,6 +183,11 @@ pub(crate) struct AgentThreadRuntime {
     pub trace_dir: Option<std::path::PathBuf>,
     pub thread_context: AgentThreadContext,
     pub cancellation: CancellationToken,
+    /// Steering input queued by [`crate::control::AgentControl::queue_input`]
+    /// while this run is in flight. Drained at iteration boundaries; on an
+    /// interrupted teardown the queued messages are persisted into the history
+    /// (attributed to the interrupted turn) so the next resume sees them.
+    pub pending_input: Arc<Mutex<VecDeque<ConversationMessage>>>,
 }
 
 impl AgentThread {
@@ -220,6 +250,7 @@ impl AgentThread {
             trace_dir,
             thread_context,
             cancellation,
+            pending_input,
         } = runtime;
         let thread_id = self.id.clone();
         let mut trace_context =
@@ -288,21 +319,47 @@ impl AgentThread {
             error!(thread_id, error = %e, "failed to persist thread snapshot");
         }
 
+        // Declaring Running can fail when a controller op (interrupt/shutdown)
+        // raced the spawn between the busy-check reservation and this point:
+        // the state machine is already Interrupting/Shutdown. Respect it —
+        // Shutdown ends the run before any turn (nothing ran, no teardown
+        // transitions); Interrupting falls through to the interrupted
+        // teardown (Interrupting → Interrupted is the designed exit).
+        let mut interrupted_before_start = false;
         if !cancellation.is_cancelled() {
-            self.set_status(ThreadStatus::Running, &notify).await?;
-            record_json(
-                trace.as_ref(),
-                &trace_context,
-                "slab-agent",
-                "thread_status",
-                serde_json::json!({ "status": ThreadStatus::Running }),
-            );
+            match self.set_status(ThreadStatus::Running, &notify).await {
+                Ok(()) => {
+                    record_json(
+                        trace.as_ref(),
+                        &trace_context,
+                        "slab-agent",
+                        "thread_status",
+                        serde_json::json!({ "status": ThreadStatus::Running }),
+                    );
 
-            // Persist the Running transition so the stored status matches the in-memory state.
-            if let Err(e) =
-                store.update_thread_status(&thread_id, ThreadStatus::Running, None).await
-            {
-                error!(thread_id, error = %e, "failed to persist running status");
+                    // Persist the Running transition so the stored status matches the in-memory state.
+                    if let Err(e) =
+                        store.update_thread_status(&thread_id, ThreadStatus::Running, None).await
+                    {
+                        error!(thread_id, error = %e, "failed to persist running status");
+                    }
+                }
+                Err(AgentError::InvalidStateTransition { .. })
+                    if self.state.status() == ThreadStatus::Shutdown =>
+                {
+                    // Shutdown won the race before this run began. The
+                    // controller persisted Shutdown; nothing ran, so no
+                    // OnAgentStart/OnAgentEnd pairing is owed either.
+                    store
+                        .update_thread_status(&thread_id, ThreadStatus::Shutdown, Some("shutdown"))
+                        .await
+                        .ok();
+                    return Ok(String::new());
+                }
+                Err(AgentError::InvalidStateTransition { .. }) => {
+                    interrupted_before_start = true;
+                }
+                Err(e) => return Err(e),
             }
         }
 
@@ -375,19 +432,41 @@ impl AgentThread {
         let mut completion_text: Option<String> = None;
         let mut last_error: Option<AgentError> = None;
         let mut invalid_tool_call_retries = 0u8;
-        let mut interrupted = false;
+        let mut interrupted = interrupted_before_start;
         let mut termination_reason: Option<TerminationReason> = None;
         let mut repetition_guard = RepetitionGuard::default();
         let mut consumed_tokens = 0u32;
         let mut last_turn_usage: Option<TurnUsage> = None;
         let mut reached_final_turn = false;
+        // Typed turn-phase lifecycle (validation choke point + per-iteration
+        // started_at) and open-item tracker (guaranteed ItemCompleted on every
+        // exit path) — both owned by this run.
+        let lifecycle = TurnLifecycle::new();
+        let items = OpenItemTracker::default();
+        // Death-spiral guard for the context-overflow recovery: at most ONE
+        // forced compaction per run (see `execute_turn`'s retry loop).
+        let context_overflow_recovered = AtomicBool::new(false);
+        // Prompt-size estimate refreshed each iteration by `maybe_compact`
+        // (drives the pre-flight token-budget gate). The `None` initial value
+        // only survives until the first iteration's compaction check.
+        #[allow(unused_assignments)]
+        let mut prompt_token_estimate: Option<u32> = None;
+        // The LAST iteration's index — terminal events must reference it, not
+        // `starting_turn_index` (the run's first iteration).
+        let mut last_turn_index = starting_turn_index;
+        let workspace_root = thread_context
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.root.to_string_lossy().into_owned());
 
         'turns: for turn_offset in 0..self.config.max_turns {
-            if cancellation.is_cancelled() {
+            if interrupted || cancellation.is_cancelled() {
                 interrupted = true;
                 break 'turns;
             }
             let turn_index = starting_turn_index + turn_offset;
+            last_turn_index = turn_index;
+            lifecycle.begin_iteration(turn_index);
             debug!(thread_id, turn_index, "starting turn");
             emit_turn_started(&notify, &thread_id, turn_index).await;
             let turn_trace_context = trace_context.clone().with_turn(turn_index);
@@ -397,8 +476,13 @@ impl AgentThread {
                 trace.as_ref(),
                 &turn_trace_context,
                 &notify,
+                &lifecycle,
+                turn_index,
             )
             .await;
+            prompt_token_estimate = Some(
+                u32::try_from(compact.as_ref().estimate_tokens(&messages)).unwrap_or(u32::MAX),
+            );
             match execute_turn(
                 TurnExecutionContext {
                     thread_id: &thread_id,
@@ -421,6 +505,11 @@ impl AgentThread {
                     cancellation: &cancellation,
                     thread_context: &thread_context,
                     consumed_tokens,
+                    lifecycle: &lifecycle,
+                    items: &items,
+                    compact: compact.as_ref(),
+                    prompt_token_estimate,
+                    context_overflow_recovered: &context_overflow_recovered,
                 },
                 &mut messages,
             )
@@ -442,7 +531,24 @@ impl AgentThread {
                             }
                             None
                         });
-                        break 'turns;
+                        // Steering: queued user input extends the run —
+                        // needs_follow_up = model wants more OR queue non-empty.
+                        // The next iteration consumes the drained input.
+                        let drained = take_pending_input(&pending_input);
+                        if !drained.is_empty() {
+                            reached_final_turn = false;
+                            inject_pending_input(
+                                &notify,
+                                &thread_id,
+                                turn_index + 1,
+                                drained,
+                                &mut messages,
+                            )
+                            .await;
+                            debug!(thread_id, turn_index, "steering input extends the run");
+                        } else {
+                            break 'turns;
+                        }
                     }
                     TurnOutcome::BudgetExceeded { usage } => {
                         let total = usage.as_ref().map(|u| u.total_tokens).unwrap_or_default();
@@ -478,6 +584,23 @@ impl AgentThread {
                             termination_reason = Some(TerminationReason::RepetitionDetected);
                             break 'turns;
                         }
+                        // Steering: inject queued input after the tool batch —
+                        // the next LLM iteration sees it.
+                        let drained = take_pending_input(&pending_input);
+                        if !drained.is_empty() {
+                            inject_pending_input(
+                                &notify,
+                                &thread_id,
+                                turn_index + 1,
+                                drained,
+                                &mut messages,
+                            )
+                            .await;
+                            debug!(
+                                thread_id,
+                                turn_index, "steering input queued for next iteration"
+                            );
+                        }
                     }
                 },
                 Err(e) => {
@@ -492,8 +615,78 @@ impl AgentThread {
             }
         }
 
+        // Persist any steering input still queued when the run ended — it
+        // never reached the model, but it is real user input; the replayed
+        // history (and the next resume) must see it. Attributed to the last
+        // iteration, the one during which it arrived.
+        let leftover = take_pending_input(&pending_input);
+        if !leftover.is_empty() {
+            warn!(
+                thread_id,
+                queued = leftover.len(),
+                "persisting undelivered steering input on run end"
+            );
+            inject_pending_input(&notify, &thread_id, last_turn_index, leftover, &mut messages)
+                .await;
+        }
+
         if interrupted {
-            self.set_status(ThreadStatus::Interrupted, &notify).await?;
+            // Protocol completeness FIRST: synthesize failed tool results for
+            // the trailing assistant tool-request (interrupted mid-batch) so
+            // the rollout never replays a dangling tool_calls tail — strict
+            // OpenAI-compatible providers reject such a follow-up request.
+            finalize_unresolved_tool_calls(
+                notify.as_ref(),
+                &thread_id,
+                last_turn_index,
+                &mut messages,
+                None,
+                "[interrupted]",
+            )
+            .await;
+            // Guaranteed closure for any in-flight tool items (no perpetual
+            // "running" cards), then the single authoritative terminal events
+            // for the interrupted run — referenced to the LAST iteration's id.
+            debug!(
+                thread_id,
+                open_items = items.open_count(),
+                "run interrupted; closing open items"
+            );
+            items
+                .close_all(
+                    notify.as_ref(),
+                    &thread_id,
+                    tools.as_ref(),
+                    workspace_root.as_deref(),
+                    "interrupted",
+                    "[interrupted]",
+                )
+                .await;
+            emit_run_terminal_turn_state(
+                notify.as_ref(),
+                &thread_id,
+                last_turn_index,
+                &lifecycle,
+                TurnPhase::Interrupted,
+                &messages,
+                Some("interrupted"),
+            )
+            .await;
+            emit_turn_aborted(
+                &notify,
+                &thread_id,
+                last_turn_index,
+                TerminationReason::Interrupted,
+                last_turn_usage.clone(),
+            )
+            .await;
+            self.finalize_status(
+                ThreadStatus::Interrupted,
+                Some("interrupted"),
+                &notify,
+                store.as_ref(),
+            )
+            .await?;
             record_json(
                 trace.as_ref(),
                 &trace_context,
@@ -501,10 +694,6 @@ impl AgentThread {
                 "thread_cancelled",
                 serde_json::json!({ "status": ThreadStatus::Interrupted }),
             );
-            store
-                .update_thread_status(&thread_id, ThreadStatus::Interrupted, Some("interrupted"))
-                .await
-                .ok();
             dispatch_registered_hooks(
                 &hooks,
                 &HookEvent::OnAgentEnd {
@@ -519,8 +708,47 @@ impl AgentThread {
         }
 
         if let Some(err) = last_error {
+            // Terminal events for the failed run: close open items, land the
+            // terminal turn state (skipped when the failing iteration already
+            // emitted its own), and a turn-abort terminal BEFORE the error
+            // event (clients treat `error` as stream-terminal — the turn must
+            // be closed first).
+            items
+                .close_all(
+                    notify.as_ref(),
+                    &thread_id,
+                    tools.as_ref(),
+                    workspace_root.as_deref(),
+                    "failed",
+                    &err.to_string(),
+                )
+                .await;
+            emit_run_terminal_turn_state(
+                notify.as_ref(),
+                &thread_id,
+                last_turn_index,
+                &lifecycle,
+                TurnPhase::Failed,
+                &messages,
+                Some(&err.to_string()),
+            )
+            .await;
+            emit_turn_aborted(
+                &notify,
+                &thread_id,
+                last_turn_index,
+                TerminationReason::Error,
+                last_turn_usage.clone(),
+            )
+            .await;
             emit_turn_error(&notify, &thread_id, &err.to_string()).await;
-            self.set_status(ThreadStatus::Errored, &notify).await?;
+            self.finalize_status(
+                ThreadStatus::Errored,
+                Some(&err.to_string()),
+                &notify,
+                store.as_ref(),
+            )
+            .await?;
             record_json(
                 trace.as_ref(),
                 &trace_context,
@@ -531,10 +759,6 @@ impl AgentThread {
                     "error": err.to_string(),
                 }),
             );
-            store
-                .update_thread_status(&thread_id, ThreadStatus::Errored, Some(&err.to_string()))
-                .await
-                .ok();
             dispatch_registered_hooks(
                 &hooks,
                 &HookEvent::OnAgentEnd {
@@ -551,8 +775,40 @@ impl AgentThread {
         if !reached_final_turn {
             let termination_reason = termination_reason.unwrap_or(TerminationReason::MaxTurns);
             let reason = termination_reason.as_str();
-            emit_turn_aborted(&notify, &thread_id, starting_turn_index).await;
-            self.set_status(ThreadStatus::Interrupted, &notify).await?;
+            // Close any straggler items and land the terminal turn state
+            // (max-turns / repetition exit from a non-terminal ExecutingTools
+            // phase; the budget path already emitted its own terminal state,
+            // which the helper detects and skips).
+            items
+                .close_all(
+                    notify.as_ref(),
+                    &thread_id,
+                    tools.as_ref(),
+                    workspace_root.as_deref(),
+                    "interrupted",
+                    &format!("[{reason}]"),
+                )
+                .await;
+            emit_run_terminal_turn_state(
+                notify.as_ref(),
+                &thread_id,
+                last_turn_index,
+                &lifecycle,
+                TurnPhase::Interrupted,
+                &messages,
+                Some(reason),
+            )
+            .await;
+            emit_turn_aborted(
+                &notify,
+                &thread_id,
+                last_turn_index,
+                termination_reason,
+                last_turn_usage.clone(),
+            )
+            .await;
+            self.finalize_status(ThreadStatus::Interrupted, Some(reason), &notify, store.as_ref())
+                .await?;
             record_json(
                 trace.as_ref(),
                 &trace_context,
@@ -566,10 +822,6 @@ impl AgentThread {
                     "token_budget": self.config.token_budget,
                 }),
             );
-            store
-                .update_thread_status(&thread_id, ThreadStatus::Interrupted, Some(reason))
-                .await
-                .ok();
             dispatch_registered_hooks(
                 &hooks,
                 &HookEvent::OnAgentEnd {
@@ -584,9 +836,21 @@ impl AgentThread {
         }
 
         info!(thread_id, "thread completed");
-        emit_turn_completed(&notify, &thread_id, starting_turn_index, last_turn_usage.clone())
-            .await;
-        self.set_status(ThreadStatus::Completed, &notify).await?;
+        emit_turn_completed(
+            &notify,
+            &thread_id,
+            last_turn_index,
+            last_turn_usage.clone(),
+            TerminationReason::Completed,
+        )
+        .await;
+        self.finalize_status(
+            ThreadStatus::Completed,
+            completion_text.as_deref(),
+            &notify,
+            store.as_ref(),
+        )
+        .await?;
         record_json(
             trace.as_ref(),
             &trace_context,
@@ -601,10 +865,6 @@ impl AgentThread {
                 "parent_span_id": trace_context.parent_span_id,
             }),
         );
-        store
-            .update_thread_status(&thread_id, ThreadStatus::Completed, completion_text.as_deref())
-            .await
-            .ok();
         dispatch_registered_hooks(
             &hooks,
             &HookEvent::OnAgentEnd {
@@ -626,9 +886,56 @@ impl AgentThread {
     ) -> Result<(), AgentError> {
         self.state.transition(status)?;
         notify.on_status_change(&self.id, status).await;
+        // Project the authoritative thread status to clients so the UI can
+        // derive busy/terminal state from the server instead of a local
+        // heuristic. Previously `on_status_change` only logged on the wired
+        // hub and no thread status ever reached the wire.
+        let msg = EventMsg::ThreadStatusChanged(ThreadStatusChangedParams {
+            thread_id: self.id.clone(),
+            status: status.to_string(),
+            reason: None,
+        });
+        notify.on_event_msg(&self.id, &msg).await;
         Ok(())
     }
 
+    /// Teardown status finalization: transition + notify + persist, tolerating
+    /// the shutdown race. A controller `shutdown` that landed mid-teardown
+    /// already transitioned the state machine to (and persisted) `Shutdown`;
+    /// re-asserting the run's own terminal status would either fail the
+    /// lattice or overwrite the controller's record. When the transition is
+    /// rejected, the existing status is kept and the store is NOT overwritten.
+    async fn finalize_status(
+        &self,
+        status: ThreadStatus,
+        reason: Option<&str>,
+        notify: &Arc<dyn AgentNotifyPort>,
+        store: &dyn AgentStorePort,
+    ) -> Result<(), AgentError> {
+        if let Err(error) = self.state.transition(status) {
+            if matches!(error, AgentError::InvalidStateTransition { .. }) {
+                warn!(
+                    thread_id = %self.id,
+                    current = %self.state.status(),
+                    attempted = %status,
+                    "teardown status raced a controller-initiated end state; keeping existing"
+                );
+                return Ok(());
+            }
+            return Err(error);
+        }
+        notify.on_status_change(&self.id, status).await;
+        let msg = EventMsg::ThreadStatusChanged(ThreadStatusChangedParams {
+            thread_id: self.id.clone(),
+            status: status.to_string(),
+            reason: reason.map(str::to_owned),
+        });
+        notify.on_event_msg(&self.id, &msg).await;
+        store.update_thread_status(&self.id, status, reason).await.ok();
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn maybe_compact(
         &self,
         compact: &dyn CompactPort,
@@ -636,6 +943,8 @@ impl AgentThread {
         trace: &dyn AgentTraceSink,
         trace_context: &AgentTraceContext,
         notify: &Arc<dyn AgentNotifyPort>,
+        lifecycle: &TurnLifecycle,
+        turn_index: u32,
     ) {
         let input_tokens = compact.estimate_tokens(messages);
         let threshold_tokens = compact.threshold_tokens();
@@ -669,6 +978,8 @@ impl AgentThread {
                 notify: notify.clone(),
                 thread_id: self.id.clone(),
                 fired: fired.clone(),
+                lifecycle,
+                turn_index,
             })),
         };
         match compact.compact(messages, &ctx).await {
@@ -732,6 +1043,12 @@ impl AgentThread {
                 );
                 Self::emit_compacted_skipped(notify, &self.id, fired).await;
             }
+        }
+        // Return to Sampling when the progress callback entered Compacting —
+        // the designed exit so the subsequent `execute_turn` entry transition
+        // is an idempotent no-op.
+        if lifecycle.phase() == TurnPhase::Compacting {
+            let _ = lifecycle.transition(TurnPhase::Sampling);
         }
     }
 
@@ -812,16 +1129,6 @@ pub(crate) async fn resolve_root_thread_id(
     None
 }
 
-impl TerminationReason {
-    const fn trace_event_name(self) -> &'static str {
-        match self {
-            Self::MaxTurns => "thread_max_turns_reached",
-            Self::RepetitionDetected => "thread_repetition_detected",
-            Self::BudgetExhausted => "thread_token_budget_exhausted",
-        }
-    }
-}
-
 fn insert_injected_messages(
     messages: &mut Vec<ConversationMessage>,
     injected: Vec<ConversationMessage>,
@@ -833,6 +1140,31 @@ fn insert_injected_messages(
         messages.iter().position(|message| message.role != "system").unwrap_or(messages.len());
     for (offset, message) in injected.into_iter().enumerate() {
         messages.insert(insert_at + offset, message);
+    }
+}
+
+/// Atomically drain the queued steering input. Returns the drained messages
+/// (empty when nothing was queued).
+fn take_pending_input(
+    pending_input: &Mutex<VecDeque<ConversationMessage>>,
+) -> Vec<ConversationMessage> {
+    let drained = std::mem::take(&mut *pending_input.lock().unwrap_or_else(|p| p.into_inner()));
+    drained.into_iter().collect()
+}
+
+/// Persist (as `MessageAppended`) and append drained steering input, attributed
+/// to `turn_index` — the iteration that will consume it (mid-run drain), or the
+/// iteration during which it arrived (teardown drain).
+async fn inject_pending_input(
+    notify: &Arc<dyn AgentNotifyPort>,
+    thread_id: &str,
+    turn_index: u32,
+    drained: Vec<ConversationMessage>,
+    messages: &mut Vec<ConversationMessage>,
+) {
+    for message in drained {
+        emit_message_appended(notify.as_ref(), thread_id, turn_index, &message).await;
+        messages.push(message);
     }
 }
 

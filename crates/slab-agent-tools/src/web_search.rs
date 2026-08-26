@@ -51,6 +51,11 @@ impl ToolHandler for WebSearchTool {
         "web_search"
     }
 
+    /// Pure read — safe to run concurrently with other read-only calls.
+    fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Search the web through configured providers. Credentials are read from settings, not tool arguments."
     }

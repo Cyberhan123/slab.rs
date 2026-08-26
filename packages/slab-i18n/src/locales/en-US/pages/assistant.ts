@@ -90,6 +90,8 @@ export const assistant = {
     },
     stopGeneratingResponse: 'Stop generating response',
     sendMessage: 'Send message',
+    queued_one: '{{count}} message queued for the running turn',
+    queued_other: '{{count}} messages queued for the running turn',
     deepThink: 'Deep think',
     reasoningEffort: 'Reasoning',
     reasoning: {
@@ -116,6 +118,15 @@ export const assistant = {
     loading: 'Thinking...',
     thoughtForAFewSeconds: 'Thought for a few seconds',
     thoughtForSeconds: 'Thought for {{seconds}} seconds',
+  },
+  turn: {
+    abortReason: {
+      interrupted: 'Turn interrupted',
+      maxTurnsReached: 'Turn stopped: maximum turns reached',
+      budgetExhausted: 'Turn stopped: token budget exhausted',
+      repetitionDetected: 'Turn stopped: repeated tool calls detected',
+      error: 'Turn failed',
+    },
   },
   dialog: {
     title: 'Switch model for this conversation?',

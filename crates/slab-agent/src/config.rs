@@ -6,6 +6,9 @@ pub const DEFAULT_TOOL_CONCURRENCY: u8 = 1;
 pub const MAX_TOOL_CONCURRENCY: u8 = 4;
 pub const DEFAULT_INVALID_TOOL_CALL_RETRIES: u8 = 1;
 pub const MAX_INVALID_TOOL_CALL_RETRIES: u8 = 3;
+pub const DEFAULT_LLM_MAX_RETRIES: u8 = 2;
+pub const MAX_LLM_MAX_RETRIES: u8 = 5;
+pub const DEFAULT_LLM_RETRY_BASE_DELAY_MS: u64 = 500;
 
 /// Tool-call mode requested for an agent thread.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -73,6 +76,14 @@ pub struct AgentConfig {
     /// Number of invalid tool-call feedback turns allowed before the thread errors.
     #[serde(default = "default_invalid_tool_call_retries")]
     pub invalid_tool_call_retries: u8,
+    /// Bounded retries for TRANSIENT LLM failures (transport reset, timeout,
+    /// 429/5xx) with exponential backoff. A partially-streamed response is
+    /// never retried (the client would see the prefix twice). `0` disables.
+    #[serde(default = "default_llm_max_retries")]
+    pub llm_max_retries: u8,
+    /// Base delay (ms) for the LLM retry backoff; doubles per attempt.
+    #[serde(default = "default_llm_retry_base_delay_ms")]
+    pub llm_retry_base_delay_ms: u64,
     /// Optional structured-output request forwarded to the chat backend.
     #[serde(default)]
     pub structured_output: Option<StructuredOutput>,
@@ -110,6 +121,8 @@ impl Default for AgentConfig {
             tool_choice: AgentToolChoice::Auto,
             tool_concurrency: DEFAULT_TOOL_CONCURRENCY,
             invalid_tool_call_retries: DEFAULT_INVALID_TOOL_CALL_RETRIES,
+            llm_max_retries: DEFAULT_LLM_MAX_RETRIES,
+            llm_retry_base_delay_ms: DEFAULT_LLM_RETRY_BASE_DELAY_MS,
             structured_output: None,
             transient: false,
             agent_type: None,
@@ -125,6 +138,10 @@ impl AgentConfig {
     pub fn effective_invalid_tool_call_retries(&self) -> u8 {
         self.invalid_tool_call_retries.clamp(0, MAX_INVALID_TOOL_CALL_RETRIES)
     }
+
+    pub fn effective_llm_max_retries(&self) -> u8 {
+        self.llm_max_retries.min(MAX_LLM_MAX_RETRIES)
+    }
 }
 
 fn default_tool_concurrency() -> u8 {
@@ -133,4 +150,12 @@ fn default_tool_concurrency() -> u8 {
 
 fn default_invalid_tool_call_retries() -> u8 {
     DEFAULT_INVALID_TOOL_CALL_RETRIES
+}
+
+fn default_llm_max_retries() -> u8 {
+    DEFAULT_LLM_MAX_RETRIES
+}
+
+fn default_llm_retry_base_delay_ms() -> u64 {
+    DEFAULT_LLM_RETRY_BASE_DELAY_MS
 }

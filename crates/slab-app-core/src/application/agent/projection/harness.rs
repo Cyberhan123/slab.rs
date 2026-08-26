@@ -22,6 +22,7 @@ use slab_proto::harness::notification::ServerNotification;
 pub fn event_msg_to_notification(msg: EventMsg) -> Option<ServerNotification> {
     match msg {
         EventMsg::ThreadStarted(p) => Some(ServerNotification::ThreadStarted(p)),
+        EventMsg::ThreadStatusChanged(p) => Some(ServerNotification::ThreadStatusChanged(p)),
         EventMsg::TurnStarted(p) => Some(ServerNotification::TurnStarted(p)),
         EventMsg::TurnCompleted(p) => Some(ServerNotification::TurnCompleted(p)),
         EventMsg::ItemStarted(p) => Some(ServerNotification::ItemStarted(p)),

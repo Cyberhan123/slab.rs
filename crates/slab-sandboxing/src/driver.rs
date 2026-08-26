@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -289,6 +290,45 @@ pub(crate) fn command_env(
 /// (e.g. a reparented descendant that kept a handle) so the run can never hang.
 const READ_DRAIN_GRACE: Duration = Duration::from_secs(5);
 
+/// Fires a tree-kill closure exactly once — including when the owning future
+/// is dropped before completion. Turn cancellation (`tokio::select!` around
+/// tool execution) drops the `wait_for_child`/`wait_for_elevated` future
+/// mid-`child.wait()`, skipping every explicit kill site below; without this
+/// guard, backgrounded grandchildren would outlive the cancelled turn (the
+/// direct child still dies via `kill_on_drop`, but its descendants do not).
+/// Normal paths call [`TreeKillGuard::fire`] explicitly, which disarms the
+/// closure so the eventual `Drop` is a no-op.
+struct TreeKillGuard(Option<Box<dyn FnOnce() + Send + 'static>>);
+
+impl TreeKillGuard {
+    fn new(kill: Option<Box<dyn FnOnce() + Send + 'static>>) -> Self {
+        Self(kill)
+    }
+
+    /// `true` while a closure is still armed (present and not yet fired).
+    fn is_armed(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Invoke and disarm the closure. Returns `true` when a closure actually
+    /// ran (i.e. one was present and had not fired yet).
+    fn fire(&mut self) -> bool {
+        match self.0.take() {
+            Some(kill) => {
+                kill();
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+impl Drop for TreeKillGuard {
+    fn drop(&mut self) {
+        self.fire();
+    }
+}
+
 #[allow(clippy::type_complexity)]
 pub(crate) async fn wait_for_child(
     mut child: tokio::process::Child,
@@ -299,12 +339,15 @@ pub(crate) async fn wait_for_child(
     // caller has no tree-kill mechanism (then the grace backstop below applies).
     kill_tree: Option<Box<dyn FnOnce() + Send + 'static>>,
 ) -> Result<SandboxedOutput, SandboxError> {
+    // Wrapped in a guard so an early drop (turn cancellation) still kills the
+    // tree; every explicit kill below goes through `fire`, which disarms it.
+    let mut kill_tree = TreeKillGuard::new(kill_tree);
     let pid = child.id();
     tracing::info!(
         ?pid,
         ?timeout,
         has_sink = sink.is_some(),
-        has_kill_tree = kill_tree.is_some(),
+        has_kill_tree = kill_tree.is_armed(),
         "wait_for_child: spawned, awaiting child.wait"
     );
     let stdout = child.stdout.take();
@@ -341,8 +384,7 @@ pub(crate) async fn wait_for_child(
     // read tasks below wait for pipe EOF forever — the exact cause of a turn
     // hanging indefinitely after a shell approval when the command backgrounds a
     // long-lived process. Must happen BEFORE awaiting the read tasks.
-    if let Some(kill) = kill_tree {
-        kill();
+    if kill_tree.fire() {
         tracing::info!(?pid, "wait_for_child: process tree killed");
     }
 
@@ -391,22 +433,20 @@ pub(crate) async fn wait_for_elevated(
 ) -> Result<SandboxedOutput, SandboxError> {
     let slab_windows_sandbox::ElevatedRun { stdout_buf, stderr_buf, mut exit_future, kill_tree } =
         run;
-    let mut kill_tree = kill_tree;
+    // Guarded so an early drop (turn cancellation mid-await) still tears the
+    // daemon connection down; the explicit fires below disarm it.
+    let mut kill_tree = TreeKillGuard::new(kill_tree);
 
     let (exit_code, timed_out) = match timeout {
         Some(t) => match tokio::time::timeout(t, &mut exit_future).await {
             Ok(Ok(elev)) => (elev.exit_code, elev.timed_out),
             Ok(Err(_)) => {
-                if let Some(k) = kill_tree.take() {
-                    k();
-                }
+                kill_tree.fire();
                 return Err(SandboxError::SpawnFailed("elevated exit stream errored".into()));
             }
             Err(_) => {
                 // Timed out: drop the daemon connection (kills the Job), best-effort await Exited.
-                if let Some(k) = kill_tree.take() {
-                    k();
-                }
+                kill_tree.fire();
                 match tokio::time::timeout(Duration::from_secs(3), &mut exit_future).await {
                     Ok(Ok(elev)) => (elev.exit_code, true),
                     _ => (1, true),
@@ -421,9 +461,7 @@ pub(crate) async fn wait_for_elevated(
 
     // Free the daemon connection now that we have the exit (the child already exited in the
     // non-timeout path; in the timeout path it was already fired above).
-    if let Some(k) = kill_tree.take() {
-        k();
-    }
+    kill_tree.fire();
 
     let stdout = stdout_buf.lock().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?.clone();
     let mut stderr =
@@ -474,4 +512,43 @@ pub(crate) fn unix_kill_tree(pgid: Option<u32>) -> Option<Box<dyn FnOnce() + Sen
             let _ = unsafe { libc::kill(-(p as i32), libc::SIGKILL) };
         }) as Box<dyn FnOnce() + Send + 'static>
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn tree_kill_guard_fires_on_drop() {
+        // Simulates cancellation: the future is dropped without reaching any
+        // explicit kill site, and the guard still fires the closure once.
+        let fired = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&fired);
+        {
+            let _guard = TreeKillGuard::new(Some(Box::new(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+            })));
+        } // dropped without fire()
+        assert_eq!(fired.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn tree_kill_guard_fire_then_drop_fires_once() {
+        let fired = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&fired);
+        let mut guard = TreeKillGuard::new(Some(Box::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        })));
+        assert!(guard.fire(), "first fire should run the closure");
+        assert!(!guard.fire(), "second fire should be a no-op");
+        drop(guard);
+        assert_eq!(fired.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn tree_kill_guard_without_closure_is_noop() {
+        let mut guard = TreeKillGuard::new(None);
+        assert!(!guard.fire());
+    }
 }

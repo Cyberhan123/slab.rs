@@ -109,6 +109,10 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     onRollbackFromTurn: vi.fn(),
     planMode: false,
     onPlanModeChange: vi.fn(),
+    threadStatus: null,
+    abortReason: null,
+    queuedCount: 0,
+    onSteerSubmit: vi.fn(),
     ...overrides,
   }
 }

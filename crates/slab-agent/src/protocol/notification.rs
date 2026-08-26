@@ -44,6 +44,30 @@ pub struct TurnCompletedParams {
     /// backend did not report usage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TurnUsage>,
+    /// Why the run ended (`"completed"` on the normal path). Lets clients
+    /// render a precise end state instead of guessing. Absent on events
+    /// written by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// `EventMsg::ThreadStatusChanged` params — projects the authoritative
+/// thread-level status (`AgentThreadStatus`) to clients so the UI derives
+/// busy/terminal state from the server instead of a local heuristic.
+/// Previously `on_status_change` only logged and no thread status ever
+/// reached the wire.
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ThreadStatusChangedParams {
+    pub thread_id: String,
+    /// `AgentThreadStatus` wire value: `pending` / `running` / `interrupting`
+    /// / `interrupted` / `completed` / `errored` / `shutdown`.
+    pub status: String,
+    /// Optional detail (e.g. the termination reason persisted alongside the
+    /// status).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// Token-usage snapshot reported at turn completion.

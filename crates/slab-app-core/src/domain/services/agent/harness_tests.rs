@@ -832,6 +832,7 @@ async fn fork_barrier_waits_for_lagging_observer() {
                         ..Default::default()
                     },
                     usage: None,
+                    reason: None,
                 },
             ),
         )

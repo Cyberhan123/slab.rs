@@ -203,6 +203,7 @@ impl HarnessSession {
 fn rewrite_thread_id(mut msg: EventMsg, harness_id: &str) -> EventMsg {
     let tid = harness_id.to_owned();
     match &mut msg {
+        EventMsg::ThreadStatusChanged(p) => p.thread_id = tid.clone(),
         EventMsg::TurnStarted(p) => p.thread_id = tid.clone(),
         EventMsg::TurnCompleted(p) => p.thread_id = tid.clone(),
         EventMsg::TurnAborted(p) => p.thread_id = tid.clone(),
@@ -243,7 +244,12 @@ fn push_event(notifier: &Notifier, thread_id: &str, msg: EventMsg) {
         ),
         EventMsg::TurnAborted(aborted) => notifier.notify(
             method::TURN_COMPLETED,
-            &TurnCompletedParams { thread_id: aborted.thread_id, turn: aborted.turn, usage: None },
+            &TurnCompletedParams {
+                thread_id: aborted.thread_id,
+                turn: aborted.turn,
+                usage: aborted.usage,
+                reason: aborted.reason,
+            },
         ),
         EventMsg::Warning(_) => {}
         other => {

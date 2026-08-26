@@ -36,6 +36,11 @@ impl ToolHandler for ReadFileTool {
         "read_file"
     }
 
+    /// Pure read — safe to run concurrently with other read-only calls.
+    fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Read a file, optionally restricted to a 1-based inclusive line range."
     }
@@ -213,6 +218,11 @@ impl ListDirTool {
 impl ToolHandler for ListDirTool {
     fn name(&self) -> &str {
         "list_dir"
+    }
+
+    /// Pure read — safe to run concurrently with other read-only calls.
+    fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
+        true
     }
 
     fn description(&self) -> &str {

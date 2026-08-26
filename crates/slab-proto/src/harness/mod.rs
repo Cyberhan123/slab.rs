@@ -58,6 +58,7 @@ pub mod method {
 
     // --- Notifications (server -> client) ---
     pub const THREAD_STARTED: &str = "thread/started";
+    pub const THREAD_STATUS_CHANGED: &str = "thread/statusChanged";
     pub const TURN_STARTED: &str = "turn/started";
     pub const TURN_COMPLETED: &str = "turn/completed";
     pub const ITEM_STARTED: &str = "item/started";

@@ -80,6 +80,10 @@ function Assistant() {
         rollbackFromTurn,
         planMode,
         setPlanMode,
+        threadStatus,
+        abortReason,
+        queuedCount,
+        sendSteering,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
 
     // Context window for the usage consumption bar: prefer the runtime's
@@ -257,6 +261,19 @@ function Assistant() {
                 onRollbackFromTurn={rollbackFromTurn}
                 planMode={planMode}
                 onPlanModeChange={setPlanMode}
+                threadStatus={threadStatus}
+                abortReason={abortReason}
+                queuedCount={queuedCount}
+                onSteerSubmit={(text, options) =>
+                    sendSteering(
+                        {
+                            id: `steer-${Date.now()}`,
+                            role: "user",
+                            parts: [{ type: "text", text }],
+                        },
+                        options,
+                    )
+                }
             />
 
             <AssistantSessionSheet

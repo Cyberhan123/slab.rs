@@ -19,7 +19,7 @@ use slab_agent::protocol::{
     CommandExecutionRequestApprovalParams, ContextCompactedParams, ContextCompactingParams,
     FileChangeOutputDeltaParams, FileChangeRequestApprovalParams, ItemCompletedParams,
     ItemStartedParams, ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams,
-    ThreadStartedParams, TurnCompletedParams, TurnStartedParams,
+    ThreadStartedParams, ThreadStatusChangedParams, TurnCompletedParams, TurnStartedParams,
 };
 
 // ---- error / account ----
@@ -145,6 +145,8 @@ pub struct ModelLoadCompletedParams {
 pub enum ServerNotification {
     #[serde(rename = "thread/started")]
     ThreadStarted(ThreadStartedParams),
+    #[serde(rename = "thread/statusChanged")]
+    ThreadStatusChanged(ThreadStatusChangedParams),
     #[serde(rename = "turn/started")]
     TurnStarted(TurnStartedParams),
     #[serde(rename = "turn/completed")]
@@ -184,6 +186,7 @@ impl ServerNotification {
     pub fn method(&self) -> &'static str {
         match self {
             Self::ThreadStarted(_) => crate::harness::method::THREAD_STARTED,
+            Self::ThreadStatusChanged(_) => crate::harness::method::THREAD_STATUS_CHANGED,
             Self::TurnStarted(_) => crate::harness::method::TURN_STARTED,
             Self::TurnCompleted(_) => crate::harness::method::TURN_COMPLETED,
             Self::ContextCompacting(_) => crate::harness::method::CONTEXT_COMPACTING,

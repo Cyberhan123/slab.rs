@@ -346,8 +346,12 @@ fn thread_from_timeline(
                 }
                 items
             };
+            // LAST-wins: a turn emits several TurnState lines (sampling entry
+            // → phase lines → terminal); `.find()` used to pick the FIRST,
+            // so restored turns always showed the entry status ("running").
             let status = turn_states
                 .iter()
+                .rev()
                 .find(|state| state.turn_index == index)
                 .map(|state| state.status.clone())
                 .filter(|status| !status.trim().is_empty())
