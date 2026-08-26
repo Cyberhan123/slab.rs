@@ -12,6 +12,7 @@ use slab_sandboxing::SandboxDriver;
 
 pub mod apply_patch;
 mod args;
+pub(crate) mod error;
 pub mod fs;
 pub mod fs_watch;
 pub mod git;
