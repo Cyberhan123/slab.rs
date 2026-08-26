@@ -80,7 +80,9 @@ impl ToolHandler for GrepTool {
                 },
                 "glob": {
                     "type": "string",
-                    "description": "Glob pattern to restrict which files are searched (e.g. '*.rs')."
+                    "description": "Glob pattern to restrict which files are searched (e.g. '*.rs'). \
+                     Negated patterns are not supported. Files ignored by .gitignore are always \
+                     excluded regardless of the glob."
                 },
                 "case_insensitive": {
                     "type": "boolean",
@@ -182,15 +184,20 @@ fn grep_blocking(
     max_results: usize,
     context_lines: usize,
 ) -> Result<Vec<serde_json::Value>, String> {
+    // The optional `glob` argument filters WITH POST-PROCESSING rather than an
+    // `ignore` Override whitelist: overrides take precedence over .gitignore,
+    // so `glob: "**/*"` used to match ignored directories themselves and leak
+    // them into the search. Post-filtering keeps .gitignore authoritative.
+    let glob_matcher = match glob {
+        Some(g) => {
+            Some(globset::Glob::new(g).map_err(|e| format!("invalid glob: {e}"))?.compile_matcher())
+        }
+        None => None,
+    };
+
     let mut builder = ignore::WalkBuilder::new(root);
     builder.hidden(false); // don't ignore hidden files (show dot-files)
-
-    if let Some(g) = glob {
-        let mut override_builder = ignore::overrides::OverrideBuilder::new(root);
-        override_builder.add(g).map_err(|e| format!("invalid glob: {e}"))?;
-        let overrides = override_builder.build().map_err(|e| format!("glob build error: {e}"))?;
-        builder.overrides(overrides);
-    }
+    builder.require_git(false); // apply .gitignore even outside a git repo (matches file_glob)
 
     let mut results = Vec::new();
 
@@ -206,6 +213,17 @@ fn grep_blocking(
             continue;
         }
         let path = entry.path();
+        if let Some(matcher) = glob_matcher.as_ref() {
+            let rel = path.strip_prefix(root).unwrap_or(path);
+            let candidate = if rel.as_os_str().is_empty() {
+                std::path::Path::new(path.file_name().unwrap_or_default())
+            } else {
+                rel
+            };
+            if !matcher.is_match(candidate) {
+                continue;
+            }
+        }
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(_) => continue, // skip binary / unreadable files
@@ -402,6 +420,47 @@ mod tests {
 
         assert_eq!(value["total"], 1);
         assert!(value["matches"][0]["file"].as_str().expect("file").ends_with(".env"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// P3 regression: a `glob` broad enough to match an ignored directory name
+    /// itself (`**/*`) used to short-circuit past .gitignore via the override
+    /// whitelist and search ignored trees. Also pins `require_git(false)`:
+    /// .gitignore applies even without a `.git` directory (none is created
+    /// here, or in any other temp-root test).
+    #[tokio::test]
+    async fn grep_tool_glob_does_not_override_gitignore() {
+        let root = temp_root("glob_gitignore");
+        fs::create_dir_all(root.join("ignored")).expect("create ignored");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join(".gitignore"), "ignored/\n").expect("write gitignore");
+        fs::write(root.join("ignored").join("x.rs"), "needle\n").expect("write ignored file");
+        fs::write(root.join("src").join("a.rs"), "needle\n").expect("write source file");
+        let tool = GrepTool::new(Some(root.clone()));
+
+        // With the broad glob the ignored tree must still be excluded.
+        let output = tool
+            .execute(&ctx(), &json!({"path": ".", "pattern": "needle", "glob": "**/*"}))
+            .await
+            .expect("grep output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        let files: Vec<String> = value["matches"]
+            .as_array()
+            .expect("matches")
+            .iter()
+            .map(|m| m["file"].as_str().expect("file").to_string())
+            .collect();
+        assert!(!files.iter().any(|f| f.contains("ignored")), "ignored leaked: {files:?}");
+        assert_eq!(value["total"], 1);
+
+        // Without a glob the same gitignore filtering applies.
+        let output = tool
+            .execute(&ctx(), &json!({"path": ".", "pattern": "needle"}))
+            .await
+            .expect("grep output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        assert_eq!(value["total"], 1);
+        assert!(value["matches"][0]["file"].as_str().expect("file").contains("src"));
         let _ = fs::remove_dir_all(root);
     }
 
