@@ -330,7 +330,7 @@ export type ServerInfo = { name: string, version: string, };
 /**
  * Union of every server → client notification, discriminated by `method`.
  */
-export type ServerNotification = { "method": "thread/started", "params": ThreadStartedParams } | { "method": "thread/statusChanged", "params": ThreadStatusChangedParams } | { "method": "turn/started", "params": TurnStartedParams } | { "method": "turn/completed", "params": TurnCompletedParams } | { "method": "context/compacting", "params": ContextCompactingParams } | { "method": "context/compacted", "params": ContextCompactedParams } | { "method": "item/started", "params": ItemStartedParams } | { "method": "item/completed", "params": ItemCompletedParams } | { "method": "item/agentMessage/delta", "params": AgentMessageDeltaParams } | { "method": "item/reasoning/textDelta", "params": ReasoningTextDeltaParams } | { "method": "item/reasoning/summaryTextDelta", "params": ReasoningSummaryTextDeltaParams } | { "method": "item/commandExecution/outputDelta", "params": CommandExecutionOutputDeltaParams } | { "method": "item/fileChange/outputDelta", "params": FileChangeOutputDeltaParams } | { "method": "item/commandExecution/requestApproval", "params": CommandExecutionRequestApprovalParams } | { "method": "item/fileChange/requestApproval", "params": FileChangeRequestApprovalParams } | { "method": "error", "params": ErrorParams } | { "method": "account/updated", "params": AccountUpdatedParams } | { "method": "account/loginCompleted", "params": AccountLoginCompletedParams };
+export type ServerNotification = { "method": "thread/statusChanged", "params": ThreadStatusChangedParams } | { "method": "turn/started", "params": TurnStartedParams } | { "method": "turn/completed", "params": TurnCompletedParams } | { "method": "context/compacting", "params": ContextCompactingParams } | { "method": "context/compacted", "params": ContextCompactedParams } | { "method": "item/started", "params": ItemStartedParams } | { "method": "item/completed", "params": ItemCompletedParams } | { "method": "item/agentMessage/delta", "params": AgentMessageDeltaParams } | { "method": "item/reasoning/textDelta", "params": ReasoningTextDeltaParams } | { "method": "item/reasoning/summaryTextDelta", "params": ReasoningSummaryTextDeltaParams } | { "method": "item/commandExecution/outputDelta", "params": CommandExecutionOutputDeltaParams } | { "method": "item/fileChange/outputDelta", "params": FileChangeOutputDeltaParams } | { "method": "item/commandExecution/requestApproval", "params": CommandExecutionRequestApprovalParams } | { "method": "item/fileChange/requestApproval", "params": FileChangeRequestApprovalParams } | { "method": "error", "params": ErrorParams } | { "method": "account/updated", "params": AccountUpdatedParams } | { "method": "account/loginCompleted", "params": AccountLoginCompletedParams };
 
 // ── ShutdownParams ──
 export type ShutdownParams = { threadId: string, };
@@ -430,9 +430,6 @@ export type ThreadRollbackParams = { threadId: string, toTurnId: string, };
 
 // ── ThreadRollbackResult ──
 export type ThreadRollbackResult = { thread: Thread, };
-
-// ── ThreadStartedParams ──
-export type ThreadStartedParams = { thread: Thread, };
 
 // ── ThreadStartParams ──
 export type ThreadStartParams = { model?: string, modelProvider?: string, cwd?: string, approvalPolicy?: ApprovalPolicy, sandbox?: SandboxMode, 

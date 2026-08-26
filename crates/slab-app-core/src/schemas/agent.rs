@@ -531,7 +531,15 @@ impl From<ThreadSnapshot> for AgentThreadResponse {
 impl From<ThreadMessageRecord> for AgentThreadMessageResponse {
     fn from(record: ThreadMessageRecord) -> Self {
         let message = record.message;
-        let content = message.content.rendered_text();
+        // The rollout stores assistant messages in their LLM-grade form (the
+        // reasoning embedded as a `<think …>…</think>` block for the next
+        // prompt's chat template). This REST surface is UI-grade — strip the
+        // block so consumers never see raw thinking markup.
+        let content = if message.role == "assistant" {
+            slab_agent::strip_think_blocks(&message.content.rendered_text())
+        } else {
+            message.content.rendered_text()
+        };
         let tool_call_id = message.tool_call_id;
         let tool_calls = message.tool_calls.into_iter().map(Into::into).collect();
         Self {

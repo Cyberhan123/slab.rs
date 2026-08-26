@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::error::{ErrorEvent, WarningEvent};
+use super::error::ErrorEvent;
 use super::notification::*;
 use super::turn::Turn;
 
@@ -54,9 +54,7 @@ pub struct TurnAbortedParams {
 #[non_exhaustive]
 pub enum EventMsg {
     Error(ErrorEvent),
-    Warning(WarningEvent),
 
-    ThreadStarted(ThreadStartedParams),
     ThreadStatusChanged(ThreadStatusChangedParams),
     TurnStarted(TurnStartedParams),
     TurnCompleted(TurnCompletedParams),

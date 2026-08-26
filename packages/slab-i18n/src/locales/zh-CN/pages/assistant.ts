@@ -90,8 +90,6 @@ export const assistant = {
     },
     stopGeneratingResponse: '停止生成回复',
     sendMessage: '发送消息',
-    queued_one: '已排队 {{count}} 条消息,将在本轮工具批次后注入',
-    queued_other: '已排队 {{count}} 条消息,将在本轮工具批次后注入',
     deepThink: '深度思考',
     reasoningEffort: '推理',
     reasoning: {
@@ -113,6 +111,7 @@ export const assistant = {
     rollback: '撤回',
     confirmRollback: '撤回此消息及其后的所有内容？',
     cancelEdit: '取消编辑',
+    queuedLabel: '已排队',
   },
   thinking: {
     loading: '思考中...',
@@ -154,6 +153,7 @@ export const assistant = {
     failedToDeleteSession: '删除助手会话失败。',
     compactFailed: '压缩会话失败。',
     forkFailed: '分叉会话失败。',
+    steeringResync: '本轮刚刚结束——你的消息将开启新一轮，正在重新同步…',
   },
   connection: {
     connected: '事件已连接',

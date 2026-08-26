@@ -13,18 +13,10 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::item::TurnItem;
-use super::thread::Thread;
 use super::turn::Turn;
 use slab_types::ConversationMessage;
 
 // ---- lifecycle ----
-
-#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-#[ts(export)]
-pub struct ThreadStartedParams {
-    pub thread: Thread,
-}
 
 #[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

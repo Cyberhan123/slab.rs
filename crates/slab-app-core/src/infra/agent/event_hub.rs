@@ -39,9 +39,9 @@ const CHANNEL_CAPACITY: usize = 256;
 /// NOTE: this NO LONGER gates routing. `on_event_msg` routes EVERY
 /// event to the dedicated unbounded persistence channel; the observer's
 /// `EventPersistenceMode::should_persist` fallback decides which non-structural
-/// variants (Error/Warning under Limited, deltas/approvals under Extended)
+/// variants (Error under Limited, deltas/approvals under Extended)
 /// become `RolloutItem::EventMsg` lines. Routing only the structural subset
-/// would make that fallback unreachable and silently drop Error/Warning from
+/// would make that fallback unreachable and silently drop Error from
 /// the rollout under the default Limited mode. This helper is retained as a
 /// structural classifier for test sanity assertions (e.g. Test C confirms its
 /// chosen flood event is a real structural event).
@@ -52,7 +52,6 @@ fn is_persistence_grade(msg: &EventMsg) -> bool {
         EventMsg::ItemCompleted(_)
             | EventMsg::ContextCompacting(_)
             | EventMsg::ContextCompacted(_)
-            | EventMsg::ThreadStarted(_)
             | EventMsg::TurnStarted(_)
             | EventMsg::TurnCompleted(_)
             | EventMsg::TurnAborted(_)

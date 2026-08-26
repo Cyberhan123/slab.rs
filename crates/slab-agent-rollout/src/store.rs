@@ -1036,11 +1036,10 @@ mod tests {
         .unwrap();
         s.append(
             "t",
-            RolloutItem::EventMsg(EventMsg::ThreadStarted(
-                slab_agent::protocol::ThreadStartedParams {
-                    thread: slab_agent::protocol::Thread::default(),
-                },
-            )),
+            RolloutItem::EventMsg(EventMsg::TurnStarted(slab_agent::protocol::TurnStartedParams {
+                thread_id: "t".to_owned(),
+                turn: slab_agent::protocol::Turn::default(),
+            })),
         )
         .await
         .unwrap();
@@ -1058,7 +1057,7 @@ mod tests {
 
         let events = s.read_events("t").await;
         assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], EventMsg::ThreadStarted(_)));
+        assert!(matches!(events[0], EventMsg::TurnStarted(_)));
 
         assert!(s.read_session_meta("t").await.is_some());
         assert!(s.file_exists("t").await);

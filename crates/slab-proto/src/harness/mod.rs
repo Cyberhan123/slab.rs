@@ -57,7 +57,6 @@ pub mod method {
     pub const WORKSPACE_MIGRATE: &str = "workspace/migrate";
 
     // --- Notifications (server -> client) ---
-    pub const THREAD_STARTED: &str = "thread/started";
     pub const THREAD_STATUS_CHANGED: &str = "thread/statusChanged";
     pub const TURN_STARTED: &str = "turn/started";
     pub const TURN_COMPLETED: &str = "turn/completed";
@@ -91,8 +90,6 @@ pub mod error_code {
     pub const NOT_INITIALIZED: i64 = -32001;
     /// No thread exists for the given id / thread is unknown to this socket.
     pub const THREAD_NOT_FOUND: i64 = -32002;
-    /// A turn is already in progress and the op cannot be accepted.
-    pub const TURN_IN_PROGRESS: i64 = -32003;
     /// The requested method is recognized by the protocol but not yet wired.
     pub const NOT_IMPLEMENTED: i64 = -32004;
 }

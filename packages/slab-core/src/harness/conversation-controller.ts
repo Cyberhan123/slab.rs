@@ -333,6 +333,14 @@ export class ConversationController {
   private threadStatus: ThreadStatusString | null = null
   private abortReason: string | null = null
   private queuedTexts: string[] = []
+  /**
+   * The live AI-SDK stream never replays user messages (the wire has no
+   * `message/appended` notification), so when queued steering is drained or
+   * persisted server-side the only way those inputs reappear is a history
+   * refresh. Set when a refresh is owed but the triggering run has not ended
+   * yet; the terminal event consumes it.
+   */
+  private pendingResync = false
 
   constructor(options: ConversationControllerOptions = {}) {
     this.sessionId = options.sessionId
@@ -360,6 +368,14 @@ export class ConversationController {
 
   /** Kick off the restore machine (mount hook for the React side). */
   start(): void {
+    // `dispose()` tears the notification subscription down; a `start()` after
+    // that (route-transition remount reusing a memoized controller) MUST
+    // re-register it or the controller silently ignores every notification —
+    // approvals never render, thread status never updates — while the
+    // transport (sharing the same client) keeps streaming normally.
+    if (!this.unsubscribeNotifications) {
+      this.unsubscribeNotifications = this.client.onNotification(this.handleNotification)
+    }
     void this.reconnect()
   }
 
@@ -515,19 +531,43 @@ export class ConversationController {
     if (result.queued) {
       this.queuedTexts = text.trim() ? [...this.queuedTexts, text.trim()] : [...this.queuedTexts]
       this.commit()
+    } else if (
+      this.threadStatus !== null &&
+      TERMINAL_THREAD_STATUSES.has(this.threadStatus)
+    ) {
+      // Lost the idle-window race and the run already ended: refresh now so
+      // the history converges on the finished rollout.
+      void this.reconnect()
     } else {
       // Lost the idle-window race: the input STARTED a new run that no local
-      // stream is subscribed to. Refresh so the history converges when it
-      // completes (its live events are unreachable from here).
-      void this.reconnect()
+      // stream is subscribed to. Defer the refresh to that run's terminal
+      // event so the pane converges on the COMPLETED rollout rather than a
+      // mid-run snapshot (its live events are unreachable from here).
+      this.pendingResync = true
     }
     return result
+  }
+
+  /**
+   * Clear the queued-steering texts on a run-terminal event. When anything was
+   * queued (or a resync was owed from a lost steering race), also refresh the
+   * restored history so the drained/persisted steering inputs materialize as
+   * real message rows — the live stream never replays them. Caller commits.
+   */
+  private clearQueuedAndResync(): void {
+    const shouldResync = this.queuedTexts.length > 0 || this.pendingResync
+    this.pendingResync = false
+    this.queuedTexts = []
+    if (shouldResync) void this.reconnect()
   }
 
   /** Interrupt the live turn on the bound thread (best-effort). */
   async interrupt(): Promise<void> {
     const threadId = this.client.currentThreadId
     if (!threadId) return
+    // Teardown persists any undelivered queued inputs into the rollout; flag a
+    // resync so the terminal event materializes them as real rows.
+    if (this.queuedTexts.length > 0) this.pendingResync = true
     this.queuedTexts = []
     this.commit()
     await this.client.turnInterrupt({ threadId, turnId: "0" })
@@ -861,9 +901,10 @@ export class ConversationController {
       this.threadStatus = params.status as ThreadStatusString
       if (this.threadStatus === "running") this.abortReason = null
       if (TERMINAL_THREAD_STATUSES.has(this.threadStatus)) {
-        // The run ended; anything still queued client-side was persisted
-        // server-side (steering leftovers land in the rollout history).
-        this.queuedTexts = []
+        // The run ended; anything still queued client-side was drained into
+        // the run or persisted server-side (steering leftovers land in the
+        // rollout history).
+        this.clearQueuedAndResync()
       }
       this.commit()
       return
@@ -877,7 +918,7 @@ export class ConversationController {
       this.turnUsage = params.usage ?? null
       const reason = typeof params.reason === "string" ? params.reason : null
       this.abortReason = reason && reason !== "completed" ? reason : null
-      this.queuedTexts = []
+      this.clearQueuedAndResync()
       this.commit()
       return
     }

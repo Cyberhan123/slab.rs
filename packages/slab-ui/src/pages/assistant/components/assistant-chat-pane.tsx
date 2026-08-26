@@ -93,10 +93,16 @@ export type AssistantChatPaneProps = {
     threadStatus: ThreadStatusString | null
     /** Why the last run ended abnormally (null after a clean completion). */
     abortReason: string | null
-    /** Steering inputs queued on the server for the running turn. */
-    queuedCount: number
+    /** Steering inputs queued on the running turn; ghost bubbles at the stream tail. */
+    queuedTexts: readonly string[]
     /** Steering send — submits while the turn runs queue at the iteration boundary. */
     onSteerSubmit: (text: string, options?: TurnSendOptions) => Promise<unknown>
+    /**
+     * Server-side interrupt for the Stop control (best-effort, errors swallowed
+     * upstream). Composed with the local AI-SDK `stop()` so the UI unblocks
+     * immediately while the server terminates the run authoritatively.
+     */
+    onInterrupt: () => void
 }
 
 export function AssistantChatPane({
@@ -129,8 +135,9 @@ export function AssistantChatPane({
     onPlanModeChange,
     threadStatus,
     abortReason,
-    queuedCount,
+    queuedTexts,
     onSteerSubmit,
+    onInterrupt,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
     const { messages, sendMessage, status, stop } = useChat({
@@ -223,6 +230,7 @@ export function AssistantChatPane({
                                                 compactionMarkers={compactionMarkers}
                                                 modelLoad={modelLoad}
                                                 sessionLoading={isHistoryLoading}
+                                                queuedTexts={queuedTexts}
                                             />
                                         </MessageInteractionContext.Provider>
                                         {rollbackConfirmDialog}
@@ -233,14 +241,6 @@ export function AssistantChatPane({
                     </CardContent>
                     <CardFooter className="flex-col gap-2">
                         <TokenUsageIndicator usage={turnUsage} contextWindow={contextWindow} />
-                        {queuedCount > 0 ? (
-                            <p
-                                className="w-full truncate text-xs text-muted-foreground"
-                                data-testid="assistant-queued-count"
-                            >
-                                {t("pages.assistant.composer.queued", { count: queuedCount })}
-                            </p>
-                        ) : null}
                         {abortReasonLabel ? (
                             <p
                                 className="w-full truncate text-xs text-muted-foreground"
@@ -269,8 +269,10 @@ export function AssistantChatPane({
                                 // Steering: while the server-side turn is running,
                                 // submit queues at the iteration boundary instead of
                                 // opening a second (double-delivering) AI-SDK stream.
+                                // This bypasses `onBeforeSubmit` on purpose — that
+                                // gate throws while the session is busy, which it
+                                // always is here (the turn is running).
                                 if (steerable) {
-                                    await onBeforeSubmit(value)
                                     await onSteerSubmit(value, { effort, permissionMode, agentType })
                                     return
                                 }
@@ -281,7 +283,13 @@ export function AssistantChatPane({
                                     metadata: { effort, permissionMode, agentType },
                                 })
                             }}
-                            onStop={stop}
+                            onStop={() => {
+                                // Local abort for immediate feedback + the
+                                // authoritative server-side interrupt (threadStatus
+                                // flips via `thread/statusChanged`).
+                                stop()
+                                onInterrupt()
+                            }}
                             loading={disabled || isBusy || isCompacting || isForking}
                             steerable={steerable && !disabled && !isCompacting && !isForking}
                             approvals={approvals}

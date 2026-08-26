@@ -19,7 +19,7 @@ use slab_agent::protocol::{
     CommandExecutionRequestApprovalParams, ContextCompactedParams, ContextCompactingParams,
     FileChangeOutputDeltaParams, FileChangeRequestApprovalParams, ItemCompletedParams,
     ItemStartedParams, ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams,
-    ThreadStartedParams, ThreadStatusChangedParams, TurnCompletedParams, TurnStartedParams,
+    ThreadStatusChangedParams, TurnCompletedParams, TurnStartedParams,
 };
 
 // ---- error / account ----
@@ -143,8 +143,6 @@ pub struct ModelLoadCompletedParams {
 #[serde(tag = "method", content = "params")]
 #[ts(export)]
 pub enum ServerNotification {
-    #[serde(rename = "thread/started")]
-    ThreadStarted(ThreadStartedParams),
     #[serde(rename = "thread/statusChanged")]
     ThreadStatusChanged(ThreadStatusChangedParams),
     #[serde(rename = "turn/started")]
@@ -185,7 +183,6 @@ impl ServerNotification {
     /// The JSON-RPC method string for this notification.
     pub fn method(&self) -> &'static str {
         match self {
-            Self::ThreadStarted(_) => crate::harness::method::THREAD_STARTED,
             Self::ThreadStatusChanged(_) => crate::harness::method::THREAD_STATUS_CHANGED,
             Self::TurnStarted(_) => crate::harness::method::TURN_STARTED,
             Self::TurnCompleted(_) => crate::harness::method::TURN_COMPLETED,

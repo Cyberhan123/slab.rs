@@ -90,8 +90,6 @@ export const assistant = {
     },
     stopGeneratingResponse: 'Stop generating response',
     sendMessage: 'Send message',
-    queued_one: '{{count}} message queued for the running turn',
-    queued_other: '{{count}} messages queued for the running turn',
     deepThink: 'Deep think',
     reasoningEffort: 'Reasoning',
     reasoning: {
@@ -113,6 +111,7 @@ export const assistant = {
     rollback: 'Rollback',
     confirmRollback: 'Retract this message and everything after it?',
     cancelEdit: 'Cancel edit',
+    queuedLabel: 'Queued',
   },
   thinking: {
     loading: 'Thinking...',
@@ -159,6 +158,8 @@ export const assistant = {
     failedToDeleteSession: 'Failed to delete assistant session.',
     compactFailed: 'Failed to compact the conversation.',
     forkFailed: 'Failed to fork the conversation.',
+    steeringResync:
+      'The running turn just ended — your message starts a new turn. Resyncing…',
   },
   connection: {
     connected: 'Events connected',

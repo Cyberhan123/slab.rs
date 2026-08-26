@@ -14,14 +14,13 @@ use slab_agent::protocol::EventMsg;
 use slab_proto::harness::notification::ServerNotification;
 
 /// Lifting helper: convert an [`EventMsg`] into its wire [`ServerNotification`],
-/// if any. `Error`, `Warning`, and `TurnAborted` return `None` — the dispatcher
+/// if any. `Error` and `TurnAborted` return `None` — the dispatcher
 /// adapts them (error needs correlation ids; aborted maps to a `turn/completed`
 /// with interrupted status). This free function replaces the old
 /// `EventMsg::into_notification` method, which could not live on the slab-agent
 /// semantic type without dragging in the wire-envelope crate.
 pub fn event_msg_to_notification(msg: EventMsg) -> Option<ServerNotification> {
     match msg {
-        EventMsg::ThreadStarted(p) => Some(ServerNotification::ThreadStarted(p)),
         EventMsg::ThreadStatusChanged(p) => Some(ServerNotification::ThreadStatusChanged(p)),
         EventMsg::TurnStarted(p) => Some(ServerNotification::TurnStarted(p)),
         EventMsg::TurnCompleted(p) => Some(ServerNotification::TurnCompleted(p)),
@@ -47,7 +46,7 @@ pub fn event_msg_to_notification(msg: EventMsg) -> Option<ServerNotification> {
         // Persistence-grade conversation events. They carry data for
         // the rollout observer only — no UI notification maps to them.
         EventMsg::MessageAppended(_) | EventMsg::TurnStateChanged(_) => None,
-        EventMsg::Error(_) | EventMsg::Warning(_) | EventMsg::TurnAborted(_) => None,
+        EventMsg::Error(_) | EventMsg::TurnAborted(_) => None,
         // `EventMsg` is `#[non_exhaustive]`; future variants added in slab-agent
         // have no wire-notification mapping yet — drop them rather than failing
         // to compile the lift when slab-agent grows a new event.

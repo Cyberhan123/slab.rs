@@ -143,7 +143,11 @@ fn thread_from_snapshot_with_id(id: &str, snapshot: &ThreadSnapshot) -> Thread {
         .unwrap_or(0);
     Thread {
         id: id.to_owned(),
-        preview: snapshot.completion_text.clone().unwrap_or_default(),
+        preview: snapshot
+            .completion_text
+            .as_deref()
+            .map(slab_agent::strip_think_blocks)
+            .unwrap_or_default(),
         // model_provider would require parsing the AgentConfig JSON; left empty
         // until a structured accessor exists.
         model_provider: String::new(),
@@ -362,7 +366,11 @@ fn thread_from_timeline(
 
     Thread {
         id: id.to_owned(),
-        preview: snapshot.completion_text.clone().unwrap_or_default(),
+        preview: snapshot
+            .completion_text
+            .as_deref()
+            .map(slab_agent::strip_think_blocks)
+            .unwrap_or_default(),
         model_provider: String::new(),
         created_at,
         turns,

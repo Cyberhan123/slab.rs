@@ -82,8 +82,9 @@ function Assistant() {
         setPlanMode,
         threadStatus,
         abortReason,
-        queuedCount,
+        queuedTexts,
         sendSteering,
+        interrupt,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
 
     // Context window for the usage consumption bar: prefer the runtime's
@@ -263,17 +264,27 @@ function Assistant() {
                 onPlanModeChange={setPlanMode}
                 threadStatus={threadStatus}
                 abortReason={abortReason}
-                queuedCount={queuedCount}
-                onSteerSubmit={(text, options) =>
-                    sendSteering(
+                queuedTexts={queuedTexts}
+                onSteerSubmit={async (text, options) => {
+                    const result = (await sendSteering(
                         {
                             id: `steer-${Date.now()}`,
                             role: "user",
                             parts: [{ type: "text", text }],
                         },
                         options,
-                    )
-                }
+                    )) as { queued?: boolean } | undefined
+                    // Lost the idle-window race: the message started a NEW run
+                    // whose live stream this pane isn't subscribed to. The
+                    // controller refreshes on its terminal event; surface the
+                    // fallback so the resync doesn't look like a silent stall.
+                    if (!result || result.queued !== true) {
+                        toast.info(t("pages.assistant.toast.steeringResync"))
+                    }
+                }}
+                onInterrupt={() => {
+                    void interrupt().catch(() => {})
+                }}
             />
 
             <AssistantSessionSheet

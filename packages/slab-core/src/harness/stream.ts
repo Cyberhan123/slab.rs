@@ -256,7 +256,6 @@ export function convertNotification(
   state: StreamState,
 ): UIMessageChunk[] {
   switch (notification.method) {
-    case HARNESS_NOTIFICATION.THREAD_STARTED:
     case HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED:
     case HARNESS_NOTIFICATION.TURN_STARTED:
     case HARNESS_NOTIFICATION.ITEM_COMMAND_EXECUTION_OUTPUT_DELTA:

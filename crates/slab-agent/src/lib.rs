@@ -86,3 +86,4 @@ pub use tool::{
     ToolContextBuilder, ToolDiscoveryState, ToolHandler, ToolName, ToolNamespace, ToolOutput,
     ToolOutputObserver, ToolOutputStream, ToolRouter, ToolVisibility, WorkspaceRef,
 };
+pub use turn::strip_think_blocks;

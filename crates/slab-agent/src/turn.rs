@@ -1213,7 +1213,10 @@ fn find_think_open(text: &str) -> Option<usize> {
 /// agentMessage item — history renders the item text verbatim, which would
 /// show the raw thinking block in the message body. Unterminated blocks
 /// (streaming truncation) are kept verbatim.
-pub(crate) fn strip_think_blocks(text: &str) -> String {
+///
+/// Public so app-core can produce UI-grade text on its own surfaces (e.g. the
+/// REST history endpoint reads the LLM-grade rollout messages directly).
+pub fn strip_think_blocks(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(open) = find_think_open(rest) {

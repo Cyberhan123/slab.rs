@@ -218,7 +218,7 @@ fn rewrite_thread_id(mut msg: EventMsg, harness_id: &str) -> EventMsg {
         EventMsg::FileChangeRequestApproval(p) => p.thread_id = tid.clone(),
         EventMsg::ContextCompacting(p) => p.thread_id = tid.clone(),
         EventMsg::ContextCompacted(p) => p.thread_id = tid.clone(),
-        // Error / Warning / ThreadStarted carry no thread_id; leave unchanged.
+        // Error carries no thread_id; leave unchanged.
         // `EventMsg` is `#[non_exhaustive]`: future slab-agent variants with no
         // known thread_id mapping pass through untouched.
         _ => {}
@@ -228,7 +228,7 @@ fn rewrite_thread_id(mut msg: EventMsg, harness_id: &str) -> EventMsg {
 
 /// Push one projected harness event onto the session's outbound stream as a
 /// JSON-RPC notification. `Error`/`TurnAborted` are adapted (they do not lift
-/// directly via `event_msg_to_notification`); `Warning` is dropped.
+/// directly via `event_msg_to_notification`).
 fn push_event(notifier: &Notifier, thread_id: &str, msg: EventMsg) {
     match msg {
         EventMsg::Error(error) => notifier.notify(
@@ -251,7 +251,6 @@ fn push_event(notifier: &Notifier, thread_id: &str, msg: EventMsg) {
                 reason: aborted.reason,
             },
         ),
-        EventMsg::Warning(_) => {}
         other => {
             if let Some(notification) = event_msg_to_notification(other) {
                 notifier.notify(notification.method(), &notification.payload());
