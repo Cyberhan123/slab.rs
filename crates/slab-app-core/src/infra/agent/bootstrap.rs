@@ -299,7 +299,7 @@ fn build_agent_control(
         Arc::new(slab_agent_context::ContextInstructionHook::new(Arc::new(
             super::context::AppContextSources::new(
                 (*ctx.model_state).clone(),
-                super::context::shell_kind(shell_config.launcher),
+                super::context::shell_kind(shell_config.launcher, shell_config.bash_path.clone()),
                 Arc::clone(&exec_policy),
                 memory_config.clone(),
                 memory_root.clone(),

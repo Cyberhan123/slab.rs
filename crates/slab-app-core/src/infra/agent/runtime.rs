@@ -120,8 +120,10 @@ impl AgentRuntimeReloader {
             memory_root.clone(),
         );
         memory_pipeline.set_control(self.runtime.control());
+        let shell_config = self.state.pmid().config().agent.tools.shell.clone();
         let shell = crate::infra::agent::context::shell_kind(
-            self.state.pmid().config().agent.tools.shell.launcher,
+            shell_config.launcher,
+            shell_config.bash_path.clone(),
         );
         let exec_policy = self.runtime.control().exec_policy();
         // The memory read-side instruction is folded into the context hook

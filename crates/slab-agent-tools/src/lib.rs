@@ -38,7 +38,8 @@ pub use plan::{
 };
 pub use shell::{ShellPolicy, ShellTool};
 pub use slab_shell_command::{
-    ShellLauncher, ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
+    ShellFamily, ShellLauncher, ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher,
+    ShellRuleSet,
 };
 pub use subagent::DelegateSubagentTool;
 pub use task_complete::{TASK_COMPLETE_METADATA_KEY, TASK_COMPLETE_TOOL_NAME, TaskCompleteTool};
