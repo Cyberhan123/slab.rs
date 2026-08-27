@@ -248,6 +248,10 @@ struct DesiredCloudRow {
     display_name: String,
     provider_id: String,
     remote_model_id: String,
+    /// Advertised context window from the curated catalog. Part of the drift
+    /// predicate so rows persisted before a catalog value landed (or wiped by
+    /// a manual edit) are refreshed on the next reconcile.
+    context_window: Option<u32>,
 }
 
 /// Reconcile curated catalog rows against the store: upsert missing/drifted rows, delete auto
@@ -284,6 +288,7 @@ async fn sync_curated_catalogs(
                     display_name: spec.display_name,
                     provider_id: provider.id.clone(),
                     remote_model_id: spec.remote_model_id,
+                    context_window: spec.context_window,
                 },
             );
         }
@@ -296,12 +301,19 @@ async fn sync_curated_catalogs(
                 || m.display_name != row.display_name
                 || m.spec.provider_id.as_deref() != Some(row.provider_id.as_str())
                 || m.spec.remote_model_id.as_deref() != Some(row.remote_model_id.as_str())
+                || m.spec.context_window != row.context_window
         });
         if !drifted {
             continue;
         }
         match model
-            .upsert_cloud_model(&row.id, &row.display_name, &row.provider_id, &row.remote_model_id)
+            .upsert_cloud_model(
+                &row.id,
+                &row.display_name,
+                &row.provider_id,
+                &row.remote_model_id,
+                row.context_window,
+            )
             .await
         {
             Ok(()) => upserted += 1,
@@ -383,7 +395,7 @@ async fn apply_live_discovery(
         if !drifted {
             continue;
         }
-        match model.upsert_cloud_model(id, remote, &provider.id, remote).await {
+        match model.upsert_cloud_model(id, remote, &provider.id, remote, None).await {
             Ok(()) => changed += 1,
             Err(error) => warn!(
                 provider_id = %provider.id,
@@ -567,6 +579,48 @@ mod tests {
         ] {
             assert!(ids.iter().any(|id| id == expected), "missing {expected} in {ids:?}");
         }
+
+        // Curated context windows land on the activated rows — the compaction
+        // threshold resolver reads exactly this field.
+        let flagship = app.model.get_model("cloud:glm-main:glm-5.3").await.expect("get glm-5.3");
+        assert_eq!(flagship.spec.context_window, Some(1_000_000));
+        let legacy = app.model.get_model("cloud:glm-main:glm-4.5").await.expect("get glm-4.5");
+        assert_eq!(legacy.spec.context_window, Some(128_000));
+    }
+
+    /// Rows persisted before the curated catalog carried context windows (or
+    /// wiped by a manual edit) are refreshed by the drift predicate — without
+    /// this, legacy `None` rows keep the tiny local fallback threshold forever.
+    #[tokio::test]
+    async fn curated_context_window_drift_backfills_existing_rows() {
+        let app = TestAppCore::new().await;
+        set_registry_providers(
+            &app,
+            vec![registry_entry(
+                "glm-main",
+                "big_model",
+                "https://open.bigmodel.cn/api/coding/paas/v4",
+            )],
+        )
+        .await;
+        sync_provider_models(&app.model, &app.model_state).await;
+
+        // Simulate a legacy row: re-upsert without a window.
+        app.model
+            .upsert_cloud_model("cloud:glm-main:glm-5.3", "GLM-5.3", "glm-main", "glm-5.3", None)
+            .await
+            .expect("wipe context window");
+        let wiped = app.model.get_model("cloud:glm-main:glm-5.3").await.expect("get wiped row");
+        assert_eq!(wiped.spec.context_window, None);
+
+        sync_provider_models(&app.model, &app.model_state).await;
+
+        let restored = app.model.get_model("cloud:glm-main:glm-5.3").await.expect("get restored");
+        assert_eq!(
+            restored.spec.context_window,
+            Some(1_000_000),
+            "drift predicate must backfill the curated window"
+        );
     }
 
     #[tokio::test]

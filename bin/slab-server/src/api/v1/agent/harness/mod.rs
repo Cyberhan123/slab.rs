@@ -745,6 +745,7 @@ mod tests {
             remote_model_id: remote.to_owned(),
             display_name: label.to_owned(),
             description: label.to_owned(),
+            context_window: None,
             is_default,
         }
     }

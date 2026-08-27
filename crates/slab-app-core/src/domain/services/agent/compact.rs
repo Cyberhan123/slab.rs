@@ -21,19 +21,33 @@ use slab_types::{ConversationMessage, ConversationMessageContent};
 use tracing::warn;
 
 use crate::context::ModelState;
-use crate::domain::models::{ChatCompletionCommand, ChatCompletionOutput, CommonChatParams};
+use crate::domain::models::{
+    ChatCompletionCommand, ChatCompletionOutput, CommonChatParams, UnifiedModel, UnifiedModelKind,
+};
 use crate::domain::services::chat::ChatService;
 use crate::error::AppCoreError;
+use crate::infra::db::ModelStore;
 
 /// Default fraction of `context_length` at which auto-compaction fires.
 const DEFAULT_THRESHOLD_RATIO: f32 = 0.80;
 /// Default fraction of `context_length` retained verbatim after compaction
 /// (the recent trailing window that is not summarized).
 const DEFAULT_TARGET_RATIO: f32 = 0.60;
-/// Token budget for the summary completion itself.
-const DEFAULT_SUMMARY_MAX_TOKENS: u32 = 512;
-/// Fallback fixed threshold (tokens) when a model's context window is unknown.
+/// Fallback fixed threshold (tokens) when a local model's context window is
+/// unknown.
 const DEFAULT_FALLBACK_THRESHOLD_TOKENS: usize = 12_000;
+/// Fallback keep target (tokens) when the context window is unknown —
+/// strictly below [`DEFAULT_FALLBACK_THRESHOLD_TOKENS`]. An equal
+/// threshold/keep pair re-fires compaction on the very next turn: the kept
+/// window lands exactly at the trigger line, looping a compaction marker
+/// into every turn.
+const DEFAULT_FALLBACK_KEEP_TARGET_TOKENS: usize = 9_000;
+/// Assumed context window (tokens) for a cloud model with no recorded
+/// window. Modern cloud models are >= 128k, so the local 12k fallback would
+/// compact absurdly early (a 1M-window model compacting at 14k tokens).
+/// Over-shooting is recoverable — the turn loop force-compacts on a provider
+/// context-length error — while premature compaction destroys context.
+const CLOUD_FALLBACK_CONTEXT_TOKENS: u32 = 128_000;
 /// Memory-pressure fill ratio (0-1, scheduler-reported GPU VRAM) at which
 /// auto-compaction fires even below the token threshold. High by design — a
 /// transient spike must not re-summarize history; only a sustained squeeze
@@ -69,19 +83,17 @@ pub struct SummarizingCompactPort {
     state: ModelState,
     threshold_ratio: f32,
     target_ratio: f32,
-    summary_max_tokens: u32,
     fallback_threshold_tokens: usize,
     fallback: SlidingWindowCompactPort,
 }
 
 impl SummarizingCompactPort {
-    /// Construct with default ratios (threshold 80%, target 60%, summary 512 tokens).
+    /// Construct with default ratios (threshold 80%, target 60%).
     pub fn new(state: ModelState) -> Self {
         Self {
             state,
             threshold_ratio: DEFAULT_THRESHOLD_RATIO,
             target_ratio: DEFAULT_TARGET_RATIO,
-            summary_max_tokens: DEFAULT_SUMMARY_MAX_TOKENS,
             fallback_threshold_tokens: DEFAULT_FALLBACK_THRESHOLD_TOKENS,
             fallback: SlidingWindowCompactPort::default(),
         }
@@ -111,35 +123,36 @@ impl CompactPort for SummarizingCompactPort {
             return Ok(CompactOutcome::Skipped { reason: "not enough messages to compact".into() });
         }
 
+        // One resolve feeds both the threshold gate and the keep target.
+        let resolved = resolve_window(&self.state, ctx.model_id).await;
+        let (threshold, keep_target) = effective_limits(
+            &resolved,
+            self.threshold_ratio,
+            self.target_ratio,
+            self.fallback_threshold_tokens,
+        );
+
         if !ctx.force {
-            let threshold = match resolve_context_length(&self.state, ctx.model_id).await {
-                Some(context_length) if context_length > 0 => {
-                    ((context_length as f32) * self.threshold_ratio) as usize
-                }
-                _ => self.fallback_threshold_tokens,
-            };
             // Dual gate: the token threshold, OR memory pressure — an
             // injected hint wins, else the policy self-queries the scheduler's
-            // cached gauge (no probe on this per-turn path).
-            let memory_pressure = ctx
-                .memory_pressure_hint
-                .or_else(|| self.state.gpu_scheduler().gpu_memory_pressure());
+            // cached gauge (no probe on this per-turn path). Cloud sessions
+            // never self-query: the gauge measures the host's GPUs, which a
+            // cloud model does not occupy (compaction frees no VRAM there).
+            let memory_pressure = ctx.memory_pressure_hint.or_else(|| {
+                (!resolved.is_cloud)
+                    .then(|| self.state.gpu_scheduler().gpu_memory_pressure())
+                    .flatten()
+            });
             if !should_compact(estimate_tokens(messages), threshold, memory_pressure) {
                 return Ok(CompactOutcome::Skipped { reason: "below threshold".into() });
             }
         }
 
-        let context_length = resolve_context_length(&self.state, ctx.model_id).await;
-        let keep_target = match context_length {
-            Some(context_length) if context_length > 0 => {
-                ((context_length as f32) * self.target_ratio) as usize
-            }
-            _ => self.fallback_threshold_tokens,
-        };
-
         let system_msg = messages.first().filter(|message| message.role == "system").cloned();
         let system_end = if system_msg.is_some() { 1 } else { 0 };
-        let keep_start = recent_window_start(messages, keep_target).max(system_end);
+        let keep_start =
+            skip_orphan_tool_results(messages, recent_window_start(messages, keep_target))
+                .max(system_end);
 
         // Nothing older than the kept window to summarize.
         if keep_start <= system_end {
@@ -240,7 +253,13 @@ impl SummarizingCompactPort {
             agent_trace: None,
             continue_generation: false,
             common: CommonChatParams {
-                max_tokens: Some(self.summary_max_tokens),
+                // No explicit cap: `resolve_sampling` only puts *request-level*
+                // caps on the wire, and cloud reasoning models burn reasoning
+                // tokens against a small `max_tokens` — a 512 cap comes back
+                // as empty content and this compaction silently degrades to
+                // the destructive trim fallback. Local models fall back to
+                // the built-in default cap.
+                max_tokens: None,
                 temperature: Some(0.0),
                 top_p: None,
                 top_k: None,
@@ -311,6 +330,20 @@ fn recent_window_start(messages: &[ConversationMessage], target_tokens: usize) -
     start
 }
 
+/// Advance a keep-window start past consecutive `role == "tool"` messages.
+///
+/// A boundary landing between an assistant `tool_calls` message and its tool
+/// results would keep orphan results (their pairing assistant got summarized
+/// away) — OpenAI-compatible providers reject those with a 400 and the turn
+/// fails. Advancing folds the orphans into the summarized region instead;
+/// intact pairs earlier in the window are untouched.
+fn skip_orphan_tool_results(messages: &[ConversationMessage], mut start: usize) -> usize {
+    while messages.get(start).is_some_and(|message| message.role == "tool") {
+        start += 1;
+    }
+    start
+}
+
 /// Render a slice of messages as a flat `role: text` transcript for summarization.
 fn render_transcript(messages: &[ConversationMessage]) -> String {
     messages
@@ -320,25 +353,86 @@ fn render_transcript(messages: &[ConversationMessage]) -> String {
         .join("\n\n")
 }
 
-/// Best-effort resolution of a model's context window (tokens).
+/// Best-effort resolution of a model's context window (tokens) plus whether
+/// the model routes to a cloud provider.
 ///
 /// 1. The scheduler's ledger: the engine-resolved `n_ctx` for the resident
-///    model — what `auto` actually sized to (workers + projector accounted).
-///    Without this, an `auto` context resolves to the fixed 12k fallback and
-///    compaction fires at the wrong threshold. 2. The model catalog's
-///    recorded `context_window` (covers cloud + local with a manifest entry).
-/// 3. The configured local llama per-seq context length (fixed values only).
-/// 4. `None` when neither is known.
-async fn resolve_context_length(state: &ModelState, model_id: &str) -> Option<u32> {
+///    local model — what `auto` actually sized to (workers + projector
+///    accounted). Cloud models never appear here. 2. A point lookup in the
+///    model catalog: the recorded `context_window` (curated cloud entries,
+///    local manifests) and the model's kind. 3. The configured local llama
+///    per-seq context length (fixed values only) — local models only, so a
+///    small local setting never leaks into a cloud model's threshold.
+async fn resolve_window(state: &ModelState, model_id: &str) -> ResolvedWindow {
     if let Some(resolved) = state.gpu_scheduler().effective_context_budget(model_id).await {
-        return Some(resolved);
+        return ResolvedWindow { window: Some(resolved), is_cloud: false };
     }
-    if let Some(context_window) =
-        crate::domain::services::model::context_window_for(state, model_id).await
-    {
-        return Some(context_window);
+    if let Ok(Some(record)) = state.store().get_model(model_id).await {
+        let Ok(model) = UnifiedModel::try_from(record) else {
+            return ResolvedWindow::local_unknown(state);
+        };
+        if model.kind == UnifiedModelKind::Cloud {
+            return ResolvedWindow { window: model.spec.context_window, is_cloud: true };
+        }
+        if let Some(context_window) = model.spec.context_window {
+            return ResolvedWindow { window: Some(context_window), is_cloud: false };
+        }
     }
-    state.pmid().config().runtime.llama.context_length.and_then(|spec| spec.as_fixed_u32())
+    ResolvedWindow::local_unknown(state)
+}
+
+/// Resolved context window plus model class for compaction limit selection.
+struct ResolvedWindow {
+    /// Advertised/engine-resolved context window (tokens), when known.
+    window: Option<u32>,
+    /// Whether the model serves from a cloud provider (never in the GPU
+    /// ledger; host GPU state is irrelevant to its sessions).
+    is_cloud: bool,
+}
+
+impl ResolvedWindow {
+    /// Local model with no recorded window: the llama fixed setting is the
+    /// last resort (an `auto` setting resolves to `None`).
+    fn local_unknown(state: &ModelState) -> Self {
+        Self {
+            window: state
+                .pmid()
+                .config()
+                .runtime
+                .llama
+                .context_length
+                .and_then(|spec| spec.as_fixed_u32()),
+            is_cloud: false,
+        }
+    }
+}
+
+/// `(threshold, keep_target)` for a resolved window.
+///
+/// The keep target is strictly below the threshold in every branch — an
+/// equal pair re-fires compaction on the next turn (the kept window lands at
+/// the trigger line). A cloud model with no recorded window assumes the
+/// modern cloud floor instead of the local 12k fallback; a genuine overflow
+/// is recovered by the turn loop's force-compaction-on-context-error path.
+fn effective_limits(
+    resolved: &ResolvedWindow,
+    threshold_ratio: f32,
+    target_ratio: f32,
+    fallback_threshold_tokens: usize,
+) -> (usize, usize) {
+    if let Some(window) = resolved.window.filter(|window| *window > 0) {
+        return (
+            (window as f32 * threshold_ratio) as usize,
+            (window as f32 * target_ratio) as usize,
+        );
+    }
+    if resolved.is_cloud {
+        return (
+            (CLOUD_FALLBACK_CONTEXT_TOKENS as f32 * threshold_ratio) as usize,
+            (CLOUD_FALLBACK_CONTEXT_TOKENS as f32 * target_ratio) as usize,
+        );
+    }
+    (fallback_threshold_tokens, DEFAULT_FALLBACK_KEEP_TARGET_TOKENS)
 }
 
 #[cfg(test)]
@@ -387,7 +481,7 @@ mod tests {
     /// sized to) beats the catalog and the fixed config fallback. Without
     /// this an `auto` context compacts at the fixed 12k fallback threshold.
     #[tokio::test]
-    async fn resolve_context_length_prefers_ledger_over_catalog_and_config() {
+    async fn resolve_window_prefers_ledger_over_catalog_and_config() {
         use crate::test_support::{TestAppCore, ready_local_llama_command};
 
         let app = TestAppCore::new().await;
@@ -400,7 +494,8 @@ mod tests {
         app.model.create_model(command).await.expect("create catalog model");
 
         // No ledger entry yet: the catalog tier answers.
-        assert_eq!(resolve_context_length(&app.model_state, "catalog-model").await, Some(2048));
+        let resolved = resolve_window(&app.model_state, "catalog-model").await;
+        assert_eq!((resolved.window, resolved.is_cloud), (Some(2048), false));
 
         // A resident ledger entry with the engine-resolved n_ctx wins over
         // every fallback tier.
@@ -423,9 +518,10 @@ mod tests {
                 },
             )
             .await;
+        let resolved = resolve_window(&app.model_state, "catalog-model").await;
         assert_eq!(
-            resolve_context_length(&app.model_state, "catalog-model").await,
-            Some(4096),
+            (resolved.window, resolved.is_cloud),
+            (Some(4096), false),
             "ledger beats the catalog's 2048"
         );
 
@@ -435,11 +531,344 @@ mod tests {
             .ledger()
             .note_model_unloaded(slab_types::RuntimeBackendId::GgmlLlama)
             .await;
+        let resolved = resolve_window(&app.model_state, "catalog-model").await;
         assert_eq!(
-            resolve_context_length(&app.model_state, "catalog-model").await,
-            Some(2048),
+            (resolved.window, resolved.is_cloud),
+            (Some(2048), false),
             "catalog tier after the ledger entry clears"
         );
+    }
+
+    /// The local llama runtime setting is the last resort for LOCAL models
+    /// only — a small fixed local value must never leak into a cloud model's
+    /// threshold (it used to compact cloud sessions after a few turns).
+    #[tokio::test]
+    async fn resolve_window_skips_llama_tier_for_cloud_models() {
+        use crate::test_support::{TestAppCore, cloud_chat_model_command};
+        use slab_config::{UpdateSettingCommand, UpdateSettingOperation};
+
+        let app = TestAppCore::new().await;
+        app.model
+            .create_model(cloud_chat_model_command("cloud-ctx", "openai-main"))
+            .await
+            .expect("create cloud model");
+
+        // A fixed local llama context that would otherwise be the last-resort
+        // tier for an unknown-window model.
+        app.pmid
+            .update_setting(
+                "runtime.ggml.backends.llama.context_length",
+                UpdateSettingCommand {
+                    op: UpdateSettingOperation::Set,
+                    value: Some(serde_json::json!(4096).into()),
+                },
+            )
+            .await
+            .expect("set llama context length");
+
+        let cloud = resolve_window(&app.model_state, "cloud-ctx").await;
+        assert_eq!((cloud.window, cloud.is_cloud), (None, true));
+
+        // A local model absent from the catalog still gets the fixed setting.
+        let local = resolve_window(&app.model_state, "ghost-local").await;
+        assert_eq!((local.window, local.is_cloud), (Some(4096), false));
+    }
+
+    /// Effective limits: known window scales by ratio; unknown cloud assumes
+    /// the modern cloud floor (NOT the 12k local fallback); unknown local
+    /// keeps a keep target strictly below the threshold so a fallback
+    /// compaction quiesces instead of re-firing every turn.
+    #[test]
+    fn effective_limits_branches_by_window_and_class() {
+        let ratios = (DEFAULT_THRESHOLD_RATIO, DEFAULT_TARGET_RATIO);
+        let fallback_threshold = DEFAULT_FALLBACK_THRESHOLD_TOKENS;
+
+        let windowed = ResolvedWindow { window: Some(1_000_000), is_cloud: false };
+        assert_eq!(
+            effective_limits(&windowed, ratios.0, ratios.1, fallback_threshold),
+            (800_000, 600_000)
+        );
+
+        let cloud_unknown = ResolvedWindow { window: None, is_cloud: true };
+        let (threshold, keep) =
+            effective_limits(&cloud_unknown, ratios.0, ratios.1, fallback_threshold);
+        assert_eq!(threshold, (CLOUD_FALLBACK_CONTEXT_TOKENS as f32 * ratios.0) as usize);
+        assert_eq!(keep, (CLOUD_FALLBACK_CONTEXT_TOKENS as f32 * ratios.1) as usize);
+        assert!(threshold > fallback_threshold, "cloud default must dwarf the local fallback");
+
+        let local_unknown = ResolvedWindow { window: None, is_cloud: false };
+        let (threshold, keep) =
+            effective_limits(&local_unknown, ratios.0, ratios.1, fallback_threshold);
+        assert_eq!(threshold, fallback_threshold);
+        assert_eq!(keep, DEFAULT_FALLBACK_KEEP_TARGET_TOKENS);
+        assert!(keep < threshold, "fallback keep target must sit below the trigger");
+    }
+
+    /// The bug report: a 1M-window cloud model compacted at ~14k tokens. With
+    /// the cloud default in place a ~60k-token history on an unknown-window
+    /// cloud model stays far below the threshold.
+    #[tokio::test]
+    async fn cloud_unknown_window_does_not_compact_at_local_fallback() {
+        use crate::test_support::{TestAppCore, cloud_chat_model_command};
+
+        let app = TestAppCore::new().await;
+        app.model
+            .create_model(cloud_chat_model_command("cloud-wide", "openai-main"))
+            .await
+            .expect("create cloud model");
+
+        let port = SummarizingCompactPort::new(app.model_state.clone());
+        let mut messages = vec![text_message("system", "sys")];
+        for _ in 0..8 {
+            messages.push(text_message("user", &"x".repeat(28_000))); // ~7k tokens each
+        }
+        // ~56k tokens: above the old 12k fallback, far below 0.8 * 128k.
+
+        let outcome = port
+            .compact(
+                &messages,
+                &CompactContext {
+                    model_id: "cloud-wide",
+                    summary_instructions: None,
+                    force: false,
+                    progress: None,
+                    memory_pressure_hint: None,
+                },
+            )
+            .await
+            .expect("compact check");
+        assert!(
+            matches!(&outcome, CompactOutcome::Skipped { reason } if reason == "below threshold"),
+            "cloud session must not compact below the cloud threshold: {outcome:?}"
+        );
+    }
+
+    /// Fallback compaction quiesces: after compacting an unknown-window local
+    /// history, the result sits below the 12k trigger, so the next turn's
+    /// gate skips (the old equal threshold/keep pair re-fired every turn).
+    #[tokio::test]
+    async fn fallback_compact_quiesces_second_pass() {
+        use crate::test_support::TestAppCore;
+
+        let app = TestAppCore::new().await;
+        let port = SummarizingCompactPort::new(app.model_state.clone());
+        let ctx = |model_id: &'static str| CompactContext {
+            model_id,
+            summary_instructions: None,
+            force: false,
+            progress: None,
+            memory_pressure_hint: None,
+        };
+
+        // Unknown-window local model (no catalog row, auto llama setting) and
+        // a ~28k-token history: above the 12k trigger.
+        let messages: Vec<ConversationMessage> = std::iter::once(text_message("system", "sys"))
+            .chain((0..4).map(|_| text_message("user", &"x".repeat(28_000))))
+            .collect();
+
+        let first = port.compact(&messages, &ctx("ghost-local")).await.expect("first compact");
+        let CompactOutcome::Replaced { messages: compacted, .. } = first else {
+            panic!("first pass must compact above the fallback threshold: {first:?}");
+        };
+
+        let second = port.compact(&compacted, &ctx("ghost-local")).await.expect("second compact");
+        assert!(
+            matches!(&second, CompactOutcome::Skipped { reason } if reason == "below threshold"),
+            "compacted history must sit below the re-trigger threshold: {second:?}"
+        );
+    }
+
+    /// Host GPU pressure is a LOCAL signal: a cloud session must not compact
+    /// because the host's card is nearly full (compacting frees no VRAM
+    /// there), while a resident local model under the same gauge compacts.
+    #[tokio::test]
+    async fn cloud_sessions_ignore_host_gpu_pressure() {
+        use crate::test_support::{FixedGpuProbe, TestAppCore, cloud_chat_model_command};
+        use std::sync::Arc;
+
+        let probe =
+            Arc::new(FixedGpuProbe { total_memory_bytes: 10_000, used_memory_bytes: 9_600 });
+        let app = TestAppCore::new_with_gpu_probe(probe).await;
+        app.gpu_scheduler.refresh_now().await; // cached gauge at 96% fill
+        assert!(
+            app.model_state.gpu_scheduler().gpu_memory_pressure().is_some_and(|p| p >= 0.90),
+            "gauge fixture must read as high pressure"
+        );
+
+        app.model
+            .create_model(cloud_chat_model_command("cloud-pressured", "openai-main"))
+            .await
+            .expect("create cloud model");
+        let mut cloud_history = vec![text_message("system", "sys")];
+        for _ in 0..8 {
+            cloud_history.push(text_message("user", &"x".repeat(28_000))); // ~56k total
+        }
+
+        let port = SummarizingCompactPort::new(app.model_state.clone());
+        let outcome = port
+            .compact(
+                &cloud_history,
+                &CompactContext {
+                    model_id: "cloud-pressured",
+                    summary_instructions: None,
+                    force: false,
+                    progress: None,
+                    memory_pressure_hint: None,
+                },
+            )
+            .await
+            .expect("cloud compact check");
+        assert!(
+            matches!(&outcome, CompactOutcome::Skipped { reason } if reason == "below threshold"),
+            "host GPU pressure must not compact a cloud session: {outcome:?}"
+        );
+
+        // Contrast: a resident local model under the same gauge compacts well
+        // below its token threshold.
+        app.model_state
+            .gpu_scheduler()
+            .ledger()
+            .note_model_loaded(
+                None,
+                slab_gpu_memory_scheduler::LedgerEntry {
+                    backend: slab_types::RuntimeBackendId::GgmlLlama,
+                    model_id: Some("local-pressured".to_owned()),
+                    model_path: "pressured.gguf".to_owned(),
+                    num_workers: 1,
+                    // Window 80k: token gate (64k) stays closed on the ~56k
+                    // history while the keep window (48k) leaves older turns
+                    // to summarize — the compaction is purely pressure-driven.
+                    resolved_context_length: Some(80_000),
+                    mmproj_resident: false,
+                    weights_bytes: None,
+                    mmproj_bytes: None,
+                    measured_delta_bytes: None,
+                    recorded_at: chrono::Utc::now(),
+                },
+            )
+            .await;
+        let outcome = port
+            .compact(
+                &cloud_history,
+                &CompactContext {
+                    model_id: "local-pressured",
+                    summary_instructions: None,
+                    force: false,
+                    progress: None,
+                    memory_pressure_hint: None,
+                },
+            )
+            .await
+            .expect("local compact check");
+        assert!(
+            matches!(outcome, CompactOutcome::Replaced { .. }),
+            "resident local model under pressure must compact: {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn skip_orphan_tool_results_advances_past_leading_tools() {
+        let messages = vec![
+            text_message("system", "sys"),
+            text_message("assistant", "call it"),
+            text_message("tool", "result-a"),
+            text_message("tool", "result-b"),
+            text_message("user", "next"),
+        ];
+        assert_eq!(skip_orphan_tool_results(&messages, 2), 4, "both orphan results skipped");
+        assert_eq!(skip_orphan_tool_results(&messages, 3), 4, "single orphan skipped");
+        assert_eq!(skip_orphan_tool_results(&messages, 4), 4, "non-tool start untouched");
+        assert_eq!(skip_orphan_tool_results(&messages, 0), 0, "system message untouched");
+    }
+
+    #[test]
+    fn skip_orphan_tool_results_runs_off_the_end() {
+        let messages = vec![
+            text_message("system", "sys"),
+            text_message("tool", "result"),
+            text_message("tool", "tail"),
+        ];
+        assert_eq!(skip_orphan_tool_results(&messages, 1), 3);
+        assert_eq!(skip_orphan_tool_results(&messages, 3), 3, "start at len stays at len");
+    }
+
+    /// A keep boundary landing between an assistant `tool_calls` message and
+    /// its tool results must not keep orphan results — the summarize path
+    /// folds them into the summarized region instead. Orphaned tool results
+    /// get cloud APIs a 400 and fail the turn after every compaction.
+    #[tokio::test]
+    async fn summarizing_compact_never_keeps_leading_orphan_tool_results() {
+        use crate::domain::ports::RuntimeTextGenerationResponse;
+        use crate::test_support::{TestAppCore, ready_local_llama_command};
+
+        let app = TestAppCore::new().await;
+        // Scripted summarize success so the summarizing path (not the trim
+        // fallback, which already strips orphans) runs end-to-end.
+        app.runtime.set_scripted_chat(RuntimeTextGenerationResponse {
+            text: "recap of earlier turns".to_owned(),
+            ..Default::default()
+        });
+        // Window 2048 -> threshold 1638, keep_target 1228. History est
+        // ~6.7k tokens fires the gate; the raw trailing window (done + two
+        // 100-token tool results = 201 <= 1228 < +2000-token assistant call)
+        // lands exactly ON the first tool result.
+        app.model_state
+            .gpu_scheduler()
+            .ledger()
+            .note_model_loaded(
+                None,
+                slab_gpu_memory_scheduler::LedgerEntry {
+                    backend: slab_types::RuntimeBackendId::GgmlLlama,
+                    model_id: Some("boundary-model".to_owned()),
+                    model_path: "boundary.gguf".to_owned(),
+                    num_workers: 1,
+                    resolved_context_length: Some(2048),
+                    mmproj_resident: false,
+                    weights_bytes: None,
+                    mmproj_bytes: None,
+                    measured_delta_bytes: None,
+                    recorded_at: chrono::Utc::now(),
+                },
+            )
+            .await;
+        let model_path = app.model_cache_dir.join("boundary.gguf");
+        std::fs::write(&model_path, b"gguf").expect("write model fixture");
+        app.model
+            .create_model(ready_local_llama_command("boundary-model", &model_path))
+            .await
+            .expect("create boundary model");
+
+        let port = SummarizingCompactPort::new(app.model_state.clone());
+        let mut messages = vec![text_message("system", "sys")];
+        for _ in 0..3 {
+            messages.push(text_message("user", &"x".repeat(6_000))); // ~1500 tokens each
+        }
+        messages.push(text_message("assistant", &"c".repeat(8_000))); // ~2000 tokens
+        messages.push(text_message("tool", &"r".repeat(400))); // ~100 tokens
+        messages.push(text_message("tool", &"r".repeat(400))); // ~100 tokens
+        messages.push(text_message("assistant", "done"));
+
+        let outcome = port
+            .compact(
+                &messages,
+                &CompactContext {
+                    model_id: "boundary-model",
+                    summary_instructions: None,
+                    force: false,
+                    progress: None,
+                    memory_pressure_hint: None,
+                },
+            )
+            .await
+            .expect("compact");
+        let CompactOutcome::Replaced { messages: compacted, .. } = outcome else {
+            panic!("history above threshold must compact: {outcome:?}");
+        };
+        // [system, slab_compact summary, kept tail] — the kept tail starts
+        // with the final assistant turn, never an orphaned tool result.
+        assert_eq!(compacted.len(), 3, "kept tail = final assistant turn only: {compacted:#?}");
+        assert!(compacted[1].name.as_deref() == Some(SUMMARY_MESSAGE_NAME));
+        assert_eq!(compacted[2].role, "assistant");
     }
 
     #[test]

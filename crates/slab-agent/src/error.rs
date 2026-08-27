@@ -130,8 +130,15 @@ pub fn classify_llm_error(message: &str) -> AgentError {
         "too many tokens",
         "reduce the length of the messages",
     ];
-    if lowered.contains("413")
+    // A bare "413" substring also matches request ids and unrelated numbers
+    // in the rendered message, misrouting a fatal error into the forced-
+    // compaction recovery (which fails the turn anyway when compaction has
+    // nothing left to shrink). Only anchored forms count.
+    const CONTEXT_STATUS_MARKERS: [&str; 5] =
+        ["status 413", "http 413", "code: 413", "error 413", "(413)"];
+    if CONTEXT_STATUS_MARKERS.iter().any(|marker| lowered.contains(marker))
         || lowered.contains("request too large")
+        || lowered.contains("payload too large")
         || CONTEXT_MARKERS.iter().any(|marker| lowered.contains(marker))
     {
         return AgentError::LlmContextTooLong(message.to_owned());
@@ -227,6 +234,28 @@ mod tests {
             assert!(
                 matches!(classify_llm_error(message), AgentError::Llm(_)),
                 "{message} must stay fatal (no retry)"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_llm_error_ignores_bare_413_in_request_ids() {
+        // A bare "413" substring used to route these into the forced-
+        // compaction recovery, which fails the turn when compaction has
+        // nothing left to shrink.
+        for message in
+            ["request id 8f4139ab not found", "invalid param req-4137", "attempt 3 of 1413 failed"]
+        {
+            assert!(
+                matches!(classify_llm_error(message), AgentError::Llm(_)),
+                "{message} contains 413 but is not a context-overflow signal"
+            );
+        }
+        // Anchored forms still classify as context overflow.
+        for message in ["HTTP 413 request too large", "status code: 413"] {
+            assert!(
+                matches!(classify_llm_error(message), AgentError::LlmContextTooLong(_)),
+                "{message} is a real 413"
             );
         }
     }

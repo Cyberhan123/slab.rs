@@ -112,6 +112,12 @@ impl RecordingRuntimeGateway {
         self
     }
 
+    /// In-place variant of [`Self::with_scripted_chat`] for tests that get the
+    /// gateway already wrapped in an `Arc` (e.g. `TestAppCore::runtime`).
+    pub(crate) fn set_scripted_chat(&self, response: RuntimeTextGenerationResponse) {
+        *self.scripted_chat.lock().unwrap_or_else(|error| error.into_inner()) = Some(response);
+    }
+
     /// Script a canned chunk sequence yielded by every subsequent `chat_stream`
     /// call.
     pub(crate) fn with_scripted_stream(self, chunks: Vec<RuntimeTextGenerationChunk>) -> Self {
