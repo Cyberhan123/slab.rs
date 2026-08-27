@@ -1709,6 +1709,7 @@
           ]
         },
         "use_lite": {
+          "description": "Deprecated: never honored by the search library (the lite endpoint has\nits own unimplemented markup). Kept for settings-file compatibility;\nsetting it logs a deprecation warning and changes nothing.",
           "type": [
             "boolean",
             "null"

@@ -51,6 +51,7 @@ impl ContextInstructionHook {
         reasoning_effort: Option<ChatReasoningEffort>,
         verbosity: Option<ChatVerbosity>,
         input_message: Option<&str>,
+        allowed_tools: &[String],
     ) -> Result<Vec<ConversationMessage>> {
         let env = build_environment();
 
@@ -66,14 +67,24 @@ impl ContextInstructionHook {
 
         let developer_template = self.sources.instruction_template_for(model).await;
 
+        let permission = self.sources.permission_snapshot(thread_id);
+
         let mut messages = Vec::new();
-        // 1. Identity / persona. `workspace_bound` keeps the tool-use guidance
-        //    in the system prompt aligned with the registered tool set (the
-        //    workspace-bound tools, e.g. `apply_patch`, exist only when a
-        //    workspace root is configured).
+        // 1. Identity / persona. `workspace_bound` keeps the workspace-scoped
+        //    guidance aligned with the registered tool set; the
+        //    `apply_patch_available` gate mirrors the SAME three layers the
+        //    turn's tool list applies (registration x file-edit exposure x
+        //    whitelist), so the "prefer apply_patch" line can only appear
+        //    when the tool is actually callable this run.
         messages.push(tagged(
-            SystemInstructionFragment { workspace_bound: self.sources.workspace_root().is_some() }
-                .render(&env)?,
+            SystemInstructionFragment {
+                workspace_bound: self.sources.workspace_root().is_some(),
+                apply_patch_available: self.sources.apply_patch_registered()
+                    && permission.file_write_allowed
+                    && (allowed_tools.is_empty()
+                        || allowed_tools.iter().any(|tool| tool == "apply_patch")),
+            }
+            .render(&env)?,
             "slab_system",
         ));
         // 2. Environment facts (cwd / shell / os / time).
@@ -84,10 +95,7 @@ impl ContextInstructionHook {
         ));
         // 3. Permission instructions + tool-use policy.
         messages.push(tagged(
-            PermissionsInstructionFragment {
-                snapshot: self.sources.permission_snapshot(thread_id),
-            }
-            .render(&env)?,
+            PermissionsInstructionFragment { snapshot: permission }.render(&env)?,
             "slab_permissions",
         ));
         // 4. Reasoning-effort steer (only when an effort/verbosity is requested).
@@ -167,6 +175,7 @@ impl AgentHook for ContextInstructionHook {
                         config.reasoning_effort,
                         config.verbosity,
                         input_message.as_deref(),
+                        &config.allowed_tools,
                     )
                     .await
                 {
@@ -275,16 +284,34 @@ mod tests {
     }
 
     fn mock_sources(workspace: Option<PathBuf>) -> MockSources {
+        mock_sources_with_permission(workspace, permissive_snapshot())
+    }
+
+    fn mock_sources_with_permission(
+        workspace: Option<PathBuf>,
+        permission: PermissionSnapshot,
+    ) -> MockSources {
         let global = tempfile::TempDir::new().unwrap();
         MockSources {
             workspace,
             skills_dir: global.path().join("skills"),
             agents_md: global.path().join("AGENTS.md"),
             template: None,
-            permission: permissive_snapshot(),
+            permission,
             memory: None,
             relevant: None,
             evicted: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn read_only_snapshot() -> PermissionSnapshot {
+        PermissionSnapshot {
+            mode: PermissionModeLabel::Custom,
+            baseline: PermissionBaselineLabel::ReadOnly,
+            read_only: true,
+            shell_allowed: false,
+            file_write_allowed: false,
+            network_allowed: false,
         }
     }
 
@@ -405,6 +432,59 @@ mod tests {
         let system = injected_messages[0].content.rendered_text();
         assert!(system.contains("apply_patch"));
         assert!(system.contains("in the workspace root"));
+    }
+
+    /// P7 regression: with a workspace root the tool is REGISTERED, but a
+    /// read-only exposure filters `apply_patch` (FileEdit category) out of
+    /// the tool list — the prompt must not tell the model to prefer a tool
+    /// it cannot call.
+    #[tokio::test]
+    async fn system_prompt_omits_apply_patch_when_file_edit_not_exposed() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let hook = ContextInstructionHook::new(Arc::new(mock_sources_with_permission(
+            Some(ws.path().to_path_buf()),
+            read_only_snapshot(),
+        )));
+
+        let HookOutcome::Effects { injected_messages, .. } =
+            hook.on_event(&start_event(AgentConfig::default())).await
+        else {
+            panic!("expected effects");
+        };
+        let system = injected_messages[0].content.rendered_text();
+        assert!(!system.contains("Prefer `apply_patch`"), "read-only prompt: {system}");
+    }
+
+    /// The `allowed_tools` whitelist is the third gate: an empty whitelist
+    /// allows everything (guidance present), a whitelist naming other tools
+    /// excludes apply_patch (guidance absent), naming it explicitly keeps it.
+    #[tokio::test]
+    async fn system_prompt_apply_patch_guidance_follows_tool_whitelist() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let sources: Arc<dyn AgentContextSources> =
+            Arc::new(mock_sources(Some(ws.path().to_path_buf())));
+
+        let excluding =
+            AgentConfig { allowed_tools: vec!["shell".into()], ..AgentConfig::default() };
+        let HookOutcome::Effects { injected_messages, .. } =
+            ContextInstructionHook::new(Arc::clone(&sources))
+                .on_event(&start_event(excluding))
+                .await
+        else {
+            panic!("expected effects");
+        };
+        let system = injected_messages[0].content.rendered_text();
+        assert!(!system.contains("Prefer `apply_patch`"), "whitelisted-out prompt: {system}");
+
+        let naming =
+            AgentConfig { allowed_tools: vec!["apply_patch".into()], ..AgentConfig::default() };
+        let HookOutcome::Effects { injected_messages, .. } =
+            ContextInstructionHook::new(sources).on_event(&start_event(naming)).await
+        else {
+            panic!("expected effects");
+        };
+        let system = injected_messages[0].content.rendered_text();
+        assert!(system.contains("Prefer `apply_patch`"), "whitelisted-in prompt: {system}");
     }
 
     #[tokio::test]

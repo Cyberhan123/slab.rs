@@ -12,6 +12,7 @@ use slab_sandboxing::SandboxDriver;
 
 pub mod apply_patch;
 mod args;
+pub(crate) mod error;
 pub mod fs;
 pub mod fs_watch;
 pub mod git;
@@ -38,7 +39,8 @@ pub use plan::{
 };
 pub use shell::{ShellPolicy, ShellTool};
 pub use slab_shell_command::{
-    ShellLauncher, ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
+    ShellFamily, ShellLauncher, ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher,
+    ShellRuleSet,
 };
 pub use subagent::DelegateSubagentTool;
 pub use task_complete::{TASK_COMPLETE_METADATA_KEY, TASK_COMPLETE_TOOL_NAME, TaskCompleteTool};

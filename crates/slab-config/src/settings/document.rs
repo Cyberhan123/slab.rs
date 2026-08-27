@@ -815,6 +815,9 @@ pub struct WebSearchDuckDuckGoProviderConfig {
     pub base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
+    /// Deprecated: never honored by the search library (the lite endpoint has
+    /// its own unimplemented markup). Kept for settings-file compatibility;
+    /// setting it logs a deprecation warning and changes nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_lite: Option<bool>,
 }

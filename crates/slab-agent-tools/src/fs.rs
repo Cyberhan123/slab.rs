@@ -74,9 +74,9 @@ impl ToolHandler for ReadFileTool {
         let start_line = arguments.get("start_line").and_then(Value::as_u64).unwrap_or(1) as usize;
         let end_line = arguments.get("end_line").and_then(Value::as_u64).map(|v| v as usize);
         let path = resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
-        let raw = tokio::fs::read_to_string(path)
+        let raw = tokio::fs::read_to_string(&path)
             .await
-            .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
+            .map_err(|error| crate::error::io_tool_error("read file", &path, &error))?;
 
         let start_idx = start_line.saturating_sub(1);
         let lines: Vec<&str> = raw.lines().collect();
@@ -177,13 +177,13 @@ impl ToolHandler for WriteFileTool {
         let path =
             resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, requested_path)?;
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
+            tokio::fs::create_dir_all(parent).await.map_err(|error| {
+                crate::error::io_tool_error("create parent directory", parent, &error)
+            })?;
         }
         tokio::fs::write(&path, content)
             .await
-            .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
+            .map_err(|error| crate::error::io_tool_error("write file", &path, &error))?;
 
         Ok(ToolOutput {
             content: serde_json::json!({
@@ -335,6 +335,24 @@ mod tests {
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert_eq!(value["content"], "");
         assert_eq!(value["returned_lines"], 0);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// P5 regression: a missing file must report a coded English error, not
+    /// the OS-localized io message ("系统找不到指定的文件。 (os error 2)").
+    #[tokio::test]
+    async fn read_file_reports_coded_error_for_missing_file() {
+        let root = temp_root("missing_read");
+        let tool = ReadFileTool::new(Some(root.clone()));
+
+        let error = tool
+            .execute(&ctx(), &json!({"path": "does_not_exist.txt"}))
+            .await
+            .expect_err("missing file");
+        let rendered = error.to_string();
+        assert!(rendered.contains("[io.not_found]"), "{rendered}");
+        assert!(rendered.contains("not found"), "{rendered}");
 
         let _ = fs::remove_dir_all(root);
     }

@@ -59,7 +59,8 @@ impl ToolHandler for ShellTool {
     }
 
     fn description(&self) -> &str {
-        "Execute a shell command and return stdout, stderr, exit_code, and timeout status."
+        "Execute a shell command and return stdout, stderr, exit_code, and timeout status. \
+         On timeout the process tree is killed and exit_code is 124."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -118,6 +119,17 @@ impl ToolHandler for ShellTool {
             .and_then(Value::as_str)
             .ok_or_else(|| AgentError::ToolExecution("missing 'command' argument".into()))?
             .to_string();
+        // Models sometimes pretty-print tool-call JSON with the command value
+        // starting (or ending) on its own line, e.g. {"command": "\nls -la"}.
+        // `bash -lc $'\nls'` then treats the command as starting on line 2 and
+        // reports `line 2: syntax error` for perfectly valid single-line
+        // commands — trim both ends before execution. (Fixing this at the tool
+        // layer covers every producer: streaming increments, non-streaming
+        // calls, and subagents.)
+        let command = command.trim().to_string();
+        if command.is_empty() {
+            return Err(AgentError::ToolExecution("'command' is empty".into()));
+        }
         let timeout_secs = arguments.get("timeout_secs").and_then(Value::as_u64).unwrap_or(30);
         let env = arguments
             .get("env")
@@ -274,6 +286,41 @@ mod tests {
             .await
             .expect_err("dangerous command");
         assert!(dangerous.to_string().contains("command blocked"));
+    }
+
+    /// P8 regression: leading/trailing newlines around the command (from
+    /// pretty-printed tool-call JSON) must be trimmed so `bash -lc` does not
+    /// see the command "starting on line 2".
+    #[tokio::test]
+    async fn shell_tool_trims_leading_and_trailing_whitespace() {
+        let seen = Arc::new(Mutex::new(None));
+        let tool = ShellTool::new(
+            None,
+            Some(Arc::new(RecordingDriver {
+                seen: Arc::clone(&seen),
+                output: SandboxedOutput {
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                    exit_code: 0,
+                    timed_out: false,
+                },
+            })),
+            ShellLauncher::PowerShell,
+            None,
+        );
+
+        tool.execute(&ctx(), &json!({"command": "\n  echo trimmed  \n"})).await.expect("execute");
+
+        let command = seen.lock().unwrap().clone().expect("driver command");
+        assert_eq!(command.argv.last().map(String::as_str), Some("echo trimmed"));
+    }
+
+    #[tokio::test]
+    async fn shell_tool_rejects_blank_command() {
+        let tool = ShellTool::new(None, None, ShellLauncher::default(), None);
+
+        let blank = tool.execute(&ctx(), &json!({"command": "  \n "})).await.expect_err("blank");
+        assert!(blank.to_string().contains("'command' is empty"));
     }
 
     #[test]

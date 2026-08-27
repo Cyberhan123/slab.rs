@@ -290,6 +290,19 @@ pub(crate) fn command_env(
 /// (e.g. a reparented descendant that kept a handle) so the run can never hang.
 const READ_DRAIN_GRACE: Duration = Duration::from_secs(5);
 
+/// How long to wait for the child to actually exit after a timeout kill before
+/// abandoning the reap. Once we have started killing the process its exit
+/// status is untrustworthy anyway — this only bounds how long a stuck kill can
+/// delay the run (the old code waited indefinitely, so a failed kill let the
+/// command run to completion while still being reported as timed out).
+const POST_KILL_WAIT_GRACE: Duration = Duration::from_secs(5);
+
+/// Fixed exit code reported for a command killed by its timeout (GNU `timeout`
+/// convention). Never derived from the process: after a kill race the real
+/// status is meaningless, and a synthetic `1` is indistinguishable from a
+/// command that genuinely failed with exit 1.
+const TIMEOUT_EXIT_CODE: i32 = 124;
+
 /// Fires a tree-kill closure exactly once — including when the owning future
 /// is dropped before completion. Turn cancellation (`tokio::select!` around
 /// tool execution) drops the `wait_for_child`/`wait_for_elevated` future
@@ -368,9 +381,37 @@ pub(crate) async fn wait_for_child(
             Ok(Ok(status)) => (status.code().unwrap_or(-1), false),
             Ok(Err(error)) => return Err(SandboxError::SpawnFailed(error.to_string())),
             Err(_) => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                (1, true)
+                // Timed out: kill the whole tree FIRST (job close / process
+                // group — a bare child.kill only terminates the direct child
+                // and can even fail silently), then best-effort kill the
+                // direct child and reap it within a bounded grace. Whatever
+                // happens, report the fixed timeout exit code — the real
+                // status is untrustworthy once killing has started.
+                if kill_tree.fire() {
+                    tracing::info!(?pid, "wait_for_child: timeout, process tree killed");
+                }
+                if let Err(error) = child.kill().await {
+                    tracing::warn!(?pid, error = %error, "wait_for_child: kill after timeout failed");
+                }
+                match tokio::time::timeout(POST_KILL_WAIT_GRACE, child.wait()).await {
+                    Ok(Ok(status)) => {
+                        tracing::info!(
+                            ?pid,
+                            ?status,
+                            "wait_for_child: reaped child after timeout kill"
+                        );
+                    }
+                    Ok(Err(error)) => {
+                        tracing::warn!(?pid, error = %error, "wait_for_child: wait after timeout kill failed");
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            ?pid,
+                            "wait_for_child: child did not exit within grace after kill; abandoning wait"
+                        );
+                    }
+                }
+                (TIMEOUT_EXIT_CODE, true)
             }
         }
     } else {
@@ -403,10 +444,20 @@ pub(crate) async fn wait_for_child(
     let mut stderr =
         stderr_buf.lock().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?.clone();
     if timed_out && stderr.is_empty() {
-        stderr.extend_from_slice(b"command timed out");
+        stderr.extend_from_slice(timeout_stderr_note(timeout).as_bytes());
     }
 
     Ok(SandboxedOutput { stdout, stderr, exit_code, timed_out })
+}
+
+/// Marker written into stderr when a run timed out and produced no stderr of
+/// its own, so the model gets an explicit signal instead of inferring the
+/// timeout from `timed_out` alone.
+fn timeout_stderr_note(timeout: Option<Duration>) -> String {
+    match timeout {
+        Some(duration) => format!("command timed out after {}s", duration.as_secs()),
+        None => "command timed out".to_string(),
+    }
 }
 
 /// Await a read task for at most `grace`; on timeout abort it. The shared
@@ -445,12 +496,16 @@ pub(crate) async fn wait_for_elevated(
                 return Err(SandboxError::SpawnFailed("elevated exit stream errored".into()));
             }
             Err(_) => {
-                // Timed out: drop the daemon connection (kills the Job), best-effort await Exited.
+                // Timed out: drop the daemon connection (kills the Job), then
+                // best-effort await Exited within a bounded grace so the
+                // pre-filled buffers settle. Report the fixed timeout exit
+                // code either way — the real status is untrustworthy once the
+                // kill has started (previously a natural exit inside the old
+                // 3s window returned the command's real code with timed_out
+                // stapled on top).
                 kill_tree.fire();
-                match tokio::time::timeout(Duration::from_secs(3), &mut exit_future).await {
-                    Ok(Ok(elev)) => (elev.exit_code, true),
-                    _ => (1, true),
-                }
+                let _ = tokio::time::timeout(POST_KILL_WAIT_GRACE, &mut exit_future).await;
+                (TIMEOUT_EXIT_CODE, true)
             }
         },
         None => {
@@ -467,7 +522,7 @@ pub(crate) async fn wait_for_elevated(
     let mut stderr =
         stderr_buf.lock().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?.clone();
     if timed_out && stderr.is_empty() {
-        stderr.extend_from_slice(b"command timed out");
+        stderr.extend_from_slice(timeout_stderr_note(timeout).as_bytes());
     }
 
     Ok(SandboxedOutput { stdout, stderr, exit_code, timed_out })
@@ -550,5 +605,50 @@ mod tests {
     fn tree_kill_guard_without_closure_is_noop() {
         let mut guard = TreeKillGuard::new(None);
         assert!(!guard.fire());
+    }
+
+    /// The P4 fix: a timeout must actually terminate the child (instead of
+    /// waiting for it to finish and stapling `timed_out` on top), and report
+    /// the fixed 124 code rather than a fabricated 1. Guards against the
+    /// function hanging past the grace window.
+    #[tokio::test]
+    async fn wait_for_child_kills_on_timeout_and_reports_124() {
+        #[cfg(windows)]
+        let child = tokio::process::Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn powershell");
+        #[cfg(not(windows))]
+        let child = tokio::process::Command::new("sleep")
+            .arg("30")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn sleep");
+
+        let started = std::time::Instant::now();
+        let output = wait_for_child(child, Some(Duration::from_secs(1)), None, None)
+            .await
+            .expect("wait_for_child returns after timeout");
+
+        assert!(output.timed_out);
+        assert_eq!(output.exit_code, TIMEOUT_EXIT_CODE);
+        assert!(String::from_utf8_lossy(&output.stderr).contains("command timed out after 1s"));
+        // 1s timeout + kill + ≤5s grace + ≤5s drain grace must stay well
+        // under the 30s the command would run if the kill did not land.
+        assert!(started.elapsed() < Duration::from_secs(20), "elapsed: {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn timeout_stderr_note_without_duration_is_generic() {
+        assert_eq!(timeout_stderr_note(None), "command timed out");
     }
 }

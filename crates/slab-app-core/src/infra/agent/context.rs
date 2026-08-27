@@ -44,21 +44,27 @@ struct RecallCacheEntry {
     created_at: Instant,
 }
 
-/// Map the configured shell launcher to the context crate's shell family. `Auto`
-/// follows the same fallback `slab-shell-command` uses (PowerShell on Windows,
-/// bash elsewhere) — the model does not need the resolved bash path.
-pub(crate) fn shell_kind(launcher: slab_config::ShellLauncherKind) -> ShellKind {
-    match launcher {
-        slab_config::ShellLauncherKind::Bash => ShellKind::Bash,
-        slab_config::ShellLauncherKind::PowerShell => ShellKind::PowerShell,
-        slab_config::ShellLauncherKind::Cmd => ShellKind::Cmd,
-        slab_config::ShellLauncherKind::Auto => {
-            if cfg!(windows) {
-                ShellKind::PowerShell
-            } else {
-                ShellKind::Bash
-            }
-        }
+/// Map the configured shell launcher to the context crate's shell family.
+///
+/// `Auto` resolves through `slab-shell-command`'s actual probing (explicit
+/// `bash_path` -> well-known Git Bash locations -> PATH, PowerShell only as the
+/// Windows fallback) — the same resolution `ShellExecutor` performs, so the
+/// environment context can never claim a different shell family than the one
+/// that executes the commands. The model does not need the resolved bash path.
+pub(crate) fn shell_kind(
+    launcher: slab_config::ShellLauncherKind,
+    bash_path: Option<PathBuf>,
+) -> ShellKind {
+    let launcher = match launcher {
+        slab_config::ShellLauncherKind::Auto => slab_agent_tools::ShellLauncher::Auto,
+        slab_config::ShellLauncherKind::Bash => slab_agent_tools::ShellLauncher::Bash,
+        slab_config::ShellLauncherKind::PowerShell => slab_agent_tools::ShellLauncher::PowerShell,
+        slab_config::ShellLauncherKind::Cmd => slab_agent_tools::ShellLauncher::Cmd,
+    };
+    match launcher.resolve_family(bash_path) {
+        slab_agent_tools::ShellFamily::Bash => ShellKind::Bash,
+        slab_agent_tools::ShellFamily::PowerShell => ShellKind::PowerShell,
+        slab_agent_tools::ShellFamily::Cmd => ShellKind::Cmd,
     }
 }
 
@@ -336,5 +342,29 @@ fn evict_oldest_cache_entry(cache: &DashMap<String, RecallCacheEntry>) {
         .map(|entry| entry.key().to_owned());
     if let Some(key) = oldest {
         cache.remove(&key);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// P1 regression: `Auto` + an explicit existing bash path must report bash
+    /// even on Windows — the old `cfg!(windows) → PowerShell` hardcode claimed
+    /// PowerShell while the executor probed and ran Git Bash.
+    #[test]
+    fn shell_kind_auto_with_bash_path_reports_bash() {
+        let exe = std::env::current_exe().expect("current exe");
+        assert_eq!(shell_kind(slab_config::ShellLauncherKind::Auto, Some(exe)), ShellKind::Bash);
+    }
+
+    #[test]
+    fn shell_kind_explicit_kinds_map_directly() {
+        assert_eq!(shell_kind(slab_config::ShellLauncherKind::Bash, None), ShellKind::Bash);
+        assert_eq!(
+            shell_kind(slab_config::ShellLauncherKind::PowerShell, None),
+            ShellKind::PowerShell
+        );
+        assert_eq!(shell_kind(slab_config::ShellLauncherKind::Cmd, None), ShellKind::Cmd);
     }
 }

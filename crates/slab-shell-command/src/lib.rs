@@ -167,6 +167,19 @@ enum ResolvedShell {
     Cmd,
 }
 
+/// The shell family a [`ShellLauncher`] would actually run — the single source
+/// of truth for `Auto`'s probing semantics. Hosts that merely *describe* the
+/// shell (e.g. the agent environment context) MUST resolve through this API
+/// instead of guessing from the platform: on a Windows machine with Git Bash
+/// installed, `Auto` runs bash, and a hardcoded `cfg!(windows) → PowerShell`
+/// would lie to the model about which syntax to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellFamily {
+    Bash,
+    PowerShell,
+    Cmd,
+}
+
 impl ShellLauncher {
     /// Resolve `Auto` to a concrete shell by probing for a POSIX shell.
     fn resolve(self, bash_path: Option<PathBuf>) -> ResolvedShell {
@@ -191,6 +204,19 @@ impl ShellLauncher {
                     }
                 }
             },
+        }
+    }
+
+    /// Which shell family this launcher would actually execute, including
+    /// `Auto`'s bash probing (explicit path -> well-known -> PATH). Callers
+    /// that only need the family (not the concrete argv) should prefer this
+    /// over [`ShellExecutor::new`] — it performs the same resolution without
+    /// keeping a resolved shell around.
+    pub fn resolve_family(self, bash_path: Option<PathBuf>) -> ShellFamily {
+        match self.resolve(bash_path) {
+            ResolvedShell::Bash(_) => ShellFamily::Bash,
+            ResolvedShell::PowerShell => ShellFamily::PowerShell,
+            ResolvedShell::Cmd => ShellFamily::Cmd,
         }
     }
 }
@@ -363,8 +389,9 @@ mod tests {
 
         assert!(output.timed_out);
         // Both the sandbox driver and PassThroughDriver route timeouts through
-        // `wait_for_child`, which reports exit_code 1 regardless of platform.
-        assert_eq!(output.exit_code, 1);
+        // `wait_for_child`, which reports the fixed timeout exit code (124,
+        // GNU `timeout` convention) regardless of platform.
+        assert_eq!(output.exit_code, 124);
     }
 
     #[test]
@@ -394,6 +421,25 @@ mod tests {
         // A non-existent preferred path is ignored, never blindly trusted.
         let bogus = PathBuf::from("/does/not/exist/bash");
         assert_ne!(resolve_bash(Some(bogus.clone())), Some(bogus));
+    }
+
+    #[test]
+    fn launcher_auto_resolves_family_from_explicit_bash_path() {
+        // P1 regression: `Auto` must fold through the actual bash probing, not
+        // a platform guess. An explicit existing bash path pins the family to
+        // Bash even on Windows (where a hardcoded cfg! used to say PowerShell).
+        let exe = std::env::current_exe().expect("current exe");
+        assert_eq!(ShellLauncher::Auto.resolve_family(Some(exe)), ShellFamily::Bash);
+        // No `Auto + no bash -> PowerShell` assertion here: on a machine with
+        // Git Bash installed the well-known/PATH probes still resolve bash, so
+        // the no-argument outcome is environment-dependent by design.
+    }
+
+    #[test]
+    fn launcher_explicit_kinds_resolve_their_own_family() {
+        assert_eq!(ShellLauncher::Bash.resolve_family(None), ShellFamily::Bash);
+        assert_eq!(ShellLauncher::PowerShell.resolve_family(None), ShellFamily::PowerShell);
+        assert_eq!(ShellLauncher::Cmd.resolve_family(None), ShellFamily::Cmd);
     }
 
     #[tokio::test]
