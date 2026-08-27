@@ -454,8 +454,10 @@ pub(crate) async fn wait_for_child(
 /// its own, so the model gets an explicit signal instead of inferring the
 /// timeout from `timed_out` alone.
 fn timeout_stderr_note(timeout: Option<Duration>) -> String {
-    let secs = timeout.map(|t| t.as_secs()).unwrap_or_default();
-    format!("command timed out after {secs}s")
+    match timeout {
+        Some(duration) => format!("command timed out after {}s", duration.as_secs()),
+        None => "command timed out".to_string(),
+    }
 }
 
 /// Await a read task for at most `grace`; on timeout abort it. The shared
@@ -643,5 +645,10 @@ mod tests {
         // 1s timeout + kill + ≤5s grace + ≤5s drain grace must stay well
         // under the 30s the command would run if the kill did not land.
         assert!(started.elapsed() < Duration::from_secs(20), "elapsed: {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn timeout_stderr_note_without_duration_is_generic() {
+        assert_eq!(timeout_stderr_note(None), "command timed out");
     }
 }
