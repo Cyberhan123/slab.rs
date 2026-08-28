@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -245,13 +246,16 @@ impl SandboxDriver for PassThroughDriver {
             child.process_group(0);
         }
 
-        let spawned = child.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-        // PassThrough has no Windows Job Object: on Unix kill the child's process
-        // group; on Windows the grace-timeout backstop in `wait_for_child` is the
-        // only protection (this driver is dev/test-only).
+        let mut spawned = child.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
+        // Unix: kill the child's whole process group. Windows: assign a
+        // KILL_ON_JOB_CLOSE Job Object so the tree dies on drop (a bare
+        // `child.kill` only terminates the direct child). Other platforms fall
+        // back to the grace backstop in `wait_for_child`.
         #[cfg(unix)]
         let kill_tree = unix_kill_tree(spawned.id());
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        let kill_tree = windows_job_kill_tree(&mut spawned);
+        #[cfg(not(any(unix, windows)))]
         let kill_tree: Option<Box<dyn FnOnce() + Send + 'static>> = None;
         wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone(), kill_tree).await
     }
@@ -296,6 +300,12 @@ const READ_DRAIN_GRACE: Duration = Duration::from_secs(5);
 /// delay the run (the old code waited indefinitely, so a failed kill let the
 /// command run to completion while still being reported as timed out).
 const POST_KILL_WAIT_GRACE: Duration = Duration::from_secs(5);
+
+/// Initial probe inside [`POST_KILL_WAIT_GRACE`] (Windows): if the child has
+/// not exited by this point the first kill did not land, and we escalate to
+/// `taskkill /PID <pid> /T /F` before waiting out the remaining grace.
+#[cfg(target_os = "windows")]
+const KILL_ESCALATION_PROBE: Duration = Duration::from_secs(2);
 
 /// Fixed exit code reported for a command killed by its timeout (GNU `timeout`
 /// convention). Never derived from the process: after a kill race the real
@@ -371,52 +381,77 @@ pub(crate) async fn wait_for_child(
     // output survives even if a task is aborted before EOF (see drain grace).
     let stdout_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let stderr_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
-    let stdout_task =
-        tokio::spawn(read_stream(stdout, stdout_sink, OutputStream::Stdout, stdout_buf.clone()));
-    let stderr_task =
-        tokio::spawn(read_stream(stderr, stderr_sink, OutputStream::Stderr, stderr_buf.clone()));
+    // Deadline seal: set by the timeout path BEFORE killing. Once sealed, the
+    // read tasks drop every chunk they pick up (neither the sink nor the
+    // buffer sees it) so output produced after the deadline can never be
+    // reported — the exact `slow_command; echo marker` leak.
+    let sealed = Arc::new(AtomicBool::new(false));
+    let mut stdout_task = Some(tokio::spawn(read_stream(
+        stdout,
+        stdout_sink,
+        OutputStream::Stdout,
+        stdout_buf.clone(),
+        sealed.clone(),
+    )));
+    let mut stderr_task = Some(tokio::spawn(read_stream(
+        stderr,
+        stderr_sink,
+        OutputStream::Stderr,
+        stderr_buf.clone(),
+        sealed.clone(),
+    )));
 
-    let (exit_code, timed_out) = if let Some(timeout) = timeout {
+    let (exit_code, timed_out, reads_aborted) = if let Some(timeout) = timeout {
         match tokio::time::timeout(timeout, child.wait()).await {
-            Ok(Ok(status)) => (status.code().unwrap_or(-1), false),
+            Ok(Ok(status)) => (status.code().unwrap_or(-1), false, false),
             Ok(Err(error)) => return Err(SandboxError::SpawnFailed(error.to_string())),
             Err(_) => {
-                // Timed out: kill the whole tree FIRST (job close / process
-                // group — a bare child.kill only terminates the direct child
-                // and can even fail silently), then best-effort kill the
-                // direct child and reap it within a bounded grace. Whatever
-                // happens, report the fixed timeout exit code — the real
-                // status is untrustworthy once killing has started.
+                // Timed out. Seal the streams FIRST so no chunk read from here
+                // on can reach the sink or the buffer, then kill the whole tree
+                // (job close / process group — a bare child.kill only
+                // terminates the direct child and can even fail silently),
+                // best-effort kill the direct child, and reap it within a
+                // bounded grace (escalating on Windows when the kill did not
+                // land). Whatever happens, report the fixed timeout exit code —
+                // the real status is untrustworthy once killing has started.
+                sealed.store(true, Ordering::SeqCst);
                 if kill_tree.fire() {
                     tracing::info!(?pid, "wait_for_child: timeout, process tree killed");
                 }
                 if let Err(error) = child.kill().await {
                     tracing::warn!(?pid, error = %error, "wait_for_child: kill after timeout failed");
                 }
-                match tokio::time::timeout(POST_KILL_WAIT_GRACE, child.wait()).await {
-                    Ok(Ok(status)) => {
-                        tracing::info!(
-                            ?pid,
-                            ?status,
-                            "wait_for_child: reaped child after timeout kill"
-                        );
+                match reap_after_kill(&mut child, pid).await {
+                    ReapOutcome::Reaped => {
+                        tracing::info!(?pid, "wait_for_child: reaped child after timeout kill");
                     }
-                    Ok(Err(error)) => {
+                    ReapOutcome::WaitFailed(error) => {
                         tracing::warn!(?pid, error = %error, "wait_for_child: wait after timeout kill failed");
                     }
-                    Err(_) => {
+                    ReapOutcome::Abandoned => {
                         tracing::warn!(
                             ?pid,
                             "wait_for_child: child did not exit within grace after kill; abandoning wait"
                         );
                     }
                 }
-                (TIMEOUT_EXIT_CODE, true)
+                // Abort the read tasks immediately instead of draining: the
+                // tree is dead so EOF is imminent, and waiting would only
+                // invite bytes from a writer that survived the kill back into
+                // the buffer. Accepted trade-off: up to one pipe-buffer of
+                // pre-deadline bytes not yet read by the task may be lost.
+                if let Some(task) = stdout_task.take() {
+                    task.abort();
+                }
+                if let Some(task) = stderr_task.take() {
+                    task.abort();
+                }
+                (TIMEOUT_EXIT_CODE, true, true)
             }
         }
     } else {
         let status = child.wait().await.map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-        (status.code().unwrap_or(-1), false)
+        (status.code().unwrap_or(-1), false, false)
     };
     tracing::info!(?pid, exit_code, timed_out, "wait_for_child: child exited, killing tree");
 
@@ -429,10 +464,17 @@ pub(crate) async fn wait_for_child(
         tracing::info!(?pid, "wait_for_child: process tree killed");
     }
 
-    // Drain the pipes within a grace window. If a read still hasn't hit EOF,
-    // abort it and keep whatever reached the shared buffer.
-    drain_with_grace(stdout_task, READ_DRAIN_GRACE).await;
-    drain_with_grace(stderr_task, READ_DRAIN_GRACE).await;
+    // Drain the pipes within a grace window (timeout path already aborted its
+    // reads above). If a read still hasn't hit EOF, abort it and keep whatever
+    // reached the shared buffer.
+    if !reads_aborted {
+        if let Some(task) = stdout_task.take() {
+            drain_with_grace(task, READ_DRAIN_GRACE).await;
+        }
+        if let Some(task) = stderr_task.take() {
+            drain_with_grace(task, READ_DRAIN_GRACE).await;
+        }
+    }
     tracing::info!(
         ?pid,
         stdout_len = stdout_buf.lock().map(|b| b.len()).unwrap_or(0),
@@ -457,6 +499,57 @@ fn timeout_stderr_note(timeout: Option<Duration>) -> String {
     match timeout {
         Some(duration) => format!("command timed out after {}s", duration.as_secs()),
         None => "command timed out".to_string(),
+    }
+}
+
+/// Outcome of the post-kill reap in [`wait_for_child`].
+enum ReapOutcome {
+    Reaped,
+    WaitFailed(std::io::Error),
+    Abandoned,
+}
+
+/// Reap the child after a timeout kill within a bounded grace. On Windows,
+/// probes for [`KILL_ESCALATION_PROBE`] first: a child that survived the tree
+/// kill (job close failed, group kill missed it) is escalated to
+/// `taskkill /PID <pid> /T /F` — `/T` enumerates descendants by walking the
+/// parent chain of live processes, which is only reliable while the root is
+/// still alive, and the probe failing is exactly the signal that it is.
+#[cfg(target_os = "windows")]
+async fn reap_after_kill(child: &mut tokio::process::Child, pid: Option<u32>) -> ReapOutcome {
+    match tokio::time::timeout(KILL_ESCALATION_PROBE, child.wait()).await {
+        Ok(Ok(_)) => ReapOutcome::Reaped,
+        Ok(Err(error)) => ReapOutcome::WaitFailed(error),
+        Err(_) => {
+            if let Some(pid) = pid {
+                tracing::warn!(
+                    ?pid,
+                    "wait_for_child: child survived kill; escalating to taskkill /T /F"
+                );
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/T", "/F"])
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
+            match tokio::time::timeout(POST_KILL_WAIT_GRACE - KILL_ESCALATION_PROBE, child.wait())
+                .await
+            {
+                Ok(Ok(_)) => ReapOutcome::Reaped,
+                Ok(Err(error)) => ReapOutcome::WaitFailed(error),
+                Err(_) => ReapOutcome::Abandoned,
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn reap_after_kill(child: &mut tokio::process::Child, _pid: Option<u32>) -> ReapOutcome {
+    match tokio::time::timeout(POST_KILL_WAIT_GRACE, child.wait()).await {
+        Ok(Ok(_)) => ReapOutcome::Reaped,
+        Ok(Err(error)) => ReapOutcome::WaitFailed(error),
+        Err(_) => ReapOutcome::Abandoned,
     }
 }
 
@@ -504,8 +597,29 @@ pub(crate) async fn wait_for_elevated(
                 // 3s window returned the command's real code with timed_out
                 // stapled on top).
                 kill_tree.fire();
+                // Snapshot the buffers NOW, before the grace wait: the
+                // daemon-side relay may still deliver in-flight frames for a
+                // moment after the drop, and any frame that lands after this
+                // snapshot belongs to a process that outlived the kill —
+                // post-deadline output that must not be reported.
+                let stdout = stdout_buf
+                    .lock()
+                    .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
+                    .clone();
+                let mut stderr = stderr_buf
+                    .lock()
+                    .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
+                    .clone();
                 let _ = tokio::time::timeout(POST_KILL_WAIT_GRACE, &mut exit_future).await;
-                (TIMEOUT_EXIT_CODE, true)
+                if stderr.is_empty() {
+                    stderr.extend_from_slice(timeout_stderr_note(timeout).as_bytes());
+                }
+                return Ok(SandboxedOutput {
+                    stdout,
+                    stderr,
+                    exit_code: TIMEOUT_EXIT_CODE,
+                    timed_out: true,
+                });
             }
         },
         None => {
@@ -531,17 +645,24 @@ pub(crate) async fn wait_for_elevated(
 /// Read a child pipe to EOF. When a sink is present, forward each chunk
 /// incrementally (lossy UTF-8); chunks are always accumulated into the shared
 /// `buffer` so the final output is available even if this task is aborted.
+/// Once `sealed` is set (timeout path, before the kill), every chunk read from
+/// that point on is dropped — output produced after the deadline must reach
+/// neither the live sink nor the returned buffer.
 async fn read_stream<R: AsyncRead + Unpin>(
     reader: Option<R>,
     sink: Option<Arc<dyn OutputSink>>,
     stream: OutputStream,
     buffer: Arc<Mutex<Vec<u8>>>,
+    sealed: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     let Some(mut reader) = reader else { return Ok(()) };
     let mut buf = [0u8; 8192];
     loop {
         let n = reader.read(&mut buf).await?;
         if n == 0 {
+            break;
+        }
+        if sealed.load(Ordering::Acquire) {
             break;
         }
         if let Some(sink) = sink.as_ref() {
@@ -567,6 +688,22 @@ pub(crate) fn unix_kill_tree(pgid: Option<u32>) -> Option<Box<dyn FnOnce() + Sen
             let _ = unsafe { libc::kill(-(p as i32), libc::SIGKILL) };
         }) as Box<dyn FnOnce() + Send + 'static>
     })
+}
+
+/// Windows counterpart of [`unix_kill_tree`]: attach a `KILL_ON_JOB_CLOSE`
+/// Job Object to the freshly spawned child and return a tree-kill closure —
+/// closing the job handle kills every assigned process and their descendants.
+/// `None` when the Job API is unavailable (then the grace backstop in
+/// [`wait_for_child`] still applies).
+#[cfg(target_os = "windows")]
+fn windows_job_kill_tree(
+    child: &mut tokio::process::Child,
+) -> Option<Box<dyn FnOnce() + Send + 'static>> {
+    let job = slab_windows_sandbox::JobHandle::new_kill_on_close().ok()?;
+    let raw = child.raw_handle()?;
+    // SAFETY: `raw` is the freshly spawned child's valid, open process handle.
+    unsafe { job.assign_process(raw) }.ok()?;
+    Some(Box::new(move || drop(job)))
 }
 
 #[cfg(test)]
@@ -645,6 +782,40 @@ mod tests {
         // 1s timeout + kill + ≤5s grace + ≤5s drain grace must stay well
         // under the 30s the command would run if the kill did not land.
         assert!(started.elapsed() < Duration::from_secs(20), "elapsed: {:?}", started.elapsed());
+    }
+
+    /// Deadline-seal semantics, pinned deterministically (no process, no
+    /// kill): bytes written before the seal must land in the buffer, bytes
+    /// written after it must be dropped.
+    #[tokio::test]
+    async fn read_stream_drops_chunks_after_seal() {
+        use tokio::io::AsyncWriteExt;
+
+        let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let sealed = Arc::new(AtomicBool::new(false));
+        let (mut writer, reader) = tokio::io::duplex(64);
+
+        let task_buffer = Arc::clone(&buffer);
+        let task_sealed = Arc::clone(&sealed);
+        let task = tokio::spawn(async move {
+            read_stream(Some(reader), None, OutputStream::Stdout, task_buffer, task_sealed)
+                .await
+                .expect("read_stream");
+        });
+
+        writer.write_all(b"pre-deadline").await.expect("write pre");
+        // Give the read task a beat to pick the chunk up before sealing.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        sealed.store(true, Ordering::SeqCst);
+        writer.write_all(b"POST-DEADLINE-LEAK").await.expect("write post");
+        // Let the read task observe the post-seal chunk and bail out.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        task.abort();
+
+        let collected = buffer.lock().unwrap().clone();
+        let text = String::from_utf8_lossy(&collected).into_owned();
+        assert!(text.contains("pre-deadline"), "pre-seal bytes missing: {text:?}");
+        assert!(!text.contains("POST-DEADLINE-LEAK"), "post-seal bytes leaked: {text:?}");
     }
 
     #[test]

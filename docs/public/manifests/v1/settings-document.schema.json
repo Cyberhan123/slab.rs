@@ -269,6 +269,7 @@
             "cooldown_secs": 30,
             "max_depth": 4,
             "max_threads": 32,
+            "max_turns": 1000,
             "queue_capacity": 0
           }
         }
@@ -293,6 +294,13 @@
         },
         "max_threads": {
           "default": 32,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_turns": {
+          "default": 1000,
+          "description": "Maximum LLM iterations granted to one agent run (one user message).\nThe allowance resets on every resume while `turn_index` accumulates\nacross runs. Runaway loops stay bounded by the token budget, repetition\ndetection, and the user's stop control.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -395,6 +403,7 @@
               "cooldown_secs": 30,
               "max_depth": 4,
               "max_threads": 32,
+              "max_turns": 1000,
               "queue_capacity": 0
             }
           }
@@ -1979,6 +1988,7 @@
             "cooldown_secs": 30,
             "max_depth": 4,
             "max_threads": 32,
+            "max_turns": 1000,
             "queue_capacity": 0
           }
         },

@@ -474,6 +474,12 @@ pub struct AgentRuntimeLimitsConfig {
     /// whether memory pressure has cleared (INFRA-05).
     #[serde(default = "default_cooldown_secs")]
     pub cooldown_secs: u32,
+    /// Maximum LLM iterations granted to one agent run (one user message).
+    /// The allowance resets on every resume while `turn_index` accumulates
+    /// across runs. Runaway loops stay bounded by the token budget, repetition
+    /// detection, and the user's stop control.
+    #[serde(default = "default_max_turns")]
+    pub max_turns: u32,
 }
 
 impl Default for AgentRuntimeLimitsConfig {
@@ -484,6 +490,7 @@ impl Default for AgentRuntimeLimitsConfig {
             queue_capacity: 0,
             rss_threshold_mb: None,
             cooldown_secs: default_cooldown_secs(),
+            max_turns: default_max_turns(),
         }
     }
 }
@@ -498,6 +505,7 @@ impl AgentRuntimeLimitsConfig {
             queue_capacity: self.queue_capacity,
             rss_threshold_mb: self.rss_threshold_mb,
             cooldown_secs: self.cooldown_secs.max(1),
+            max_turns: self.max_turns.max(1),
         }
     }
 }
@@ -512,6 +520,10 @@ fn default_max_threads() -> u32 {
 
 fn default_max_depth() -> u32 {
     4
+}
+
+fn default_max_turns() -> u32 {
+    1000
 }
 
 /// Agent lifecycle hook settings.
@@ -1931,27 +1943,34 @@ mod tests {
         let default = AgentSettingsConfig::default();
         assert_eq!(default.runtime.limits.max_threads, 32);
         assert_eq!(default.runtime.limits.max_depth, 4);
+        assert_eq!(default.runtime.limits.max_turns, 1000);
     }
 
     #[test]
     fn agent_runtime_limits_deserialize_from_overrides() {
         let json = r#"{
             "debug": false,
-            "runtime": { "limits": { "max_threads": 8, "max_depth": 2 } }
+            "runtime": { "limits": { "max_threads": 8, "max_depth": 2, "max_turns": 40 } }
         }"#;
         let parsed: AgentSettingsConfig = serde_json::from_str(json).expect("parse");
         assert_eq!(parsed.runtime.limits.max_threads, 8);
         assert_eq!(parsed.runtime.limits.max_depth, 2);
+        assert_eq!(parsed.runtime.limits.max_turns, 40);
         assert!(!parsed.debug);
     }
 
     #[test]
     fn agent_runtime_limits_clamp_to_minimums() {
-        let limits =
-            AgentRuntimeLimitsConfig { max_threads: 0, max_depth: 0, ..Default::default() };
+        let limits = AgentRuntimeLimitsConfig {
+            max_threads: 0,
+            max_depth: 0,
+            max_turns: 0,
+            ..Default::default()
+        };
         let clamped = limits.clamped();
         assert_eq!(clamped.max_threads, 1);
         assert_eq!(clamped.max_depth, 1);
+        assert_eq!(clamped.max_turns, 1);
     }
 
     #[test]

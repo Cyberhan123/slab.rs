@@ -88,6 +88,12 @@ pub(crate) async fn turn_start(
     // non-default agent after a plan is approved.
     let agent_def = session.service().resolve_agent_definition(params.agent_type.as_deref());
 
+    // Per-run LLM-iteration budget from settings. Re-applied on every turn so
+    // legacy threads persisted with the old default (`10`) are upgraded on
+    // their next user message; `resume_thread` re-reads `config_json` each
+    // turn, making the persisted config the chokepoint.
+    let max_turns = session.state().context.pmid.config().agent.runtime.limits.clamped().max_turns;
+
     let mut queued = false;
     match session.existing_real(&params.thread_id) {
         Some(real_id) => {
@@ -110,6 +116,11 @@ pub(crate) async fn turn_start(
                 )
                 .await
                 .map_err(|e| e.to_string())?;
+            session
+                .service()
+                .set_thread_max_turns(&real_id, max_turns)
+                .await
+                .map_err(|e| e.to_string())?;
             let known_skills = scan_known_skills(session.state().workspace_root().as_deref());
             // Structured input carries image parts (VLM) through to
             // `send_input_message`; empty input is a silent no-op, mirroring the
@@ -125,8 +136,12 @@ pub(crate) async fn turn_start(
         None => {
             // First turn materializes the slab thread (create + run).
             let known_skills = scan_known_skills(session.state().workspace_root().as_deref());
-            let mut config: slab_agent::AgentConfig =
-                AgentConfigInput { model: params.model.clone(), ..Default::default() }.into();
+            let mut config: slab_agent::AgentConfig = AgentConfigInput {
+                model: params.model.clone(),
+                max_turns: Some(max_turns),
+                ..Default::default()
+            }
+            .into();
             if let Some(def) = &agent_def {
                 config.agent_type = Some(def.agent_type.clone());
                 config.system_prompt = Some(def.system_prompt.clone());

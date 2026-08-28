@@ -5,7 +5,7 @@
 use crate::error::{WindowsSandboxError, win32_ctx};
 
 /// RAII handle to a Windows Job Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
-pub(crate) struct JobHandle(windows_sys::Win32::Foundation::HANDLE);
+pub struct JobHandle(windows_sys::Win32::Foundation::HANDLE);
 
 // SAFETY: the handle is owned solely by this wrapper and never shared across threads while live.
 unsafe impl Send for JobHandle {}
@@ -23,6 +23,15 @@ impl JobHandle {
             )));
         }
         Ok(Self(handle))
+    }
+
+    /// Create a Job Object pre-configured with `KILL_ON_JOB_CLOSE` — the
+    /// composed constructor for callers outside this crate (e.g. the
+    /// pass-through sandbox driver) that only need tree-kill semantics.
+    pub fn new_kill_on_close() -> Result<Self, WindowsSandboxError> {
+        let job = Self::new()?;
+        job.configure_kill_on_close()?;
+        Ok(job)
     }
 
     /// Configure the job so closing its handle kills every assigned process.
@@ -47,7 +56,13 @@ impl JobHandle {
     }
 
     /// Assign a process (by its OS handle) to this job.
-    pub(crate) fn assign_process(
+    ///
+    /// # Safety
+    ///
+    /// `process` must be a valid, open process handle with
+    /// `PROCESS_SET_QUOTA | PROCESS_TERMINATE` access; the caller must keep it
+    /// valid for the duration of the call.
+    pub unsafe fn assign_process(
         &self,
         process: windows_sys::Win32::Foundation::HANDLE,
     ) -> Result<(), WindowsSandboxError> {

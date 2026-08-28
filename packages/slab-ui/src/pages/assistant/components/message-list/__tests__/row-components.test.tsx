@@ -33,6 +33,7 @@ vi.mock("@slab/components/message", () => ({
   MessageAvatar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   MessageContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   MessageHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MessageFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 
 vi.mock("@slab/components/bubble", () => ({

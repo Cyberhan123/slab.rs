@@ -176,6 +176,23 @@ impl HarnessService {
             .map_err(AppCoreError::from)
     }
 
+    /// Overwrite the run-iteration budget for the next turn on a thread (flows
+    /// from the `agent.runtime.limits.max_turns` setting). Re-applied every
+    /// turn so legacy threads carrying the old default in their persisted
+    /// config are upgraded on their next user message.
+    pub async fn set_thread_max_turns(
+        &self,
+        thread_id: &str,
+        max_turns: u32,
+    ) -> Result<(), AppCoreError> {
+        self.0
+            .runtime()
+            .control()
+            .set_thread_max_turns(thread_id, max_turns)
+            .await
+            .map_err(AppCoreError::from)
+    }
+
     /// Send an approval decision for a pending tool-call.
     ///
     /// Both `thread_id` (from the URL path) and `call_id` must match so that

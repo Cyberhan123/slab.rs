@@ -124,8 +124,9 @@ type SenderProps = {
   loading?: boolean
   /**
    * Allow submitting WHILE a turn runs (steering): the submit routes to the
-   * queued steering path instead of a second AI-SDK stream. The Stop control
-   * stays available alongside an enabled Send button.
+   * queued steering path instead of a second AI-SDK stream. The single submit
+   * button becomes Stop while generating with nothing to steer (empty
+   * composer, or a non-steerable turn) and stays Send otherwise.
    */
   steerable?: boolean
   /** Pending human-approval requests rendered in a slot above the textarea. */
@@ -185,10 +186,14 @@ function Sender({
 
   const effort: ReasoningEffort = thinkingEnabled ? effortLevel : "off"
   const isGenerating = loading
-  const showStop = isGenerating && onStop
+  const showStop = Boolean(isGenerating && onStop)
   // Steerable turns keep submit enabled while generating; plain turns lock it.
   const canSend =
     (!isGenerating || steerable) && (value.trim().length > 0 || attachments.length > 0)
+  // Single-button state machine: while generating, the button is Stop when
+  // there is nothing to steer (empty composer or non-steerable turn) and Send
+  // otherwise; idle turns always show Send.
+  const stopMode = showStop && !canSend
 
   const addFiles = (fileList: FileList | File[] | null) => {
     if (!fileList) return
@@ -572,52 +577,29 @@ function Sender({
             </DropdownMenuContent>
           </DropdownMenu>
           <div className="ml-auto flex items-center gap-1">
-            {showStop ? (
-              <>
-                <InputGroupButton
-                  aria-label={t("pages.assistant.composer.stopGeneratingResponse")}
-                  data-testid="assistant-stop-button"
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  onClick={() => onStop?.()}
-                >
-                  <SquareIcon className="size-4" />
-                  <span className="sr-only">
-                    {t("pages.assistant.composer.stopGeneratingResponse")}
-                  </span>
-                </InputGroupButton>
-                {steerable ? (
-                  <InputGroupButton
-                    aria-label="Send"
-                    data-testid="assistant-send-button"
-                    type="submit"
-                    variant="default"
-                    size="icon-sm"
-                    disabled={!canSend}
-                  >
-                    {canSend ? <ArrowUpIcon /> : <Spinner />}
-                    <span className="sr-only">
-                      {t("pages.assistant.composer.sendMessage")}
-                    </span>
-                  </InputGroupButton>
-                ) : null}
-              </>
-            ) : (
-              <InputGroupButton
-                aria-label="Send"
-                data-testid="assistant-send-button"
-                type="submit"
-                variant="default"
-                size="icon-sm"
-                disabled={!canSend}
-              >
-                {isGenerating ? <Spinner /> : <ArrowUpIcon />}
-                <span className="sr-only">
-                  {t("pages.assistant.composer.sendMessage")}
-                </span>
-              </InputGroupButton>
-            )}
+            <InputGroupButton
+              aria-label={stopMode ? t("pages.assistant.composer.stopGeneratingResponse") : "Send"}
+              data-testid="assistant-send-button"
+              data-mode={stopMode ? "stop" : "send"}
+              type={stopMode ? "button" : "submit"}
+              variant={stopMode ? "outline" : "default"}
+              size="icon-sm"
+              disabled={!stopMode && !canSend}
+              onClick={stopMode ? () => onStop?.() : undefined}
+            >
+              {stopMode ? (
+                <SquareIcon className="size-4" />
+              ) : isGenerating && !canSend ? (
+                <Spinner />
+              ) : (
+                <ArrowUpIcon />
+              )}
+              <span className="sr-only">
+                {stopMode
+                  ? t("pages.assistant.composer.stopGeneratingResponse")
+                  : t("pages.assistant.composer.sendMessage")}
+              </span>
+            </InputGroupButton>
             {planMode ? (
               <InputGroupButton
                 aria-label={t("pages.assistant.planMode.exit")}

@@ -543,6 +543,34 @@ impl AgentControl {
         Ok(())
     }
 
+    /// Overwrite the persisted run-iteration budget for a thread (flows from the
+    /// `agent.runtime.limits.max_turns` setting on every harness `turn/start`).
+    /// Same read-modify-write as [`Self::set_thread_reasoning_effort`]:
+    /// `resume_thread` re-reads the persisted `config_json` every turn, so this
+    /// is also what retroactively upgrades legacy threads that still carry the
+    /// old default (`10`) in their stored config.
+    pub async fn set_thread_max_turns(
+        &self,
+        thread_id: &str,
+        max_turns: u32,
+    ) -> Result<(), AgentError> {
+        let snapshot = self
+            .store
+            .get_thread(thread_id)
+            .await?
+            .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+        let mut config =
+            serde_json::from_str::<AgentConfig>(&snapshot.config_json).map_err(|e| {
+                AgentError::Internal(format!("failed to deserialize agent config: {e}"))
+            })?;
+        config.max_turns = max_turns;
+        let config_json = serde_json::to_string(&config)
+            .map_err(|e| AgentError::Internal(format!("failed to serialize agent config: {e}")))?;
+        let updated = ThreadSnapshot { config_json, ..snapshot };
+        self.store.upsert_thread(&updated).await?;
+        Ok(())
+    }
+
     /// Return a persisted thread snapshot.
     pub async fn thread_snapshot(
         &self,
