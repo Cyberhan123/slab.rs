@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
-use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use crate::{Result, error::fs_error, templates};
 
@@ -63,6 +62,14 @@ pub fn render_read_developer_message(config: &MemoryReadConfig) -> Result<Option
         return Ok(None);
     }
 
+    // Bound the injected summary (Codex's 2500-token read limit): an
+    // over-grown memory_summary.md must not silently inflate every agent
+    // start. The cut backs off to a line boundary, so the leading `v1`
+    // marker survives.
+    let memory_summary = crate::recall::truncate_to_token_budget(
+        &memory_summary,
+        crate::recall::SUMMARY_TOKEN_BUDGET,
+    );
     let mut rendered =
         templates::render_memory_read(&config.memory_root.to_string_lossy(), &memory_summary)?;
     if config.inject_hook_instructions {
@@ -70,18 +77,6 @@ pub fn render_read_developer_message(config: &MemoryReadConfig) -> Result<Option
         rendered.push_str(&templates::render_hook_instructions());
     }
     Ok(Some(rendered))
-}
-
-pub fn render_read_developer_turn(
-    config: &MemoryReadConfig,
-) -> Result<Option<ConversationMessage>> {
-    Ok(render_read_developer_message(config)?.map(|content| ConversationMessage {
-        role: "developer".to_owned(),
-        content: ConversationMessageContent::Text(content),
-        name: Some("slab_memory".to_owned()),
-        tool_call_id: None,
-        tool_calls: Vec::new(),
-    }))
 }
 
 pub fn parse_memory_citations(text: &str) -> Vec<MemoryCitation> {
@@ -97,6 +92,26 @@ pub fn parse_memory_citations(text: &str) -> Vec<MemoryCitation> {
                 .map(str::trim)
                 .filter(|line| !line.is_empty())
                 .filter_map(parse_citation_line)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Parse the `<rollout_ids>` block of an `<oai-mem-citation>` into valid
+/// rollout (session) UUIDs. The ids are the session ids the memory pipeline
+/// originally extracted from, so they let a citation bump usage even when the
+/// cited file's slug no longer maps back to a phase1 row.
+pub fn parse_memory_rollout_ids(text: &str) -> Vec<String> {
+    let block_re = Regex::new(r"(?s)<rollout_ids>\s*(?P<body>.*?)\s*</rollout_ids>")
+        .expect("valid rollout ids block regex");
+    block_re
+        .captures_iter(text)
+        .flat_map(|captures| {
+            captures["body"]
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .filter_map(|line| uuid::Uuid::parse_str(line).ok().map(|_| line.to_owned()))
                 .collect::<Vec<_>>()
         })
         .collect()
@@ -143,6 +158,23 @@ fn read_optional(path: &Path) -> Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_rollout_ids() {
+        let ids = parse_memory_rollout_ids(
+            "<oai-mem-citation>\n<citation_entries>\nMEMORY.md:1-2\n</citation_entries>\n<rollout_ids>\n0b6e64b2-90d2-4d3a-9f7c-2a1d3c4e5f60\nnot-a-uuid\n7f9242ce-1b3a-4c5d-8e6f-708192a3b4c5\n</rollout_ids>\n</oai-mem-citation>",
+        );
+
+        assert_eq!(
+            ids,
+            vec![
+                "0b6e64b2-90d2-4d3a-9f7c-2a1d3c4e5f60".to_owned(),
+                "7f9242ce-1b3a-4c5d-8e6f-708192a3b4c5".to_owned(),
+            ],
+            "invalid lines dropped, order kept"
+        );
+        assert!(parse_memory_rollout_ids("no block here").is_empty());
+    }
 
     #[test]
     fn parses_memory_citations() {

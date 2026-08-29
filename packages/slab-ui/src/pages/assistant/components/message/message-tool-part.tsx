@@ -10,6 +10,7 @@ import { cn } from "@slab/ui/lib/utils"
 import {
   CheckCircleIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   CircleIcon,
   ClockIcon,
   WrenchIcon,
@@ -103,7 +104,10 @@ export const ToolHeader = ({
       <span className="truncate font-medium text-sm">{title}</span>
       {getStatusBadge(state)}
     </div>
-    <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+    <span className="flex shrink-0 items-center text-muted-foreground">
+      <ChevronRightIcon className="size-4 group-data-[state=closed]:block group-data-[state=open]:hidden" />
+      <ChevronDownIcon className="size-4 group-data-[state=closed]:hidden group-data-[state=open]:block" />
+    </span>
   </CollapsibleTrigger>
 )
 
@@ -203,6 +207,15 @@ export function isToolActive(state: ToolState): boolean {
   )
 }
 
+/**
+ * Whether a tool card must start expanded because it awaits an interactive
+ * decision — the only default-open case. Cards that merely run stay collapsed
+ * (during generation and after); the user expands them via the trigger.
+ */
+export function isApprovalPending(state: ToolState): boolean {
+  return state === "approval-requested"
+}
+
 function MessageToolPart({
   part,
   kind,
@@ -223,7 +236,7 @@ function MessageToolPart({
   const derivedName = (name ?? p.toolName ?? fromType) || "tool"
 
   return (
-    <Tool defaultOpen={isToolActive(state)}>
+    <Tool defaultOpen={isApprovalPending(state)}>
       <ToolHeader title={derivedName} state={state} />
       <ToolContent>
         <ToolInput input={p.input} />

@@ -44,8 +44,9 @@ pub enum OsKind {
 #[derive(Debug, Clone, Serialize)]
 pub struct EnvironmentSnapshot {
     /// Absolute workspace root the agent operates in, if any. Serialized as
-    /// `null` when absent so the template can render an "(unset)" fallback
-    /// under minijinja strict-undefined mode.
+    /// `null` when absent so the template can render an explicit
+    /// "no workspace configured" fallback under minijinja strict-undefined
+    /// mode.
     pub cwd: Option<String>,
     pub shell: ShellKind,
     pub os: OsKind,
@@ -93,7 +94,12 @@ pub struct PermissionSnapshot {
 /// Folded read-side memory context. `body` is the fully rendered memory
 /// instruction (already wrapped by `slab-agent-memories`); the context hook
 /// injects it verbatim as a `developer` message named `slab_memory`.
+/// `relevant_body` carries the recall-selected rollout summaries (when
+/// recall is enabled and produced a selection); it is injected as a separate
+/// `slab_memory_relevant` developer message so each fragment refreshes
+/// independently by tag.
 #[derive(Debug, Clone, Serialize)]
 pub struct MemoryContext {
     pub body: String,
+    pub relevant_body: Option<String>,
 }

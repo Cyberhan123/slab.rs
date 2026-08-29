@@ -34,6 +34,7 @@ export type {
   ConversationControllerOptions,
   ConversationState,
   ModelLoadState,
+  ThreadStatusString,
   TurnSendOptions,
 } from "./conversation-controller"
 export {

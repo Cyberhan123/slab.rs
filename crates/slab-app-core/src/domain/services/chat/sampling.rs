@@ -55,6 +55,13 @@ pub(super) fn built_in_for_effort(effort: Option<ChatReasoningEffort>) -> Runtim
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ResolvedSampling {
     pub max_tokens: u32,
+    /// The max-tokens value only when it was *deliberately* chosen — supplied
+    /// by the request or authored in the model's runtime presets, never filled
+    /// in by the built-in effort presets or the legacy fallback. Cloud callers
+    /// send this on the wire instead of `max_tokens`: implicit small caps
+    /// truncate cloud reasoning models mid-thought (reasoning tokens count
+    /// against `max_tokens`) and surface as "empty assistant content".
+    pub explicit_max_tokens: Option<u32>,
     pub temperature: f32,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
@@ -73,12 +80,12 @@ pub(super) fn resolve_sampling(
     let effort_preset =
         model_presets.map(|presets| presets.resolve_for_effort(effort)).unwrap_or_default();
     let built_in = built_in_for_effort(effort);
+    let explicit_max_tokens = common.max_tokens.or(effort_preset.max_tokens);
     ResolvedSampling {
-        max_tokens: common
-            .max_tokens
-            .or(effort_preset.max_tokens)
+        max_tokens: explicit_max_tokens
             .or(built_in.max_tokens)
             .unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS),
+        explicit_max_tokens,
         temperature: common
             .temperature
             .or(effort_preset.temperature)
@@ -122,7 +129,28 @@ mod tests {
     fn no_preset_no_effort_keeps_legacy_defaults() {
         let resolved = resolve_sampling(&common(None, None), None, None);
         assert_eq!(resolved.max_tokens, 512);
+        assert_eq!(resolved.explicit_max_tokens, None);
         assert!((resolved.temperature - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn built_in_effort_caps_are_not_explicit() {
+        let resolved = resolve_sampling(&common(None, None), Some(ChatReasoningEffort::High), None);
+        assert_eq!(resolved.max_tokens, 4096);
+        assert_eq!(resolved.explicit_max_tokens, None);
+    }
+
+    #[test]
+    fn request_and_model_preset_caps_are_explicit() {
+        let mut params = common(None, None);
+        params.max_tokens = Some(1200);
+        assert_eq!(resolve_sampling(&params, None, None).explicit_max_tokens, Some(1200));
+
+        let model = RuntimePresets::new(Some(2048), None, None, None, None, None, None);
+        assert_eq!(
+            resolve_sampling(&common(None, None), None, Some(&model)).explicit_max_tokens,
+            Some(2048)
+        );
     }
 
     #[test]

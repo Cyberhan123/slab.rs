@@ -13,6 +13,7 @@ import {
   TerminalTitle,
 } from "./terminal"
 import {
+  isApprovalPending,
   deriveState,
   isToolActive,
   Tool,
@@ -90,7 +91,7 @@ function MessageToolCommandPart({
   const body = active && liveOutput !== undefined ? liveOutput : finalizedStdout
 
   return (
-    <Tool defaultOpen={active}>
+    <Tool defaultOpen={isApprovalPending(state)}>
       <ToolHeader title="commandExecution" state={state} />
       <ToolContent>
         {/* `output` feeds both the TerminalContent body and the copy button, so

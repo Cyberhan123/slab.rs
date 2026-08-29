@@ -688,7 +688,9 @@ fn spawn_low_il_child_sync(
 
     // Assign the Job WHILE SUSPENDED. On failure, terminate the suspended child (never resume an
     // untracked process) and fail closed.
-    if let Err(e) = job.assign_process(pi.hProcess) {
+    // SAFETY: `pi.hProcess` is the freshly created (suspended) child's process handle
+    // from `CreateProcessW`, still valid and open here.
+    if let Err(e) = unsafe { job.assign_process(pi.hProcess) } {
         unsafe {
             TerminateProcess(pi.hProcess, 1);
             CloseHandle(pi.hProcess);

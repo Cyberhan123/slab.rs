@@ -254,6 +254,8 @@ pub enum ServerI18nKey {
     SettingsPropertyLabelLegacyHookScripts,
     #[serde(rename = "server.settings.properties.label.agentMemories")]
     SettingsPropertyLabelAgentMemories,
+    #[serde(rename = "server.settings.properties.label.memoryRecall")]
+    SettingsPropertyLabelMemoryRecall,
     #[serde(rename = "server.settings.properties.label.memoryRoot")]
     SettingsPropertyLabelMemoryRoot,
     #[serde(rename = "server.settings.properties.label.phase1ScanLimit")]
@@ -266,6 +268,8 @@ pub enum ServerI18nKey {
     SettingsPropertyLabelPhase1LeaseSeconds,
     #[serde(rename = "server.settings.properties.label.phase1RetrySeconds")]
     SettingsPropertyLabelPhase1RetrySeconds,
+    #[serde(rename = "server.settings.properties.label.phase1MaxAttempts")]
+    SettingsPropertyLabelPhase1MaxAttempts,
     #[serde(rename = "server.settings.properties.label.phase1MaxAgeDays")]
     SettingsPropertyLabelPhase1MaxAgeDays,
     #[serde(rename = "server.settings.properties.label.phase2Limit")]
@@ -392,6 +396,8 @@ pub enum ServerI18nKey {
     SettingsPropertyDescriptionLegacyHookScripts,
     #[serde(rename = "server.settings.properties.description.agentMemories")]
     SettingsPropertyDescriptionAgentMemories,
+    #[serde(rename = "server.settings.properties.description.memoryRecall")]
+    SettingsPropertyDescriptionMemoryRecall,
     #[serde(rename = "server.settings.properties.description.agentMemoryModel")]
     SettingsPropertyDescriptionAgentMemoryModel,
     #[serde(rename = "server.settings.properties.description.memoryRoot")]
@@ -406,6 +412,8 @@ pub enum ServerI18nKey {
     SettingsPropertyDescriptionPhase1LeaseSeconds,
     #[serde(rename = "server.settings.properties.description.phase1RetrySeconds")]
     SettingsPropertyDescriptionPhase1RetrySeconds,
+    #[serde(rename = "server.settings.properties.description.phase1MaxAttempts")]
+    SettingsPropertyDescriptionPhase1MaxAttempts,
     #[serde(rename = "server.settings.properties.description.phase1MaxAgeDays")]
     SettingsPropertyDescriptionPhase1MaxAgeDays,
     #[serde(rename = "server.settings.properties.description.phase2Limit")]

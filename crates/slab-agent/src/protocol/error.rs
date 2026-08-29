@@ -28,17 +28,6 @@ impl ErrorEvent {
     }
 }
 
-/// A non-terminal warning: the turn continued but the user should be notified.
-/// Carried by [`super::EventMsg::Warning`].
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct WarningEvent {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
-    pub message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

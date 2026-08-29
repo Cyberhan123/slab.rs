@@ -50,6 +50,17 @@ pub fn remove_workspace_diff_file(memory_root: &Path) -> Result<()> {
     }
 }
 
+/// Roll the workspace's TRACKED files back to the committed baseline.
+///
+/// The post-phase2 validation rollback: when the consolidation agent's
+/// output fails validation, this undoes its edits without destroying
+/// anything. Deliberately NOT `git clean` — untracked files such as
+/// `extensions/ad_hoc/notes/*.md` (user-authored memory notes) would be
+/// irrecoverably deleted.
+pub fn restore_tracked_files(memory_root: &Path) -> Result<()> {
+    run_git(memory_root, &["reset", "--hard", "HEAD"])
+}
+
 fn git_output(root: &Path, args: &[&str]) -> Result<String> {
     let output = Command::new("git").arg("-C").arg(root).args(args).output().map_err(|error| {
         MemoryError::Git(format!("failed to run git {}: {error}", args.join(" ")))
@@ -102,5 +113,34 @@ mod tests {
         remove_workspace_diff_file(root.path()).expect("remove missing");
 
         assert!(!diff_path.exists());
+    }
+
+    // The validation rollback: tracked files return to the committed
+    // baseline while UNTRACKED files (user-authored memory notes) survive.
+    #[test]
+    fn restores_tracked_files_but_keeps_untracked_when_git_is_available() {
+        let root = tempfile::tempdir().expect("tempdir");
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+
+        ensure_memory_git_baseline(root.path()).expect("baseline");
+        std::fs::write(root.path().join("MEMORY.md"), "committed\n").expect("write");
+        reset_memory_git_baseline(root.path()).expect("baseline commit");
+        std::fs::write(root.path().join("MEMORY.md"), "bad consolidation\n").expect("overwrite");
+        let notes = root.path().join("extensions").join("ad_hoc").join("notes");
+        std::fs::create_dir_all(&notes).expect("notes dir");
+        std::fs::write(notes.join("user-note.md"), "user authored").expect("note");
+
+        restore_tracked_files(root.path()).expect("restore");
+
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("MEMORY.md"))
+                .expect("read")
+                .replace("\r\n", "\n"),
+            "committed\n",
+            "tracked edits roll back to the baseline"
+        );
+        assert!(notes.join("user-note.md").exists(), "untracked user notes survive the rollback");
     }
 }
