@@ -32,6 +32,76 @@ pub fn truncate_middle_with_token_budget(s: &str, max_tokens: usize) -> (String,
     if truncated == s { (truncated, None) } else { (truncated, Some(total_tokens)) }
 }
 
+/// Inline marker for middle-preserving byte truncation (byte analog of the
+/// token-budget marker above). Carries the narrowing hint so the model treats
+/// truncation as a signal to scope down, not to re-request everything.
+const OMITTED_BYTES_MARKER: &str =
+    "…{bytes} bytes omitted (narrow the scope or delegate to delegate_subagent)…";
+/// Newline-delimited variant for multi-line command output.
+const OMITTED_BYTES_MARKER_MULTILINE: &str = "\n[... {bytes} bytes omitted — narrow the scope (path/glob, line ranges) or delegate broad sweeps to delegate_subagent ...]\n";
+
+/// Truncate the middle of a UTF-8 string to at most `limit_bytes`, keeping a
+/// head fraction of `head_ratio` (clamped to `0.0..=1.0`) of the budget and
+/// the remainder as tail. Returns the bounded string and the number of bytes
+/// omitted (0 when the input already fits).
+pub fn truncate_middle_bytes(s: &str, limit_bytes: usize, head_ratio: f32) -> (String, u64) {
+    truncate_middle_bytes_with_marker(s, limit_bytes, head_ratio, OMITTED_BYTES_MARKER)
+}
+
+fn truncate_middle_bytes_with_marker(
+    s: &str,
+    limit_bytes: usize,
+    head_ratio: f32,
+    marker: &str,
+) -> (String, u64) {
+    if s.len() <= limit_bytes {
+        return (s.to_string(), 0);
+    }
+
+    let ratio = head_ratio.clamp(0.0, 1.0);
+    let head_budget = ((limit_bytes as f32) * ratio) as usize;
+    let tail_budget = limit_bytes.saturating_sub(head_budget);
+    let (_, head, tail) = split_string(s, head_budget, tail_budget);
+    let omitted = u64::try_from(s.len() - head.len() - tail.len()).unwrap_or(u64::MAX);
+    let marker_text = marker.replace("{bytes}", &omitted.to_string());
+
+    let mut out = String::with_capacity(head.len() + marker_text.len() + tail.len());
+    out.push_str(head);
+    out.push_str(&marker_text);
+    out.push_str(tail);
+    (out, omitted)
+}
+
+/// Decode command output bytes lossily, then middle-truncate to `limit` with a
+/// `head_ratio` head/tail split — unlike [`decode_truncated_output`] the tail
+/// survives, which keeps exit summaries and error tails readable.
+pub fn decode_truncated_head_tail(bytes: &[u8], limit: usize, head_ratio: f32) -> String {
+    if bytes.len() <= limit {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+
+    let decoded = String::from_utf8_lossy(bytes).into_owned();
+    let (bounded, _) = truncate_middle_bytes_with_marker(
+        &decoded,
+        limit,
+        head_ratio,
+        OMITTED_BYTES_MARKER_MULTILINE,
+    );
+    bounded
+}
+
+/// Cap a single (typically very long) line to `limit_bytes` on a UTF-8 char
+/// boundary, appending a marker that reports the original byte length so the
+/// model knows the line itself was the payload.
+pub fn truncate_line_bytes(line: &str, limit_bytes: usize) -> String {
+    if line.len() <= limit_bytes {
+        return line.to_string();
+    }
+
+    let head = super::take_bytes_at_char_boundary(line, limit_bytes);
+    format!("{head} [...line truncated, {} bytes total]", line.len())
+}
+
 /// Decode bytes lossily and preserve at most `limit` leading bytes, appending
 /// `marker` when truncation happens.
 pub fn decode_truncated_prefix(bytes: &[u8], limit: usize, marker: &str) -> String {
@@ -188,11 +258,12 @@ fn assemble_truncated_output(prefix: &str, suffix: &str, marker: &str) -> String
 #[cfg(test)]
 mod tests {
     use super::split_string;
+    use super::truncate_middle_bytes;
     use super::truncate_middle_chars;
     use super::truncate_middle_with_token_budget;
     use super::{
-        decode_truncated_output, decode_truncated_prefix, truncate_output_prefix,
-        truncate_prefix_bytes,
+        decode_truncated_head_tail, decode_truncated_output, decode_truncated_prefix,
+        truncate_line_bytes, truncate_output_prefix, truncate_prefix_bytes,
     };
     use pretty_assertions::assert_eq;
 
@@ -298,5 +369,73 @@ mod tests {
         let s = "😀😀😀😀😀😀😀😀😀😀\nsecond line with text\n";
         let out = truncate_middle_chars(s, /*max_bytes*/ 20);
         assert_eq!(out, "😀😀…21 chars truncated…with text\n");
+    }
+
+    #[test]
+    fn truncate_middle_bytes_preserves_head_and_tail_ratio() {
+        let s = "0123456789abcdefghij"; // 20 ASCII bytes
+        let (out, omitted) = truncate_middle_bytes(s, /*limit*/ 10, /*head_ratio*/ 0.7);
+        assert!(out.starts_with("0123456…10 bytes omitted"), "marker must lead: {out}");
+        assert!(out.ends_with("hij"), "tail must survive: {out}");
+        assert_eq!(omitted, 10);
+
+        let (out, _) = truncate_middle_bytes(s, /*limit*/ 10, /*head_ratio*/ 0.5);
+        assert!(out.starts_with("01234"), "head must survive: {out}");
+        assert!(out.ends_with("fghij"), "tail must survive: {out}");
+        assert!(out.contains("10 bytes omitted"), "marker present: {out}");
+    }
+
+    #[test]
+    fn truncate_middle_bytes_respects_utf8_boundaries() {
+        let s = "😀😀😀😀😀😀😀😀😀😀"; // 40 bytes
+        let (out, omitted) = truncate_middle_bytes(s, /*limit*/ 20, /*head_ratio*/ 0.5);
+        // Head budget 10 keeps 2 emoji (8 bytes); tail budget 10 keeps 2 emoji.
+        assert!(out.starts_with("😀😀"), "head must survive");
+        assert!(out.ends_with("😀😀"), "tail must survive");
+        assert!(out.contains("24 bytes omitted"), "marker present: {out}");
+        assert_eq!(omitted, 24);
+    }
+
+    #[test]
+    fn truncate_middle_bytes_returns_original_under_limit() {
+        let (out, omitted) = truncate_middle_bytes("short", /*limit*/ 100, 0.7);
+        assert_eq!(out, "short");
+        assert_eq!(omitted, 0);
+    }
+
+    #[test]
+    fn truncate_middle_bytes_clamps_degenerate_ratio() {
+        let s = "0123456789abcdefghij";
+        let (all_head, _) = truncate_middle_bytes(s, /*limit*/ 10, /*head_ratio*/ 2.0);
+        assert!(all_head.starts_with("0123456789")); // full budget goes to the head
+        assert!(all_head.contains("10 bytes omitted"));
+        assert!(!all_head.contains("abcdefghij")); // no tail survived
+
+        let (all_tail, _) = truncate_middle_bytes(s, /*limit*/ 10, /*head_ratio*/ -1.0);
+        assert!(all_tail.contains("10 bytes omitted"));
+        assert!(all_tail.ends_with("abcdefghij")); // full budget goes to the tail
+    }
+
+    #[test]
+    fn decode_truncated_head_tail_marks_omission() {
+        let out = decode_truncated_head_tail(b"0123456789abcdefghij", /*limit*/ 10, 0.7);
+        assert!(out.starts_with("0123456\n[... 10 bytes omitted"), "head + marker: {out}");
+        assert!(out.contains("delegate_subagent"), "narrowing hint rides the marker: {out}");
+        assert!(out.ends_with("hij"), "tail must survive: {out}");
+
+        // Under the limit: verbatim lossy decode.
+        assert_eq!(decode_truncated_head_tail(b"abcdef", 10, 0.7), "abcdef");
+    }
+
+    #[test]
+    fn truncate_line_bytes_caps_and_reports_total() {
+        let long = "x".repeat(10_000);
+        let out = truncate_line_bytes(&long, /*limit*/ 2_000);
+        assert!(out.starts_with(&"x".repeat(100)));
+        assert!(out.contains("[...line truncated, 10000 bytes total]"));
+        assert!(out.len() < 2_100);
+
+        // Under the limit: untouched.
+        assert_eq!(truncate_line_bytes("short", 2_000), "short");
     }
 }

@@ -34,6 +34,9 @@ pub(crate) struct TestServerOptions {
     pub(crate) bind_address: Option<String>,
     pub(crate) admin_api_token: Option<String>,
     pub(crate) workspace_root: Option<std::path::PathBuf>,
+    /// Additional providers appended to the settings `providers.registry` seed (e.g. a
+    /// curated-catalog family for cloud-activation route tests).
+    pub(crate) extra_providers: Vec<ProviderRegistryEntry>,
 }
 
 pub(crate) struct TestResponse {
@@ -78,6 +81,7 @@ impl TestServer {
             &plugins_dir,
             &bind_address,
             options.admin_api_token.as_deref(),
+            &options.extra_providers,
         );
 
         let database_url = sqlite_url_for_path(&root.join("slab.db"));
@@ -132,6 +136,9 @@ impl TestServer {
         let runtime_status = Arc::new(RuntimeSupervisorStatus::from_launch_spec(&launch_spec));
         let state =
             Arc::new(AppState::new(config, pmid, grpc, runtime_status, None, store.clone()));
+        // Mirror the real gateway bootstrap so route tests exercise the same cloud-catalog
+        // activation (curated inline + background live discovery) as `main.rs`.
+        state.services.model.sync_cloud_provider_catalogs().await;
 
         Self { _temp_dir: temp_dir, state, store }
     }
@@ -244,6 +251,7 @@ fn write_test_settings(
     plugins_dir: &std::path::Path,
     bind_address: &str,
     admin_api_token: Option<&str>,
+    extra_providers: &[ProviderRegistryEntry],
 ) {
     let mut document = SettingsDocument::default();
     document.server.address = bind_address.to_owned();
@@ -255,9 +263,12 @@ fn write_test_settings(
         id: TEST_PROVIDER_ID.to_owned(),
         family: ProviderFamily::OpenaiCompatible,
         display_name: "OpenAI Test".to_owned(),
-        api_base: "https://api.openai.test/v1".to_owned(),
+        // Non-routable local endpoint: catalog read-reconcile may spawn a live discovery for
+        // this OpenaiCompatible provider, and tests must never leave localhost.
+        api_base: "http://127.0.0.1:9/v1".to_owned(),
         auth: Default::default(),
     });
+    document.providers.registry.extend(extra_providers.iter().cloned());
 
     let raw = serde_json::to_string_pretty(&document).expect("serialize test settings");
     std::fs::write(settings_path, format!("{raw}\n")).expect("write test settings");

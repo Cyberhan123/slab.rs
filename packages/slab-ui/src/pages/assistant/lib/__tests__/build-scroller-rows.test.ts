@@ -112,6 +112,34 @@ describe('buildScrollerRows', () => {
       'modelLoadMarker',
     ])
   })
+
+  it('appends queued steering inputs as ghost rows at the absolute tail, in order', () => {
+    const load: ModelLoadState = { phase: 'loading', modelId: 'm' }
+    const rows = buildScrollerRows([msg('m1')], [compact('c1')], {
+      showHistoryMarker: false,
+      modelLoad: load,
+      queuedTexts: ['first steer', 'second steer'],
+    })
+
+    expect(rows.map((r) => r.kind)).toEqual([
+      'message',
+      'compactMarker',
+      'modelLoadMarker',
+      'queuedInput',
+      'queuedInput',
+    ])
+    const queued = rows.filter(
+      (r): r is Extract<ScrollerRow, { kind: 'queuedInput' }> => r.kind === 'queuedInput',
+    )
+    expect(queued.map((r) => r.text)).toEqual(['first steer', 'second steer'])
+    expect(queued.map((r) => r.id)).toEqual(['__queued_input_0', '__queued_input_1'])
+  })
+
+  it('omits queued rows when nothing is queued', () => {
+    const rows = buildScrollerRows([msg('m1')], [], { showHistoryMarker: false })
+
+    expect(rows.some((r) => r.kind === 'queuedInput')).toBe(false)
+  })
 })
 
 describe('formatMarkerDate', () => {

@@ -252,6 +252,17 @@ impl ModelAutoUnloadManager {
         })
     }
 
+    /// Whether a model is resident on the backend according to this manager's
+    /// mirror of load/unload lifecycle events. `None` means the backend has
+    /// never been tracked here (never loaded through app-core, or unloaded by
+    /// an external actor) — callers should treat that as "not loaded" for
+    /// diagnostics while knowing the authoritative state lives in the runtime
+    /// process.
+    pub async fn backend_resident(&self, backend_id: RuntimeBackendId) -> Option<bool> {
+        let states = self.states.lock().await;
+        states.get(&backend_id).map(|state| state.resident)
+    }
+
     pub async fn sync_runtime_restart_states(&self) {
         let mut changed = Vec::new();
         {
