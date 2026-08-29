@@ -22,6 +22,11 @@ pub struct CloudModelSpec {
     /// `model/list` `ModelInfo.description`). Defaults to the display name when
     /// the curated catalog has no richer copy.
     pub description: String,
+    /// The model's advertised context window (tokens). Feeds auto-compaction
+    /// threshold resolution — a cloud model without a recorded window falls
+    /// back to a small fixed threshold and compacts far too early. `None` when
+    /// the public spec is unconfirmed; the host then applies its cloud default.
+    pub context_window: Option<u32>,
     /// Whether this is the flagship default model for its provider family
     /// (the first curated entry). Lets clients preselect a sensible model.
     pub is_default: bool,
@@ -35,107 +40,129 @@ pub fn default_models_for_provider(provider: &CloudProviderConfig) -> Vec<CloudM
     catalog_for_family(provider.family)
         .iter()
         .enumerate()
-        .map(|(index, (remote_model_id, display_name))| CloudModelSpec {
+        .map(|(index, (remote_model_id, display_name, context_window))| CloudModelSpec {
             remote_model_id: (*remote_model_id).to_owned(),
             display_name: (*display_name).to_owned(),
-            // The curated catalog carries only an id + label today; richer
-            // per-model copy can be added later. The first entry of each
-            // family is treated as the flagship default.
+            // The curated catalog carries an id + label + context window;
+            // richer per-model copy can be added later. The first entry of
+            // each family is treated as the flagship default.
             description: (*display_name).to_owned(),
+            context_window: *context_window,
             is_default: index == 0,
         })
         .collect()
 }
 
-/// Curated `(remote_model_id, display_name)` pairs per family.
+/// Curated `(remote_model_id, display_name, context_window)` triples per family.
 ///
 /// Model ids follow each vendor's native naming (genai-valid). Refresh this table when vendors
 /// ship new flagship models; it intentionally stays a small, well-known set rather than an
-/// exhaustive (and fast-stale) dump.
-fn catalog_for_family(family: ProviderFamily) -> &'static [(&'static str, &'static str)] {
+/// exhaustive (and fast-stale) dump. Context windows are the vendor-advertised limits in tokens
+/// (GLM catalog only for now — verified against public specs); `None` keeps the host's cloud
+/// default.
+fn catalog_for_family(
+    family: ProviderFamily,
+) -> &'static [(&'static str, &'static str, Option<u32>)] {
+    // Zhipu's two endpoints (Z.ai and open.bigmodel.cn) serve the same GLM model ids.
+    const GLM_CATALOG: &[(&str, &str, Option<u32>)] = &[
+        ("glm-5.3", "GLM-5.3", Some(1_000_000)),
+        ("glm-5.2", "GLM-5.2", Some(1_000_000)),
+        // Public spec for 5.1 is unconfirmed; leave the window unset so the
+        // host's cloud default applies instead of a guessed value.
+        ("glm-5.1", "GLM-5.1", None),
+        ("glm-5", "GLM-5", Some(202_752)),
+        ("glm-5-turbo", "GLM-5 Turbo", Some(200_000)),
+        ("glm-4.7", "GLM-4.7", Some(200_000)),
+        ("glm-4.6", "GLM-4.6", Some(200_000)),
+        ("glm-4.5", "GLM-4.5", Some(128_000)),
+    ];
+    const NONE_WINDOW: Option<u32> = None;
     match family {
         ProviderFamily::Openai => &[
-            ("gpt-4.1", "GPT-4.1"),
-            ("gpt-4.1-mini", "GPT-4.1 mini"),
-            ("gpt-4.1-nano", "GPT-4.1 nano"),
-            ("gpt-4o", "GPT-4o"),
-            ("gpt-4o-mini", "GPT-4o mini"),
+            ("gpt-4.1", "GPT-4.1", NONE_WINDOW),
+            ("gpt-4.1-mini", "GPT-4.1 mini", NONE_WINDOW),
+            ("gpt-4.1-nano", "GPT-4.1 nano", NONE_WINDOW),
+            ("gpt-4o", "GPT-4o", NONE_WINDOW),
+            ("gpt-4o-mini", "GPT-4o mini", NONE_WINDOW),
         ],
         ProviderFamily::OpenaiResp => &[
-            ("gpt-4.1", "GPT-4.1"),
-            ("gpt-4.1-mini", "GPT-4.1 mini"),
-            ("gpt-4o", "GPT-4o"),
-            ("o3", "o3"),
-            ("o4-mini", "o4-mini"),
+            ("gpt-4.1", "GPT-4.1", NONE_WINDOW),
+            ("gpt-4.1-mini", "GPT-4.1 mini", NONE_WINDOW),
+            ("gpt-4o", "GPT-4o", NONE_WINDOW),
+            ("o3", "o3", NONE_WINDOW),
+            ("o4-mini", "o4-mini", NONE_WINDOW),
         ],
         ProviderFamily::Anthropic => &[
-            ("claude-sonnet-4-5", "Claude Sonnet 4.5"),
-            ("claude-opus-4-1", "Claude Opus 4.1"),
-            ("claude-haiku-4-5", "Claude Haiku 4.5"),
-            ("claude-3-7-sonnet", "Claude 3.7 Sonnet"),
-            ("claude-3-5-sonnet", "Claude 3.5 Sonnet"),
-            ("claude-3-5-haiku", "Claude 3.5 Haiku"),
+            ("claude-sonnet-4-5", "Claude Sonnet 4.5", NONE_WINDOW),
+            ("claude-opus-4-1", "Claude Opus 4.1", NONE_WINDOW),
+            ("claude-haiku-4-5", "Claude Haiku 4.5", NONE_WINDOW),
+            ("claude-3-7-sonnet", "Claude 3.7 Sonnet", NONE_WINDOW),
+            ("claude-3-5-sonnet", "Claude 3.5 Sonnet", NONE_WINDOW),
+            ("claude-3-5-haiku", "Claude 3.5 Haiku", NONE_WINDOW),
         ],
         ProviderFamily::Gemini => &[
-            ("gemini-2.5-pro", "Gemini 2.5 Pro"),
-            ("gemini-2.5-flash", "Gemini 2.5 Flash"),
-            ("gemini-2.0-flash", "Gemini 2.0 Flash"),
-            ("gemini-2.0-flash-lite", "Gemini 2.0 Flash Lite"),
+            ("gemini-2.5-pro", "Gemini 2.5 Pro", NONE_WINDOW),
+            ("gemini-2.5-flash", "Gemini 2.5 Flash", NONE_WINDOW),
+            ("gemini-2.0-flash", "Gemini 2.0 Flash", NONE_WINDOW),
+            ("gemini-2.0-flash-lite", "Gemini 2.0 Flash Lite", NONE_WINDOW),
         ],
         ProviderFamily::Groq => &[
-            ("llama-3.3-70b-versatile", "Llama 3.3 70B Versatile"),
-            ("llama-3.1-8b-instant", "Llama 3.1 8B Instant"),
+            ("llama-3.3-70b-versatile", "Llama 3.3 70B Versatile", NONE_WINDOW),
+            ("llama-3.1-8b-instant", "Llama 3.1 8B Instant", NONE_WINDOW),
         ],
-        ProviderFamily::DeepSeek => {
-            &[("deepseek-chat", "DeepSeek Chat"), ("deepseek-reasoner", "DeepSeek Reasoner")]
-        }
+        ProviderFamily::DeepSeek => &[
+            ("deepseek-chat", "DeepSeek Chat", NONE_WINDOW),
+            ("deepseek-reasoner", "DeepSeek Reasoner", NONE_WINDOW),
+        ],
         ProviderFamily::Cohere => &[
-            ("command-r-plus", "Command R+"),
-            ("command-r", "Command R"),
-            ("command-r7b", "Command R7B"),
+            ("command-r-plus", "Command R+", NONE_WINDOW),
+            ("command-r", "Command R", NONE_WINDOW),
+            ("command-r7b", "Command R7B", NONE_WINDOW),
         ],
-        ProviderFamily::Xai => {
-            &[("grok-4", "Grok 4"), ("grok-3", "Grok 3"), ("grok-3-mini", "Grok 3 mini")]
-        }
+        ProviderFamily::Xai => &[
+            ("grok-4", "Grok 4", NONE_WINDOW),
+            ("grok-3", "Grok 3", NONE_WINDOW),
+            ("grok-3-mini", "Grok 3 mini", NONE_WINDOW),
+        ],
         ProviderFamily::Moonshot => &[
-            ("kimi-k2", "Kimi K2"),
-            ("moonshot-v1-128k", "Moonshot v1 128K"),
-            ("moonshot-v1-32k", "Moonshot v1 32K"),
+            ("kimi-k2", "Kimi K2", NONE_WINDOW),
+            ("moonshot-v1-128k", "Moonshot v1 128K", NONE_WINDOW),
+            ("moonshot-v1-32k", "Moonshot v1 32K", NONE_WINDOW),
         ],
-        ProviderFamily::Zai => &[
-            ("glm-4.6", "GLM-4.6"),
-            ("glm-4.5", "GLM-4.5"),
-            ("glm-4.5-air", "GLM-4.5 Air"),
-            ("glm-4-flash", "GLM-4 Flash"),
+        ProviderFamily::Zai | ProviderFamily::BigModel => GLM_CATALOG,
+        ProviderFamily::Aliyun => &[
+            ("qwen-max", "Qwen Max", NONE_WINDOW),
+            ("qwen-plus", "Qwen Plus", NONE_WINDOW),
+            ("qwen-turbo", "Qwen Turbo", NONE_WINDOW),
         ],
-        ProviderFamily::Aliyun => {
-            &[("qwen-max", "Qwen Max"), ("qwen-plus", "Qwen Plus"), ("qwen-turbo", "Qwen Turbo")]
-        }
         ProviderFamily::Baidu => &[
-            ("ernie-4.0-8k-latest", "ERNIE 4.0"),
-            ("ernie-3.5-8k", "ERNIE 3.5"),
-            ("ernie-speed-128k", "ERNIE Speed 128K"),
+            ("ernie-4.0-8k-latest", "ERNIE 4.0", NONE_WINDOW),
+            ("ernie-3.5-8k", "ERNIE 3.5", NONE_WINDOW),
+            ("ernie-speed-128k", "ERNIE Speed 128K", NONE_WINDOW),
         ],
         ProviderFamily::OpenRouter => &[
-            ("openai/gpt-4o", "OpenAI · GPT-4o"),
-            ("anthropic/claude-3.5-sonnet", "Anthropic · Claude 3.5 Sonnet"),
-            ("google/gemini-2.0-flash", "Google · Gemini 2.0 Flash"),
+            ("openai/gpt-4o", "OpenAI · GPT-4o", NONE_WINDOW),
+            ("anthropic/claude-3.5-sonnet", "Anthropic · Claude 3.5 Sonnet", NONE_WINDOW),
+            ("google/gemini-2.0-flash", "Google · Gemini 2.0 Flash", NONE_WINDOW),
         ],
         ProviderFamily::Together => &[
-            ("meta-llama/Llama-3.3-70B-Instruct-Turbo", "Llama 3.3 70B Turbo"),
-            ("meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", "Llama 3.1 8B Turbo"),
+            ("meta-llama/Llama-3.3-70B-Instruct-Turbo", "Llama 3.3 70B Turbo", NONE_WINDOW),
+            ("meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", "Llama 3.1 8B Turbo", NONE_WINDOW),
         ],
         ProviderFamily::Fireworks => &[
-            ("accounts/fireworks/models/llama-v3p1-70b-instruct", "Llama 3.1 70B"),
-            ("accounts/fireworks/models/llama-v3p1-8b-instruct", "Llama 3.1 8B"),
+            ("accounts/fireworks/models/llama-v3p1-70b-instruct", "Llama 3.1 70B", NONE_WINDOW),
+            ("accounts/fireworks/models/llama-v3p1-8b-instruct", "Llama 3.1 8B", NONE_WINDOW),
         ],
-        ProviderFamily::MiniMax => &[("MiniMax-M1", "MiniMax M1"), ("abab6.5s-chat", "ABAB 6.5s")],
-        // No curated catalog: the user adds models manually via /v1/models.
+        ProviderFamily::MiniMax => &[
+            ("MiniMax-M1", "MiniMax M1", NONE_WINDOW),
+            ("abab6.5s-chat", "ABAB 6.5s", NONE_WINDOW),
+        ],
+        // No curated catalog: the user adds models manually via /v1/models (or, for
+        // `OpenaiCompatible`, live discovery probes the endpoint's `/models` route).
         ProviderFamily::OpenaiCompatible
         | ProviderFamily::Aihubmix
         | ProviderFamily::Mimo
         | ProviderFamily::Nebius
-        | ProviderFamily::BigModel
         | ProviderFamily::Ollama
         | ProviderFamily::OllamaCloud
         | ProviderFamily::Vertex
@@ -178,6 +205,49 @@ mod tests {
         // Exactly one flagship default per family (the first entry).
         assert_eq!(specs.iter().filter(|spec| spec.is_default).count(), 1);
         assert!(specs.first().is_some_and(|spec| spec.is_default));
+    }
+
+    #[test]
+    fn big_model_catalog_lists_glm_models() {
+        // open.bigmodel.cn serves the same GLM model ids as the Z.ai family.
+        let specs = default_models_for_provider(&provider("glm", ProviderFamily::BigModel));
+        assert!(!specs.is_empty(), "BigModel should expose the curated GLM catalog");
+        for remote_id in
+            ["glm-5.3", "glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.6"]
+        {
+            assert!(
+                specs.iter().any(|spec| spec.remote_model_id == remote_id),
+                "curated GLM catalog missing {remote_id}"
+            );
+        }
+        assert!(specs.first().is_some_and(|spec| spec.is_default));
+        // Advertised context windows feed the compaction threshold resolver;
+        // unconfirmed specs (5.1) stay None so the host default applies.
+        let window = |remote_id: &str| {
+            specs
+                .iter()
+                .find(|spec| spec.remote_model_id == remote_id)
+                .and_then(|spec| spec.context_window)
+        };
+        assert_eq!(window("glm-5.3"), Some(1_000_000));
+        assert_eq!(window("glm-5.2"), Some(1_000_000));
+        assert_eq!(window("glm-5.1"), None);
+        assert_eq!(window("glm-4.5"), Some(128_000));
+        // glm-4.5-air / glm-4-flash are retired upstream and must not resurface.
+        for offline in ["glm-4.5-air", "glm-4-flash"] {
+            assert!(
+                !specs.iter().any(|spec| spec.remote_model_id == offline),
+                "retired model {offline} must not appear in the GLM catalog"
+            );
+        }
+        for family in [ProviderFamily::Zai, ProviderFamily::BigModel] {
+            let specs = default_models_for_provider(&provider("p", family));
+            assert_eq!(
+                specs.first().map(|spec| spec.remote_model_id.as_str()),
+                Some("glm-5.3"),
+                "{family:?} flagship should stay glm-5.3"
+            );
+        }
     }
 
     #[test]

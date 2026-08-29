@@ -25,6 +25,8 @@ export const assistant = {
   },
   modelPicker: {
     groupLabel: 'Assistant model',
+    localGroupLabel: 'Local models',
+    cloudGroupLabel: 'Cloud providers',
     emptyLabel: 'No assistant models',
   },
   greeting: {
@@ -109,11 +111,21 @@ export const assistant = {
     rollback: 'Rollback',
     confirmRollback: 'Retract this message and everything after it?',
     cancelEdit: 'Cancel edit',
+    queuedLabel: 'Queued',
   },
   thinking: {
     loading: 'Thinking...',
     thoughtForAFewSeconds: 'Thought for a few seconds',
     thoughtForSeconds: 'Thought for {{seconds}} seconds',
+  },
+  turn: {
+    abortReason: {
+      interrupted: 'Turn interrupted',
+      maxTurnsReached: 'Turn stopped: maximum turns reached',
+      budgetExhausted: 'Turn stopped: token budget exhausted',
+      repetitionDetected: 'Turn stopped: repeated tool calls detected',
+      error: 'Turn failed',
+    },
   },
   dialog: {
     title: 'Switch model for this conversation?',
@@ -146,6 +158,8 @@ export const assistant = {
     failedToDeleteSession: 'Failed to delete assistant session.',
     compactFailed: 'Failed to compact the conversation.',
     forkFailed: 'Failed to fork the conversation.',
+    steeringResync:
+      'The running turn just ended — your message starts a new turn. Resyncing…',
   },
   connection: {
     connected: 'Events connected',

@@ -11,6 +11,7 @@ pub mod hooks;
 pub mod phase1;
 pub mod phase2;
 pub mod read;
+pub mod recall;
 pub mod redaction;
 pub mod templates;
 

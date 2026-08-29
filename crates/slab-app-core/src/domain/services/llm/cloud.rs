@@ -188,7 +188,11 @@ async fn find_cloud_catalog_model(
 /// Cloud chat request parameters (provider- and wire-agnostic).
 #[derive(Debug, Clone)]
 pub(crate) struct CloudChatRequestConfig {
-    pub(crate) max_tokens: u32,
+    /// Output cap to send on the wire. `None` means "let the provider choose" —
+    /// cloud reasoning models burn reasoning tokens against `max_tokens`, so an
+    /// implicit small cap truncates the model mid-thought and yields an empty
+    /// assistant message. Only request-level or model-preset values belong here.
+    pub(crate) max_tokens: Option<u32>,
     pub(crate) temperature: f32,
     pub(crate) top_p: Option<f32>,
     pub(crate) structured_output: Option<StructuredOutput>,
@@ -199,11 +203,19 @@ pub(crate) struct CloudChatRequestConfig {
     pub(crate) include_usage: bool,
 }
 
-/// Cloud streaming delta (content or reasoning).
+/// Cloud streaming delta (content, reasoning, or the terminal completion).
 #[derive(Debug)]
 pub(crate) enum CloudDelta {
     Content(String),
     Reasoning(String),
+    /// Terminal event from the provider stream: the complete native tool calls
+    /// (genai accumulates them server-side of the stream — intermediate
+    /// `ToolCallChunk`s are snapshots, so they are skipped in favor of the
+    /// finalized calls) plus the provider-reported stop reason, when captured.
+    Completed {
+        tool_calls: Vec<ConversationToolCall>,
+        stop_reason: Option<String>,
+    },
 }
 
 pub(crate) type CloudTokenStream =
@@ -263,9 +275,7 @@ pub(crate) async fn cloud_chat_completion(
         response.tool_calls().into_iter().map(genai_tool_call_to_conversation).collect::<Vec<_>>();
     let text = response.first_text().map(str::to_owned).unwrap_or_default();
     if text.is_empty() && tool_calls.is_empty() {
-        return Err(AppCoreError::Internal(
-            "cloud response has empty assistant content".to_owned(),
-        ));
+        return Err(AppCoreError::Internal(empty_cloud_content_detail(&response)));
     }
     let usage = super::build_estimated_usage(&render_messages_for_usage(messages), &text, None);
     let finish_reason =
@@ -341,10 +351,17 @@ pub(crate) async fn cloud_chat_stream(
                 let token = chunk.content;
                 if token.is_empty() { None } else { Some(Ok(CloudDelta::Reasoning(token))) }
             }
+            Ok(GenaiChatStreamEvent::End(end)) => {
+                let stop_reason =
+                    end.captured_stop_reason.as_ref().map(|reason| reason.raw().to_owned());
+                let captured = end.captured_into_tool_calls().unwrap_or_default();
+                let tool_calls =
+                    captured.iter().map(genai_tool_call_to_conversation).collect::<Vec<_>>();
+                Some(Ok(CloudDelta::Completed { tool_calls, stop_reason }))
+            }
             Ok(GenaiChatStreamEvent::ToolCallChunk(_))
             | Ok(GenaiChatStreamEvent::ThoughtSignatureChunk(_))
-            | Ok(GenaiChatStreamEvent::Start)
-            | Ok(GenaiChatStreamEvent::End(_)) => None,
+            | Ok(GenaiChatStreamEvent::Start) => None,
             Err(error) => {
                 if let Some(trace) = trace.as_ref() {
                     log_cloud_http_response_error(&trace_target, trace, &error);
@@ -481,9 +498,11 @@ fn build_genai_chat_options(
     config: &CloudChatRequestConfig,
     capture_raw_body: bool,
 ) -> GenaiChatOptions {
-    let mut options = GenaiChatOptions::default()
-        .with_max_tokens(config.max_tokens)
-        .with_temperature(f64::from(config.temperature));
+    let mut options = GenaiChatOptions::default().with_temperature(f64::from(config.temperature));
+
+    if let Some(max_tokens) = config.max_tokens {
+        options = options.with_max_tokens(max_tokens);
+    }
 
     if let Some(top_p) = config.top_p {
         options = options.with_top_p(f64::from(top_p));
@@ -569,6 +588,38 @@ fn extract_reasoning_content_from_raw_body(raw_body: Option<&Value>) -> Option<S
         .map(str::to_owned)
 }
 
+/// Diagnose a 2xx cloud response whose assistant message carries neither text
+/// nor tool calls. The dominant case: a reasoning model consumed the whole
+/// `max_tokens` budget on `reasoning_content` (finish_reason=length) and never
+/// started the visible answer — the error must say so, not just "empty".
+fn empty_cloud_content_detail(response: &genai::chat::ChatResponse) -> String {
+    let mut detail = "cloud response has empty assistant content".to_owned();
+
+    let finish_reason = response.stop_reason.as_ref().map(|reason| reason.raw().to_owned());
+    if let Some(reason) = finish_reason.as_deref() {
+        detail.push_str(&format!(" (finish_reason={reason})"));
+    }
+
+    let reasoning_len = response
+        .reasoning_content
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::len)
+        .or_else(|| {
+            extract_reasoning_content_from_raw_body(response.captured_raw_body.as_ref())
+                .map(|value| value.len())
+        });
+    if let Some(len) = reasoning_len {
+        detail.push_str(&format!(
+            ", reasoning_content present (len={len}) — the completion budget was likely \
+             consumed by reasoning; raise max_tokens or lower reasoning_effort"
+        ));
+    }
+
+    detail
+}
+
 // ============ HTTP trace ============
 
 fn build_cloud_http_trace_context(
@@ -614,9 +665,12 @@ fn build_cloud_http_request_body(
             })
             .collect::<Vec<_>>(),
         "stream": config.stream,
-        "max_tokens": config.max_tokens,
         "temperature": f64::from(config.temperature),
     });
+
+    if let Some(max_tokens) = config.max_tokens {
+        payload["max_tokens"] = json!(max_tokens);
+    }
 
     if let Some(top_p) = config.top_p {
         payload["top_p"] = json!(f64::from(top_p));
@@ -1017,7 +1071,7 @@ mod test {
             &make_target(),
             &[make_message("user", "hello")],
             &CloudChatRequestConfig {
-                max_tokens: 64,
+                max_tokens: Some(64),
                 temperature: 0.7,
                 top_p: None,
                 structured_output: Some(StructuredOutput::JsonSchema(StructuredOutputJsonSchema {
@@ -1040,6 +1094,7 @@ mod test {
         );
 
         assert_eq!(payload["response_format"]["type"], "json_schema");
+        assert_eq!(payload["max_tokens"], 64);
         assert_eq!(payload["response_format"]["json_schema"]["name"], "example_schema");
         assert_eq!(payload["response_format"]["json_schema"]["strict"], true);
         assert_eq!(
@@ -1054,7 +1109,7 @@ mod test {
             &make_target(),
             &[make_message("user", "hello")],
             &CloudChatRequestConfig {
-                max_tokens: 64,
+                max_tokens: None,
                 temperature: 0.7,
                 top_p: None,
                 structured_output: None,
@@ -1070,6 +1125,9 @@ mod test {
         assert_eq!(payload["tools"][0]["function"]["name"], "web_search");
         assert_eq!(payload["tools"][0]["function"]["strict"], true);
         assert_eq!(payload["tools"][0]["function"]["parameters"]["type"], "object");
+        // No explicit cap → the field must be omitted entirely so the provider
+        // default applies (reasoning models spend max_tokens on reasoning first).
+        assert!(payload.get("max_tokens").is_none());
     }
 
     fn make_target() -> ResolvedCloudModel {

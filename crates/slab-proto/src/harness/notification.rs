@@ -19,7 +19,7 @@ use slab_agent::protocol::{
     CommandExecutionRequestApprovalParams, ContextCompactedParams, ContextCompactingParams,
     FileChangeOutputDeltaParams, FileChangeRequestApprovalParams, ItemCompletedParams,
     ItemStartedParams, ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams,
-    ThreadStartedParams, TurnCompletedParams, TurnStartedParams,
+    ThreadStatusChangedParams, TurnCompletedParams, TurnStartedParams,
 };
 
 // ---- error / account ----
@@ -143,8 +143,8 @@ pub struct ModelLoadCompletedParams {
 #[serde(tag = "method", content = "params")]
 #[ts(export)]
 pub enum ServerNotification {
-    #[serde(rename = "thread/started")]
-    ThreadStarted(ThreadStartedParams),
+    #[serde(rename = "thread/statusChanged")]
+    ThreadStatusChanged(ThreadStatusChangedParams),
     #[serde(rename = "turn/started")]
     TurnStarted(TurnStartedParams),
     #[serde(rename = "turn/completed")]
@@ -183,7 +183,7 @@ impl ServerNotification {
     /// The JSON-RPC method string for this notification.
     pub fn method(&self) -> &'static str {
         match self {
-            Self::ThreadStarted(_) => crate::harness::method::THREAD_STARTED,
+            Self::ThreadStatusChanged(_) => crate::harness::method::THREAD_STATUS_CHANGED,
             Self::TurnStarted(_) => crate::harness::method::TURN_STARTED,
             Self::TurnCompleted(_) => crate::harness::method::TURN_COMPLETED,
             Self::ContextCompacting(_) => crate::harness::method::CONTEXT_COMPACTING,
@@ -274,12 +274,14 @@ mod tests {
             thread_id: "t1".to_owned(),
             status: Some("compacted".to_owned()),
             removed_messages: Some(12),
+            stubbed_messages: Some(4),
             output_tokens: Some(340),
         });
         let json = serde_json::to_value(&n).unwrap();
         assert_eq!(json["method"], "context/compacted");
         assert_eq!(json["params"]["status"], "compacted");
         assert_eq!(json["params"]["removedMessages"], 12);
+        assert_eq!(json["params"]["stubbedMessages"], 4);
         let back: ServerNotification = serde_json::from_value(json).unwrap();
         assert_eq!(n, back);
     }

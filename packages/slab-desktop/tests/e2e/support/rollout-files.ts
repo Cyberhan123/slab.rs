@@ -1,6 +1,7 @@
 /**
  * Rollout-JSONL reader for e2e — reads the on-disk append-only rollout file
- * (`<sessionStateDir>/sessions/.../*.jsonl`) that is slab's conversation true
+ * (`<sessionStateDir>/.../*.jsonl`; the state dir IS the rollout store root,
+ * date-partitioned as `YYYY/MM/DD/`) that is slab's conversation true
  * source after the rollout refactor. The desktop test suite otherwise only
  * observes persistence via the REST history endpoint; reading the file itself
  * is the strongest check that the async observer + barrier actually wrote what
@@ -45,8 +46,7 @@ function readSessionMeta(file: string): Record<string, unknown> | undefined {
 
 /** Find the rollout file whose `SessionMeta` first line carries `threadId`. */
 export function findRolloutFile(sessionStateDir: string, threadId: string): string | undefined {
-  const sessionsRoot = join(sessionStateDir, "sessions")
-  for (const file of walkJsonl(sessionsRoot)) {
+  for (const file of walkJsonl(sessionStateDir)) {
     if (readSessionMeta(file)?.threadId === threadId) return file
   }
   return undefined
@@ -57,8 +57,7 @@ export function findRolloutChildFile(
   sessionStateDir: string,
   parentThreadId: string,
 ): string | undefined {
-  const sessionsRoot = join(sessionStateDir, "sessions")
-  for (const file of walkJsonl(sessionsRoot)) {
+  for (const file of walkJsonl(sessionStateDir)) {
     if (readSessionMeta(file)?.parentId === parentThreadId) return file
   }
   return undefined

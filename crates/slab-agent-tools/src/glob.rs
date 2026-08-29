@@ -35,8 +35,15 @@ impl ToolHandler for FileGlobTool {
         "file_glob"
     }
 
+    /// Pure read — safe to run concurrently with other read-only calls.
+    fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
-        "Find files by gitignore-aware glob pattern inside a workspace path."
+        "Find files by gitignore-aware glob pattern inside a workspace path. \
+         Skips .git, node_modules, target, vendor, dist, lockfiles, and \
+         cargo-bazel generated files by default."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -45,7 +52,9 @@ impl ToolHandler for FileGlobTool {
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Glob pattern to match, e.g. '*.rs' or 'src/**/*.ts'."
+                    "description": "Glob pattern relative to 'path', e.g. '*.rs' or 'src/**/*.ts'. \
+                     Negated patterns are not supported. Files ignored by .gitignore are always \
+                     excluded regardless of the pattern."
                 },
                 "path": {
                     "type": "string",
@@ -119,15 +128,23 @@ fn glob_blocking(
     max_results: usize,
     include_dirs: bool,
 ) -> Result<Vec<serde_json::Value>, String> {
+    // The user pattern filters WITH POST-PROCESSING, not via `ignore`'s
+    // Override whitelist: overrides have the highest precedence in the `ignore`
+    // crate, so a pattern like `**/*` would match an ignored directory itself,
+    // short-circuit to Whitelist, and the .gitignore rule would never be
+    // consulted (leaking e.g. `/binaries/` into the results). Walking with
+    // plain gitignore filtering and matching the pattern afterwards keeps
+    // .gitignore authoritative.
+    let matcher = globset::Glob::new(pattern)
+        .map_err(|error| format!("invalid glob: {error}"))?
+        .compile_matcher();
+
     let mut builder = ignore::WalkBuilder::new(root);
     builder.hidden(false);
     builder.require_git(false);
-
-    let mut override_builder = ignore::overrides::OverrideBuilder::new(root);
-    override_builder.add(pattern).map_err(|error| format!("invalid glob: {error}"))?;
-    let overrides =
-        override_builder.build().map_err(|error| format!("glob build error: {error}"))?;
-    builder.overrides(overrides);
+    // Prune non-source trees by name during traversal (see `exclusions`),
+    // shared with the grep tool so the two cannot drift.
+    builder.filter_entry(|entry| !crate::exclusions::is_default_excluded(entry));
 
     let mut results = Vec::new();
     for result in builder.build() {
@@ -145,6 +162,9 @@ fn glob_blocking(
         if is_dir && !include_dirs {
             continue;
         }
+        if !glob_entry_matches(root, &entry, &matcher) {
+            continue;
+        }
         results.push(serde_json::json!({
             "path": entry.path().display().to_string(),
             "kind": if is_dir { "dir" } else { "file" }
@@ -152,6 +172,20 @@ fn glob_blocking(
     }
 
     Ok(results)
+}
+
+/// Match a walk entry against the user pattern, relative to the walk root.
+/// When the root is a single file (empty relative path) fall back to the file
+/// name, so `path: some_file.rs` + `pattern: '*.rs'` still matches.
+fn glob_entry_matches(
+    root: &std::path::Path,
+    entry: &ignore::DirEntry,
+    matcher: &globset::GlobMatcher,
+) -> bool {
+    let rel = entry.path().strip_prefix(root).unwrap_or(entry.path());
+    let candidate =
+        if rel.as_os_str().is_empty() { std::path::Path::new(entry.file_name()) } else { rel };
+    matcher.is_match(candidate)
 }
 
 #[cfg(test)]
@@ -244,6 +278,132 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    /// P3 regression: `**/*` matches an ignored directory NAME itself, which
+    /// used to short-circuit past the gitignore check via the override
+    /// whitelist and leak the whole ignored tree into the results.
+    #[tokio::test]
+    async fn file_glob_double_star_does_not_leak_gitignored_directory() {
+        let root = temp_root("double_star_gitignore");
+        fs::create_dir_all(root.join("binaries")).expect("create binaries");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join(".gitignore"), "binaries/\n").expect("write gitignore");
+        fs::write(root.join("binaries").join("tool.exe"), "").expect("write ignored file");
+        fs::write(root.join("src").join("a.rs"), "").expect("write source file");
+        let tool = FileGlobTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": ".", "pattern": "**/*"}))
+            .await
+            .expect("glob output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        let paths: Vec<String> = value["matches"]
+            .as_array()
+            .expect("matches")
+            .iter()
+            .map(|m| m["path"].as_str().expect("path").to_string())
+            .collect();
+        assert!(
+            !paths.iter().any(|p| p.contains("binaries")),
+            "ignored directory leaked: {paths:?}"
+        );
+        assert!(
+            paths.iter().any(|p| p.replace('\\', "/").ends_with("src/a.rs")),
+            "src/a.rs missing: {paths:?}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Anchored gitignore patterns (`/build/`) must only ignore the root-level
+    /// directory, not identically-named nested ones.
+    #[tokio::test]
+    async fn file_glob_anchored_gitignore_only_ignores_root_level_dir() {
+        let root = temp_root("anchored_gitignore");
+        fs::create_dir_all(root.join("build")).expect("create build");
+        fs::create_dir_all(root.join("a").join("build")).expect("create nested build");
+        fs::write(root.join(".gitignore"), "/build/\n").expect("write gitignore");
+        fs::write(root.join("build").join("x.rs"), "").expect("write root-level file");
+        fs::write(root.join("a").join("build").join("y.rs"), "").expect("write nested file");
+        let tool = FileGlobTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": ".", "pattern": "**/*.rs"}))
+            .await
+            .expect("glob output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        let paths: Vec<String> = value["matches"]
+            .as_array()
+            .expect("matches")
+            .iter()
+            .map(|m| m["path"].as_str().expect("path").replace('\\', "/"))
+            .collect();
+        assert!(
+            !paths.iter().any(|p| p.ends_with("/build/x.rs")),
+            "root-level build leaked: {paths:?}"
+        );
+        assert!(
+            paths.iter().any(|p| p.ends_with("a/build/y.rs")),
+            "nested build must survive: {paths:?}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// `*`-style patterns that can match the ignored directory name itself
+    /// must still respect gitignore.
+    #[tokio::test]
+    async fn file_glob_star_pattern_matching_ignored_dir_name_excludes_it() {
+        let root = temp_root("star_gitignore");
+        fs::create_dir_all(root.join("ignored")).expect("create ignored");
+        fs::write(root.join(".gitignore"), "ignored/\n").expect("write gitignore");
+        fs::write(root.join("ignored").join("skip.rs"), "").expect("write ignored file");
+        fs::write(root.join("keep.rs"), "").expect("write kept file");
+        let tool = FileGlobTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": ".", "pattern": "*", "include_dirs": true}))
+            .await
+            .expect("glob output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        let paths: Vec<String> = value["matches"]
+            .as_array()
+            .expect("matches")
+            .iter()
+            .map(|m| m["path"].as_str().expect("path").to_string())
+            .collect();
+        assert!(
+            !paths.iter().any(|p| p.contains("ignored")),
+            "ignored directory leaked through '*': {paths:?}"
+        );
+        assert!(
+            paths.iter().any(|p| p.replace('\\', "/").ends_with("keep.rs")),
+            "keep.rs missing: {paths:?}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// A single-file `path` still matches by file name (empty relative path
+    /// falls back to `file_name`).
+    #[tokio::test]
+    async fn file_glob_matches_single_file_root() {
+        let root = temp_root("single_file_root");
+        let file = root.join("notes.md");
+        fs::write(&file, "x").expect("write file");
+        let tool = FileGlobTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": "notes.md", "pattern": "*.md"}))
+            .await
+            .expect("glob output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        let matches = value["matches"].as_array().expect("matches");
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0]["path"].as_str().expect("path").ends_with("notes.md"));
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[tokio::test]
     async fn file_glob_rejects_workspace_escape_before_scanning() {
         let root = temp_root("escape");
@@ -267,6 +427,42 @@ mod tests {
         assert_eq!(schema["properties"]["max_results"]["default"], 200);
         assert_eq!(schema["properties"]["include_dirs"]["default"], false);
         assert_eq!(schema["required"], json!(["pattern"]));
+    }
+
+    #[tokio::test]
+    async fn file_glob_excludes_git_and_vendor_by_default() {
+        let root = temp_root("default_excludes");
+        for dir in [".git/objects", "node_modules/pkg", "vendor/crate", "dist"] {
+            fs::create_dir_all(root.join(dir)).expect("create excluded dir");
+        }
+        fs::write(root.join(".git").join("objects").join("x.txt"), "").expect("write git file");
+        fs::write(root.join("node_modules").join("pkg").join("x.js"), "").expect("write nm file");
+        fs::write(root.join("vendor").join("crate").join("x.rs"), "").expect("write vendor file");
+        fs::write(root.join("dist").join("x.js"), "").expect("write dist file");
+        fs::write(root.join("Cargo.lock"), "").expect("write lockfile");
+        fs::write(root.join("crates.bzl"), "").expect("write bazel file");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join("src").join("keep.rs"), "").expect("write kept file");
+        let tool = FileGlobTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": ".", "pattern": "**/*"}))
+            .await
+            .expect("glob output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        let paths: Vec<String> = value["matches"]
+            .as_array()
+            .expect("matches")
+            .iter()
+            .map(|m| m["path"].as_str().expect("path").replace('\\', "/"))
+            .collect();
+        for excluded in [".git/", "node_modules/", "vendor/", "dist/", "Cargo.lock", "crates.bzl"] {
+            assert!(!paths.iter().any(|p| p.contains(excluded)), "{excluded} leaked: {paths:?}");
+        }
+        assert!(paths.iter().any(|p| p.ends_with("src/keep.rs")), "src/keep.rs missing: {paths:?}");
+
+        let _ = fs::remove_dir_all(root);
     }
 
     fn temp_root(name: &str) -> PathBuf {

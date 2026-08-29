@@ -26,6 +26,11 @@ impl ToolHandler for GitStatusTool {
         "git_status"
     }
 
+    /// Pure read — safe to run concurrently with other read-only calls.
+    fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Return the current Git status for the configured workspace."
     }
@@ -63,6 +68,11 @@ impl GitDiffTool {
 impl ToolHandler for GitDiffTool {
     fn name(&self) -> &str {
         "git_diff"
+    }
+
+    /// Pure read — safe to run concurrently with other read-only calls.
+    fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
+        true
     }
 
     fn description(&self) -> &str {

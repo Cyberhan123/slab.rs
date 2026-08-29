@@ -42,8 +42,10 @@ mod concurrency_gate;
 mod llm_output;
 mod repetition_guard;
 mod state;
+mod tool_result_guard;
 mod tool_validation;
 mod turn;
+mod turn_state;
 mod turn_tool_call;
 mod turn_tool_record;
 
@@ -60,8 +62,8 @@ pub use compact::{
     remove_leading_orphan_tool_results, trailing_window, trim_to_target_after_system,
 };
 pub use config::{AgentConfig, AgentToolChoice};
-pub use control::{AgentControl, AgentControlLimits};
-pub use error::{AgentError, ToolError};
+pub use control::{AgentControl, AgentControlLimits, SendOutcome};
+pub use error::{AgentError, ToolError, classify_llm_error};
 pub use hook::{AgentHook, AgentHookRegistry, HookEffects, HookEvent, HookOutcome, HookToolAction};
 pub use llm_output::{
     AgentStreamAssembler, AgentStreamCompletion, AgentStreamDelta, RenderedToolCallOutput,
@@ -85,3 +87,4 @@ pub use tool::{
     ToolContextBuilder, ToolDiscoveryState, ToolHandler, ToolName, ToolNamespace, ToolOutput,
     ToolOutputObserver, ToolOutputStream, ToolRouter, ToolVisibility, WorkspaceRef,
 };
+pub use turn::strip_think_blocks;
