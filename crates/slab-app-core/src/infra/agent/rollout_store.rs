@@ -1144,6 +1144,7 @@ mod tests {
                     thread_id: "t-skip".to_owned(),
                     compacted_messages: vec![],
                     removed_messages: 0,
+                    stubbed_messages: 0,
                     output_tokens: 0,
                     status: "skipped".to_owned(),
                     turn_index: 0,

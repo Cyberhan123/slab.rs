@@ -4,6 +4,7 @@ import type { TMessage } from "@slab/ui/pages/assistant/components/message/messa
 export const HISTORY_MARKER_ID = "__history_marker__" as const
 export const SESSION_LOAD_MARKER_ID = "__session_load_marker__" as const
 export const MODEL_LOAD_MARKER_ID = "__model_load_marker__" as const
+export const QUEUED_INPUT_ID_PREFIX = "__queued_input_" as const
 
 /**
  * A virtualized scroller row. Either a real message, or a synthetic non-message
@@ -18,6 +19,7 @@ export type ScrollerRow =
     | { kind: "historyMarker"; id: typeof HISTORY_MARKER_ID }
     | { kind: "compactMarker"; id: string; marker: CompactionMarker }
     | { kind: "modelLoadMarker"; id: typeof MODEL_LOAD_MARKER_ID; modelLoad: NonNullable<ModelLoadState> }
+    | { kind: "queuedInput"; id: string; text: string }
     | { kind: "message"; id: string; message: TMessage }
 
 /** Narrow a `ScrollerRow` to a single variant by its discriminant `kind`. */
@@ -32,6 +34,8 @@ export type BuildScrollerRowsOptions = {
     modelLoad?: ModelLoadState | null
     /** True while restoring; renders a session-load Marker when there are no messages yet. */
     sessionLoading?: boolean
+    /** Steering inputs queued on the running turn; rendered as ghost user bubbles at the tail. */
+    queuedTexts?: readonly string[]
 }
 
 /**
@@ -70,6 +74,9 @@ export function buildScrollerRows(
     }
     if (options.modelLoad) {
         out.push({ kind: "modelLoadMarker", id: MODEL_LOAD_MARKER_ID, modelLoad: options.modelLoad })
+    }
+    for (const [index, text] of (options.queuedTexts ?? []).entries()) {
+        out.push({ kind: "queuedInput", id: `${QUEUED_INPUT_ID_PREFIX}${index}`, text })
     }
     return out
 }

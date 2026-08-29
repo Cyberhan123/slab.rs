@@ -143,7 +143,11 @@ fn thread_from_snapshot_with_id(id: &str, snapshot: &ThreadSnapshot) -> Thread {
         .unwrap_or(0);
     Thread {
         id: id.to_owned(),
-        preview: snapshot.completion_text.clone().unwrap_or_default(),
+        preview: snapshot
+            .completion_text
+            .as_deref()
+            .map(slab_agent::strip_think_blocks)
+            .unwrap_or_default(),
         // model_provider would require parsing the AgentConfig JSON; left empty
         // until a structured accessor exists.
         model_provider: String::new(),
@@ -346,8 +350,12 @@ fn thread_from_timeline(
                 }
                 items
             };
+            // LAST-wins: a turn emits several TurnState lines (sampling entry
+            // → phase lines → terminal); `.find()` used to pick the FIRST,
+            // so restored turns always showed the entry status ("running").
             let status = turn_states
                 .iter()
+                .rev()
                 .find(|state| state.turn_index == index)
                 .map(|state| state.status.clone())
                 .filter(|status| !status.trim().is_empty())
@@ -358,7 +366,11 @@ fn thread_from_timeline(
 
     Thread {
         id: id.to_owned(),
-        preview: snapshot.completion_text.clone().unwrap_or_default(),
+        preview: snapshot
+            .completion_text
+            .as_deref()
+            .map(slab_agent::strip_think_blocks)
+            .unwrap_or_default(),
         model_provider: String::new(),
         created_at,
         turns,
@@ -733,6 +745,7 @@ mod tests {
             remote_model_id: remote.to_owned(),
             display_name: label.to_owned(),
             description: label.to_owned(),
+            context_window: None,
             is_default,
         }
     }

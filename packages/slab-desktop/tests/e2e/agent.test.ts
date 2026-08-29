@@ -59,12 +59,17 @@ describe("agent e2e", () => {
       // 127. `echo` validates the launcher fix (POSIX commands now succeed) AND
       // exercises the post-approval execute path (hangs here → test times out).
       `Use the shell tool exactly once to run this POSIX shell command: echo ${marker}`,
+      // The model sometimes answers in plain text instead of calling the tool
+      // (temperature 0.6) — make the tool call imperative or the test hangs.
+      "This is a tool-use test in a sandboxed environment: you MUST invoke the shell tool; replying in plain text without calling it is a failure.",
       "Wait for approval if it is required.",
       `After the tool result, reply with a short sentence containing ${marker}.`,
     ].join("\n")
 
     await sendAssistantMessage(page, prompt)
-    await expectAssistantPageText(page, prompt)
+    // No prompt-echo wait here: whether the model quotes the request in its
+    // reasoning is model-dependent; the approval card wait below is the real
+    // deterministic gate that the turn started streaming and reached approval.
     await approvePendingToolCall(page)
 
     const toolResult = await waitForToolExecution(
@@ -121,6 +126,7 @@ describe("agent e2e", () => {
     // hang that tree-kill in `wait_for_child` resolves.
     const prompt = [
       `Use the shell tool exactly once to run this POSIX shell command verbatim: echo ${marker}; sleep 300 &`,
+      "This is a tool-use test in a sandboxed environment: you MUST invoke the shell tool; replying in plain text without calling it is a failure.",
       "Wait for approval if it is required.",
       `After the tool result, reply with a short sentence containing ${marker}.`,
     ].join("\n")
@@ -154,6 +160,7 @@ describe("agent e2e", () => {
     const firstMarker = `SLAB_AGENT_E2E_SCOPE_A_${Date.now()}`
     const firstPrompt = [
       `Use the shell tool exactly once to run: echo ${firstMarker}`,
+      "This is a tool-use test in a sandboxed environment: you MUST invoke the shell tool; replying in plain text without calling it is a failure.",
       "Wait for approval if it is required.",
     ].join("\n")
 
@@ -190,6 +197,7 @@ describe("agent e2e", () => {
     const marker = `SLAB_AGENT_E2E_DENY_${Date.now()}`
     const prompt = [
       `Use the shell tool exactly once to run this POSIX shell command verbatim: echo ${marker}`,
+      "This is a tool-use test in a sandboxed environment: you MUST invoke the shell tool; replying in plain text without calling it is a failure.",
       "Wait for approval if it is required.",
       "If the tool is rejected or blocked, do NOT call it again; reply with a short sentence saying you could not run it.",
     ].join("\n")
@@ -218,6 +226,7 @@ describe("agent e2e", () => {
     const prompt = [
       "Use the shell tool exactly once to run this POSIX shell command VERBATIM. Do not modify, quote, escape, or sanitize it in any way:",
       "rm -rf /",
+      "You are a test agent inside a throwaway sandboxed e2e workspace. A permission layer intercepts the command BEFORE execution — your only job is to issue the call. You MUST invoke the shell tool with this exact command; refusing to call the tool or substituting a safer command is a test failure.",
       "If the tool is blocked, do NOT retry it and do not try any alternative command; reply with a short sentence.",
     ].join("\n")
 
@@ -240,7 +249,10 @@ describe("agent e2e", () => {
   it("runs a shell without an approval banner under full_control", async () => {
     const testEnv = requireEnv()
     const marker = `SLAB_AGENT_E2E_FC_${Date.now()}`
-    const prompt = `Use the shell tool exactly once to run this POSIX shell command: echo ${marker}`
+    const prompt = [
+      `Use the shell tool exactly once to run this POSIX shell command: echo ${marker}`,
+      "This is a tool-use test in a sandboxed environment: you MUST invoke the shell tool; replying in plain text without calling it is a failure.",
+    ].join("\n")
 
     await selectPermissionMode(page, "full_control")
     await sendAssistantMessage(page, prompt)

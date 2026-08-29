@@ -40,6 +40,17 @@ impl ChildTerminator for PipeChildTerminator {
 
         #[cfg(windows)]
         {
+            // Tree-kill first: the console command runs under a shell whose
+            // children (e.g. `slow_cmd; dangerous_cmd` after a background
+            // child) would outlive a single-process TerminateProcess.
+            // `/T` walks the parent chain of live processes, which requires
+            // the root to still be alive — true here by construction.
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &self.pid.to_string(), "/T", "/F"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
             kill_process(self.pid)
         }
 

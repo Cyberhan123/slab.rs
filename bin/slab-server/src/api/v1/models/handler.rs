@@ -422,7 +422,49 @@ mod tests {
     use axum::http::{Method, Request, StatusCode, header};
     use serde_json::json;
 
-    use crate::api::test_support::{TEST_PROVIDER_ID, TestServer, response_json};
+    use crate::api::test_support::{
+        TEST_PROVIDER_ID, TestServer, TestServerOptions, response_json,
+    };
+    use slab_config::{ProviderFamily, ProviderRegistryEntry};
+
+    #[tokio::test]
+    async fn bootstrap_activates_curated_cloud_models_for_configured_provider() {
+        // A BigModel provider seeded via the settings file (no settings PUT) must have its
+        // curated GLM catalog activated at gateway bootstrap and listed by GET /v1/models.
+        let server = TestServer::new_with(TestServerOptions {
+            extra_providers: vec![ProviderRegistryEntry {
+                id: "glm-main".to_owned(),
+                family: ProviderFamily::BigModel,
+                display_name: "BigModel (GLM)".to_owned(),
+                api_base: "https://open.bigmodel.cn/api/coding/paas/v4".to_owned(),
+                auth: Default::default(),
+            }],
+            ..TestServerOptions::default()
+        })
+        .await;
+
+        let response = server.get("/v1/models?capability=chat_generation").await;
+        assert_eq!(response.status, StatusCode::OK);
+        let models = response.body.as_array().expect("model list array");
+
+        let glm_46 = models
+            .iter()
+            .find(|model| model["id"] == "cloud:glm-main:glm-4.6")
+            .expect("activated GLM-4.6 cloud row");
+        assert_eq!(glm_46["kind"], "cloud");
+        assert_eq!(glm_46["display_name"], "GLM-4.6");
+        assert_eq!(glm_46["spec"]["provider_id"], "glm-main");
+        assert_eq!(glm_46["spec"]["remote_model_id"], "glm-4.6");
+
+        for remote in
+            ["glm-5.3", "glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.5"]
+        {
+            assert!(
+                models.iter().any(|model| model["id"] == format!("cloud:glm-main:{remote}")),
+                "missing curated catalog entry {remote}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn create_model_validates_request_body() {

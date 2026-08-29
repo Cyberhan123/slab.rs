@@ -291,6 +291,7 @@ impl CompactPort for ScriptedCompact {
             messages: vec![self.summary.clone()],
             output_tokens: 7,
             replaced_messages: messages.len(),
+            stubbed_messages: 0,
         })
     }
 }
@@ -324,6 +325,7 @@ impl CompactPort for EchoCompact {
             messages: messages.to_vec(),
             output_tokens: 1,
             replaced_messages: messages.len(),
+            stubbed_messages: 0,
         })
     }
 }
@@ -832,6 +834,7 @@ async fn fork_barrier_waits_for_lagging_observer() {
                         ..Default::default()
                     },
                     usage: None,
+                    reason: None,
                 },
             ),
         )

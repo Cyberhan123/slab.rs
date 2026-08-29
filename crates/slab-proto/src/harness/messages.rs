@@ -483,6 +483,12 @@ pub struct TurnStartParams {
 #[ts(export)]
 pub struct TurnStartResult {
     pub turn: Turn,
+    /// `Some(true)` when the thread was mid-run and the input was QUEUED for
+    /// the next iteration boundary (steering) instead of starting a new run.
+    /// Absent on servers without steering support.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub queued: Option<bool>,
 }
 
 // ============ turn/interrupt ============

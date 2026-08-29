@@ -33,8 +33,19 @@ import type {
     CompactionMarker,
     HarnessChatTransport,
     ModelLoadState,
+    ThreadStatusString,
+    TurnSendOptions,
     TurnUsage,
 } from "@slab/core/harness"
+
+/** Static i18n keys per wire abort reason (static strings satisfy the key guards). */
+const ABORT_REASON_LABEL_KEYS: Record<string, string> = {
+    interrupted: "pages.assistant.turn.abortReason.interrupted",
+    max_turns_reached: "pages.assistant.turn.abortReason.maxTurnsReached",
+    budget_exhausted: "pages.assistant.turn.abortReason.budgetExhausted",
+    repetition_detected: "pages.assistant.turn.abortReason.repetitionDetected",
+    error: "pages.assistant.turn.abortReason.error",
+}
 
 export type AssistantChatPaneProps = {
     disabled: boolean
@@ -78,6 +89,20 @@ export type AssistantChatPaneProps = {
     planMode: boolean
     /** Toggle plan mode on/off; drives the plan chip + `/plan`. */
     onPlanModeChange: (enabled: boolean) => void
+    /** Authoritative thread status from `thread/statusChanged` (null before the first event). */
+    threadStatus: ThreadStatusString | null
+    /** Why the last run ended abnormally (null after a clean completion). */
+    abortReason: string | null
+    /** Steering inputs queued on the running turn; ghost bubbles at the stream tail. */
+    queuedTexts: readonly string[]
+    /** Steering send — submits while the turn runs queue at the iteration boundary. */
+    onSteerSubmit: (text: string, options?: TurnSendOptions) => Promise<unknown>
+    /**
+     * Server-side interrupt for the Stop control (best-effort, errors swallowed
+     * upstream). Composed with the local AI-SDK `stop()` so the UI unblocks
+     * immediately while the server terminates the run authoritatively.
+     */
+    onInterrupt: () => void
 }
 
 export function AssistantChatPane({
@@ -108,6 +133,11 @@ export function AssistantChatPane({
     onRollbackFromTurn,
     planMode,
     onPlanModeChange,
+    threadStatus,
+    abortReason,
+    queuedTexts,
+    onSteerSubmit,
+    onInterrupt,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
     const { messages, sendMessage, status, stop } = useChat({
@@ -115,6 +145,15 @@ export function AssistantChatPane({
         transport,
     })
     const isBusy = status === "submitted" || status === "streaming"
+    // Server-authoritative busy: the submit gate derives from THIS, not from
+    // the local AI-SDK status (the two diverge after interrupts, and a normal
+    // `sendMessage` against a busy server thread would misbehave).
+    const serverBusy =
+        threadStatus === "running" ||
+        threadStatus === "interrupting" ||
+        threadStatus === "pending"
+    const steerable = serverBusy
+    const abortReasonLabel = abortReason ? ABORT_REASON_LABEL_KEYS[abortReason] : undefined
     const greeting = useGreeting()
 
     const { confirm: confirmRollback, dialog: rollbackConfirmDialog } = useWorkspaceConfirmDialog()
@@ -191,6 +230,7 @@ export function AssistantChatPane({
                                                 compactionMarkers={compactionMarkers}
                                                 modelLoad={modelLoad}
                                                 sessionLoading={isHistoryLoading}
+                                                queuedTexts={queuedTexts}
                                             />
                                         </MessageInteractionContext.Provider>
                                         {rollbackConfirmDialog}
@@ -201,6 +241,14 @@ export function AssistantChatPane({
                     </CardContent>
                     <CardFooter className="flex-col gap-2">
                         <TokenUsageIndicator usage={turnUsage} contextWindow={contextWindow} />
+                        {abortReasonLabel ? (
+                            <p
+                                className="w-full truncate text-xs text-muted-foreground"
+                                data-testid="assistant-abort-reason"
+                            >
+                                {t(abortReasonLabel)}
+                            </p>
+                        ) : null}
                         <Sender
                             onSubmit={async (value, { files, effort, permissionMode, agentType }) => {
                                 // Registry-driven dispatch: Control commands run a
@@ -218,6 +266,16 @@ export function AssistantChatPane({
                                         return
                                     }
                                 }
+                                // Steering: while the server-side turn is running,
+                                // submit queues at the iteration boundary instead of
+                                // opening a second (double-delivering) AI-SDK stream.
+                                // This bypasses `onBeforeSubmit` on purpose — that
+                                // gate throws while the session is busy, which it
+                                // always is here (the turn is running).
+                                if (steerable) {
+                                    await onSteerSubmit(value, { effort, permissionMode, agentType })
+                                    return
+                                }
                                 await onBeforeSubmit(value)
                                 sendMessage({
                                     text: value,
@@ -225,8 +283,15 @@ export function AssistantChatPane({
                                     metadata: { effort, permissionMode, agentType },
                                 })
                             }}
-                            onStop={stop}
+                            onStop={() => {
+                                // Local abort for immediate feedback + the
+                                // authoritative server-side interrupt (threadStatus
+                                // flips via `thread/statusChanged`).
+                                stop()
+                                onInterrupt()
+                            }}
                             loading={disabled || isBusy || isCompacting || isForking}
+                            steerable={steerable && !disabled && !isCompacting && !isForking}
                             approvals={approvals}
                             onResolveApproval={resolveApproval}
                             commands={commands}

@@ -34,10 +34,14 @@ pub fn select_phase2_inputs(
 ) -> Phase2Selection {
     let oldest_allowed = now - Duration::days(config.max_unused_days.max(0));
     inputs.retain(|input| input.last_usage.unwrap_or(input.generated_at) >= oldest_allowed);
+    // Most-used-first (Codex parity): when the limit binds, the memories the
+    // agent actually cites must survive — sorting ascending would starve
+    // high-value inputs and preferentially consolidate never-used ones.
     inputs.sort_by(|left, right| {
-        left.usage_count
-            .cmp(&right.usage_count)
-            .then_with(|| usage_sort_key(left).cmp(&usage_sort_key(right)))
+        right
+            .usage_count
+            .cmp(&left.usage_count)
+            .then_with(|| usage_sort_key(right).cmp(&usage_sort_key(left)))
             .then_with(|| left.thread_id.cmp(&right.thread_id))
     });
     inputs.truncate(config.limit);
@@ -146,7 +150,34 @@ mod tests {
         );
 
         let ids = selection.inputs.iter().map(|input| input.thread_id.as_str()).collect::<Vec<_>>();
-        assert_eq!(ids, vec!["older", "newer", "often"]);
+        assert_eq!(ids, vec!["often", "newer", "older"]);
         assert_eq!(selection.new_watermark, Some(newest_source));
+    }
+
+    #[test]
+    fn selection_prefers_most_used_when_limit_binds() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0).unwrap();
+
+        let input = |thread_id: &str, usage_count: u64| Phase2Input {
+            thread_id: thread_id.to_owned(),
+            session_id: "s".into(),
+            raw_memory: thread_id.to_owned(),
+            rollout_summary: thread_id.to_owned(),
+            rollout_slug: None,
+            generated_at: now,
+            source_updated_at: now,
+            last_usage: None,
+            usage_count,
+        };
+
+        let selection = select_phase2_inputs(
+            vec![input("never", 0), input("rare", 1), input("often", 5)],
+            Phase2SelectionConfig { limit: 1, max_unused_days: 30 },
+            now,
+            None,
+        );
+
+        let ids = selection.inputs.iter().map(|input| input.thread_id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids, vec!["often"]);
     }
 }
