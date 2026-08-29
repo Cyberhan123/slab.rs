@@ -1036,11 +1036,10 @@ mod tests {
         .unwrap();
         s.append(
             "t",
-            RolloutItem::EventMsg(EventMsg::ThreadStarted(
-                slab_agent::protocol::ThreadStartedParams {
-                    thread: slab_agent::protocol::Thread::default(),
-                },
-            )),
+            RolloutItem::EventMsg(EventMsg::TurnStarted(slab_agent::protocol::TurnStartedParams {
+                thread_id: "t".to_owned(),
+                turn: slab_agent::protocol::Turn::default(),
+            })),
         )
         .await
         .unwrap();
@@ -1058,7 +1057,7 @@ mod tests {
 
         let events = s.read_events("t").await;
         assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], EventMsg::ThreadStarted(_)));
+        assert!(matches!(events[0], EventMsg::TurnStarted(_)));
 
         assert!(s.read_session_meta("t").await.is_some());
         assert!(s.file_exists("t").await);
@@ -1152,6 +1151,7 @@ mod tests {
                 thread_id: "t".to_owned(),
                 compacted_messages: vec![user_msg("summary")],
                 removed_messages: 6,
+                stubbed_messages: 0,
                 output_tokens: 11,
                 status: "manual".to_owned(),
                 turn_index: 0,
@@ -1336,6 +1336,7 @@ mod tests {
                 thread_id: "t".to_owned(),
                 compacted_messages: vec![user_msg("summary")],
                 removed_messages: 2,
+                stubbed_messages: 0,
                 output_tokens: 5,
                 status: "auto".to_owned(),
                 turn_index: 1,
@@ -1512,6 +1513,7 @@ mod tests {
                 thread_id: "t".to_owned(),
                 compacted_messages: vec![],
                 removed_messages: 1,
+                stubbed_messages: 0,
                 output_tokens: 0,
                 status: "auto".to_owned(),
                 turn_index: 1,
@@ -1666,6 +1668,7 @@ mod tests {
                 thread_id: "t".to_owned(),
                 compacted_messages: vec![user_msg("sumAB")],
                 removed_messages: 2,
+                stubbed_messages: 0,
                 output_tokens: 5,
                 status: "auto".to_owned(),
                 turn_index: 1,
@@ -1826,6 +1829,7 @@ mod tests {
                 thread_id: "t".to_owned(),
                 compacted_messages: vec![],
                 removed_messages: 0,
+                stubbed_messages: 0,
                 output_tokens: 0,
                 status: "skipped".to_owned(),
                 turn_index: 1,
@@ -2814,6 +2818,7 @@ mod tests {
                 thread_id: "t".to_owned(),
                 compacted_messages: vec![user_msg("summary")],
                 removed_messages: 4,
+                stubbed_messages: 0,
                 output_tokens: 10,
                 status: "auto".to_owned(),
                 turn_index: 1,
@@ -2924,6 +2929,7 @@ mod keep_line_tests {
             thread_id: "t".to_owned(),
             compacted_messages: vec![],
             removed_messages: 0,
+            stubbed_messages: 0,
             output_tokens: 0,
             status: "auto".to_owned(),
             turn_index: 0, // turn 0 < from_turn 1 → keep
@@ -2932,6 +2938,7 @@ mod keep_line_tests {
             thread_id: "t".to_owned(),
             compacted_messages: vec![],
             removed_messages: 0,
+            stubbed_messages: 0,
             output_tokens: 0,
             status: "auto".to_owned(),
             turn_index: 1, // turn 1 >= from_turn 1 → drop

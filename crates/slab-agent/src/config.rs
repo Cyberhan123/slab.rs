@@ -6,6 +6,15 @@ pub const DEFAULT_TOOL_CONCURRENCY: u8 = 1;
 pub const MAX_TOOL_CONCURRENCY: u8 = 4;
 pub const DEFAULT_INVALID_TOOL_CALL_RETRIES: u8 = 1;
 pub const MAX_INVALID_TOOL_CALL_RETRIES: u8 = 3;
+pub const DEFAULT_LLM_MAX_RETRIES: u8 = 2;
+pub const MAX_LLM_MAX_RETRIES: u8 = 5;
+pub const DEFAULT_LLM_RETRY_BASE_DELAY_MS: u64 = 500;
+/// Default LLM-iteration budget per run. The budget is granted per run (each
+/// user message resumes the thread with a fresh allowance) while `turn_index`
+/// accumulates across runs. A generous ceiling keeps multi-step tasks viable;
+/// runaway loops stay bounded by the token budget, repetition detection, and
+/// the user's stop control.
+pub const DEFAULT_MAX_TURNS: u32 = 1000;
 
 /// Tool-call mode requested for an agent thread.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -27,7 +36,9 @@ pub struct AgentConfig {
     pub model: String,
     /// Optional system prompt injected as the first message.
     pub system_prompt: Option<String>,
-    /// Maximum number of LLM turns before the thread is forcibly completed.
+    /// Maximum number of LLM iterations before the run is forcibly completed.
+    /// Granted per run (each user message resumes with a fresh allowance);
+    /// `turn_index` accumulates across runs. See [`DEFAULT_MAX_TURNS`].
     pub max_turns: u32,
     /// Maximum nesting depth for child agents spawned by this thread.
     ///
@@ -73,6 +84,14 @@ pub struct AgentConfig {
     /// Number of invalid tool-call feedback turns allowed before the thread errors.
     #[serde(default = "default_invalid_tool_call_retries")]
     pub invalid_tool_call_retries: u8,
+    /// Bounded retries for TRANSIENT LLM failures (transport reset, timeout,
+    /// 429/5xx) with exponential backoff. A partially-streamed response is
+    /// never retried (the client would see the prefix twice). `0` disables.
+    #[serde(default = "default_llm_max_retries")]
+    pub llm_max_retries: u8,
+    /// Base delay (ms) for the LLM retry backoff; doubles per attempt.
+    #[serde(default = "default_llm_retry_base_delay_ms")]
+    pub llm_retry_base_delay_ms: u64,
     /// Optional structured-output request forwarded to the chat backend.
     #[serde(default)]
     pub structured_output: Option<StructuredOutput>,
@@ -93,7 +112,7 @@ impl Default for AgentConfig {
         Self {
             model: "default".to_owned(),
             system_prompt: None,
-            max_turns: 10,
+            max_turns: DEFAULT_MAX_TURNS,
             max_depth: 3,
             max_threads: 8,
             max_tokens: None,
@@ -110,6 +129,8 @@ impl Default for AgentConfig {
             tool_choice: AgentToolChoice::Auto,
             tool_concurrency: DEFAULT_TOOL_CONCURRENCY,
             invalid_tool_call_retries: DEFAULT_INVALID_TOOL_CALL_RETRIES,
+            llm_max_retries: DEFAULT_LLM_MAX_RETRIES,
+            llm_retry_base_delay_ms: DEFAULT_LLM_RETRY_BASE_DELAY_MS,
             structured_output: None,
             transient: false,
             agent_type: None,
@@ -125,6 +146,10 @@ impl AgentConfig {
     pub fn effective_invalid_tool_call_retries(&self) -> u8 {
         self.invalid_tool_call_retries.clamp(0, MAX_INVALID_TOOL_CALL_RETRIES)
     }
+
+    pub fn effective_llm_max_retries(&self) -> u8 {
+        self.llm_max_retries.min(MAX_LLM_MAX_RETRIES)
+    }
 }
 
 fn default_tool_concurrency() -> u8 {
@@ -133,4 +158,22 @@ fn default_tool_concurrency() -> u8 {
 
 fn default_invalid_tool_call_retries() -> u8 {
     DEFAULT_INVALID_TOOL_CALL_RETRIES
+}
+
+fn default_llm_max_retries() -> u8 {
+    DEFAULT_LLM_MAX_RETRIES
+}
+
+fn default_llm_retry_base_delay_ms() -> u64 {
+    DEFAULT_LLM_RETRY_BASE_DELAY_MS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_max_turns_matches_constant() {
+        assert_eq!(AgentConfig::default().max_turns, DEFAULT_MAX_TURNS);
+    }
 }

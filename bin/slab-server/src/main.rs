@@ -447,6 +447,9 @@ where
         Arc::clone(&store),
     ));
     state.services.model.sync_model_packs_from_disk().await?;
+    // Best-effort cloud catalog activation (curated inline + background live discovery) so
+    // models of configured cloud providers are listed without waiting for a settings save.
+    state.services.model.sync_cloud_provider_catalogs().await;
 
     let app = api::build(Arc::clone(&state));
     let addr: SocketAddr = cfg.bind_address.parse()?;

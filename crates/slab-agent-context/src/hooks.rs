@@ -5,7 +5,8 @@
 //! skills + `AGENTS.md`, snapshots the environment + permission state, and
 //! injects a single ordered batch:
 //! `[system, environment, permissions, …reasoning-effort(added later),
-//! developer(skills), memory?, …agents_md]`. `system` is emitted first so the
+//! developer(skills — only when a skill or a model template exists), memory?,
+//! …agents_md]`. `system` is emitted first so the
 //! existing thread-level insertion logic (which places injected messages after
 //! the leading `system` block) lands the rest in the right positions. Skill-body
 //! expansion is NOT done here — hooks can only inject new messages, not mutate
@@ -49,6 +50,8 @@ impl ContextInstructionHook {
         model: &str,
         reasoning_effort: Option<ChatReasoningEffort>,
         verbosity: Option<ChatVerbosity>,
+        input_message: Option<&str>,
+        allowed_tools: &[String],
     ) -> Result<Vec<ConversationMessage>> {
         let env = build_environment();
 
@@ -62,15 +65,28 @@ impl ContextInstructionHook {
         );
         let skill_roots = build_skill_roots(&skills, &agents_md);
 
-        let developer_template = self
-            .sources
-            .instruction_template_for(model)
-            .await
-            .or_else(|| Some(crate::helper::DEFAULT_DEVELOPER_TEMPLATE.to_owned()));
+        let developer_template = self.sources.instruction_template_for(model).await;
+
+        let permission = self.sources.permission_snapshot(thread_id);
 
         let mut messages = Vec::new();
-        // 1. Identity / persona.
-        messages.push(tagged(SystemInstructionFragment.render(&env)?, "slab_system"));
+        // 1. Identity / persona. `workspace_bound` keeps the workspace-scoped
+        //    guidance aligned with the registered tool set; the
+        //    `apply_patch_available` gate mirrors the SAME three layers the
+        //    turn's tool list applies (registration x file-edit exposure x
+        //    whitelist), so the "prefer apply_patch" line can only appear
+        //    when the tool is actually callable this run.
+        messages.push(tagged(
+            SystemInstructionFragment {
+                workspace_bound: self.sources.workspace_root().is_some(),
+                apply_patch_available: self.sources.apply_patch_registered()
+                    && permission.file_write_allowed
+                    && (allowed_tools.is_empty()
+                        || allowed_tools.iter().any(|tool| tool == "apply_patch")),
+            }
+            .render(&env)?,
+            "slab_system",
+        ));
         // 2. Environment facts (cwd / shell / os / time).
         messages.push(tagged(
             EnvironmentContextFragment { snapshot: self.sources.environment_snapshot() }
@@ -79,10 +95,7 @@ impl ContextInstructionHook {
         ));
         // 3. Permission instructions + tool-use policy.
         messages.push(tagged(
-            PermissionsInstructionFragment {
-                snapshot: self.sources.permission_snapshot(thread_id),
-            }
-            .render(&env)?,
+            PermissionsInstructionFragment { snapshot: permission }.render(&env)?,
             "slab_permissions",
         ));
         // 4. Reasoning-effort steer (only when an effort/verbosity is requested).
@@ -92,14 +105,19 @@ impl ContextInstructionHook {
                 "slab_reasoning_effort",
             ));
         }
-        // 5. Skills (developer).
-        let mut developer = DeveloperInstructionFragment::new(skills, skill_roots);
-        if let Some(template_source) = developer_template {
-            developer.template_source = template_source;
+        // 5. Skills (developer) — only when there is something to render.
+        //    An empty skills catalogue would inject a dead instruction block
+        //    describing a skill system with zero entries; a model-provided
+        //    instruction template still injects (it is an explicit override).
+        if !skills.is_empty() || developer_template.is_some() {
+            let mut developer = DeveloperInstructionFragment::new(skills, skill_roots);
+            if let Some(template_source) = developer_template {
+                developer.template_source = template_source;
+            }
+            messages.push(tagged(developer.render(&env)?, "slab_skills"));
         }
-        messages.push(tagged(developer.render(&env)?, "slab_skills"));
         // 6. Folded read-side memory (developer, preserves the `slab_memory` name).
-        if let Some(memory) = self.sources.memory_context() {
+        if let Some(memory) = self.sources.memory_context(thread_id, model, input_message).await {
             messages.push(ConversationMessage {
                 role: "developer".to_owned(),
                 content: ConversationMessageContent::Text(memory.body),
@@ -107,6 +125,18 @@ impl ContextInstructionHook {
                 tool_call_id: None,
                 tool_calls: Vec::new(),
             });
+            // 6b. Recall-selected rollout summaries (developer): a separate
+            // tag so the summary fragment and the per-task recall refresh
+            // independently between runs.
+            if let Some(relevant) = memory.relevant_body {
+                messages.push(ConversationMessage {
+                    role: "developer".to_owned(),
+                    content: ConversationMessageContent::Text(relevant),
+                    name: Some("slab_memory_relevant".to_owned()),
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                });
+            }
         }
         // 7. Discovered `AGENTS.md` bodies (user).
         for AgentMdRecord { path, body } in agents_md {
@@ -133,30 +163,40 @@ fn tagged(mut message: ConversationMessage, name: &str) -> ConversationMessage {
 #[async_trait]
 impl AgentHook for ContextInstructionHook {
     async fn on_event(&self, event: &HookEvent) -> HookOutcome {
-        let HookEvent::OnAgentStart { thread_id, config, .. } = event else {
-            return HookOutcome::Continue;
-        };
-        if config.transient {
-            return HookOutcome::Continue;
-        }
-        match self
-            .render_startup_messages(
-                thread_id,
-                &config.model,
-                config.reasoning_effort,
-                config.verbosity,
-            )
-            .await
-        {
-            Ok(messages) if !messages.is_empty() => HookOutcome::Effects {
-                tool_action: HookToolAction::Continue,
-                injected_messages: messages,
-                observations: Vec::new(),
-            },
-            Ok(_) => HookOutcome::Continue,
-            Err(error) => HookOutcome::AppendObservation {
-                observation: format!("context instruction injection skipped: {error}"),
-            },
+        match event {
+            HookEvent::OnAgentStart { thread_id, config, input_message, .. } => {
+                if config.transient {
+                    return HookOutcome::Continue;
+                }
+                match self
+                    .render_startup_messages(
+                        thread_id,
+                        &config.model,
+                        config.reasoning_effort,
+                        config.verbosity,
+                        input_message.as_deref(),
+                        &config.allowed_tools,
+                    )
+                    .await
+                {
+                    Ok(messages) if !messages.is_empty() => HookOutcome::Effects {
+                        tool_action: HookToolAction::Continue,
+                        injected_messages: messages,
+                        observations: Vec::new(),
+                    },
+                    Ok(_) => HookOutcome::Continue,
+                    Err(error) => HookOutcome::AppendObservation {
+                        observation: format!("context instruction injection skipped: {error}"),
+                    },
+                }
+            }
+            // Release per-thread recall state when the thread finishes; the
+            // surfaced-memory cache must not outlive its thread.
+            HookEvent::OnAgentEnd { thread_id, .. } => {
+                self.sources.evict_thread(thread_id);
+                HookOutcome::Continue
+            }
+            _ => HookOutcome::Continue,
         }
     }
 }
@@ -181,6 +221,8 @@ mod tests {
         template: Option<String>,
         permission: PermissionSnapshot,
         memory: Option<String>,
+        relevant: Option<String>,
+        evicted: std::sync::Mutex<Vec<String>>,
     }
 
     fn permissive_snapshot() -> PermissionSnapshot {
@@ -219,8 +261,19 @@ mod tests {
         fn permission_snapshot(&self, _thread_id: &str) -> PermissionSnapshot {
             self.permission.clone()
         }
-        fn memory_context(&self) -> Option<crate::snapshots::MemoryContext> {
-            self.memory.as_ref().map(|body| crate::snapshots::MemoryContext { body: body.clone() })
+        async fn memory_context(
+            &self,
+            _thread_id: &str,
+            _model_id: &str,
+            _input_message: Option<&str>,
+        ) -> Option<crate::snapshots::MemoryContext> {
+            self.memory.as_ref().map(|body| crate::snapshots::MemoryContext {
+                body: body.clone(),
+                relevant_body: self.relevant.clone(),
+            })
+        }
+        fn evict_thread(&self, thread_id: &str) {
+            self.evicted.lock().expect("evicted lock").push(thread_id.to_owned());
         }
     }
 
@@ -231,14 +284,45 @@ mod tests {
     }
 
     fn mock_sources(workspace: Option<PathBuf>) -> MockSources {
+        mock_sources_with_permission(workspace, permissive_snapshot())
+    }
+
+    fn mock_sources_with_permission(
+        workspace: Option<PathBuf>,
+        permission: PermissionSnapshot,
+    ) -> MockSources {
         let global = tempfile::TempDir::new().unwrap();
         MockSources {
             workspace,
             skills_dir: global.path().join("skills"),
             agents_md: global.path().join("AGENTS.md"),
             template: None,
-            permission: permissive_snapshot(),
+            permission,
             memory: None,
+            relevant: None,
+            evicted: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn read_only_snapshot() -> PermissionSnapshot {
+        PermissionSnapshot {
+            mode: PermissionModeLabel::Custom,
+            baseline: PermissionBaselineLabel::ReadOnly,
+            read_only: true,
+            shell_allowed: false,
+            file_write_allowed: false,
+            network_allowed: false,
+        }
+    }
+
+    fn start_event(config: AgentConfig) -> HookEvent {
+        HookEvent::OnAgentStart {
+            thread_id: "t".into(),
+            session_id: "s".into(),
+            parent_id: None,
+            depth: 0,
+            config: Box::new(config),
+            input_message: Some("help me with the parser bug".to_owned()),
         }
     }
 
@@ -255,15 +339,7 @@ mod tests {
         let hook =
             ContextInstructionHook::new(Arc::new(mock_sources(Some(ws.path().to_path_buf()))));
 
-        let outcome = hook
-            .on_event(&HookEvent::OnAgentStart {
-                thread_id: "t".into(),
-                session_id: "s".into(),
-                parent_id: None,
-                depth: 0,
-                config: AgentConfig::default(),
-            })
-            .await;
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
 
         let HookOutcome::Effects { injected_messages, .. } = outcome else {
             panic!("expected effects, got {outcome:?}");
@@ -290,21 +366,147 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn skips_skills_fragment_when_no_skills_exist() {
+        let ws = tempfile::TempDir::new().unwrap();
+        // No SKILL.md written anywhere: workspace + global roots are empty.
+        let hook =
+            ContextInstructionHook::new(Arc::new(mock_sources(Some(ws.path().to_path_buf()))));
+
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
+
+        let HookOutcome::Effects { injected_messages, .. } = outcome else {
+            panic!("expected effects, got {outcome:?}");
+        };
+        // system, environment, permissions, agents_md(root AGENTS.md absent) = 3;
+        // the skills developer message must NOT be injected for an empty catalogue.
+        assert!(
+            injected_messages.iter().all(|m| m.name.as_deref() != Some("slab_skills")),
+            "no slab_skills message should be injected when no skills exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn injects_skills_fragment_for_model_template_even_without_skills() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let mut sources = mock_sources(Some(ws.path().to_path_buf()));
+        sources.template = Some("<skills_instructions>custom</skills_instructions>".to_owned());
+        let hook = ContextInstructionHook::new(Arc::new(sources));
+
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
+
+        let HookOutcome::Effects { injected_messages, .. } = outcome else {
+            panic!("expected effects, got {outcome:?}");
+        };
+        let skills_msg = injected_messages
+            .iter()
+            .find(|m| m.name.as_deref() == Some("slab_skills"))
+            .expect("model-provided template must still be injected");
+        assert!(skills_msg.content.rendered_text().contains("custom"));
+    }
+
+    #[tokio::test]
+    async fn system_prompt_apply_patch_guidance_follows_workspace_binding() {
+        // Without a workspace root the workspace-bound tools (apply_patch …)
+        // are not registered, so the system prompt must not reference them.
+        let unbound_event = start_event(AgentConfig::default());
+        let unbound_hook = ContextInstructionHook::new(Arc::new(mock_sources(None)));
+        let HookOutcome::Effects { injected_messages, .. } =
+            unbound_hook.on_event(&unbound_event).await
+        else {
+            panic!("expected effects");
+        };
+        let system = injected_messages[0].content.rendered_text();
+        assert!(!system.contains("apply_patch"), "unbound system prompt: {system}");
+        assert!(system.contains("no workspace root is configured"));
+
+        // With a workspace root the guidance is present.
+        let ws = tempfile::TempDir::new().unwrap();
+        let bound_event = start_event(AgentConfig::default());
+        let bound_hook =
+            ContextInstructionHook::new(Arc::new(mock_sources(Some(ws.path().to_path_buf()))));
+        let HookOutcome::Effects { injected_messages, .. } =
+            bound_hook.on_event(&bound_event).await
+        else {
+            panic!("expected effects");
+        };
+        let system = injected_messages[0].content.rendered_text();
+        assert!(system.contains("apply_patch"));
+        assert!(system.contains("in the workspace root"));
+    }
+
+    /// P7 regression: with a workspace root the tool is REGISTERED, but a
+    /// read-only exposure filters `apply_patch` (FileEdit category) out of
+    /// the tool list — the prompt must not tell the model to prefer a tool
+    /// it cannot call.
+    #[tokio::test]
+    async fn system_prompt_omits_apply_patch_when_file_edit_not_exposed() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let hook = ContextInstructionHook::new(Arc::new(mock_sources_with_permission(
+            Some(ws.path().to_path_buf()),
+            read_only_snapshot(),
+        )));
+
+        let HookOutcome::Effects { injected_messages, .. } =
+            hook.on_event(&start_event(AgentConfig::default())).await
+        else {
+            panic!("expected effects");
+        };
+        let system = injected_messages[0].content.rendered_text();
+        assert!(!system.contains("Prefer `apply_patch`"), "read-only prompt: {system}");
+    }
+
+    /// The `allowed_tools` whitelist is the third gate: an empty whitelist
+    /// allows everything (guidance present), a whitelist naming other tools
+    /// excludes apply_patch (guidance absent), naming it explicitly keeps it.
+    #[tokio::test]
+    async fn system_prompt_apply_patch_guidance_follows_tool_whitelist() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let sources: Arc<dyn AgentContextSources> =
+            Arc::new(mock_sources(Some(ws.path().to_path_buf())));
+
+        let excluding =
+            AgentConfig { allowed_tools: vec!["shell".into()], ..AgentConfig::default() };
+        let HookOutcome::Effects { injected_messages, .. } =
+            ContextInstructionHook::new(Arc::clone(&sources))
+                .on_event(&start_event(excluding))
+                .await
+        else {
+            panic!("expected effects");
+        };
+        let system = injected_messages[0].content.rendered_text();
+        assert!(!system.contains("Prefer `apply_patch`"), "whitelisted-out prompt: {system}");
+
+        let naming =
+            AgentConfig { allowed_tools: vec!["apply_patch".into()], ..AgentConfig::default() };
+        let HookOutcome::Effects { injected_messages, .. } =
+            ContextInstructionHook::new(sources).on_event(&start_event(naming)).await
+        else {
+            panic!("expected effects");
+        };
+        let system = injected_messages[0].content.rendered_text();
+        assert!(system.contains("Prefer `apply_patch`"), "whitelisted-in prompt: {system}");
+    }
+
+    #[tokio::test]
+    async fn environment_fragment_explains_missing_workspace_instead_of_bare_unset() {
+        let hook = ContextInstructionHook::new(Arc::new(mock_sources(None)));
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
+        let HookOutcome::Effects { injected_messages, .. } = outcome else {
+            panic!("expected effects");
+        };
+        let env = injected_messages[1].content.rendered_text();
+        assert!(env.contains("no workspace configured"), "env fragment: {env}");
+        assert!(!env.contains("(unset)"));
+    }
+
+    #[tokio::test]
     async fn folds_memory_read_context_as_slab_memory_developer_message() {
         let ws = tempfile::TempDir::new().unwrap();
         let mut sources = mock_sources(Some(ws.path().to_path_buf()));
         sources.memory = Some("memory summary body".to_owned());
         let hook = ContextInstructionHook::new(Arc::new(sources));
 
-        let outcome = hook
-            .on_event(&HookEvent::OnAgentStart {
-                thread_id: "t".into(),
-                session_id: "s".into(),
-                parent_id: None,
-                depth: 0,
-                config: AgentConfig::default(),
-            })
-            .await;
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
 
         let HookOutcome::Effects { injected_messages, .. } = outcome else {
             panic!("expected effects, got {outcome:?}");
@@ -318,16 +520,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn folds_relevant_memory_as_slab_memory_relevant_fragment() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let mut sources = mock_sources(Some(ws.path().to_path_buf()));
+        sources.memory = Some("memory summary body".to_owned());
+        sources.relevant = Some("relevant rollout summaries".to_owned());
+        let hook = ContextInstructionHook::new(Arc::new(sources));
+
+        let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
+
+        let HookOutcome::Effects { injected_messages, .. } = outcome else {
+            panic!("expected effects, got {outcome:?}");
+        };
+        let memory_position = injected_messages
+            .iter()
+            .position(|m| m.name.as_deref() == Some("slab_memory"))
+            .expect("summary fragment present");
+        let relevant_position = injected_messages
+            .iter()
+            .position(|m| m.name.as_deref() == Some("slab_memory_relevant"))
+            .expect("relevant fragment present");
+        let relevant_msg = &injected_messages[relevant_position];
+        assert_eq!(relevant_msg.role, "developer");
+        assert!(relevant_msg.content.rendered_text().contains("relevant rollout summaries"));
+        // 6b sits immediately after slot 6.
+        assert_eq!(relevant_position, memory_position + 1);
+    }
+
+    #[tokio::test]
+    async fn evicts_thread_on_agent_end() {
+        let sources = Arc::new(mock_sources(None));
+        let hook =
+            ContextInstructionHook::new(Arc::clone(&sources) as Arc<dyn AgentContextSources>);
+
+        let outcome = hook
+            .on_event(&HookEvent::OnAgentEnd {
+                thread_id: "t".into(),
+                session_id: "s".into(),
+                status: slab_agent::ThreadStatus::Completed,
+                error: None,
+            })
+            .await;
+
+        assert!(matches!(outcome, HookOutcome::Continue));
+        assert_eq!(
+            sources.evicted.lock().expect("evicted lock").as_slice(),
+            ["t".to_owned()].as_slice()
+        );
+    }
+
+    #[tokio::test]
     async fn skips_transient_threads() {
         let hook = ContextInstructionHook::new(Arc::new(mock_sources(None)));
         let outcome = hook
-            .on_event(&HookEvent::OnAgentStart {
-                thread_id: "t".into(),
-                session_id: "s".into(),
-                parent_id: None,
-                depth: 0,
-                config: AgentConfig { transient: true, ..AgentConfig::default() },
-            })
+            .on_event(&start_event(AgentConfig { transient: true, ..AgentConfig::default() }))
             .await;
         assert!(matches!(outcome, HookOutcome::Continue));
     }
@@ -351,16 +597,10 @@ mod tests {
     async fn emits_reasoning_effort_fragment_when_effort_is_set() {
         let hook = ContextInstructionHook::new(Arc::new(mock_sources(None)));
         let outcome = hook
-            .on_event(&HookEvent::OnAgentStart {
-                thread_id: "t".into(),
-                session_id: "s".into(),
-                parent_id: None,
-                depth: 0,
-                config: AgentConfig {
-                    reasoning_effort: Some(slab_types::ChatReasoningEffort::High),
-                    ..AgentConfig::default()
-                },
-            })
+            .on_event(&start_event(AgentConfig {
+                reasoning_effort: Some(slab_types::ChatReasoningEffort::High),
+                ..AgentConfig::default()
+            }))
             .await;
 
         let HookOutcome::Effects { injected_messages, .. } = outcome else {

@@ -178,6 +178,12 @@ async function main(): Promise<void> {
     const base = patchFile.replace(/\.patch$/, "");
     const parsed = parseCrateId(base);
     if (!parsed) {
+      if (base.includes("@")) {
+        // `name@version.patch` files are bun patchedDependencies (npm
+        // packages) — bun applies them at install time, not this script.
+        console.log(`[info] Skipping npm dependency patch ${patchFile} (applied by bun).`);
+        continue;
+      }
       console.warn(`[warn] Cannot parse crate id from filename: ${patchFile}`);
       errors++;
       continue;

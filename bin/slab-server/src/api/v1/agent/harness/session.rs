@@ -203,6 +203,7 @@ impl HarnessSession {
 fn rewrite_thread_id(mut msg: EventMsg, harness_id: &str) -> EventMsg {
     let tid = harness_id.to_owned();
     match &mut msg {
+        EventMsg::ThreadStatusChanged(p) => p.thread_id = tid.clone(),
         EventMsg::TurnStarted(p) => p.thread_id = tid.clone(),
         EventMsg::TurnCompleted(p) => p.thread_id = tid.clone(),
         EventMsg::TurnAborted(p) => p.thread_id = tid.clone(),
@@ -217,7 +218,7 @@ fn rewrite_thread_id(mut msg: EventMsg, harness_id: &str) -> EventMsg {
         EventMsg::FileChangeRequestApproval(p) => p.thread_id = tid.clone(),
         EventMsg::ContextCompacting(p) => p.thread_id = tid.clone(),
         EventMsg::ContextCompacted(p) => p.thread_id = tid.clone(),
-        // Error / Warning / ThreadStarted carry no thread_id; leave unchanged.
+        // Error carries no thread_id; leave unchanged.
         // `EventMsg` is `#[non_exhaustive]`: future slab-agent variants with no
         // known thread_id mapping pass through untouched.
         _ => {}
@@ -227,7 +228,7 @@ fn rewrite_thread_id(mut msg: EventMsg, harness_id: &str) -> EventMsg {
 
 /// Push one projected harness event onto the session's outbound stream as a
 /// JSON-RPC notification. `Error`/`TurnAborted` are adapted (they do not lift
-/// directly via `event_msg_to_notification`); `Warning` is dropped.
+/// directly via `event_msg_to_notification`).
 fn push_event(notifier: &Notifier, thread_id: &str, msg: EventMsg) {
     match msg {
         EventMsg::Error(error) => notifier.notify(
@@ -243,9 +244,13 @@ fn push_event(notifier: &Notifier, thread_id: &str, msg: EventMsg) {
         ),
         EventMsg::TurnAborted(aborted) => notifier.notify(
             method::TURN_COMPLETED,
-            &TurnCompletedParams { thread_id: aborted.thread_id, turn: aborted.turn, usage: None },
+            &TurnCompletedParams {
+                thread_id: aborted.thread_id,
+                turn: aborted.turn,
+                usage: aborted.usage,
+                reason: aborted.reason,
+            },
         ),
-        EventMsg::Warning(_) => {}
         other => {
             if let Some(notification) = event_msg_to_notification(other) {
                 notifier.notify(notification.method(), &notification.payload());
@@ -316,6 +321,7 @@ mod tests {
                 thread_id: "real-1".to_owned(),
                 status: Some("compacted".to_owned()),
                 removed_messages: Some(2),
+                stubbed_messages: None,
                 output_tokens: Some(80),
             }),
             "hthread-1",

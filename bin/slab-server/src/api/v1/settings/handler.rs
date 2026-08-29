@@ -133,6 +133,7 @@ mod tests {
             bind_address: Some("0.0.0.0:0".to_owned()),
             admin_api_token: Some("test-admin-token".to_owned()),
             workspace_root: None,
+            extra_providers: Vec::new(),
         })
         .await;
 

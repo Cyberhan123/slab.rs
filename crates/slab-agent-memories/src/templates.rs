@@ -7,6 +7,8 @@ pub const PHASE1_INPUT_TEMPLATE: &str = include_str!("../templates/memories/inpu
 pub const MEMORY_READ_TEMPLATE: &str = include_str!("../templates/memories/read.md");
 pub const PHASE2_CONSOLIDATION_TEMPLATE: &str =
     include_str!("../templates/memories/consolidation.md");
+pub const RECALL_TEMPLATE: &str = include_str!("../templates/memories/recall.md");
+pub const RECALL_SELECT_TEMPLATE: &str = include_str!("../templates/memories/recall-select.md");
 pub const HOOK_INSTRUCTIONS_TEMPLATE: &str = include_str!("../templates/hooks/instructions.md");
 
 pub fn render_phase1_input(
@@ -53,6 +55,27 @@ pub fn render_phase2_consolidation(
 
 pub fn render_hook_instructions() -> String {
     HOOK_INSTRUCTIONS_TEMPLATE.to_owned()
+}
+
+/// Wrap the recall-selected summaries as the `slab_memory_relevant` body.
+pub fn render_memory_relevant(base_path: &str, body: &str) -> Result<String> {
+    render(
+        RECALL_TEMPLATE,
+        context! {
+            base_path => base_path,
+            body => body,
+        },
+    )
+}
+
+/// The side-query system prompt for recall selection.
+pub fn render_recall_select(top_k: usize) -> Result<String> {
+    render(
+        RECALL_SELECT_TEMPLATE,
+        context! {
+            top_k => top_k,
+        },
+    )
 }
 
 fn render(template: &str, context: minijinja::Value) -> Result<String> {

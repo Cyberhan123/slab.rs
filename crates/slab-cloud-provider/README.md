@@ -12,8 +12,14 @@ Single owner of slab's cloud-provider knowledge:
   with a fallback to the adapter kind's canonical env var (e.g. `OPENAI_API_KEY`).
 - **Default model catalog** — `default_models_for_provider` returns a curated flagship model list
   per `ProviderFamily`, used to activate cloud models as soon as a provider is configured. Returns
-  plain `CloudModelSpec` data so callers own the DB writes. (genai 0.6.5's `Client::all_model_names`
+  plain `CloudModelSpec` data (including the advertised `context_window`, which feeds
+  auto-compaction thresholds) so callers own the DB writes. (genai 0.6.5's `Client::all_model_names`
   is a live web call that several vendors don't support, so it is not used as the activation source.)
+  Zhipu's `Zai` and `BigModel` families share the same GLM catalog.
+- **Live model discovery** — `list_remote_model_ids` probes an `OpenaiCompatible` provider's
+  `GET {api_base}/models` endpoint via genai's `all_model_names` (Bearer auth, `{data:[{id}]}`
+  shape). A live web call: callers own caching/timeouts, and a failed discovery must keep the
+  previously known catalog.
 
 ## Boundaries
 

@@ -4,6 +4,7 @@ import { MessageCirclePlus } from "lucide-react"
 import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
 import { useHeader } from "@slab/ui/hooks/use-header"
+import type { HeaderSelectConfig } from "@slab/ui/layouts/header"
 
 import type { ModelOption } from "../lib/assistant-page-state"
 
@@ -34,24 +35,47 @@ export function useAssistantHeader({
   const { t } = useTranslation()
 
   const headerModelPicker = useMemo(
-    () => ({
-      disabled:
-        modelLoading ||
-        isSessionBusy ||
-        isSessionBootstrapping ||
-        Boolean(pendingModelSwitchId) ||
-        modelOptions.length === 0,
-      emptyLabel: t("pages.assistant.modelPicker.emptyLabel"),
-      groupLabel: t("pages.assistant.modelPicker.groupLabel"),
-      loading: modelLoading,
-      onChange: onModelPickerChange,
-      options: modelOptions.map((model) => ({
-        id: model.id,
-        label: model.label,
-      })),
-      placeholder: t("common.fields.selectModel"),
-      value: selectedModelId,
-    }),
+    () => {
+      const toOption = (model: ModelOption) => ({ id: model.id, label: model.label })
+      const groups: HeaderSelectConfig["options"] = []
+      const localModels = modelOptions.filter((model) => model.source === "local")
+      const cloudModels = modelOptions.filter((model) => model.source === "cloud")
+      if (localModels.length > 0) {
+        groups.push({
+          id: "local",
+          label: t("pages.assistant.modelPicker.localGroupLabel"),
+          children: {
+            groupLabel: t("pages.assistant.modelPicker.localGroupLabel"),
+            options: localModels.map(toOption),
+          },
+        })
+      }
+      if (cloudModels.length > 0) {
+        groups.push({
+          id: "cloud",
+          label: t("pages.assistant.modelPicker.cloudGroupLabel"),
+          children: {
+            groupLabel: t("pages.assistant.modelPicker.cloudGroupLabel"),
+            options: cloudModels.map(toOption),
+          },
+        })
+      }
+      return {
+        disabled:
+          modelLoading ||
+          isSessionBusy ||
+          isSessionBootstrapping ||
+          Boolean(pendingModelSwitchId) ||
+          modelOptions.length === 0,
+        emptyLabel: t("pages.assistant.modelPicker.emptyLabel"),
+        groupLabel: t("pages.assistant.modelPicker.groupLabel"),
+        loading: modelLoading,
+        onChange: onModelPickerChange,
+        options: groups,
+        placeholder: t("common.fields.selectModel"),
+        value: selectedModelId,
+      }
+    },
     [
       isSessionBootstrapping,
       isSessionBusy,

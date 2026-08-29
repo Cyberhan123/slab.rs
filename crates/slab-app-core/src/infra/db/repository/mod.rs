@@ -134,6 +134,31 @@ mod tests {
         assert_eq!(not_null, 1);
         assert_eq!(default_value.as_deref(), Some("'unknown'"));
 
+        // Per-project memory stores: the sharding key on the three memory
+        // tables, and the keyed lock table that replaced the id=1 singleton.
+        for table in
+            ["agent_memory_phase1_outputs", "agent_memory_phase2_runs", "agent_memory_usage_events"]
+        {
+            assert!(
+                table_columns(&pool, table).await.contains("project_key"),
+                "{table} must carry the project_key shard column"
+            );
+        }
+        let legacy_lock: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_memory_phase2_lock'")
+                .fetch_one(&pool)
+                .await
+                .expect("legacy lock lookup");
+        assert_eq!(legacy_lock, 0, "the singleton lock table must be dropped");
+        let lock_keys: Vec<(String,)> =
+            sqlx::query_as("SELECT name FROM pragma_table_info('agent_memory_phase2_locks')")
+                .fetch_all(&pool)
+                .await
+                .expect("lock columns");
+        let lock_keys = lock_keys.into_iter().map(|(name,)| name).collect::<Vec<_>>();
+        assert!(lock_keys.contains(&"job_key".to_owned()));
+        assert!(lock_keys.contains(&"completed_watermark".to_owned()));
+
         for index in [
             "idx_agent_memory_usage_events_source_kind",
             "idx_image_generation_tasks_created_at",
@@ -142,7 +167,9 @@ mod tests {
             "idx_model_config_state_updated_at",
             "idx_agent_threads_session",
             "idx_agent_memory_phase1_status",
+            "idx_agent_memory_phase1_project",
             "idx_agent_memory_phase2_runs_status",
+            "idx_agent_memory_phase2_runs_project",
             "idx_agent_memory_usage_events_thread",
             // rollout-session L2 index.
             "idx_rollout_session",
