@@ -264,13 +264,20 @@ impl ImageService {
                 }
                 Err(error) => {
                     let runtime_snapshot = runtime_status.snapshot(backend_id);
-                    let runtime_status = runtime_snapshot.compact_summary();
-                    let message = format!("{error:#}\nruntime_status: {runtime_status}");
+                    let process_summary = runtime_snapshot.compact_summary();
+                    let model_resident = model_auto_unload.backend_resident(backend_id).await;
+                    let message = render_failure_message(
+                        &backend_id,
+                        &format!("{error:#}"),
+                        &process_summary,
+                        model_resident,
+                    );
                     cleanup_dir(&task_output_dir).await;
                     warn!(
                         task_id = %operation_id,
                         error = %message,
-                        runtime_status = %runtime_status,
+                        runtime_status = %process_summary,
+                        ?model_resident,
                         "image generation task failed"
                     );
                     if let Err(db_error) = operation.mark_failed(&message).await {
@@ -344,6 +351,48 @@ fn ensure_image_backend(backend_id: RuntimeBackendId) -> Result<(), AppCoreError
     }
 }
 
+/// Render the failure message recorded on an image task.
+///
+/// Two DIFFERENT state layers surround an image backend: the runtime PROCESS
+/// status (supervisor; `status=ready` only means the backend process is alive)
+/// and whether a MODEL is resident on it. The old renderer blindly appended
+/// `runtime_status: status=ready` to every failure, so a "model is not
+/// loaded" error read as a self-contradiction. When the error itself already
+/// says the model is not loaded, explain the layer distinction explicitly
+/// instead of stapling a bare process summary next to it.
+fn render_failure_message(
+    backend_id: &RuntimeBackendId,
+    error_display: &str,
+    process_summary: &str,
+    model_resident: Option<bool>,
+) -> String {
+    if error_display.to_lowercase().contains("not loaded") {
+        return format!(
+            "{error_display}\nthe diffusion model on backend {} is not loaded — load a model first \
+             (the runtime process itself reports {process_summary}; a ready process does not imply \
+             a loaded model)",
+            backend_id.canonical_id(),
+        );
+    }
+    match model_resident {
+        // Model tracked and resident: the process summary is context, not a
+        // contradiction — the failure lies elsewhere.
+        Some(true) => format!("{error_display}\nruntime_status: {process_summary}"),
+        Some(false) => format!(
+            "{error_display}\nruntime_status: {process_summary}; no model resident on backend {} \
+             (load a model first)",
+            backend_id.canonical_id(),
+        ),
+        // Backend never tracked here (never loaded, or loaded/unloaded by an
+        // external actor): say so rather than implying a known-good state.
+        None => format!(
+            "{error_display}\nruntime_status: {process_summary}; model residency on backend {} \
+             unknown (no load tracked through this server)",
+            backend_id.canonical_id(),
+        ),
+    }
+}
+
 fn map_image_view(row: ImageGenerationTaskViewRecord) -> ImageGenerationTaskView {
     let primary_image_url = row
         .task
@@ -398,4 +447,60 @@ fn map_image_view(row: ImageGenerationTaskViewRecord) -> ImageGenerationTaskView
 
 fn image_task_dir(output_root: &Path, task_id: &str) -> PathBuf {
     output_root.join("images").join(task_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// P6 regression: a "model is not loaded" failure must not be followed by
+    /// a bare `runtime_status: status=ready` line that reads as a flat
+    /// contradiction — the layer distinction (process ready ≠ model loaded)
+    /// is spelled out instead.
+    #[test]
+    fn render_failure_message_explains_layer_gap_when_model_not_loaded() {
+        let message = render_failure_message(
+            &RuntimeBackendId::GgmlDiffusion,
+            "runtime error: model is not loaded",
+            "status=ready, consecutive_failures=0, restart_attempts=0",
+            Some(false),
+        );
+        assert!(message.contains("load a model first"), "{message}");
+        assert!(
+            !message.contains("\nruntime_status:"),
+            "bare process summary must not be appended to a not-loaded error: {message}"
+        );
+        assert!(message.contains("does not imply"), "{message}");
+    }
+
+    #[test]
+    fn render_failure_message_keeps_process_summary_for_resident_model() {
+        let message = render_failure_message(
+            &RuntimeBackendId::GgmlDiffusion,
+            "runtime error: engine I/O failure",
+            "status=ready, consecutive_failures=0, restart_attempts=0",
+            Some(true),
+        );
+        assert!(message.contains("\nruntime_status: status=ready"), "{message}");
+        assert!(!message.contains("load a model first"), "{message}");
+    }
+
+    #[test]
+    fn render_failure_message_flags_missing_residency() {
+        let non_resident = render_failure_message(
+            &RuntimeBackendId::GgmlDiffusion,
+            "runtime error: engine crashed",
+            "status=ready, consecutive_failures=0, restart_attempts=0",
+            Some(false),
+        );
+        assert!(non_resident.contains("no model resident"), "{non_resident}");
+
+        let untracked = render_failure_message(
+            &RuntimeBackendId::GgmlDiffusion,
+            "runtime error: engine crashed",
+            "status=ready, consecutive_failures=0, restart_attempts=0",
+            None,
+        );
+        assert!(untracked.contains("unknown"), "{untracked}");
+    }
 }

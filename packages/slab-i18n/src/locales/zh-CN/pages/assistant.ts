@@ -25,6 +25,8 @@ export const assistant = {
   },
   modelPicker: {
     groupLabel: '助手模型',
+    localGroupLabel: '本地模型',
+    cloudGroupLabel: '云供应商',
     emptyLabel: '暂无助手模型',
   },
   greeting: {
@@ -109,11 +111,21 @@ export const assistant = {
     rollback: '撤回',
     confirmRollback: '撤回此消息及其后的所有内容？',
     cancelEdit: '取消编辑',
+    queuedLabel: '已排队',
   },
   thinking: {
     loading: '思考中...',
     thoughtForAFewSeconds: '思考了几秒钟',
     thoughtForSeconds: '思考了 {{seconds}} 秒',
+  },
+  turn: {
+    abortReason: {
+      interrupted: '本轮已中断',
+      maxTurnsReached: '本轮已停止:达到最大轮数',
+      budgetExhausted: '本轮已停止:token 预算耗尽',
+      repetitionDetected: '本轮已停止:检测到重复工具调用',
+      error: '本轮失败',
+    },
   },
   dialog: {
     title: '为此会话切换模型？',
@@ -141,6 +153,7 @@ export const assistant = {
     failedToDeleteSession: '删除助手会话失败。',
     compactFailed: '压缩会话失败。',
     forkFailed: '分叉会话失败。',
+    steeringResync: '本轮刚刚结束——你的消息将开启新一轮，正在重新同步…',
   },
   connection: {
     connected: '事件已连接',

@@ -6,7 +6,7 @@ import {
   MAX_RESTORE_ATTEMPTS,
   RESTORE_BACKOFF_MS,
 } from "../conversation-controller"
-import type { Thread } from "../types"
+import { HARNESS_NOTIFICATION, type Thread } from "../types"
 
 /** Flush microtasks + the macrotask queue so the client's async open/await settle. */
 function flush(): Promise<void> {
@@ -451,6 +451,234 @@ describe("ConversationController", () => {
     await vi.waitFor(() => expect(controller.getState().restoredThreadId).toBe("hthread-1"))
     // THREAD's single user message (u1) lives in turn 0.
     expect(controller.getState().userMessageTurnIndex.get("u1")).toBe(0)
+  })
+
+  // ── authoritative thread status + steering (S7) ───────────────────────────
+
+  /** Restore a bound thread and return the settled controller + socket. */
+  async function restoredController(): Promise<{
+    controller: ConversationController
+    socket: FakeWebSocket
+  }> {
+    const controller = makeController("s1")
+    controller.start()
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(controller.getState().restoredThreadId).toBe("hthread-1"))
+    return { controller, socket: FakeWebSocket.last! }
+  }
+
+  function findRequest(socket: FakeWebSocket, method: string): { id: number | string } {
+    const req = socket.sent.map((raw) => JSON.parse(raw)).find((m) => m.method === method)
+    if (!req) throw new Error(`no ${method} request was sent`)
+    return req
+  }
+
+  /** Count outbound requests with the given method (e.g. resync `thread/resume`s). */
+  function countRequests(socket: FakeWebSocket, method: string): number {
+    return socket.sent.filter((raw) => JSON.parse(raw).method === method).length
+  }
+
+  it("tracks the authoritative thread status and ignores other threads", async () => {
+    const { controller, socket } = await restoredController()
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "running",
+      }),
+    )
+    await flush()
+    expect(controller.getState().threadStatus).toBe("running")
+
+    // Another thread's status must not leak into this conversation.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-other",
+        status: "interrupted",
+      }),
+    )
+    await flush()
+    expect(controller.getState().threadStatus).toBe("running")
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "interrupted",
+      }),
+    )
+    await flush()
+    expect(controller.getState().threadStatus).toBe("interrupted")
+    controller.dispose()
+  })
+
+  it("sendSteering queues on a running turn and the terminal event clears it", async () => {
+    const { controller, socket } = await restoredController()
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "running",
+      }),
+    )
+    await flush()
+
+    const sendPromise = controller.sendSteering({
+      id: "steer-1",
+      role: "user",
+      parts: [{ type: "text", text: "also check the tests" }],
+    })
+    await flush()
+    const turnReq = findRequest(socket, "turn/start")
+    socket.simMessage(
+      rpcResponse(turnReq.id, { turn: { id: "0", status: "queued" }, queued: true }),
+    )
+    const result = await sendPromise
+    expect(result.queued).toBe(true)
+    expect(controller.getState().queuedCount).toBe(1)
+    expect(controller.getState().queuedTexts).toEqual(["also check the tests"])
+
+    // The run's terminal event carries the abort reason and clears the queue…
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.TURN_COMPLETED, {
+        threadId: "hthread-1",
+        turn: { id: "1", status: "interrupted" },
+        reason: "max_turns_reached",
+      }),
+    )
+    await flush()
+    expect(controller.getState().abortReason).toBe("max_turns_reached")
+    expect(controller.getState().queuedCount).toBe(0)
+    // …and, because something WAS queued, refreshes the history so the drained
+    // input materializes as a real row (the live stream never replays it).
+    await vi.waitFor(() => expect(countRequests(socket, "thread/resume")).toBe(2))
+    const resyncReq = socket.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((m) => m.method === "thread/resume")
+      .at(-1)
+    socket.simMessage(rpcResponse(resyncReq.id, { thread: THREAD }))
+    await vi.waitFor(() => expect(controller.getState().isHistoryLoading).toBe(false))
+
+    // A clean completion clears the abort reason again.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.TURN_COMPLETED, {
+        threadId: "hthread-1",
+        turn: { id: "2", status: "completed" },
+        reason: "completed",
+      }),
+    )
+    await flush()
+    expect(controller.getState().abortReason).toBeNull()
+    controller.dispose()
+  })
+
+  it("a lost steering race defers the history refresh to the run's terminal event", async () => {
+    const { controller, socket } = await restoredController()
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "running",
+      }),
+    )
+    await flush()
+
+    // The server reports the input STARTED a new run (not queued): no local
+    // stream is subscribed to it, so the refresh must wait for its end.
+    const sendPromise = controller.sendSteering({
+      id: "steer-race",
+      role: "user",
+      parts: [{ type: "text", text: "orphaned run" }],
+    })
+    await flush()
+    const turnReq = findRequest(socket, "turn/start")
+    socket.simMessage(rpcResponse(turnReq.id, { turn: { id: "0", status: "in_progress" } }))
+    await sendPromise
+    await flush()
+    expect(countRequests(socket, "thread/resume")).toBe(1)
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "completed",
+      }),
+    )
+    await vi.waitFor(() => expect(countRequests(socket, "thread/resume")).toBe(2))
+    controller.dispose()
+  })
+
+  it("an interrupt with queued input resyncs on the terminal status event", async () => {
+    const { controller, socket } = await restoredController()
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "running",
+      }),
+    )
+    await flush()
+
+    const sendPromise = controller.sendSteering({
+      id: "steer-3",
+      role: "user",
+      parts: [{ type: "text", text: "stop early" }],
+    })
+    await flush()
+    const turnReq = findRequest(socket, "turn/start")
+    socket.simMessage(rpcResponse(turnReq.id, { turn: { id: "0", status: "queued" }, queued: true }))
+    await sendPromise
+    expect(controller.getState().queuedCount).toBe(1)
+
+    const interrupting = controller.interrupt()
+    await flush()
+    const interruptReq = findRequest(socket, "turn/interrupt")
+    socket.simMessage(rpcResponse(interruptReq.id, {}))
+    await interrupting
+    expect(controller.getState().queuedCount).toBe(0)
+    // Teardown persisted the undelivered input; the terminal event materializes it.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "interrupted",
+      }),
+    )
+    await vi.waitFor(() => expect(countRequests(socket, "thread/resume")).toBe(2))
+    controller.dispose()
+  })
+
+  it("interrupt clears the queued-steering display", async () => {
+    const { controller, socket } = await restoredController()
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "running",
+      }),
+    )
+    await flush()
+
+    const sendPromise = controller.sendSteering({
+      id: "steer-2",
+      role: "user",
+      parts: [{ type: "text", text: "stop early" }],
+    })
+    await flush()
+    const turnReq = findRequest(socket, "turn/start")
+    socket.simMessage(
+      rpcResponse(turnReq.id, { turn: { id: "0", status: "queued" }, queued: true }),
+    )
+    await sendPromise
+    expect(controller.getState().queuedCount).toBe(1)
+
+    const interrupting = controller.interrupt()
+    await flush()
+    const interruptReq = findRequest(socket, "turn/interrupt")
+    socket.simMessage(rpcResponse(interruptReq.id, {}))
+    await interrupting
+    expect(controller.getState().queuedCount).toBe(0)
+    controller.dispose()
   })
 
   it("retracts a turn via thread/rollback and re-resumes the thread", async () => {

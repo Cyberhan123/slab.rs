@@ -131,22 +131,27 @@ function HeaderSelect({ select }: { select: HeaderSelectConfig }) {
               {select.emptyLabel ?? t("layouts.header.select.noOptions")}
             </SelectItem>
           </SelectGroup>
-        ) : (
-          select.options.map((option) =>
-            option.children ? (
+        ) : select.options.some((option) => option.children) ? (
+          select.options.map((option) => {
+            const children = option.children
+            if (!children) {
+              return null
+            }
+            return (
               <HeaderSelectGroup
                 key={option.id}
-                groupLabel={option.children.groupLabel}
-                options={option.children.options}
-              />
-            ) : (
-              <HeaderSelectGroup
-                key={option.id}
-                groupLabel={select.groupLabel ?? t("layouts.header.select.options")}
-                options={[option]}
+                groupLabel={children.groupLabel}
+                options={children.options}
               />
             )
-          )
+          })
+        ) : (
+          // Flat options share ONE group — a label per option would repeat the
+          // group name before every entry.
+          <HeaderSelectGroup
+            groupLabel={select.groupLabel ?? t("layouts.header.select.options")}
+            options={select.options}
+          />
         )}
       </SelectContent>
     </Select>

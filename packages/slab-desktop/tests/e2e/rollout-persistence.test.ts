@@ -79,14 +79,16 @@ describe("rollout persistence e2e", () => {
     await expectAssistantPageText(page, markerB)
 
     // The rollout file: SessionMeta header, then a MessageAppend per appended
-    // message, each carrying a numeric turnIndex (no turn-crossing).
+    // message, each carrying a numeric turn index (no turn-crossing). NOTE:
+    // `TurnContextPayload` renames only the enum TAG (`kind`) to camelCase —
+    // the variant fields stay snake_case (`turn_index`).
     const lines = readRolloutLines(testEnv.sessionStateDir, threadId)
     expect(lines.length).toBeGreaterThan(0)
     expect(isSessionMeta(lines[0]!)).toBe(true)
     const appends = lines.filter(isMessageAppend)
     expect(appends.length).toBeGreaterThanOrEqual(4) // 2 user + 2 assistant
     for (const line of appends) {
-      expect(typeof line.item.turnIndex).toBe("number")
+      expect(typeof line.item.turn_index).toBe("number")
     }
   }, 900_000)
 
@@ -97,9 +99,22 @@ describe("rollout persistence e2e", () => {
     const session = await createSession(testEnv.serverBaseUrl, `rollout-compact-${Date.now()}`)
     await openAssistant(page, testEnv.uiBaseUrl, session.id)
 
-    const prompt = `Reply with only the token SLAB_ROLLOUT_COMPACT_${Date.now()}.`
+    // Manual compact still SKIPS a minimal history: the keep window is
+    // `context_length × 60%` (~9.8k tokens at the pinned 16384), and anything
+    // inside it is kept verbatim — a tiny one-turn conversation is entirely
+    // "recent", so nothing is summarized and no Compacted row is written.
+    // Pad the first turn past the keep window (~9k tokens of filler + marker)
+    // so the manual compact has older-than-window content to summarize.
+    const marker = `SLAB_ROLLOUT_COMPACT_${Date.now()}`
+    const filler = (
+      "The quick brown fox jumps over the lazy dog while the rollout compaction e2e fills the context window. "
+    ).repeat(180)
+    const prompt = `Reply with only the token ${marker}.\n\n${filler}`
     await sendAssistantMessage(page, prompt)
     await waitForCompletedAssistantReply(testEnv.serverBaseUrl, session.id, prompt, 900_000)
+    const shortPrompt = `Reply with only the token ${marker}_END.`
+    await sendAssistantMessage(page, shortPrompt)
+    await waitForCompletedAssistantReply(testEnv.serverBaseUrl, session.id, shortPrompt, 900_000)
 
     const threadId = (await restoreSession(testEnv.serverBaseUrl, session.id)).thread?.id ?? ""
 
@@ -158,6 +173,13 @@ describe("rollout persistence e2e", () => {
     const before = await restoreSession(testEnv.serverBaseUrl, session.id)
     const threadId = before.thread?.id ?? ""
     expect(before.messages.length).toBeGreaterThanOrEqual(6) // 3 user + 3 assistant
+
+    // Reload + re-enter: the rollback affordance maps RESTORED item ids to
+    // turn indexes (`userMessageTurnIndex`); live AI-SDK messages carry
+    // client-generated ids that map to nothing, so the button only exists on
+    // restored bubbles.
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 })
+    await openAssistant(page, testEnv.uiBaseUrl, session.id)
 
     // Retract the latest user message and everything after it.
     const lastUser = page.getByTestId("assistant-message-user").last()

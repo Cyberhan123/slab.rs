@@ -35,6 +35,10 @@ export interface HarnessConversation extends ConversationState {
   forkThread: (threadId?: string) => Promise<void>
   /** Retract `turnIndex` and every later turn via `thread/rollback` (turn 0 is a no-op). */
   rollbackFromTurn: (turnIndex: number) => Promise<void>
+  /** Steering send — queue user input on the RUNNING turn (iteration boundary). */
+  sendSteering: (message: UIMessage, options?: Parameters<ConversationController["send"]>[1]) => Promise<unknown>
+  /** Interrupt the live turn (Stop control). */
+  interrupt: () => Promise<void>
 }
 
 export function useHarnessConversation(
@@ -72,5 +76,7 @@ export function useHarnessConversation(
     compactThread: controller.compactThread,
     forkThread: controller.forkThread,
     rollbackFromTurn: controller.rollbackFromTurn,
+    sendSteering: controller.sendSteering,
+    interrupt: controller.interrupt,
   }
 }

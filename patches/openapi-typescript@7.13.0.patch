@@ -1,0 +1,150 @@
+diff --git a/dist/lib/ts.mjs b/dist/lib/ts.mjs
+index 8fa9e94fa4ecd8034e6c79912b27a5e3b067fa88..c0020ce1a04c19e93465ca52d5c98f9b644f2924 100644
+--- a/dist/lib/ts.mjs
++++ b/dist/lib/ts.mjs
+@@ -1,5 +1,5 @@
+ import { parseRef } from '@redocly/openapi-core/lib/ref-utils.js';
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ 
+ const JS_PROPERTY_INDEX_RE = /^[A-Za-z_$][A-Za-z_$0-9]*$/;
+ const JS_ENUM_INVALID_CHARS_RE = /[^A-Za-z_$0-9]+(.)?/g;
+diff --git a/dist/lib/utils.mjs b/dist/lib/utils.mjs
+index c44709d4fa1e945a69259946f077bd222029cab8..b57684df762c089eb9661bc465fe281890b4674e 100644
+--- a/dist/lib/utils.mjs
++++ b/dist/lib/utils.mjs
+@@ -2,7 +2,7 @@ import { parseRef, escapePointer } from '@redocly/openapi-core/lib/ref-utils.js'
+ import c from 'ansi-colors';
+ export { default as c } from 'ansi-colors';
+ import supportsColor from 'supports-color';
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { tsModifiers, tsPropertyIndex, tsLiteral } from './ts.mjs';
+ 
+ if (!supportsColor.stdout || supportsColor.stdout.hasBasic === false) {
+diff --git a/dist/transform/components-object.mjs b/dist/transform/components-object.mjs
+index da850f3e2d46d4c259d6738db480272eaa4b5a36..c43adf782b1035b7c6cc7c09e84bc386f7edee13 100644
+--- a/dist/transform/components-object.mjs
++++ b/dist/transform/components-object.mjs
+@@ -1,6 +1,6 @@
+ import { performance } from 'node:perf_hooks';
+ import * as changeCase from 'change-case';
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { tsModifiers, tsPropertyIndex, QUESTION_TOKEN, addJSDocComment, NEVER } from '../lib/ts.mjs';
+ import { getEntries, createRef, debug } from '../lib/utils.mjs';
+ import transformHeaderObject from './header-object.mjs';
+diff --git a/dist/transform/header-object.mjs b/dist/transform/header-object.mjs
+index cfd4204035cb2587bebb38d87bbf5aa34e5320bc..6e24f378311393907bb1030c7473f51095a058da 100644
+--- a/dist/transform/header-object.mjs
++++ b/dist/transform/header-object.mjs
+@@ -1,5 +1,5 @@
+ import { escapePointer } from '@redocly/openapi-core/lib/ref-utils.js';
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { tsModifiers, tsPropertyIndex, addJSDocComment, UNKNOWN } from '../lib/ts.mjs';
+ import { getEntries } from '../lib/utils.mjs';
+ import transformMediaTypeObject from './media-type-object.mjs';
+diff --git a/dist/transform/index.mjs b/dist/transform/index.mjs
+index e08b18fb964a87157fb31c743d3b99d37e930670..4e94ca8ff408d4ac736764163ede489ed105019d 100644
+--- a/dist/transform/index.mjs
++++ b/dist/transform/index.mjs
+@@ -1,5 +1,5 @@
+ import { performance } from 'node:perf_hooks';
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { stringToAST, tsModifiers, tsRecord, NEVER, STRING } from '../lib/ts.mjs';
+ import { debug, createRef } from '../lib/utils.mjs';
+ import transformComponentsObject from './components-object.mjs';
+diff --git a/dist/transform/operation-object.mjs b/dist/transform/operation-object.mjs
+index b141847a7c8958315768315fe6617bcfb840a33c..9fc37409c40e293a0a5b3b77a7806582ac8ff319 100644
+--- a/dist/transform/operation-object.mjs
++++ b/dist/transform/operation-object.mjs
+@@ -1,4 +1,4 @@
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { oapiRef, tsModifiers, tsPropertyIndex, QUESTION_TOKEN, addJSDocComment, NEVER } from '../lib/ts.mjs';
+ import { createRef } from '../lib/utils.mjs';
+ import { transformParametersArray } from './parameters-array.mjs';
+diff --git a/dist/transform/parameters-array.mjs b/dist/transform/parameters-array.mjs
+index dc20775ed4b8c4ca4e57ecd4a20b47ca4fcacfad..fc3b6f050bc5759cf0dd42d90b675d2e8a838a2b 100644
+--- a/dist/transform/parameters-array.mjs
++++ b/dist/transform/parameters-array.mjs
+@@ -1,4 +1,4 @@
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { oapiRef, tsModifiers, tsPropertyIndex, addJSDocComment, QUESTION_TOKEN, NEVER } from '../lib/ts.mjs';
+ import { createRef } from '../lib/utils.mjs';
+ import transformParameterObject from './parameter-object.mjs';
+diff --git a/dist/transform/path-item-object.mjs b/dist/transform/path-item-object.mjs
+index 1c449b58b9b815551a925965a1298b5d2b7d78ca..dbbef6f506e11ee1c3d40c501461bb0c9bfe37fc 100644
+--- a/dist/transform/path-item-object.mjs
++++ b/dist/transform/path-item-object.mjs
+@@ -1,4 +1,4 @@
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { tsModifiers, tsPropertyIndex, QUESTION_TOKEN, NEVER, oapiRef, addJSDocComment } from '../lib/ts.mjs';
+ import { createRef } from '../lib/utils.mjs';
+ import transformOperationObject, { injectOperationObject } from './operation-object.mjs';
+diff --git a/dist/transform/paths-object.mjs b/dist/transform/paths-object.mjs
+index 5e898c380ffd47932b7694b249cba15b5838dde7..731a44b587b326c407ecdaa8b452b86085abc34d 100644
+--- a/dist/transform/paths-object.mjs
++++ b/dist/transform/paths-object.mjs
+@@ -1,5 +1,5 @@
+ import { performance } from 'node:perf_hooks';
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { tsModifiers, tsPropertyIndex, oapiRef, addJSDocComment, stringToAST } from '../lib/ts.mjs';
+ import { getEntries, createRef, debug } from '../lib/utils.mjs';
+ import transformPathItemObject from './path-item-object.mjs';
+diff --git a/dist/transform/request-body-object.mjs b/dist/transform/request-body-object.mjs
+index 0f6583f03382c26a842d1b70d93f3ec374d97696..97367c04006fdac7ab88b419c7a7990e6ffd1fca 100644
+--- a/dist/transform/request-body-object.mjs
++++ b/dist/transform/request-body-object.mjs
+@@ -1,4 +1,4 @@
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { tsModifiers, tsPropertyIndex, addJSDocComment, QUESTION_TOKEN, NEVER } from '../lib/ts.mjs';
+ import { getEntries, createRef } from '../lib/utils.mjs';
+ import transformMediaTypeObject from './media-type-object.mjs';
+diff --git a/dist/transform/response-object.mjs b/dist/transform/response-object.mjs
+index 000851adc267f8e98338ffaa954a0aece28b9a47..e03d45dc46ea64d10acb6a223b5120d1fcb31813 100644
+--- a/dist/transform/response-object.mjs
++++ b/dist/transform/response-object.mjs
+@@ -1,4 +1,4 @@
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { QUESTION_TOKEN, oapiRef, tsModifiers, tsPropertyIndex, addJSDocComment, STRING, UNKNOWN, NEVER } from '../lib/ts.mjs';
+ import { getEntries, createRef } from '../lib/utils.mjs';
+ import transformHeaderObject from './header-object.mjs';
+diff --git a/dist/transform/responses-object.mjs b/dist/transform/responses-object.mjs
+index dafb268bbdc546dda686c1a6aa4f1797a7a3f983..93c156fbbb52ce59a0326f3fdc60e3dac11b3313 100644
+--- a/dist/transform/responses-object.mjs
++++ b/dist/transform/responses-object.mjs
+@@ -1,4 +1,4 @@
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { oapiRef, tsModifiers, tsPropertyIndex, addJSDocComment, NEVER } from '../lib/ts.mjs';
+ import { getEntries, createRef } from '../lib/utils.mjs';
+ import transformResponseObject from './response-object.mjs';
+diff --git a/dist/transform/schema-object.mjs b/dist/transform/schema-object.mjs
+index dc20a5c14b1320364a71a254b79415bd214f4416..281dd19f171007716f6fcc08b3f75a35df6bd392 100644
+--- a/dist/transform/schema-object.mjs
++++ b/dist/transform/schema-object.mjs
+@@ -1,5 +1,5 @@
+ import { parseRef } from '@redocly/openapi-core/lib/ref-utils.js';
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { NEVER, UNKNOWN, oapiRef, tsLiteral, tsEnum, tsUnion, NULL, tsArrayLiteralExpression, tsIntersection, tsIsPrimitive, tsRecord, STRING, tsNullable, UNDEFINED, NUMBER, BOOLEAN, QUESTION_TOKEN, tsModifiers, tsPropertyIndex, addJSDocComment, tsWithRequired, tsOmit } from '../lib/ts.mjs';
+ import { createRef, createDiscriminatorProperty, getEntries } from '../lib/utils.mjs';
+ 
+diff --git a/dist/transform/webhooks-object.mjs b/dist/transform/webhooks-object.mjs
+index f48a576635e02120fd0b66ef68d142e671f62dc2..034c461f07119dea7e244d07993bd384961ac128 100644
+--- a/dist/transform/webhooks-object.mjs
++++ b/dist/transform/webhooks-object.mjs
+@@ -1,4 +1,4 @@
+-import ts from 'typescript';
++import ts from 'typescript-compiler';
+ import { tsModifiers, tsPropertyIndex } from '../lib/ts.mjs';
+ import { getEntries, createRef } from '../lib/utils.mjs';
+ import transformPathItemObject from './path-item-object.mjs';
