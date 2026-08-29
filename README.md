@@ -159,10 +159,13 @@ bun run build:desktop:ui
 bun run build:sidecars
 
 # Build the desktop app binary without an installer bundle
-bun run build:desktop
+bun run build:desktop:debug
 
-# Build the Windows full installer
+# Build the Windows offline full installer (one command; also what
+# `bun run build:desktop` runs on Windows)
 bun run build:windows-installer
+bun ./scripts/cargo/run.ts build --release -p slab-windows-full-installer
+./target/release/slab-windows-full-installer.exe pack
 
 # Regenerate generated assets
 bun run gen:api

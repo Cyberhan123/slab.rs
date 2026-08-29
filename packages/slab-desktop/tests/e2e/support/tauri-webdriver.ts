@@ -213,7 +213,7 @@ export async function eventually<T>(
 }
 
 function ensureDesktopAppBuilt(appPath: string): void {
-  execFileSync("bun", ["run", "build:desktop"], {
+  execFileSync("bun", ["run", "build:desktop:debug"], {
     cwd: repoRoot,
     env: { ...process.env, NO_COLOR: "1" },
     stdio: "inherit",

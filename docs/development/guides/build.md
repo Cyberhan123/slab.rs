@@ -37,6 +37,7 @@ bun run test:e2e
 # Builds
 bun run build:sidecars
 bun run build:desktop
+bun run build:desktop:debug
 bun run build:desktop:ui
 bun run build:language-servers
 bun run build:windows-installer
@@ -45,8 +46,14 @@ bun run build:windows-installer
 `bun run build:sidecars` compiles `slab-server`, `slab-runtime`,
 `slab-js-runtime`, and `slab-python-runtime`, then stages them under
 `bin/slab-app/src-tauri/binaries/` for Tauri `externalBin` packaging.
-`bun run build:windows-installer` uses release sidecars before building the NSIS
-bundle.
+`bun run build:desktop` is the one-command desktop build: on Windows it chains
+`build:windows-installer` (release sidecars + resource-less NSIS bundle),
+builds `slab-windows-full-installer`, and runs `pack` to wrap the NSIS setup
+with runtime payload CABs into
+`target/release/bundle/nsis/Slab_<version>_x64-offline-setup.exe` — install
+with that file, not the inner `*-setup.exe`. On other platforms it falls back
+to the unbundled debug binary (`build:desktop:debug`), which is also what the
+e2e harness uses on every platform.
 
 `bun run dev` is the canonical full development stack alias for `bun run dev:desktop`
 (Tauri spawns `slab-server` itself). `bun run dev:server` builds and runs the

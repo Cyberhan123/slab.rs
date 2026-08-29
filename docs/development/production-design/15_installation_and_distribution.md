@@ -418,8 +418,11 @@ flowchart LR
 ### 5.2 构建命令
 
 ```bash
-# 构建桌面应用 (不含安装程序)
+# 一键构建桌面应用 + Windows 离线全量安装器 (产物 Slab_<version>_x64-offline-setup.exe)
 bun run build:desktop
+
+# 只构建不含安装程序的桌面二进制
+bun run build:desktop:debug
 
 # 构建桌面 sidecars
 bun run build:sidecars

@@ -485,6 +485,7 @@ bun run dev:desktop
 ### Production Build
 ```bash
 bun run build:desktop
+# Windows: produces target/release/bundle/nsis/Slab_<version>_x64-offline-setup.exe
 ```
 
 ### Distribution

@@ -110,7 +110,16 @@ export default defineConfig(async () => ({
   // root) so extensionless deep imports like `@slab/core/harness` resolve to
   // workspace sources without a package build step. Mirrors vitest.shared.ts.
   resolve: {
-    dedupe: ["@tanstack/react-query", "monaco-editor", "vscode"],
+    // `@codingame/monaco-vscode-api` must resolve to ONE physical copy: its
+    // services.js throws at import time when a second copy (stale nested
+    // node_modules link) enters the bundle, which white-screens the app before
+    // React mounts.
+    dedupe: [
+      "@tanstack/react-query",
+      "monaco-editor",
+      "vscode",
+      "@codingame/monaco-vscode-api",
+    ],
     alias: [
       {
         find: "@slab/components/globals.css",
