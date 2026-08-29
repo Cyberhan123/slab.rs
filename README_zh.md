@@ -161,10 +161,12 @@ bun run build:desktop:ui
 bun run build:sidecars
 
 # 构建桌面应用二进制，不生成安装包
-bun run build:desktop
+bun run build:desktop:debug
 
-# 构建 Windows 全量安装器
+# 构建 Windows 离线全量安装器（一键命令；Windows 上 `bun run build:desktop` 即跑此链）
 bun run build:windows-installer
+bun ./scripts/cargo/run.ts build --release -p slab-windows-full-installer
+./target/release/slab-windows-full-installer.exe pack
 
 # 重新生成衍生产物
 bun run gen:api

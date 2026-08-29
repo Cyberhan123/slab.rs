@@ -81,6 +81,7 @@ bun run test:components
 bun run test:server
 
 bun run build:desktop
+bun run build:desktop:debug
 bun run build:desktop:ui
 bun run build:language-servers
 bun run build:sidecars

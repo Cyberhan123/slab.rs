@@ -18,8 +18,8 @@ Prefer the repo-root scripts for normal development:
 
 ```sh
 bun run dev:desktop
-bun run build:desktop
-bun run build:windows-installer
+bun run build:desktop        # Windows: full offline installer; other platforms: debug binary
+bun run build:desktop:debug  # unbundled debug binary (used by the e2e harness)
 ```
 
 Use local scripts only when working directly on the Tauri package:
