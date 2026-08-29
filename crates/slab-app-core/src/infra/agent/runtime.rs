@@ -111,19 +111,19 @@ impl AgentRuntimeReloader {
         memory_config: AgentMemoriesConfig,
         memory_root: PathBuf,
     ) -> Vec<Arc<dyn AgentHook>> {
-        let workspace_root = workspace_root_from_config(self.state.config());
         let memory_pipeline = crate::infra::agent::memory::AgentMemoryPipeline::new(
             Arc::clone(self.state.store()),
             Arc::clone(&self.rollout),
             Arc::clone(&self.rollout_store),
-            workspace_root,
             Arc::new(self.state.clone()),
             memory_config.clone(),
             memory_root.clone(),
         );
         memory_pipeline.set_control(self.runtime.control());
+        let shell_config = self.state.pmid().config().agent.tools.shell.clone();
         let shell = crate::infra::agent::context::shell_kind(
-            self.state.pmid().config().agent.tools.shell.launcher,
+            shell_config.launcher,
+            shell_config.bash_path.clone(),
         );
         let exec_policy = self.runtime.control().exec_policy();
         // The memory read-side instruction is folded into the context hook
@@ -135,7 +135,7 @@ impl AgentRuntimeReloader {
                     self.state.clone(),
                     shell,
                     exec_policy,
-                    memory_config.enabled,
+                    memory_config,
                     memory_root,
                 ),
             ))),

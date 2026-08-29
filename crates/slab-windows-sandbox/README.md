@@ -11,9 +11,13 @@ child processes via an elevated helper (`slab-sandbox-helper`), opt-in through U
   network isolation** (S3 — the child runs as an AppContainer without `internetClient`, so the OS
   default WFP rule blocks outbound traffic, plus a session-scoped user-mode WFP filter keyed on the
   package SID), and the elevated helper IPC (HMAC-signed payload/result files,
-  `ShellExecuteExW("runas")`).
+  `ShellExecuteExW("runas")`). `JobHandle` (re-exported, `new_kill_on_close()` +
+  `assign_process()`) is the public Job Object seam — `slab-sandboxing`'s pass-through driver
+  uses it for tree-kill on Windows.
 - Owns the `SpawnedChild` seam: returns a raw `tokio::process::Child` + `kill_tree` closure to
-  `slab-sandboxing`, which feeds it into the **shared** `wait_for_child` output loop.
+  `slab-sandboxing`, which feeds it into the **shared** `wait_for_child` output loop. The elevated
+  path's `kill_tree` aborts the connection-reader task (a tokio `JoinHandle` drop merely detaches —
+  without the explicit abort the daemon never sees the disconnect and its Job stays alive).
 - **ConPTY (S6a, opt-in):** `conpty.rs` can spawn the elevated child under a Windows pseudoconsole
   (`CreatePseudoConsole` + `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` combined with the AppContainer
   `SECURITY_CAPABILITIES` attribute) for terminal-aware output (ANSI/TUI fidelity) instead of piped

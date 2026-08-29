@@ -177,7 +177,17 @@ async fn poll_generation_task(
 }
 
 fn to_tool_execution_error(error: AppCoreError) -> AgentError {
-    AgentError::ToolExecution(error.to_string())
+    // Preserve the stable machine codes at the tool boundary so the model
+    // (and logs) can grep failures like `runtime_model_not_loaded` instead
+    // of only prose. Other variants already render with English prefixes.
+    let coded = match &error {
+        AppCoreError::RuntimeFailure { message, data } => {
+            format!("[runtime:{}] {message}", data.runtime_code().unwrap_or("unknown"))
+        }
+        AppCoreError::NotFound(message) => format!("[not_found] {message}"),
+        _ => error.to_string(),
+    };
+    AgentError::ToolExecution(coded)
 }
 
 fn generate_image_schema() -> Value {
@@ -222,5 +232,30 @@ mod tests {
             serde_json::from_value(json!({ "prompt": "a red cube" })).unwrap();
         assert_eq!(args.prompt, "a red cube");
         assert!(args.width.is_none() && args.height.is_none() && args.n.is_none());
+    }
+
+    /// P5 regression: the runtime's stable machine code (e.g.
+    /// `runtime_model_not_loaded`) must survive the tool boundary instead of
+    /// being flattened into prose.
+    #[test]
+    fn runtime_failure_error_keeps_runtime_code() {
+        let data = Box::new(crate::error::AppCoreErrorData::runtime_failure(
+            "runtime_model_not_loaded",
+            serde_json::json!({"detail": "model is not loaded"}),
+        ));
+        let error = to_tool_execution_error(AppCoreError::RuntimeFailure {
+            message: "model is not loaded".to_owned(),
+            data,
+        });
+        let rendered = error.to_string();
+        assert!(rendered.contains("[runtime:runtime_model_not_loaded]"), "{rendered}");
+        assert!(rendered.contains("model is not loaded"), "{rendered}");
+    }
+
+    #[test]
+    fn not_found_error_keeps_code_prefix() {
+        let error =
+            to_tool_execution_error(AppCoreError::NotFound("task abc does not exist".into()));
+        assert!(error.to_string().contains("[not_found] task abc does not exist"), "{error}");
     }
 }

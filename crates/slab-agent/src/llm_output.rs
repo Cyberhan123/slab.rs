@@ -8,8 +8,8 @@ use uuid::Uuid;
 use crate::error::AgentError;
 use crate::port::ParsedToolCall;
 
-const QWEN_TOOL_CALL_OPEN: &str = "<tool_call>";
-const QWEN_TOOL_CALL_CLOSE: &str = "</tool_call>";
+const COMMON_TOOL_CALL_OPEN: &str = "<tool_call>";
+const COMMON_TOOL_CALL_CLOSE: &str = "</tool_call>";
 
 /// Assembles provider stream chunks into visible text, reasoning text, and
 /// structured tool calls.
@@ -20,6 +20,18 @@ pub struct AgentStreamAssembler {
     finish_reason: Option<String>,
     usage: Option<crate::port::LlmUsage>,
     visibility: StreamVisibilityGate,
+    /// Native `delta.tool_calls` fragments accumulated by stream index. Local
+    /// models express tool calls as text markers; cloud providers stream them
+    /// as structured deltas instead.
+    tool_calls: Vec<NativeToolCallAccumulator>,
+}
+
+/// One native tool call being accumulated from stream deltas.
+#[derive(Default, Clone)]
+struct NativeToolCallAccumulator {
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
 }
 
 /// A visible delta emitted while assembling a provider stream.
@@ -63,13 +75,40 @@ impl AgentStreamAssembler {
         if parsed.usage.is_some() {
             self.usage = parsed.usage;
         }
+        for delta in parsed.tool_call_deltas {
+            let index = delta.index as usize;
+            if self.tool_calls.len() <= index {
+                self.tool_calls.resize(index + 1, NativeToolCallAccumulator::default());
+            }
+            let accumulator = &mut self.tool_calls[index];
+            if let Some(id) = delta.id.filter(|value| !value.is_empty()) {
+                accumulator.id = Some(id);
+            }
+            if let Some(name) = delta.name.filter(|value| !value.is_empty()) {
+                accumulator.name = Some(name);
+            }
+            if let Some(arguments) = delta.arguments {
+                accumulator.arguments.push_str(&arguments);
+            }
+        }
 
         Ok(deltas)
     }
 
     /// Finishes the stream and returns normalized content and tool calls.
     pub fn finish(mut self) -> AgentStreamCompletion {
-        let parsed = parse_rendered_tool_call_output(&self.content);
+        let native_tool_calls = self.finalize_native_tool_calls();
+        let parsed = if native_tool_calls.is_empty() {
+            parse_rendered_tool_call_output(&self.content)
+        } else {
+            // Native structured calls win over any text-embedded fallback; any
+            // streamed preamble text is kept alongside them, matching the
+            // non-streaming path.
+            RenderedToolCallOutput {
+                content: (!self.content.trim().is_empty()).then(|| self.content.clone()),
+                tool_calls: native_tool_calls,
+            }
+        };
         let should_hide_unparsed_buffer = parsed.tool_calls.is_empty()
             && unparsed_stream_buffer_should_remain_hidden(&self.content);
         let unstreamed_text_delta = if parsed.tool_calls.is_empty() && !should_hide_unparsed_buffer
@@ -92,10 +131,29 @@ impl AgentStreamAssembler {
             content_already_streamed,
             reasoning: self.reasoning,
             unstreamed_text_delta,
-            tool_calls: parsed.tool_calls,
-            finish_reason: self.finish_reason,
+            finish_reason: self
+                .finish_reason
+                .or_else(|| (!parsed.tool_calls.is_empty()).then_some("tool_calls".to_owned())),
             usage: self.usage,
+            tool_calls: parsed.tool_calls,
         }
+    }
+
+    /// Fold the accumulated native tool-call deltas into final calls. Entries
+    /// without a tool name are dropped (nameless fragments cannot be executed).
+    fn finalize_native_tool_calls(&self) -> Vec<ParsedToolCall> {
+        self.tool_calls
+            .iter()
+            .enumerate()
+            .filter(|(_, accumulator)| {
+                accumulator.name.as_deref().is_some_and(|name| !name.is_empty())
+            })
+            .map(|(index, accumulator)| ParsedToolCall {
+                id: accumulator.id.clone().unwrap_or_else(|| format!("call_{index}")),
+                name: accumulator.name.clone().unwrap_or_default(),
+                arguments: accumulator.arguments.clone(),
+            })
+            .collect()
     }
 }
 
@@ -124,6 +182,15 @@ struct ParsedChatStreamChunk {
     reasoning_delta: Option<String>,
     finish_reason: Option<String>,
     usage: Option<crate::port::LlmUsage>,
+    tool_call_deltas: Vec<StreamToolCallDelta>,
+}
+
+/// One native `delta.tool_calls[]` entry from a chat stream chunk.
+struct StreamToolCallDelta {
+    index: u64,
+    id: Option<String>,
+    name: Option<String>,
+    arguments: Option<String>,
 }
 
 fn parse_chat_stream_chunk(data: &str) -> Result<Option<ParsedChatStreamChunk>, AgentError> {
@@ -145,6 +212,7 @@ fn parse_chat_stream_chunk(data: &str) -> Result<Option<ParsedChatStreamChunk>, 
         reasoning_delta: collect_text_delta(&payload, "reasoning_content"),
         finish_reason: stream_finish_reason(&payload),
         usage: stream_usage(&payload),
+        tool_call_deltas: collect_tool_call_deltas(&payload),
     }))
 }
 
@@ -169,6 +237,40 @@ fn collect_text_delta(payload: &Value, field: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
         .collect::<String>();
     if text.is_empty() { None } else { Some(text) }
+}
+
+/// Collect the native `delta.tool_calls[]` entries of a stream chunk. Fields
+/// arrive incrementally (id/name on the first fragment, argument fragments
+/// appended across chunks) and are reassembled by the caller.
+fn collect_tool_call_deltas(payload: &Value) -> Vec<StreamToolCallDelta> {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|choice| choice.get("delta")?.get("tool_calls")?.as_array())
+        .flatten()
+        .filter_map(|tool_call| {
+            let function = tool_call.get("function");
+            Some(StreamToolCallDelta {
+                index: tool_call.get("index").and_then(Value::as_u64)?,
+                id: tool_call
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned),
+                name: function
+                    .and_then(|value| value.get("name"))
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned),
+                arguments: function
+                    .and_then(|value| value.get("arguments"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            })
+        })
+        .collect()
 }
 
 fn stream_finish_reason(payload: &Value) -> Option<String> {
@@ -236,11 +338,11 @@ impl StreamVisibilityGate {
         }
 
         let rest = &content[self.emitted_len..];
-        if let Some(index) = rest.find(QWEN_TOOL_CALL_OPEN) {
+        if let Some(index) = rest.find(COMMON_TOOL_CALL_OPEN) {
             return self.emitted_len + index;
         }
 
-        content.len().saturating_sub(trailing_partial_marker_len(content, QWEN_TOOL_CALL_OPEN))
+        content.len().saturating_sub(trailing_partial_marker_len(content, COMMON_TOOL_CALL_OPEN))
     }
 }
 
@@ -272,10 +374,10 @@ fn parse_tool_json(content: &str) -> Option<Value> {
 
 fn unparsed_stream_buffer_should_remain_hidden(content: &str) -> bool {
     let trimmed = content.trim_start();
-    if trailing_partial_marker_len(content, QWEN_TOOL_CALL_OPEN) > 0 {
+    if trailing_partial_marker_len(content, COMMON_TOOL_CALL_OPEN) > 0 {
         return true;
     }
-    if trimmed.contains(QWEN_TOOL_CALL_OPEN) {
+    if trimmed.contains(COMMON_TOOL_CALL_OPEN) {
         return true;
     }
     if trimmed.starts_with('{') || trimmed.starts_with('[') {
@@ -350,15 +452,15 @@ fn parse_responses_function_call(value: &Value) -> Option<ParsedToolCall> {
 
 fn parse_qwen_tool_call_output(content: &str) -> RenderedToolCallOutput {
     let stripped = strip_reasoning_prefix(content.trim());
-    let Some(tool_call_start) = stripped.find(QWEN_TOOL_CALL_OPEN) else {
+    let Some(tool_call_start) = stripped.find(COMMON_TOOL_CALL_OPEN) else {
         return RenderedToolCallOutput::default();
     };
     let visible_prefix = stripped[..tool_call_start].trim_end();
     let mut rest = stripped[tool_call_start..].trim_start();
     let mut calls = Vec::new();
 
-    while let Some(after_open) = rest.strip_prefix(QWEN_TOOL_CALL_OPEN) {
-        let Some(close_start) = after_open.find(QWEN_TOOL_CALL_CLOSE) else {
+    while let Some(after_open) = rest.strip_prefix(COMMON_TOOL_CALL_OPEN) {
+        let Some(close_start) = after_open.find(COMMON_TOOL_CALL_CLOSE) else {
             return RenderedToolCallOutput::default();
         };
         let block = &after_open[..close_start];
@@ -366,7 +468,7 @@ fn parse_qwen_tool_call_output(content: &str) -> RenderedToolCallOutput {
             return RenderedToolCallOutput::default();
         };
         calls.push(call);
-        rest = after_open[close_start + QWEN_TOOL_CALL_CLOSE.len()..].trim_start();
+        rest = after_open[close_start + COMMON_TOOL_CALL_CLOSE.len()..].trim_start();
     }
 
     if calls.is_empty() || !rest.trim().is_empty() {
@@ -384,7 +486,7 @@ fn strip_reasoning_prefix(content: &str) -> &str {
         return content.trim();
     };
     let after_reasoning = content[close_start + "</think>".len()..].trim_start();
-    if after_reasoning.contains(QWEN_TOOL_CALL_OPEN) || after_reasoning.starts_with('{') {
+    if after_reasoning.contains(COMMON_TOOL_CALL_OPEN) || after_reasoning.starts_with('{') {
         after_reasoning
     } else {
         content.trim()
@@ -580,6 +682,66 @@ mod tests {
         assert!(matches!(&second[1], AgentStreamDelta::Text(delta) if delta == "answer"));
         assert_eq!(completion.reasoning, "plan done");
         assert_eq!(completion.content, "answer");
+    }
+
+    #[test]
+    fn stream_assembler_assembles_native_tool_call_deltas() {
+        let mut assembler = AgentStreamAssembler::default();
+
+        // Cloud streams: content streams as text, tool calls arrive as
+        // structured deltas (id/name first, argument fragments appended).
+        assembler
+            .ingest_data(r#"{"choices":[{"delta":{"content":"checking..."},"tool_calls":null}]}"#)
+            .expect("content chunk");
+        assembler
+            .ingest_data(
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_9","function":{"name":"read_file","arguments":""}}]}}]}"#,
+            )
+            .expect("tool call head");
+        assembler
+            .ingest_data(
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"a.txt\"}"}}]}}]}"#,
+            )
+            .expect("tool call arguments");
+        // A second, parallel call finalized in one complete chunk.
+        assembler
+            .ingest_data(
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_10","function":{"name":"list","arguments":"{}"}}]}}]}"#,
+            )
+            .expect("second tool call");
+        assembler
+            .ingest_data(r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#)
+            .expect("finish chunk");
+        let completion = assembler.finish();
+
+        assert_eq!(completion.content, "checking...");
+        assert_eq!(completion.tool_calls.len(), 2);
+        assert_eq!(completion.tool_calls[0].id, "call_9");
+        assert_eq!(completion.tool_calls[0].name, "read_file");
+        assert_eq!(completion.tool_calls[0].arguments, r#"{"path":"a.txt"}"#);
+        assert_eq!(completion.tool_calls[1].name, "list");
+        assert_eq!(completion.finish_reason.as_deref(), Some("tool_calls"));
+    }
+
+    #[test]
+    fn stream_assembler_native_calls_win_over_text_embedded() {
+        let mut assembler = AgentStreamAssembler::default();
+
+        // Text that happens to contain a marker is NOT re-parsed as a tool
+        // call when native structured calls are present.
+        assembler
+            .ingest_data(r#"{"choices":[{"delta":{"content":"<tool_call>"}}]}"#)
+            .expect("text chunk");
+        assembler
+            .ingest_data(
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"echo","arguments":"{}"}}]}}]}"#,
+            )
+            .expect("native call");
+        let completion = assembler.finish();
+
+        assert_eq!(completion.tool_calls.len(), 1);
+        assert_eq!(completion.tool_calls[0].name, "echo");
+        assert_eq!(completion.finish_reason.as_deref(), Some("tool_calls"));
     }
 
     #[test]

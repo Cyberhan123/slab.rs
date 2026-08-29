@@ -62,6 +62,9 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
         "agent.memories.enabled" => {
             descriptor!("agent.memories.enabled", agent.memories.enabled)
         }
+        "agent.memories.recall_enabled" => {
+            descriptor!("agent.memories.recall_enabled", agent.memories.recall_enabled)
+        }
         "agent.memories.model" => descriptor!("agent.memories.model", agent.memories.model),
         "agent.memories.memory_root" => {
             descriptor!("agent.memories.memory_root", agent.memories.memory_root)
@@ -80,6 +83,9 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
         }
         "agent.memories.phase1_retry_seconds" => {
             descriptor!("agent.memories.phase1_retry_seconds", agent.memories.phase1_retry_seconds)
+        }
+        "agent.memories.phase1_max_attempts" => {
+            descriptor!("agent.memories.phase1_max_attempts", agent.memories.phase1_max_attempts)
         }
         "agent.memories.phase1_max_age_days" => {
             descriptor!("agent.memories.phase1_max_age_days", agent.memories.phase1_max_age_days)

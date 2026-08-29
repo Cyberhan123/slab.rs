@@ -100,8 +100,9 @@ impl ToolHandler for ApplyPatchTool {
         // sandbox `workspace_root` MUST be the same absolute path: the engine
         // strips `cwd` to form a relative path string and the local filesystem
         // adapter re-anchors it via `resolve_path(workspace_root, …)`.
-        let base = std::env::current_dir()
-            .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
+        let base = std::env::current_dir().map_err(|error| {
+            crate::error::io_tool_error("resolve current directory", &self.workspace_root, &error)
+        })?;
         let cwd = AbsolutePathBuf::resolve_path_against_base(&self.workspace_root, &base);
         let root = cwd.as_path().to_path_buf();
         let sandbox = FileSystemSandboxContext {

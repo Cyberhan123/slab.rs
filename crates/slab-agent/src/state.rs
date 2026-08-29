@@ -21,7 +21,9 @@ impl ThreadStateMachine {
     }
 
     pub(crate) fn status(&self) -> AgentThreadStatus {
-        *self.status.lock().expect("thread state mutex poisoned")
+        // Poison-tolerant: the guarded value is a plain copyable enum with no
+        // invariants beyond its own value, so recovering the lock is safe.
+        *self.status.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub(crate) fn subscribe(&self) -> watch::Receiver<AgentThreadStatus> {
@@ -29,7 +31,7 @@ impl ThreadStateMachine {
     }
 
     pub(crate) fn transition(&self, next: AgentThreadStatus) -> Result<(), AgentError> {
-        let mut status = self.status.lock().expect("thread state mutex poisoned");
+        let mut status = self.status.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let current = *status;
         if current == next {
             return Ok(());

@@ -1,6 +1,9 @@
 import type { ComponentType, ReactElement } from "react"
 import { useTranslation } from "@slab/i18n"
 import { Marker, MarkerContent } from "@slab/components/marker"
+import { Message, MessageAvatar, MessageContent, MessageHeader } from "@slab/components/message"
+import { Bubble, BubbleContent } from "@slab/components/bubble"
+import UserAvatar from "@slab/ui/pages/assistant/components/user-avatar"
 import { MessageItem } from "@slab/ui/pages/assistant/components/message/message-item"
 import { Shimmer } from "@slab/ui/pages/assistant/components/message/shimmer"
 import {
@@ -112,6 +115,33 @@ export function ModelLoadMarkerRow({
 }
 
 /**
+ * Ghost user bubble for a queued steering input: rendered at the tail while a
+ * turn runs, replaced by the real (rollout-backed) message row after the run
+ * ends and the controller resyncs. Mirrors the user-message row structure
+ * (avatar + header + tinted bubble), dimmed and labelled "Queued".
+ */
+export function QueuedInputRow({
+    row,
+}: ScrollerRowComponentProps<ScrollerRowOf<"queuedInput">>): ReactElement {
+    const { t } = useTranslation()
+    return (
+        <Message align="end" data-testid="assistant-queued-input">
+            <MessageAvatar>
+                <UserAvatar name={t("pages.assistant.message.user")} />
+            </MessageAvatar>
+            <MessageContent>
+                <MessageHeader>{t("pages.assistant.message.queuedLabel")}</MessageHeader>
+                <Bubble align="end" variant="tinted" className="opacity-70">
+                    <BubbleContent>
+                        <p className="whitespace-pre-wrap break-words">{row.text}</p>
+                    </BubbleContent>
+                </Bubble>
+            </MessageContent>
+        </Message>
+    )
+}
+
+/**
  * Row-level component registry, mirroring the MessageParts dispatch pattern.
  * Replaces the former `row.kind === ...` ternary chain in the list. Meta-rows
  * (history/compact markers) live in the SAME positioned container as messages
@@ -129,11 +159,13 @@ export const rowComponents: {
     historyMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"historyMarker">>>
     compactMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"compactMarker">>>
     modelLoadMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"modelLoadMarker">>>
+    queuedInput: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"queuedInput">>>
     message: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"message">>>
 } = {
     sessionLoadMarker: SessionLoadMarkerRow,
     historyMarker: HistoryMarkerRow,
     compactMarker: CompactMarkerRow,
     modelLoadMarker: ModelLoadMarkerRow,
+    queuedInput: QueuedInputRow,
     message: MessageRow,
 }

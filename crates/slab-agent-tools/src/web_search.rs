@@ -51,6 +51,11 @@ impl ToolHandler for WebSearchTool {
         "web_search"
     }
 
+    /// Pure read — safe to run concurrently with other read-only calls.
+    fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Search the web through configured providers. Credentials are read from settings, not tool arguments."
     }
@@ -359,8 +364,13 @@ fn duckduckgo_provider(config: &WebSearchDuckDuckGoProviderConfig) -> DuckDuckGo
     if let Some(user_agent) = trimmed(config.user_agent.as_deref()) {
         duck_config.user_agent = user_agent.to_owned();
     }
-    if let Some(use_lite) = config.use_lite {
-        duck_config.use_lite = use_lite;
+    // `use_lite` was never honored by the library (the lite endpoint has its
+    // own fragile markup that is not implemented); it is deprecated and
+    // ignored rather than half-wired to a second untested code path.
+    if config.use_lite == Some(true) {
+        tracing::warn!(
+            "agent.tools.websearch.providers.duckduckgo.use_lite is deprecated and ignored"
+        );
     }
     DuckDuckGoProvider::with_config(duck_config)
 }

@@ -326,6 +326,9 @@ class ServerI18NKey(str, Enum):
     SERVER_SETTINGS_PROPERTIES_DESCRIPTION_MCPTOOLS = (
         "server.settings.properties.description.mcpTools"
     )
+    SERVER_SETTINGS_PROPERTIES_DESCRIPTION_MEMORYRECALL = (
+        "server.settings.properties.description.memoryRecall"
+    )
     SERVER_SETTINGS_PROPERTIES_DESCRIPTION_MEMORYROOT = (
         "server.settings.properties.description.memoryRoot"
     )
@@ -352,6 +355,9 @@ class ServerI18NKey(str, Enum):
     )
     SERVER_SETTINGS_PROPERTIES_DESCRIPTION_PHASE1MAXAGEDAYS = (
         "server.settings.properties.description.phase1MaxAgeDays"
+    )
+    SERVER_SETTINGS_PROPERTIES_DESCRIPTION_PHASE1MAXATTEMPTS = (
+        "server.settings.properties.description.phase1MaxAttempts"
     )
     SERVER_SETTINGS_PROPERTIES_DESCRIPTION_PHASE1RETRYSECONDS = (
         "server.settings.properties.description.phase1RetrySeconds"
@@ -539,6 +545,9 @@ class ServerI18NKey(str, Enum):
     SERVER_SETTINGS_PROPERTIES_LABEL_MCPTOOLS = (
         "server.settings.properties.label.mcpTools"
     )
+    SERVER_SETTINGS_PROPERTIES_LABEL_MEMORYRECALL = (
+        "server.settings.properties.label.memoryRecall"
+    )
     SERVER_SETTINGS_PROPERTIES_LABEL_MEMORYROOT = (
         "server.settings.properties.label.memoryRoot"
     )
@@ -565,6 +574,9 @@ class ServerI18NKey(str, Enum):
     )
     SERVER_SETTINGS_PROPERTIES_LABEL_PHASE1MAXAGEDAYS = (
         "server.settings.properties.label.phase1MaxAgeDays"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_PHASE1MAXATTEMPTS = (
+        "server.settings.properties.label.phase1MaxAttempts"
     )
     SERVER_SETTINGS_PROPERTIES_LABEL_PHASE1RETRYSECONDS = (
         "server.settings.properties.label.phase1RetrySeconds"

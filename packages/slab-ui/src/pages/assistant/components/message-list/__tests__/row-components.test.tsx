@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { render } from "vitest-browser-react"
 
 
-import { CompactMarkerRow, HistoryMarkerRow, ModelLoadMarkerRow, SessionLoadMarkerRow } from "../row-components"
+import { CompactMarkerRow, HistoryMarkerRow, ModelLoadMarkerRow, QueuedInputRow, SessionLoadMarkerRow } from "../row-components"
 import {
   HISTORY_MARKER_ID,
   MODEL_LOAD_MARKER_ID,
@@ -23,6 +23,29 @@ vi.mock("@slab/components/marker", () => ({
     ...rest
   }: { children: ReactNode } & Record<string, unknown>) => <div {...rest}>{children}</div>,
   MarkerContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}))
+
+vi.mock("@slab/components/message", () => ({
+  Message: ({
+    children,
+    ...rest
+  }: { children: ReactNode } & Record<string, unknown>) => <div {...rest}>{children}</div>,
+  MessageAvatar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MessageContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MessageHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MessageFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}))
+
+vi.mock("@slab/components/bubble", () => ({
+  Bubble: ({
+    children,
+    ...rest
+  }: { children: ReactNode } & Record<string, unknown>) => <div {...rest}>{children}</div>,
+  BubbleContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}))
+
+vi.mock("@slab/ui/pages/assistant/components/user-avatar", () => ({
+  default: ({ name }: { name: string }) => <div data-testid="queued-user-avatar">{name}</div>,
 }))
 
 vi.mock("@slab/ui/pages/assistant/components/message/shimmer", () => ({
@@ -155,5 +178,24 @@ describe("ModelLoadMarkerRow", () => {
 
     expect(screen.getByText("%").query()).toBeNull()
     expect(screen.getByTestId("shimmer").element().textContent).toContain("pages.assistant.modelLoad.loading")
+  })
+})
+
+describe("QueuedInputRow", () => {
+  it("renders the queued text with the queued label", async () => {
+    const screen = await render(
+      <QueuedInputRow
+        row={{ kind: "queuedInput", id: "__queued_input_0", text: "also check the tests" }}
+        historyCreatedAt={null}
+      />,
+    )
+
+    await expect.element(screen.getByTestId("assistant-queued-input")).toBeInTheDocument()
+    expect(screen.getByTestId("assistant-queued-input").element().textContent).toContain(
+      "also check the tests",
+    )
+    expect(screen.getByTestId("assistant-queued-input").element().textContent).toContain(
+      "pages.assistant.message.queuedLabel",
+    )
   })
 })
