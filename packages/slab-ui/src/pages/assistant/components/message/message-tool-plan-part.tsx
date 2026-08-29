@@ -15,8 +15,8 @@ import { useMessageInteraction } from "../message-interaction-context"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
 import {
+  isApprovalPending,
   deriveState,
-  isToolActive,
   Tool,
   ToolContent,
   ToolHeader,
@@ -103,13 +103,12 @@ function MessageToolPlanPart({
   const { approvalStatusByItemId } = useMessageInteraction()
   const approval = toolCallId ? approvalStatusByItemId.get(toolCallId) : undefined
   const state = deriveState(p, approval)
-  const active = isToolActive(state)
 
   const plan = (p.input ?? {}) as Plan
   const title = plan.summary ?? "plan"
 
   return (
-    <Tool defaultOpen={active}>
+    <Tool defaultOpen={isApprovalPending(state)}>
       <ToolHeader title={title} state={state} />
       <ToolContent>
         <div data-testid="assistant-tool-plan" className="space-y-3">

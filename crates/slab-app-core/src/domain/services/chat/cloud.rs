@@ -7,10 +7,10 @@
 //! chat and agent/response.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use futures::{StreamExt, stream};
-use tracing::warn;
 use uuid::Uuid;
 
 use crate::context::ModelState;
@@ -35,16 +35,7 @@ pub(super) async fn create_chat_completion(
     let target = resolve_cloud_model(state, requested_model).await?;
     let trace_http = state.pmid().config().server.cloud_http_trace;
 
-    if config.stream && !config.tools.is_empty() {
-        warn!(
-            provider_id = %target.provider_id,
-            provider_name = %target.provider_name,
-            remote_model = %target.remote_model,
-            "cloud tool streaming is falling back to non-streaming so native tool call chunks are preserved"
-        );
-    }
-
-    if config.stream && config.tools.is_empty() {
+    if config.stream {
         let max_tokens = config.max_tokens;
         let include_usage = config.include_usage;
         let backend_stream = cloud_chat_stream(&target, messages, config, trace_http).await?;
@@ -63,6 +54,11 @@ pub(super) async fn create_chat_completion(
 
         let error_flag = Arc::new(AtomicBool::new(false));
         let completion_tokens = Arc::new(AtomicU32::new(0));
+        // Terminal stream state: the provider's real stop reason and whether
+        // native tool calls were finalized — both decided by the `Completed`
+        // delta and read by the finish chunk afterwards.
+        let stop_reason = Arc::new(Mutex::new(None::<String>));
+        let has_tool_calls = Arc::new(AtomicBool::new(false));
 
         let role_chunk = stream::once(async move {
             super::build_role_chunk(&completion_id_for_role, created_ts, &model_name_for_role)
@@ -70,40 +66,70 @@ pub(super) async fn create_chat_completion(
 
         let token_stream_error_flag = Arc::clone(&error_flag);
         let token_stream_completion_tokens = Arc::clone(&completion_tokens);
-        let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
-            match chunk {
+        let token_stream_stop_reason = Arc::clone(&stop_reason);
+        let token_stream_has_tool_calls = Arc::clone(&has_tool_calls);
+        let token_stream = backend_stream.filter_map(move |chunk| {
+            let mapped: Option<ChatStreamChunk> = match chunk {
                 Ok(CloudDelta::Content(token)) => {
                     token_stream_completion_tokens.fetch_add(1, Ordering::SeqCst);
-                    super::build_chunk(
+                    Some(super::build_chunk(
                         &completion_id_for_tokens,
                         created_ts,
                         &model_name_for_tokens,
                         &token,
-                    )
+                    ))
                 }
-                Ok(CloudDelta::Reasoning(token)) => super::build_reasoning_chunk(
+                Ok(CloudDelta::Reasoning(token)) => Some(super::build_reasoning_chunk(
                     &completion_id_for_tokens,
                     created_ts,
                     &model_name_for_tokens,
                     &token,
-                ),
+                )),
+                Ok(CloudDelta::Completed { tool_calls, stop_reason }) => {
+                    if let Some(reason) = stop_reason {
+                        *token_stream_stop_reason.lock().unwrap() = Some(reason);
+                    }
+                    if tool_calls.is_empty() {
+                        None
+                    } else {
+                        token_stream_has_tool_calls.store(true, Ordering::SeqCst);
+                        Some(super::build_tool_calls_chunk(
+                            &completion_id_for_tokens,
+                            created_ts,
+                            &model_name_for_tokens,
+                            &tool_calls,
+                        ))
+                    }
+                }
                 Err(error) => {
                     token_stream_error_flag.store(true, Ordering::SeqCst);
-                    super::build_error_chunk(&error.to_string())
+                    Some(super::build_error_chunk(&error.to_string()))
                 }
-            }
+            };
+            futures::future::ready(mapped)
         });
 
         let finish_chunk_error_flag = Arc::clone(&error_flag);
         let finish_chunk_completion_tokens = Arc::clone(&completion_tokens);
+        let finish_chunk_stop_reason = Arc::clone(&stop_reason);
+        let finish_chunk_has_tool_calls = Arc::clone(&has_tool_calls);
         let finish_chunk = stream::once(async move {
             if finish_chunk_error_flag.load(Ordering::SeqCst) {
                 None
+            } else if finish_chunk_has_tool_calls.load(Ordering::SeqCst) {
+                Some(super::build_finish_chunk(
+                    &completion_id_for_finish,
+                    created_ts,
+                    &model_name_for_finish,
+                    "tool_calls",
+                ))
             } else {
-                let finish_reason = finish_reason_from_token_budget(
+                let budget_reason = finish_reason_from_token_budget(
                     finish_chunk_completion_tokens.load(Ordering::SeqCst),
                     max_tokens,
                 );
+                let finish_reason =
+                    finish_chunk_stop_reason.lock().unwrap().clone().unwrap_or(budget_reason);
                 Some(super::build_finish_chunk(
                     &completion_id_for_finish,
                     created_ts,

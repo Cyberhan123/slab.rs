@@ -4,6 +4,7 @@ import { useMessageInteraction } from "../message-interaction-context"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
 import {
+  isApprovalPending,
   deriveState,
   isToolActive,
   Tool,
@@ -55,7 +56,7 @@ function MessageToolFileChangePart({
   const liveLines = toolCallId ? livePatchByItemId.get(toolCallId) : undefined
 
   return (
-    <Tool defaultOpen={active}>
+    <Tool defaultOpen={isApprovalPending(state)}>
       <ToolHeader title="apply_patch" state={state} />
       <ToolContent>
         {active && liveLines && liveLines.length > 0 ? (

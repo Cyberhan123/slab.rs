@@ -37,6 +37,18 @@ pub enum AgentError {
     #[error("llm error: {0}")]
     Llm(String),
 
+    /// A transient LLM transport/provider failure (connect reset, timeout,
+    /// 429, 5xx) — eligible for the turn loop's bounded retry with backoff.
+    /// Fatal errors (auth, bad request) stay [`AgentError::Llm`].
+    #[error("llm transient error: {0}")]
+    LlmTransient(String),
+
+    /// The request exceeded the model's context window. Recoverable ONCE per
+    /// run via a forced compaction + retry; a repeat fails the turn (death-
+    /// spiral guard: compacting twice in a row cannot shrink further).
+    #[error("llm context length exceeded: {0}")]
+    LlmContextTooLong(String),
+
     /// The current turn was interrupted by the caller.
     #[error("turn interrupted")]
     Interrupted,
@@ -97,6 +109,63 @@ impl From<ToolError> for AgentError {
     }
 }
 
+/// Classify a stringly LLM error into the typed taxonomy. Hosts call this when
+/// mapping their chat-service errors onto [`AgentError`] — the turn loop's
+/// recovery paths (retry / forced compaction) match on the variants.
+///
+/// Heuristics over the rendered message because providers surface transport
+/// failures as formatted strings; false negatives (an unclassified transient)
+/// simply fail the turn as before, never mis-retry a fatal error.
+pub fn classify_llm_error(message: &str) -> AgentError {
+    let lowered = message.to_ascii_lowercase();
+    // Context-window exhaustion — checked FIRST (a 413 is also "transient-
+    // looking" but needs compaction, not a blind retry).
+    const CONTEXT_MARKERS: [&str; 8] = [
+        "context length", // OpenAI: "maximum context length"
+        "context window",
+        "context_length_exceeded", // Anthropic code
+        "prompt is too long",
+        "input length and `max_tokens` exceed context limit",
+        "request exceeds the available context", // local ggml/llama
+        "too many tokens",
+        "reduce the length of the messages",
+    ];
+    // A bare "413" substring also matches request ids and unrelated numbers
+    // in the rendered message, misrouting a fatal error into the forced-
+    // compaction recovery (which fails the turn anyway when compaction has
+    // nothing left to shrink). Only anchored forms count.
+    const CONTEXT_STATUS_MARKERS: [&str; 5] =
+        ["status 413", "http 413", "code: 413", "error 413", "(413)"];
+    if CONTEXT_STATUS_MARKERS.iter().any(|marker| lowered.contains(marker))
+        || lowered.contains("request too large")
+        || lowered.contains("payload too large")
+        || CONTEXT_MARKERS.iter().any(|marker| lowered.contains(marker))
+    {
+        return AgentError::LlmContextTooLong(message.to_owned());
+    }
+    // Transient transport/provider failures.
+    const TRANSIENT_MARKERS: [&str; 14] = [
+        "429",
+        "rate limit",
+        "overloaded",
+        "529",
+        "500",
+        "502",
+        "503",
+        "504",
+        "bad gateway",
+        "service unavailable",
+        "gateway timeout",
+        "connection reset",
+        "connection closed",
+        "timeout",
+    ];
+    if TRANSIENT_MARKERS.iter().any(|marker| lowered.contains(marker)) {
+        return AgentError::LlmTransient(message.to_owned());
+    }
+    AgentError::Llm(message.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,5 +192,71 @@ mod tests {
             ToolError::PermissionDenied("sandbox".into()).to_string(),
             "permission denied: sandbox"
         );
+    }
+
+    #[test]
+    fn classify_llm_error_detects_context_overflow() {
+        for message in [
+            "This model's maximum context length is 8192 tokens",
+            "prompt is too long: 123456 tokens > 8192 limit",
+            "request exceeds the available context size",
+            "Error code: 413 — payload too large",
+        ] {
+            assert!(
+                matches!(classify_llm_error(message), AgentError::LlmContextTooLong(_)),
+                "{message} should classify as context overflow"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_llm_error_detects_transient_failures() {
+        for message in [
+            "Error code: 429 — rate limit exceeded",
+            "connection reset by peer",
+            "HTTP 503 service unavailable",
+            "gateway timeout after 30000ms",
+        ] {
+            assert!(
+                matches!(classify_llm_error(message), AgentError::LlmTransient(_)),
+                "{message} should classify as transient"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_llm_error_keeps_fatal_errors_plain() {
+        for message in [
+            "Error code: 401 — invalid api key",
+            "Error code: 400 — invalid request body",
+            "model not found: no-such-model",
+        ] {
+            assert!(
+                matches!(classify_llm_error(message), AgentError::Llm(_)),
+                "{message} must stay fatal (no retry)"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_llm_error_ignores_bare_413_in_request_ids() {
+        // A bare "413" substring used to route these into the forced-
+        // compaction recovery, which fails the turn when compaction has
+        // nothing left to shrink.
+        for message in
+            ["request id 8f4139ab not found", "invalid param req-4137", "attempt 3 of 1413 failed"]
+        {
+            assert!(
+                matches!(classify_llm_error(message), AgentError::Llm(_)),
+                "{message} contains 413 but is not a context-overflow signal"
+            );
+        }
+        // Anchored forms still classify as context overflow.
+        for message in ["HTTP 413 request too large", "status code: 413"] {
+            assert!(
+                matches!(classify_llm_error(message), AgentError::LlmContextTooLong(_)),
+                "{message} is a real 413"
+            );
+        }
     }
 }

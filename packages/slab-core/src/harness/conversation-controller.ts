@@ -48,6 +48,7 @@ import type {
   Plan,
   ReasoningEffort,
   Thread,
+  ThreadStatusChangedParams,
   TurnCompletedParams,
   TurnStartParams,
   TurnStartResult,
@@ -110,6 +111,29 @@ export interface CompactionMarker {
 /** A failed `/compact` or `/fork` action (distinct from a restore `error`). */
 export type ActionError = { kind: "compact" | "fork"; message: string }
 
+/**
+ * Wire values of the authoritative thread status pushed by
+ * `thread/statusChanged` — the SERVER-side source of truth the UI should
+ * derive busy/terminal state from (instead of a local AI-SDK heuristic that
+ * can diverge after interrupts).
+ */
+export type ThreadStatusString =
+  | "pending"
+  | "running"
+  | "interrupting"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+
+/** Terminal thread statuses — no further work until a new turn starts. */
+const TERMINAL_THREAD_STATUSES: ReadonlySet<ThreadStatusString> = new Set([
+  "interrupted",
+  "completed",
+  "errored",
+  "shutdown",
+])
+
 /** Immutable snapshot exposed via {@link ConversationController.getState}. */
 export interface ConversationState {
   /** Restored conversation, seeded as `useChat` `initialMessages`. */
@@ -154,6 +178,22 @@ export interface ConversationState {
   userMessageTurnIndex: ReadonlyMap<string, number>
   /** Whether plan mode is active (turn runs as the read-only plan agent). */
   planMode: boolean
+  /**
+   * Authoritative thread status from `thread/statusChanged` (null before the
+   * first event). The busy/submit gating should derive from THIS, not from a
+   * local AI-SDK status heuristic.
+   */
+  threadStatus: ThreadStatusString | null
+  /**
+   * Why the last run ended abnormally (`interrupted` / `max_turns_reached` /
+   * `budget_exhausted` / `repetition_detected` / `error`), from the terminal
+   * `turn/completed` reason. Null after a clean completion.
+   */
+  abortReason: string | null
+  /** Steering input queued on the server for the running turn (0 when none). */
+  queuedCount: number
+  /** Texts of the queued steering inputs, in send order (drives queued chips). */
+  queuedTexts: readonly string[]
 }
 
 /** Options accepted by the {@link ConversationController} constructor. */
@@ -247,6 +287,10 @@ const EMPTY_SNAPSHOT: ConversationState = {
   isRollingBack: false,
   userMessageTurnIndex: new Map(),
   planMode: false,
+  threadStatus: null,
+  abortReason: null,
+  queuedCount: 0,
+  queuedTexts: [],
 }
 
 // ── Controller ──────────────────────────────────────────────────────────────
@@ -286,6 +330,17 @@ export class ConversationController {
   private isRollingBack = false
   private userMessageTurnIndex = new Map<string, number>()
   private planMode = false
+  private threadStatus: ThreadStatusString | null = null
+  private abortReason: string | null = null
+  private queuedTexts: string[] = []
+  /**
+   * The live AI-SDK stream never replays user messages (the wire has no
+   * `message/appended` notification), so when queued steering is drained or
+   * persisted server-side the only way those inputs reappear is a history
+   * refresh. Set when a refresh is owed but the triggering run has not ended
+   * yet; the terminal event consumes it.
+   */
+  private pendingResync = false
 
   constructor(options: ConversationControllerOptions = {}) {
     this.sessionId = options.sessionId
@@ -313,6 +368,14 @@ export class ConversationController {
 
   /** Kick off the restore machine (mount hook for the React side). */
   start(): void {
+    // `dispose()` tears the notification subscription down; a `start()` after
+    // that (route-transition remount reusing a memoized controller) MUST
+    // re-register it or the controller silently ignores every notification —
+    // approvals never render, thread status never updates — while the
+    // transport (sharing the same client) keeps streaming normally.
+    if (!this.unsubscribeNotifications) {
+      this.unsubscribeNotifications = this.client.onNotification(this.handleNotification)
+    }
     void this.reconnect()
   }
 
@@ -450,10 +513,63 @@ export class ConversationController {
     return this.client.turnStart(params)
   }
 
+  /**
+   * Steering send: deliver user input to a RUNNING turn. The server queues it
+   * for the next iteration boundary (`turn/start` returns `queued: true`), the
+   * still-open AI-SDK stream keeps rendering the run's continued output, and
+   * the text is tracked locally as a queued chip until the run ends. If the
+   * run ended in the race window (server answered `queued: false`), refresh
+   * the restored history so the pane converges on the new run's rollout.
+   */
+  async sendSteering(message: UIMessage, options?: TurnSendOptions): Promise<TurnStartResult> {
+    const text =
+      message.parts
+        ?.filter((part): part is { type: "text"; text: string } => part.type === "text")
+        .map((part) => part.text)
+        .join(" ") ?? ""
+    const result = await this.send(message, options)
+    if (result.queued) {
+      this.queuedTexts = text.trim() ? [...this.queuedTexts, text.trim()] : [...this.queuedTexts]
+      this.commit()
+    } else if (
+      this.threadStatus !== null &&
+      TERMINAL_THREAD_STATUSES.has(this.threadStatus)
+    ) {
+      // Lost the idle-window race and the run already ended: refresh now so
+      // the history converges on the finished rollout.
+      void this.reconnect()
+    } else {
+      // Lost the idle-window race: the input STARTED a new run that no local
+      // stream is subscribed to. Defer the refresh to that run's terminal
+      // event so the pane converges on the COMPLETED rollout rather than a
+      // mid-run snapshot (its live events are unreachable from here).
+      this.pendingResync = true
+    }
+    return result
+  }
+
+  /**
+   * Clear the queued-steering texts on a run-terminal event. When anything was
+   * queued (or a resync was owed from a lost steering race), also refresh the
+   * restored history so the drained/persisted steering inputs materialize as
+   * real message rows — the live stream never replays them. Caller commits.
+   */
+  private clearQueuedAndResync(): void {
+    const shouldResync = this.queuedTexts.length > 0 || this.pendingResync
+    this.pendingResync = false
+    this.queuedTexts = []
+    if (shouldResync) void this.reconnect()
+  }
+
   /** Interrupt the live turn on the bound thread (best-effort). */
   async interrupt(): Promise<void> {
     const threadId = this.client.currentThreadId
     if (!threadId) return
+    // Teardown persists any undelivered queued inputs into the rollout; flag a
+    // resync so the terminal event materializes them as real rows.
+    if (this.queuedTexts.length > 0) this.pendingResync = true
+    this.queuedTexts = []
+    this.commit()
     await this.client.turnInterrupt({ threadId, turnId: "0" })
   }
 
@@ -666,6 +782,10 @@ export class ConversationController {
       isRollingBack: this.isRollingBack,
       userMessageTurnIndex: new Map(this.userMessageTurnIndex),
       planMode: this.planMode,
+      threadStatus: this.threadStatus,
+      abortReason: this.abortReason,
+      queuedCount: this.queuedTexts.length,
+      queuedTexts: [...this.queuedTexts],
     }
     for (const listener of this.listeners) listener()
   }
@@ -772,11 +892,33 @@ export class ConversationController {
       return
     }
 
-    // Capture the finalized token usage for the just-completed turn so the
-    // composer footer can render a usage indicator + context-window bar.
+    // Authoritative thread status from the server — the UI's source of truth
+    // for busy/terminal state (replaces deriving busy from a local AI-SDK
+    // status heuristic that diverges after interrupts).
+    if (method === HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED) {
+      const params = (notification.params ?? {}) as ThreadStatusChangedParams
+      if (params.threadId !== this.client.currentThreadId) return
+      this.threadStatus = params.status as ThreadStatusString
+      if (this.threadStatus === "running") this.abortReason = null
+      if (TERMINAL_THREAD_STATUSES.has(this.threadStatus)) {
+        // The run ended; anything still queued client-side was drained into
+        // the run or persisted server-side (steering leftovers land in the
+        // rollout history).
+        this.clearQueuedAndResync()
+      }
+      this.commit()
+      return
+    }
+
+    // Capture the finalized token usage + the run's termination reason for
+    // the just-completed turn, and clear the queued-steering display (the
+    // inputs were either consumed mid-run or persisted on teardown).
     if (method === HARNESS_NOTIFICATION.TURN_COMPLETED) {
       const params = (notification.params ?? {}) as TurnCompletedParams
       this.turnUsage = params.usage ?? null
+      const reason = typeof params.reason === "string" ? params.reason : null
+      this.abortReason = reason && reason !== "completed" ? reason : null
+      this.clearQueuedAndResync()
       this.commit()
       return
     }

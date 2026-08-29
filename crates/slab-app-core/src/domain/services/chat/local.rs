@@ -521,7 +521,7 @@ pub(super) async fn create_chat_completion(
                     .unwrap_or_else(|| {
                         super::finish_reason_from_token_budget(
                             finish_chunk_completion_tokens.load(Ordering::SeqCst),
-                            config.max_tokens,
+                            Some(config.max_tokens),
                         )
                     });
                 Some(super::build_finish_chunk(
@@ -593,7 +593,7 @@ pub(super) async fn create_chat_completion(
     response.tokens_used.get_or_insert(usage.completion_tokens);
     response.usage = Some(usage.clone());
     response.finish_reason.get_or_insert_with(|| {
-        super::finish_reason_from_token_budget(usage.completion_tokens, config.max_tokens)
+        super::finish_reason_from_token_budget(usage.completion_tokens, Some(config.max_tokens))
     });
     attach_reasoning_metadata(&mut response);
     if reasoning_is_disabled(config.reasoning_effort) {
@@ -669,7 +669,7 @@ pub(super) async fn create_text_completion(
     response.tokens_used.get_or_insert(usage.completion_tokens);
     response.usage = Some(usage.clone());
     response.finish_reason.get_or_insert_with(|| {
-        super::finish_reason_from_token_budget(usage.completion_tokens, config.max_tokens)
+        super::finish_reason_from_token_budget(usage.completion_tokens, Some(config.max_tokens))
     });
 
     Ok(response)

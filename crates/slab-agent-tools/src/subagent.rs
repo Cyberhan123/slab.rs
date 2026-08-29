@@ -284,23 +284,25 @@ async fn write_subagent_artifact(
     let Some(workspace_root) = workspace_root else {
         return Ok(Vec::new());
     };
-    let artifact_ref = format!(".slab/artifacts/{child_thread_id}/result.json");
-    let artifact_path = workspace_root.join(&artifact_ref);
-    if let Some(parent) = artifact_path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
-    }
     let content = serde_json::json!({
         "child_thread_id": child_thread_id,
         "completion_text": completion_text,
     });
     let bytes = serde_json::to_vec_pretty(&content)
         .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
-    tokio::fs::write(&artifact_path, bytes)
-        .await
-        .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
-    Ok(vec![artifact_ref])
+    // Thin wrapper over the shared spill helper (same result.json layout as
+    // before the generalization).
+    match crate::artifact::write_tool_artifact(
+        Some(workspace_root),
+        child_thread_id,
+        "result.json",
+        &bytes,
+    )
+    .await
+    {
+        Some(artifact_ref) => Ok(vec![artifact_ref]),
+        None => Err(AgentError::ToolExecution("failed to write subagent artifact".to_owned())),
+    }
 }
 
 #[cfg(test)]
