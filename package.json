@@ -163,6 +163,7 @@
     "@streamdown/cjk": "^1.0.3",
     "motion": "^13.1.1",
     "@ai-sdk/react": "^4.0.74",
+    "@hookform/resolvers": "^5.9.1",
     "ai": "^7.0.71",
     "@tanstack/react-virtual": "^3.14.10",
     "@ai-sdk/provider-utils": "^5.0.28",
