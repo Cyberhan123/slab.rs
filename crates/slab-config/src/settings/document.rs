@@ -91,7 +91,11 @@ pub struct SettingsDocument {
     pub schema_version: u32,
     #[serde(default)]
     pub general: GeneralSettingsConfig,
+    /// The runtime default resolves to the app-home SQLite database (absolute,
+    /// CWD-independent). The schemars override keeps that machine-specific path
+    /// out of the published schema, which instead documents a portable example.
     #[serde(default)]
+    #[schemars(default = "schema_example_database_config")]
     pub database: DatabaseConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
@@ -161,14 +165,23 @@ impl Default for GeneralSettingsConfig {
 /// Shared database configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DatabaseConfig {
-    /// Database connection string.
+    /// Database connection string. Defaults (via the struct `Default`, not a
+    /// field serde default — that would inline a machine-specific path into the
+    /// published schema) to the app-home SQLite database; keep it absolute so
+    /// the URL never resolves against the process CWD.
     pub url: String,
 }
 
 impl Default for DatabaseConfig {
     fn default() -> Self {
-        Self { url: "sqlite://slab.db?mode=rwc".to_owned() }
+        Self { url: crate::app_config::default_database_url() }
     }
+}
+
+/// Portable placeholder used only as the published schema's documented default
+/// for `database`; the runtime `Default` resolves the real app-home path.
+fn schema_example_database_config() -> DatabaseConfig {
+    DatabaseConfig { url: "sqlite:///slab.db?mode=rwc".to_owned() }
 }
 
 /// Shared logging configuration.
@@ -461,6 +474,12 @@ pub struct AgentRuntimeLimitsConfig {
     /// whether memory pressure has cleared (INFRA-05).
     #[serde(default = "default_cooldown_secs")]
     pub cooldown_secs: u32,
+    /// Maximum LLM iterations granted to one agent run (one user message).
+    /// The allowance resets on every resume while `turn_index` accumulates
+    /// across runs. Runaway loops stay bounded by the token budget, repetition
+    /// detection, and the user's stop control.
+    #[serde(default = "default_max_turns")]
+    pub max_turns: u32,
 }
 
 impl Default for AgentRuntimeLimitsConfig {
@@ -471,6 +490,7 @@ impl Default for AgentRuntimeLimitsConfig {
             queue_capacity: 0,
             rss_threshold_mb: None,
             cooldown_secs: default_cooldown_secs(),
+            max_turns: default_max_turns(),
         }
     }
 }
@@ -485,6 +505,7 @@ impl AgentRuntimeLimitsConfig {
             queue_capacity: self.queue_capacity,
             rss_threshold_mb: self.rss_threshold_mb,
             cooldown_secs: self.cooldown_secs.max(1),
+            max_turns: self.max_turns.max(1),
         }
     }
 }
@@ -499,6 +520,10 @@ fn default_max_threads() -> u32 {
 
 fn default_max_depth() -> u32 {
     4
+}
+
+fn default_max_turns() -> u32 {
+    1000
 }
 
 /// Agent lifecycle hook settings.
@@ -540,8 +565,10 @@ fn default_hook_export_name() -> String {
 /// Agent memory pipeline settings.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AgentMemoriesConfig {
-    #[serde(default)]
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default = "default_enabled")]
+    pub recall_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -556,6 +583,8 @@ pub struct AgentMemoriesConfig {
     pub phase1_lease_seconds: u64,
     #[serde(default = "default_memory_phase1_retry_seconds")]
     pub phase1_retry_seconds: u64,
+    #[serde(default = "default_memory_phase1_max_attempts")]
+    pub phase1_max_attempts: u32,
     #[serde(default = "default_memory_phase1_max_age_days")]
     pub phase1_max_age_days: u32,
     #[serde(default = "default_memory_phase2_limit")]
@@ -571,7 +600,8 @@ pub struct AgentMemoriesConfig {
 impl Default for AgentMemoriesConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: default_enabled(),
+            recall_enabled: default_enabled(),
             model: None,
             memory_root: None,
             phase1_scan_limit: default_memory_phase1_scan_limit(),
@@ -579,6 +609,7 @@ impl Default for AgentMemoriesConfig {
             phase1_idle_seconds: default_memory_phase1_idle_seconds(),
             phase1_lease_seconds: default_memory_phase1_lease_seconds(),
             phase1_retry_seconds: default_memory_phase1_retry_seconds(),
+            phase1_max_attempts: default_memory_phase1_max_attempts(),
             phase1_max_age_days: default_memory_phase1_max_age_days(),
             phase2_limit: default_memory_phase2_limit(),
             phase2_lease_seconds: default_memory_phase2_lease_seconds(),
@@ -606,6 +637,10 @@ const fn default_memory_phase1_lease_seconds() -> u64 {
 
 const fn default_memory_phase1_retry_seconds() -> u64 {
     3600
+}
+
+const fn default_memory_phase1_max_attempts() -> u32 {
+    3
 }
 
 const fn default_memory_phase1_max_age_days() -> u32 {
@@ -792,6 +827,9 @@ pub struct WebSearchDuckDuckGoProviderConfig {
     pub base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
+    /// Deprecated: never honored by the search library (the lite endpoint has
+    /// its own unimplemented markup). Kept for settings-file compatibility;
+    /// setting it logs a deprecation warning and changes nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_lite: Option<bool>,
 }
@@ -1079,9 +1117,9 @@ pub struct LlamaRuntimeLeafConfig {
     /// Whether the llama backend is enabled.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// Optional context length override (`auto` resolves at load to the largest
-    /// context that fits in GPU VRAM).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Context window: an explicit token count, or `auto` (resolve at load to
+    /// the largest context that fits in GPU VRAM). Defaults to `auto`.
+    #[serde(default = "default_llama_context_length", skip_serializing_if = "Option::is_none")]
     pub context_length: Option<ContextLengthSpec>,
     /// Whether Flash Attention is enabled for llama contexts.
     #[serde(default = "defaults::flash_attn_enabled")]
@@ -1100,10 +1138,7 @@ impl Default for LlamaRuntimeLeafConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            // Unset = `auto` (resolve at load to the largest context that fits
-            // in GPU VRAM). The explicit default keeps programmatic `default()`
-            // consistent with an absent settings field.
-            context_length: None,
+            context_length: default_llama_context_length(),
             flash_attn: defaults::flash_attn_enabled(),
             source: SourceConfig::default(),
             logging: LoggingOverrideConfig::default(),
@@ -1111,6 +1146,10 @@ impl Default for LlamaRuntimeLeafConfig {
             endpoint: EndpointConfig::default(),
         }
     }
+}
+
+fn default_llama_context_length() -> Option<ContextLengthSpec> {
+    Some(ContextLengthSpec::Auto)
 }
 
 /// Single-node runtime family configuration used for candle and onnx.
@@ -1904,27 +1943,34 @@ mod tests {
         let default = AgentSettingsConfig::default();
         assert_eq!(default.runtime.limits.max_threads, 32);
         assert_eq!(default.runtime.limits.max_depth, 4);
+        assert_eq!(default.runtime.limits.max_turns, 1000);
     }
 
     #[test]
     fn agent_runtime_limits_deserialize_from_overrides() {
         let json = r#"{
             "debug": false,
-            "runtime": { "limits": { "max_threads": 8, "max_depth": 2 } }
+            "runtime": { "limits": { "max_threads": 8, "max_depth": 2, "max_turns": 40 } }
         }"#;
         let parsed: AgentSettingsConfig = serde_json::from_str(json).expect("parse");
         assert_eq!(parsed.runtime.limits.max_threads, 8);
         assert_eq!(parsed.runtime.limits.max_depth, 2);
+        assert_eq!(parsed.runtime.limits.max_turns, 40);
         assert!(!parsed.debug);
     }
 
     #[test]
     fn agent_runtime_limits_clamp_to_minimums() {
-        let limits =
-            AgentRuntimeLimitsConfig { max_threads: 0, max_depth: 0, ..Default::default() };
+        let limits = AgentRuntimeLimitsConfig {
+            max_threads: 0,
+            max_depth: 0,
+            max_turns: 0,
+            ..Default::default()
+        };
         let clamped = limits.clamped();
         assert_eq!(clamped.max_threads, 1);
         assert_eq!(clamped.max_depth, 1);
+        assert_eq!(clamped.max_turns, 1);
     }
 
     #[test]
@@ -1971,7 +2017,7 @@ mod tests {
         assert!(settings.agent.debug);
         assert!(!settings.agent.hooks.enabled);
         assert!(settings.agent.hooks.scripts.is_empty());
-        assert!(!settings.agent.memories.enabled);
+        assert!(settings.agent.memories.enabled);
         assert_eq!(settings.agent.memories.phase1_concurrency, 2);
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
         assert_eq!(settings.runtime.launch.server.bind_host, "127.0.0.1");

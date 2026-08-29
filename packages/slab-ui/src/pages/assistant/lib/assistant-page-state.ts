@@ -135,7 +135,7 @@ export function getSelectedModelStatusLabel({
   }
 
   if (!selectedModel) {
-    return t("pages.assistant.status.selectModel")
+    return t("common.fields.selectModel")
   }
 
   const parts = [selectedModel.label]

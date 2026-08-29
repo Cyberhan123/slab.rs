@@ -168,7 +168,7 @@ describe("useAssistantModel", () => {
       await result.current.ensureAssistantModelReady()
     })
 
-    expect(toastMock.success).toHaveBeenCalledWith("pages.assistant.toast.downloaded")
+    expect(toastMock.success).toHaveBeenCalledWith("common.toasts.modelDownloaded")
     expect(result0.ensureLoaded).toHaveBeenCalledWith("local-1")
     expect(result.current.loadedModelStatus?.context_length).toBe(8192)
   })

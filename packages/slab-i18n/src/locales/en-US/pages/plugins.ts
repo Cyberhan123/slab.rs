@@ -1,8 +1,4 @@
 export const plugins = {
-  header: {
-    title: "Plugins",
-    subtitle: "Run workspace plugins with Extism runtime",
-  },
   search: {
     placeholder: "Search installed plugins...",
     ariaLabel: "Search installed plugins",
@@ -107,11 +103,6 @@ export const plugins = {
       revoke: "Revoke",
       revokeAll: "Revoke all",
     },
-  },
-  desktopOnly: {
-    title: "Plugins require Tauri desktop runtime",
-    description:
-      "This page manages desktop plugins, so launching and lifecycle controls only work in Tauri mode.",
   },
   empty: {
     noInstalled: {

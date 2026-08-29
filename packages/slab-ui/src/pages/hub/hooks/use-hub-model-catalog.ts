@@ -279,7 +279,7 @@ export function useHubModelCatalog() {
 
       const refreshedModel = await refreshCatalogAndFindModel(model.id);
       if (!refreshedModel?.local_path) {
-        throw new Error(t('pages.hub.error.missingDownloadedPath'));
+        throw new Error(t('common.errors.missingDownloadedPath'));
       }
 
       toast.success(t('pages.hub.toast.downloaded'), {

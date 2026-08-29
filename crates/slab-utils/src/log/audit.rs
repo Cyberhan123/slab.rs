@@ -35,6 +35,8 @@ pub enum AuditKind {
     SpawnFailed,
     /// The daemon lost its connection to a sandbox client.
     DaemonConnectionFailed,
+    /// The daemon shut down because its owner process (slab-server) exited.
+    DaemonOwnerExited,
 }
 
 /// Outcome of a sandbox decision.

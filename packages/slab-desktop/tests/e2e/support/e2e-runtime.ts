@@ -160,7 +160,7 @@ let sidecarBuildPromise: Promise<void> | undefined
  * `target/debug/`: `slab-server` plus its `managed_children` siblings
  * `slab-runtime` and `slab-js-runtime` (slab-server resolves those as siblings
  * next to its own exe via `resolve_sibling_sidecar_exe`). This mirrors
- * `dev:app`'s `build:sidecars` prefix so `bun run test:e2e` is self-sufficient:
+ * `dev:desktop`'s `build:sidecars` prefix so `bun run test:e2e` is self-sufficient:
  * no manual pre-build required, and a stale binary is rebuilt (cargo incremental
  * makes an up-to-date build a near no-op). Memoized per process.
  */
@@ -645,7 +645,16 @@ function writeSettingsDocument(
           ggml: {
             backends: {
               diffusion: { enabled: false },
-              llama: { enabled: true, context_length: "auto" },
+              // Pinned (not "auto"): the VRAM-aware auto formula is
+              // architecture-unaware and resolves to ~5120 on a 16GB card for
+              // Qwen3.5-9B-Q8 — the agent system prompt + tool schemas +
+              // reasoning generation overflow that mid-stream ("context
+              // capacity exceeded"), failing every agentic e2e turn. The
+              // actual KV cost at 16384 cells is ~512MB (160MB @ 5120, GQA
+              // 8-layer), comfortably within free VRAM alongside the ~9.5GB
+              // weights; pinning keeps the suite deterministic regardless of
+              // ambient VRAM drift.
+              llama: { enabled: true, context_length: 16384 },
               whisper: { enabled: false },
             },
           },

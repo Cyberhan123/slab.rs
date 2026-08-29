@@ -58,13 +58,13 @@ export function ImageHistoryPanel({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-caption font-bold uppercase tracking-eyebrow text-muted-foreground">
-              {t('pages.image.history.title')}
+              {t('common.diffusion.recentHistory')}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               {historyLoading
                 ? t('pages.image.history.loading')
                 : historyError
-                  ? t('pages.image.history.error', { message: historyError })
+                  ? t('common.toasts.historyLoadFailed', { message: historyError })
                   : t('pages.image.history.description')}
             </p>
           </div>
@@ -138,7 +138,7 @@ export function ImageHistoryPanel({
                   onClick={() => refillFromHistory(selectedHistoryTask)}
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
-                  {t('pages.image.history.actions.refill')}
+                  {t('common.diffusion.reuseParameters')}
                 </Button>
               </div>
               <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
@@ -176,7 +176,7 @@ export function ImageHistoryPanel({
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">
-                        {t('pages.image.history.fields.size')}
+                        {t('common.diffusion.size')}
                       </p>
                       <p className="font-semibold">
                         {selectedHistoryTask.width} x {selectedHistoryTask.height}
@@ -184,13 +184,13 @@ export function ImageHistoryPanel({
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">
-                        {t('pages.image.history.fields.backend')}
+                        {t('common.fields.backend')}
                       </p>
                       <p className="truncate font-semibold">{selectedHistoryTask.backend_id}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">
-                        {t('pages.image.history.fields.model')}
+                        {t('common.fields.model')}
                       </p>
                       <p className="truncate font-semibold">
                         {selectedHistoryTask.model_id ?? selectedHistoryTask.model_path}

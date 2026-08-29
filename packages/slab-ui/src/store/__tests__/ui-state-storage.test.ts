@@ -56,6 +56,16 @@ describe('createUiStateStorage', () => {
     expect(toastMock.error).not.toHaveBeenCalled();
   });
 
+  it('treats an undefined batch GET result as empty state without recording a failure', async () => {
+    const storage = createUiStateStorage({ namespace: 'test' });
+
+    apiClientMock.GET.mockResolvedValueOnce(undefined);
+    await expect(storage.getItem('workspace')).resolves.toBe(null);
+
+    expect(toastMock.error).not.toHaveBeenCalled();
+    expect(useUiStatePersistenceStatus.getState().lastFailure).toBeNull();
+  });
+
   it('coalesces concurrent reads into a single batched request', async () => {
     const storage = createUiStateStorage({ namespace: 'test' });
 

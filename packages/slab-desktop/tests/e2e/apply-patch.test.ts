@@ -85,8 +85,10 @@ describe("apply_patch e2e", () => {
     expectAppliedFile(output, target)
     expect(await read(target)).toBe("alpha PATCHED\nbeta\n")
     // The file-change diff card must render in the DOM (proves the live
-    // FileChangeOutputDelta → MessageToolFileChangePart path end-to-end).
-    await expectFileChangeCard(page, { path: target, contains: "*** Begin Patch" })
+    // FileChangeOutputDelta → MessageToolFileChangePart path end-to-end). The
+    // card shows the per-file synthesized diff (`@@` + `-old`/`+new`), not the
+    // raw `*** Begin Patch` envelope.
+    await expectFileChangeCard(page, { path: target, contains: "-alpha" })
   }, 900_000)
 
   it("applies a patch whose context matches the file only after Unicode normalization", async () => {

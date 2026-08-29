@@ -86,7 +86,7 @@ function GlobalErrorFallback({ error, retry }: ErrorBoundaryFallbackProps) {
         action={
           <Button onClick={retry} className="w-full">
             <RefreshCw className="mr-2 h-4 w-4" />
-            {t('layouts.errorBoundary.global.retry')}
+            {t('common.actions.tryAgain')}
           </Button>
         }
         description={t('layouts.errorBoundary.global.description')}

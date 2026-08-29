@@ -96,7 +96,9 @@ impl WindowsSandboxExecutor for JobOnlyExecutor {
         let process_handle = spawned.raw_handle().ok_or_else(|| {
             WindowsSandboxError::SetupFailed("spawned child has no process handle".to_string())
         })?;
-        job.assign_process(process_handle as windows_sys::Win32::Foundation::HANDLE)?;
+        // SAFETY: `process_handle` is the just-spawned child's valid, open
+        // process handle from `raw_handle()`.
+        unsafe { job.assign_process(process_handle as windows_sys::Win32::Foundation::HANDLE) }?;
 
         tracing::debug!(pid = spawned.id(), "spawned process in Windows Job Object");
         // Dropping `job` fires KILL_ON_JOB_CLOSE → tree dies → pipes released. The shim's
@@ -108,8 +110,8 @@ impl WindowsSandboxExecutor for JobOnlyExecutor {
 
 /// The elevated executor: starts (once, via UAC) a long-lived daemon that provisions Low-IL
 /// integrity-label ACLs and spawns each sandboxed child under a restricted token. The orchestrator
-/// (non-elevated) drives the daemon over a named pipe; the daemon survives slab-server restart, so
-/// reconnect hits no UAC.
+/// (non-elevated) drives the daemon over a named pipe; the daemon dies with slab-server (owner-PID
+/// watchdog), so every server start pays one UAC.
 pub struct ElevatedAclTokenExecutor {
     cfg: PrepareContext,
     state: Mutex<ElevatedState>,
@@ -270,19 +272,31 @@ impl WindowsSandboxExecutor for ElevatedAclTokenExecutor {
                 .map_err(|_| WindowsSandboxError::SpawnFailed("elevated exit stream closed".into()))
         });
 
-        // kill_tree: dropping the guard aborts the reader task (which owns the connection) → the
-        // daemon sees the disconnect and tears the Job down (KILL_ON_JOB_CLOSE).
+        // kill_tree: dropping the guard ABORTS the reader task (which owns the
+        // connection) → the pipe handle closes → the daemon sees the disconnect
+        // and tears the Job down (KILL_ON_JOB_CLOSE).
         let kill_tree: Box<dyn FnOnce() + Send + 'static> = Box::new(move || {
-            drop(ConnGuard { _reader_task: reader_task });
+            drop(ConnGuard { reader_task });
         });
 
         Ok(ElevatedRun { stdout_buf, stderr_buf, exit_future, kill_tree: Some(kill_tree) })
     }
 }
 
-/// Owns the reader task (which owns the connection) so dropping it closes the pipe.
+/// Owns the reader task (which owns the connection). Dropping MUST abort the
+/// task: a tokio `JoinHandle` drop merely detaches, which would leave the
+/// named-pipe connection open — the daemon would never observe the
+/// disconnect, its Job (KILL_ON_JOB_CLOSE) would never be torn down, and the
+/// child would outlive the timeout kill with its post-deadline output still
+/// being relayed into the buffers.
 struct ConnGuard {
-    _reader_task: tokio::task::JoinHandle<()>,
+    reader_task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for ConnGuard {
+    fn drop(&mut self) {
+        self.reader_task.abort();
+    }
 }
 
 /// Named pipe path for a given key fingerprint.

@@ -55,8 +55,32 @@ pub trait AgentContextSources: Send + Sync {
     /// policy so this crate stays free of `slab-exec-policy`.
     fn permission_snapshot(&self, thread_id: &str) -> PermissionSnapshot;
 
+    /// Whether the host registered the `apply_patch` tool. The default mirrors
+    /// the registration gate (the workspace-bound tools register only when a
+    /// workspace root exists); hosts with additional registration conditions
+    /// override this. Combined with the permission snapshot and the tool
+    /// whitelist in the hook, this decides whether the system prompt may
+    /// tell the model to prefer `apply_patch`.
+    fn apply_patch_registered(&self) -> bool {
+        self.workspace_root().is_some()
+    }
+
     /// Folded read-side memory context, if memory is enabled and a v1 summary
     /// exists. `None` skips the memory fragment. The host bridges from
     /// `slab-agent-memories` so this crate stays free of it.
-    fn memory_context(&self) -> Option<MemoryContext>;
+    ///
+    /// Async + parameterized because the recall path (when enabled) runs a
+    /// small model side query against the thread's first user message; the
+    /// host bounds that call with a timeout and degrades to `relevant_body:
+    /// None` instead of failing agent start.
+    async fn memory_context(
+        &self,
+        thread_id: &str,
+        model_id: &str,
+        input_message: Option<&str>,
+    ) -> Option<MemoryContext>;
+
+    /// Drop per-thread recall state when the thread ends. Default no-op;
+    /// hosts with a recall cache override this to release entries.
+    fn evict_thread(&self, _thread_id: &str) {}
 }

@@ -61,12 +61,14 @@ impl HarnessService {
     }
 
     /// Append a structured user message (e.g. text + image parts for VLM turns)
-    /// to an existing agent thread and run the next turn.
+    /// to an existing agent thread and run the next turn. Returns `true` when
+    /// the thread was mid-run and the input was QUEUED for the next iteration
+    /// boundary (steering) instead of starting a new run.
     pub async fn send_input_message(
         &self,
         thread_id: &str,
         message: ConversationMessage,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<bool, AppCoreError> {
         self.0.send_input_message(thread_id, message).await
     }
 
@@ -103,12 +105,22 @@ impl HarnessService {
     // ----- harness-specific control surface ---------------------------------
 
     /// Gracefully shut down a running agent thread.
+    ///
+    /// Pending approvals are resolved as Rejected BEFORE the control call: the
+    /// cancellation drops the waiting `request_approval` futures, whose own
+    /// cleanup (timeout/decision path) then never runs — without the explicit
+    /// clear the oneshot entries leak in the hub's map forever.
     pub async fn shutdown(&self, thread_id: &str) -> Result<(), AppCoreError> {
+        self.0.events().clear_pending_approvals(thread_id);
         self.0.runtime().shutdown(thread_id).await.map_err(AppCoreError::from)
     }
 
     /// Interrupt the currently running turn while keeping the thread resumable.
+    ///
+    /// Pending approvals are resolved as Rejected before the cancel for the
+    /// same leak reason as [`Self::shutdown`].
     pub async fn interrupt(&self, thread_id: &str) -> Result<(), AppCoreError> {
+        self.0.events().clear_pending_approvals(thread_id);
         self.0.runtime().interrupt(thread_id).await.map_err(AppCoreError::from)
     }
 
@@ -144,6 +156,39 @@ impl HarnessService {
             .runtime()
             .control()
             .apply_agent_override(thread_id, def)
+            .await
+            .map_err(AppCoreError::from)
+    }
+
+    /// Apply (or clear) the reasoning-effort override for the next turn on a
+    /// thread (flows from the harness `turn/start` `effort` param). Re-applied
+    /// every turn; `None` clears a previous override.
+    pub async fn set_thread_reasoning_effort(
+        &self,
+        thread_id: &str,
+        effort: Option<slab_types::chat::ChatReasoningEffort>,
+    ) -> Result<(), AppCoreError> {
+        self.0
+            .runtime()
+            .control()
+            .set_thread_reasoning_effort(thread_id, effort)
+            .await
+            .map_err(AppCoreError::from)
+    }
+
+    /// Overwrite the run-iteration budget for the next turn on a thread (flows
+    /// from the `agent.runtime.limits.max_turns` setting). Re-applied every
+    /// turn so legacy threads carrying the old default in their persisted
+    /// config are upgraded on their next user message.
+    pub async fn set_thread_max_turns(
+        &self,
+        thread_id: &str,
+        max_turns: u32,
+    ) -> Result<(), AppCoreError> {
+        self.0
+            .runtime()
+            .control()
+            .set_thread_max_turns(thread_id, max_turns)
             .await
             .map_err(AppCoreError::from)
     }
@@ -385,8 +430,12 @@ impl HarnessService {
         };
         let outcome =
             self.0.compact().compact(&messages, &ctx).await.map_err(AppCoreError::from)?;
-        let CompactOutcome::Replaced { messages: compacted, output_tokens, replaced_messages } =
-            outcome
+        let CompactOutcome::Replaced {
+            messages: compacted,
+            output_tokens,
+            replaced_messages,
+            stubbed_messages,
+        } = outcome
         else {
             // Skipped: history was already minimal — nothing to persist.
             return Ok((snapshot, 0, 0));
@@ -405,6 +454,7 @@ impl HarnessService {
             thread_id: thread_id.to_owned(),
             compacted_messages: compacted.clone(),
             removed_messages: replaced_messages as u32,
+            stubbed_messages: stubbed_messages as u32,
             output_tokens: output_tokens as u32,
             status: "manual".to_owned(),
             turn_index: 0,
@@ -486,6 +536,29 @@ impl HarnessService {
         self.0
             .reader()
             .list_turn_items(thread_id)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))
+    }
+
+    /// List the persisted interleaved `TurnItem` + `MessageAppend` timeline for
+    /// a thread in rollout write order (the `thread/resume` history source).
+    pub async fn list_turn_timeline(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<slab_agent_rollout::TurnTimelineEntry>, AppCoreError> {
+        if self
+            .0
+            .store()
+            .get_thread(thread_id)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))?
+            .is_none()
+        {
+            return Err(AppCoreError::NotFound(format!("agent thread not found: {thread_id}")));
+        }
+        self.0
+            .reader()
+            .list_turn_timeline(thread_id)
             .await
             .map_err(|e| AppCoreError::Internal(e.to_string()))
     }

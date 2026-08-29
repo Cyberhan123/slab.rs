@@ -7,7 +7,7 @@ import {
   CollapsibleTrigger,
 } from "@slab/components/collapsible"
 import { cn } from "@slab/ui/lib/utils"
-import { BrainIcon, ChevronDownIcon } from "lucide-react"
+import { BrainIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import type { ComponentProps, ReactNode } from "react"
 import {
   createContext,
@@ -17,13 +17,13 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
 } from "react"
 
 import { Markdown } from "./markdown"
 import { Shimmer } from "./shimmer"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
+import { useTranslation } from "@slab/i18n"
 
 interface ReasoningContextValue {
   isStreaming: boolean
@@ -50,7 +50,6 @@ type ReasoningProps = ComponentProps<typeof Collapsible> & {
   duration?: number
 }
 
-const AUTO_CLOSE_DELAY = 1000
 const MS_IN_S = 1000
 
 const Reasoning = memo(
@@ -64,9 +63,9 @@ const Reasoning = memo(
     children,
     ...props
   }: ReasoningProps) => {
-    const resolvedDefaultOpen = defaultOpen ?? isStreaming
-    // Track if defaultOpen was explicitly set to false (to prevent auto-open).
-    const isExplicitlyClosed = defaultOpen === false
+    // Collapsed by default — during generation and after — so the transcript
+    // stays compact; the user expands via the trigger whenever they want.
+    const resolvedDefaultOpen = defaultOpen ?? false
 
     const [isOpen, setIsOpen] = useControllableState<boolean>({
       defaultProp: resolvedDefaultOpen,
@@ -78,36 +77,17 @@ const Reasoning = memo(
       prop: durationProp,
     })
 
-    const hasEverStreamedRef = useRef(isStreaming)
-    const [hasAutoClosed, setHasAutoClosed] = useState(false)
     const startTimeRef = useRef<number | null>(null)
 
     // Track when streaming starts and compute duration once it ends.
     useEffect(() => {
       if (isStreaming) {
-        hasEverStreamedRef.current = true
         if (startTimeRef.current === null) startTimeRef.current = Date.now()
       } else if (startTimeRef.current !== null) {
         setDuration(Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S))
         startTimeRef.current = null
       }
     }, [isStreaming, setDuration])
-
-    // Auto-open when streaming starts (unless explicitly closed).
-    useEffect(() => {
-      if (isStreaming && !isOpen && !isExplicitlyClosed) setIsOpen(true)
-    }, [isStreaming, isOpen, setIsOpen, isExplicitlyClosed])
-
-    // Auto-close when streaming ends (once only, and only if it ever streamed).
-    useEffect(() => {
-      if (hasEverStreamedRef.current && !isStreaming && isOpen && !hasAutoClosed) {
-        const timer = setTimeout(() => {
-          setIsOpen(false)
-          setHasAutoClosed(true)
-        }, AUTO_CLOSE_DELAY)
-        return () => clearTimeout(timer)
-      }
-    }, [isStreaming, isOpen, setIsOpen, hasAutoClosed])
 
     const handleOpenChange = useCallback(
       (nextOpen: boolean) => {
@@ -137,19 +117,23 @@ const Reasoning = memo(
 )
 Reasoning.displayName = "Reasoning"
 
-const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number): ReactNode => {
-  if (isStreaming || duration === 0) return <Shimmer duration={1}>Thinking...</Shimmer>
-  if (duration === undefined) return <p>Thought for a few seconds</p>
-  return <p>Thought for {duration} seconds</p>
-}
-
 type ReasoningTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
   getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode
 }
 
 const ReasoningTrigger = memo(
-  ({ className, children, getThinkingMessage = defaultGetThinkingMessage, ...props }: ReasoningTriggerProps) => {
+  ({ className, children, getThinkingMessage, ...props }: ReasoningTriggerProps) => {
     const { isStreaming, isOpen, duration } = useReasoning()
+    const { t } = useTranslation()
+    const message =
+      getThinkingMessage?.(isStreaming, duration) ??
+      (isStreaming || duration === 0 ? (
+        <Shimmer duration={1}>{t("pages.assistant.thinking.loading")}</Shimmer>
+      ) : duration === undefined ? (
+        <p>{t("pages.assistant.thinking.thoughtForAFewSeconds")}</p>
+      ) : (
+        <p>{t("pages.assistant.thinking.thoughtForSeconds", { seconds: duration })}</p>
+      ))
     return (
       <CollapsibleTrigger
         className={cn(
@@ -161,10 +145,12 @@ const ReasoningTrigger = memo(
         {children ?? (
           <>
             <BrainIcon className="size-4" />
-            {getThinkingMessage(isStreaming, duration)}
-            <ChevronDownIcon
-              className={cn("size-4 transition-transform", isOpen ? "rotate-180" : "rotate-0")}
-            />
+            {message}
+            {isOpen ? (
+              <ChevronDownIcon className="size-4 shrink-0" />
+            ) : (
+              <ChevronRightIcon className="size-4 shrink-0" />
+            )}
           </>
         )}
       </CollapsibleTrigger>

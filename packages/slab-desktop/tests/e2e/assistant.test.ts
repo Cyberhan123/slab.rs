@@ -54,7 +54,11 @@ describe("assistant e2e", () => {
     const prompt = `Assistant E2E ${runId}. Reply with one short sentence that includes ${runId}.`
 
     await sendAssistantMessage(page, prompt)
-    await expectAssistantPageText(page, prompt)
+    // Wait for the RUN ID (not the prompt): the prompt instructs the model to
+    // include it in the reply, so this deterministically verifies the streamed
+    // assistant bubble rendered. Waiting for the full prompt text would depend
+    // on the model quoting the request verbatim in its reasoning/reply.
+    await expectAssistantPageText(page, runId)
 
     const reply = await waitForCompletedAssistantReply(testEnv.serverBaseUrl, session.id, prompt)
     expect(reply.restore.thread?.status).toBe("completed")

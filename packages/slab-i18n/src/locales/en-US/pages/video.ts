@@ -1,12 +1,6 @@
 export const video = {
-  header: {
-    title: 'Video',
-    subtitle: 'Video tooling and processing',
-  },
   modelPicker: {
     groupLabel: 'Video Models',
-    placeholder: 'Select model',
-    emptyLabel: 'No diffusion models',
     optionDownloadInHub: '{{model}} (Download in Hub)',
   },
   options: {
@@ -25,29 +19,18 @@ export const video = {
   },
   workbench: {
     configTitle: 'Configuration',
-    modelHint: 'Choose the active diffusion model from the global header.',
     prompt: {
       label: 'Creative Prompt',
       placeholder: 'Describe the scene in cinematic detail...',
     },
     negativePrompt: {
-      label: 'Negative Prompt',
       placeholder: 'Blurry, low quality, distorted...',
     },
     fields: {
-      width: 'Width',
-      height: 'Height',
       frames: 'Frames',
       fps: 'FPS',
       referenceImage: 'Reference Image',
       advanced: 'Advanced Parameters',
-      cfgScale: 'CFG Scale',
-      guidance: 'Guidance',
-      steps: 'Steps',
-      strength: 'Strength',
-      seed: 'Seed (-1 random)',
-      sampler: 'Sampler',
-      scheduler: 'Scheduler',
     },
     referenceImage: {
       readyTitle: 'Reference frame ready',
@@ -58,7 +41,6 @@ export const video = {
       removeAria: 'Remove reference image',
     },
     actions: {
-      generating: 'Generating...',
       generate: 'Generate Video',
       cancel: 'Cancel current render',
     },
@@ -72,35 +54,25 @@ export const video = {
     },
   },
   history: {
-    title: 'Recent History',
     loading: 'Loading recent video generations...',
-    error: 'Failed to load history: {{message}}',
     description: 'Reopen generated clips, prompts, and render settings from recent video tasks.',
     empty: 'No video history yet. Completed renders will show up here.',
     detailTitle: 'Video Task Detail',
     noArtifact: 'This task has not produced a persisted video artifact yet.',
-    refilled: 'History parameters loaded. Review them before generating again.',
     compareArtifact: 'Comparison artifact {{index}}',
     actions: {
       compare: 'Compare',
       openWorkspace: 'Open in Workspace',
-      refill: 'Reuse parameters',
       removeCompare: 'Remove compare',
     },
     fields: {
-      size: 'Size',
       clip: 'Clip',
-      backend: 'Backend',
-      model: 'Model',
     },
   },
   progress: {
     title: 'Render progress',
-    queued: 'Queued and waiting for the runtime',
     running: 'Runtime is rendering frames',
     finalizing: 'Finalizing video artifact',
-    eta: 'ETA',
-    step: 'Step',
   },
   stage: {
     title: {
@@ -130,16 +102,12 @@ export const video = {
     started: 'Video generation started ({{frames}} frames at {{fps}} fps)...',
     generated: 'Video generated!',
     historyDetailFailed: 'Failed to open video history detail: {{message}}',
-    timedOut: 'Video generation timed out',
-    pollingError: 'Polling error: {{message}}',
     completedWithoutPath: 'Video generation completed without a video path',
     resultFetchFailed: 'Failed to fetch video result: {{message}}',
   },
   error: {
-    enterPrompt: 'Please enter a prompt',
     selectDownloadedModel: 'Selected model is not downloaded. Please download it first in Hub.',
     chooseImageFile: 'Please choose an image file',
-    readImageFileFailed: 'Failed to read image file',
     generationFailed: 'Video generation failed',
   },
 } as const;

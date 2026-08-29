@@ -30,7 +30,7 @@ export const HARNESS_METHOD = {
 
 /** Server → client notifications (agent event delivery). */
 export const HARNESS_NOTIFICATION = {
-  THREAD_STARTED: "thread/started",
+  THREAD_STATUS_CHANGED: "thread/statusChanged",
   TURN_STARTED: "turn/started",
   TURN_COMPLETED: "turn/completed",
   ITEM_STARTED: "item/started",
@@ -58,6 +58,5 @@ export const HARNESS_ERROR_CODE = {
   APPLICATION_ERROR: -32000,
   NOT_INITIALIZED: -32001,
   THREAD_NOT_FOUND: -32002,
-  TURN_IN_PROGRESS: -32003,
   NOT_IMPLEMENTED: -32004,
 } as const

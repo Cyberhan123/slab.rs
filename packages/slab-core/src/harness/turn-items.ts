@@ -121,14 +121,29 @@ function reasoningToString(value: ReasoningText): string {
 }
 
 /**
+ * Complete `<think …>…</think>` blocks the server used to embed into the
+ * persisted agentMessage text (LLM-context form). History renders item text
+ * verbatim, so legacy rollout files still carrying the block must be cleaned
+ * here or the raw thinking shows up in the message body. Mirrors the
+ * server-side `strip_think_blocks` emission guard.
+ */
+const THINK_BLOCK_PATTERN = /<think\b[^>]*>[\s\S]*?<\/think>/gi
+
+function stripThinkBlocks(text: string): string {
+  return text.replace(THINK_BLOCK_PATTERN, "").trim()
+}
+
+/**
  * Build the finalized UI parts for one assistant-side {@link TurnItem}
  * (agentMessage / reasoning / imageView / tool items). `userMessage` is handled
  * by {@link turnItemsToMessages} (it starts a new user message).
  */
 export function turnItemToUiParts(item: TurnItem): UiPart[] {
   switch (item.type) {
-    case "agentMessage":
-      return item.text ? ([{ text: item.text, type: "text" }] as UiPart[]) : []
+    case "agentMessage": {
+      const text = stripThinkBlocks(item.text ?? "")
+      return text ? ([{ text, type: "text" }] as UiPart[]) : []
+    }
     case "reasoning": {
       // Use `content` (the full trace) — the live reasoning-delta stream
       // accumulates content, so this keeps history aligned with live rather

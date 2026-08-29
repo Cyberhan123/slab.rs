@@ -7,12 +7,7 @@ export const header = {
     noOptions: 'No options available',
   },
   search: {
-    chat: 'Search tasks...',
     default: 'Search pages, tools, or settings...',
-  },
-  context: {
-    activeWorkspace: 'Active Workspace',
-    desktop: 'Slab Desktop',
   },
   windowControls: {
     toolbar: 'Window controls',

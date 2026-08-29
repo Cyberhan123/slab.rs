@@ -48,15 +48,17 @@ impl AgentRuntime {
     /// Resume a persisted thread with a pre-built message history and run the
     /// next turn. The conversation read + user-content append was hoisted into
     /// the app-core caller; slab-agent receives the full message
-    /// vec + the `emit_from` anchor (index of the first new message to emit).
+    /// vec + the `emit_new` anchor (how many TRAILING messages are new and
+    /// must be emitted — a count, so the init-batch merge shifting positions
+    /// cannot drift the anchor).
     pub async fn resume_thread(
         &self,
         thread_id: &str,
         messages: Vec<ConversationMessage>,
         starting_turn_index: u32,
-        emit_from: Option<usize>,
+        emit_new: Option<usize>,
     ) -> Result<(), AgentError> {
-        self.control.resume_thread(thread_id, messages, starting_turn_index, emit_from).await
+        self.control.resume_thread(thread_id, messages, starting_turn_index, emit_new).await
     }
 
     /// Interrupt the current turn while keeping the thread resumable.

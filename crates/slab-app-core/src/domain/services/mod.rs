@@ -19,7 +19,7 @@ mod ui_state;
 mod video;
 mod workspace;
 
-pub use agent::{HarnessService, ResponseService};
+pub use agent::{HarnessService, ResponseService, TurnTimelineEntry};
 pub use audio::AudioService;
 pub use backend::BackendService;
 pub use chat::ChatService;

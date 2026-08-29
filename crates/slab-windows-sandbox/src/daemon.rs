@@ -13,6 +13,11 @@
 //! `ResumeThread` so a fast fork-and-exit can never escape the Job. The AppContainer child can only
 //! inherit the stdio handles listed in a `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`, so the three handles
 //! (NUL stdin + two pipe write-ends) are explicitly allowlisted.
+//!
+//! Lifetime: the daemon is tied to its owner (slab-server) via the owner-PID watchdog
+//! (`--owner-pid`). The moment that process exits — clean shutdown, crash, or taskkill — the
+//! accept loop breaks, every connection task is aborted (dropping its Jobs ⇒ `KILL_ON_JOB_CLOSE`
+//! tears the sandboxed children down), and the daemon exits with code 0.
 
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -99,13 +104,34 @@ impl WfpState {
     }
 }
 
-/// Run the daemon forever (until the process is killed). Loads the DPAPI key once (the daemon is
-/// the elevated owner) so it can verify frame tags + write the marker.
+/// Run the daemon until its owner process exits (or the process is killed). Loads the DPAPI key
+/// once (the daemon is the elevated owner) so it can verify frame tags + write the marker. When
+/// `owner_pid` is given, the watchdog (`crate::owner`) breaks the accept loop as soon as that
+/// process dies — clean shutdown, crash, or taskkill all land here — and the teardown aborts every
+/// connection so its Jobs (`KILL_ON_JOB_CLOSE`) tear the sandboxed children down. The setup marker
+/// is deliberately NOT deleted on exit: the OS-level provisions (ACLs, AppContainer profile)
+/// persist and the next `prepare` revalidates them.
 pub async fn run_daemon(
     pipe_name: String,
     key_path: PathBuf,
     marker_path: PathBuf,
+    owner_pid: Option<u32>,
 ) -> Result<(), WindowsSandboxError> {
+    // Watchdog first, fail-closed before any side effects (the DPAPI key file must not be created
+    // when there is no owner to serve): from an elevated process, OpenProcess(PROCESS_SYNCHRONIZE)
+    // on the owner essentially always succeeds, so failure means the owner is already gone.
+    let watchdog = match owner_pid {
+        Some(pid) => match crate::owner::start(pid) {
+            Ok(watchdog) => Some(watchdog),
+            Err(e) => {
+                tracing::error!(owner_pid = pid, error = %e, "daemon: cannot watch owner; refusing to start");
+                audit_owner_exit(pid, Some(&e));
+                return Err(e);
+            }
+        },
+        None => None,
+    };
+    let mut owner_rx = watchdog.as_ref().map(|w| w.subscribe());
     let key = creds::load_or_create_key(&key_path)?;
     let wfp = Arc::new(WfpState::new(&key)?);
     let mut server = ServerOptions::new()
@@ -114,13 +140,26 @@ pub async fn run_daemon(
         .map_err(|e| WindowsSandboxError::WindowsApi(format!("create pipe: {e}")))?;
 
     tracing::info!(%pipe_name, "slab-sandbox-helper daemon listening");
+    let mut conns: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     loop {
-        if let Err(e) = server.connect().await {
-            tracing::warn!(error = %e, "daemon: pipe connect failed");
-            server = ServerOptions::new()
-                .create(&pipe_name)
-                .map_err(|e2| WindowsSandboxError::WindowsApi(format!("recreate pipe: {e2}")))?;
-            continue;
+        tokio::select! {
+            // biased: poll the owner first so a dead owner never admits a new connection.
+            biased;
+            _ = crate::owner::owner_signal(&mut owner_rx) => {
+                let pid = owner_pid.unwrap_or_default();
+                tracing::info!(owner_pid = pid, "daemon: owner process exited; shutting down");
+                audit_owner_exit(pid, None);
+                break;
+            }
+            connected = server.connect() => {
+                if let Err(e) = connected {
+                    tracing::warn!(error = %e, "daemon: pipe connect failed");
+                    server = ServerOptions::new()
+                        .create(&pipe_name)
+                        .map_err(|e2| WindowsSandboxError::WindowsApi(format!("recreate pipe: {e2}")))?;
+                    continue;
+                }
+            }
         }
         let next = match ServerOptions::new().create(&pipe_name) {
             Ok(next) => next,
@@ -134,7 +173,7 @@ pub async fn run_daemon(
         let pipe_name_clone = pipe_name.clone();
         let marker_path_clone = marker_path.clone();
         let wfp_clone = wfp.clone();
-        tokio::spawn(async move {
+        conns.push(tokio::spawn(async move {
             if let Err(e) =
                 handle_connection(prev, key, pipe_name_clone, marker_path_clone, wfp_clone).await
             {
@@ -150,7 +189,36 @@ pub async fn run_daemon(
                 .error(e.to_string())
                 .record();
             }
-        });
+        }));
+        // Prune finished handles so the vec cannot grow unbounded over the daemon's lifetime.
+        conns.retain(|handle| !handle.is_finished());
+    }
+    // Abort every connection task so its ConnectionState (and every JobHandle) drops ⇒
+    // KILL_ON_JOB_CLOSE tears the sandboxed children down, and the last Arc<WfpState> drops ⇒ the
+    // DYNAMIC WFP session closes and removes its filters. Daemon process exit would close these
+    // handles anyway; aborting first makes teardown deterministic for in-process callers (tests).
+    // One shared deadline bounds the drain.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    for conn in conns.drain(..) {
+        conn.abort();
+        let _ = tokio::time::timeout_at(deadline, conn).await;
+    }
+    drop(watchdog);
+    Ok(())
+}
+
+/// Record the daemon's owner-driven shutdown in the unified sandbox audit log (the daemon's stderr
+/// is hidden, so this is the only observable trace). Covers both the normal owner-exited path and
+/// the fail-closed cannot-watch-owner startup refusal (distinguished by `error`).
+fn audit_owner_exit(owner_pid: u32, error: Option<&WindowsSandboxError>) {
+    let record = slab_utils::log::SandboxAudit::new(
+        slab_utils::log::AuditKind::DaemonOwnerExited,
+        "slab-windows-sandbox::daemon",
+    )
+    .args(format!("owner_pid={owner_pid}"));
+    match error {
+        Some(e) => record.error(e.to_string()).record(),
+        None => record.record(),
     }
 }
 
@@ -620,7 +688,9 @@ fn spawn_low_il_child_sync(
 
     // Assign the Job WHILE SUSPENDED. On failure, terminate the suspended child (never resume an
     // untracked process) and fail closed.
-    if let Err(e) = job.assign_process(pi.hProcess) {
+    // SAFETY: `pi.hProcess` is the freshly created (suspended) child's process handle
+    // from `CreateProcessW`, still valid and open here.
+    if let Err(e) = unsafe { job.assign_process(pi.hProcess) } {
         unsafe {
             TerminateProcess(pi.hProcess, 1);
             CloseHandle(pi.hProcess);

@@ -301,7 +301,7 @@ describe.sequential("assistant real-dev e2e fuzzing", () => {
 async function preflightRealDevEnvironment(): Promise<string> {
   const health = await fetch(`${serverBaseUrl}/health`).catch((error) => {
     throw new Error(
-      `Cannot reach slab-server at ${serverBaseUrl}/health. Start dev with 'bun run dev:app'. ${String(error)}`
+      `Cannot reach slab-server at ${serverBaseUrl}/health. Start dev with 'bun run dev:desktop'. ${String(error)}`
     )
   })
   if (!health.ok) {
@@ -315,7 +315,7 @@ async function preflightRealDevEnvironment(): Promise<string> {
 
   const ui = await fetch(uiBaseUrl).catch((error) => {
     throw new Error(
-      `Cannot reach the desktop dev UI at ${uiBaseUrl}. Start dev with 'bun run dev:app'. ${String(error)}`
+      `Cannot reach the desktop dev UI at ${uiBaseUrl}. Start dev with 'bun run dev:desktop'. ${String(error)}`
     )
   })
   if (!ui.ok) {

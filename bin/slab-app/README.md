@@ -17,8 +17,8 @@ Bun-managed application package.
 Prefer the repo-root scripts for normal development:
 
 ```sh
-bun run dev:app
-bun run build:app
+bun run dev:desktop
+bun run build:desktop
 bun run build:windows-installer
 ```
 

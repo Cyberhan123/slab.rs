@@ -18,6 +18,9 @@ pub mod response;
 pub use compact::{SummarizingCompactPort, maybe_compact_messages};
 pub use harness::HarnessService;
 pub use response::ResponseService;
+/// Re-exported so harness consumers (`slab-server`) can name the timeline
+/// entry type without a direct `slab-agent-rollout` dependency.
+pub use slab_agent_rollout::TurnTimelineEntry;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -58,6 +61,16 @@ pub(crate) trait RolloutConversationStore: Send + Sync {
     /// Persisted full-fidelity `TurnItem` snapshots for a thread, ordered by
     /// `(turn_index, seq)` for deterministic replay.
     async fn list_turn_items(&self, thread_id: &str) -> Result<Vec<TurnItemRecord>, AgentError>;
+
+    /// Persisted interleaved `TurnItem` + `MessageAppend` timeline for a
+    /// thread, in rollout write (file) order with per-turn attribution — the
+    /// single ordered source for the `thread/resume` history projection (the
+    /// bucket-merge over separate reads lost ordering when a `TurnState`
+    /// restamp collapsed every message onto the last turn).
+    async fn list_turn_timeline(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<slab_agent_rollout::TurnTimelineEntry>, AgentError>;
 
     /// Persisted turn-state records for a thread ordered by `turn_index`.
     async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError>;
@@ -235,7 +248,20 @@ impl AgentCore {
         &self,
         thread_id: &str,
         message: ConversationMessage,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<bool, AppCoreError> {
+        // Steering: a RUNNING thread queues the input for the next iteration
+        // boundary instead of hard-failing with ThreadBusy. The run loop
+        // drains it after the current LLM call / tool batch (needs_follow_up =
+        // model wants more OR queue non-empty).
+        match self.runtime().control().queue_input(thread_id, message.clone()).await {
+            Ok(slab_agent::SendOutcome::Queued { position }) => {
+                tracing::debug!(thread_id, position, "steering input queued for the running turn");
+                return Ok(true);
+            }
+            Ok(slab_agent::SendOutcome::NeedsResume) => {}
+            Err(error) => return Err(AppCoreError::from(error)),
+        }
+
         let mut records = self.reader().list_thread_messages(thread_id).await?;
         records.sort_by(|left, right| {
             left.turn_index
@@ -247,14 +273,38 @@ impl AgentCore {
             records.iter().map(|record| record.turn_index).max().map_or(0, |index| index + 1);
         let mut messages: Vec<ConversationMessage> =
             records.into_iter().map(|record| record.message).collect();
-        let emit_from = messages.len();
-        messages.push(message);
-        self.runtime
-            .resume_thread(thread_id, messages, starting_turn_index, Some(emit_from))
+        messages.push(message.clone());
+        // Exactly ONE message is new (the user input above). A trailing COUNT,
+        // not an absolute index — the OnAgentStart init-batch merge inside
+        // `run()` shifts history positions, and an absolute anchor would drift
+        // and re-emit a tail of old messages as `MessageAppended` (duplicating
+        // them in the rollout).
+        match self
+            .runtime
+            .resume_thread(thread_id, messages, starting_turn_index, Some(1))
             .await
-            .map_err(AppCoreError::from)?;
+            .map_err(AppCoreError::from)
+        {
+            Ok(()) => {}
+            // Lost the idle-window race: another starter made the thread live
+            // between the queue probe and the resume — the input now belongs
+            // in that run's steering queue.
+            Err(AppCoreError::TooManyRequests(detail)) if detail.contains("already running") => {
+                return match self.runtime().control().queue_input(thread_id, message).await {
+                    Ok(slab_agent::SendOutcome::Queued { .. }) => Ok(true),
+                    // Went idle again in the meantime — surface the original
+                    // busy error; a retry from the caller will take the
+                    // resume path cleanly.
+                    Ok(slab_agent::SendOutcome::NeedsResume) => {
+                        Err(AppCoreError::TooManyRequests(detail))
+                    }
+                    Err(error) => Err(AppCoreError::from(error)),
+                };
+            }
+            Err(error) => return Err(error),
+        }
         self.ensure_rollout_persistence(thread_id);
-        Ok(())
+        Ok(false)
     }
 
     /// Append plain-text user input to an existing agent thread and run the next
@@ -276,6 +326,7 @@ impl AgentCore {
             },
         )
         .await
+        .map(|_| ())
     }
 
     /// Restore the latest root thread for a chat session and its persisted messages.

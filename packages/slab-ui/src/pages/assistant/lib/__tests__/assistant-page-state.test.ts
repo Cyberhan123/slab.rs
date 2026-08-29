@@ -198,7 +198,7 @@ describe('assistant page state helpers', () => {
     );
     // No selected model yet.
     expect(getSelectedModelStatusLabel({ ...base, selectedModel: undefined })).toBe(
-      'pages.assistant.status.selectModel',
+      'common.fields.selectModel',
     );
     // A pending download surfaces before the local-not-downloaded branch.
     expect(

@@ -395,7 +395,7 @@ flowchart LR
 
 - [10_config_and_settings.md](./10_config_and_settings.md) - MCP 配置管理
 - [11_desktop_frontend.md](./11_desktop_frontend.md) - 前端集成
-- [01_global_map.md](./01_global_map.md) - 系统整体架构
+- [00_global_map.md](./00_global_map.md) - 系统整体架构
 
 ---
 

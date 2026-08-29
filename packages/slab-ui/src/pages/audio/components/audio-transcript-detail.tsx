@@ -132,13 +132,13 @@ export function AudioTranscriptDetail({ isTauri, task }: AudioTranscriptDetailPr
 
         <div>
           <p className="text-caption font-bold uppercase tracking-eyebrow text-muted-foreground">
-            {t('pages.audio.history.fields.source')}
+            {t('common.fields.source')}
           </p>
           <p className="mt-2 break-all text-sm text-foreground">{task.source_path}</p>
         </div>
         <div className="grid grid-cols-1 gap-3 text-sm">
           <div>
-            <p className="text-xs text-muted-foreground">{t('pages.audio.history.fields.model')}</p>
+            <p className="text-xs text-muted-foreground">{t('common.fields.model')}</p>
             <p className="font-semibold">{task.model_id ?? task.backend_id}</p>
           </div>
           <div>

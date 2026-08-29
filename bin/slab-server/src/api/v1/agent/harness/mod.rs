@@ -16,7 +16,7 @@ use axum::extract::{Query, State};
 use axum::response::Response;
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
-use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot, TurnItemRecord, TurnStateRecord};
+use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot, TurnStateRecord};
 use slab_agent::protocol::{Thread, Turn, TurnItem, UserMessageContent};
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::HarnessService;
@@ -143,7 +143,11 @@ fn thread_from_snapshot_with_id(id: &str, snapshot: &ThreadSnapshot) -> Thread {
         .unwrap_or(0);
     Thread {
         id: id.to_owned(),
-        preview: snapshot.completion_text.clone().unwrap_or_default(),
+        preview: snapshot
+            .completion_text
+            .as_deref()
+            .map(slab_agent::strip_think_blocks)
+            .unwrap_or_default(),
         // model_provider would require parsing the AgentConfig JSON; left empty
         // until a structured accessor exists.
         model_provider: String::new(),
@@ -155,12 +159,16 @@ fn thread_from_snapshot_with_id(id: &str, snapshot: &ThreadSnapshot) -> Thread {
 /// Map one persisted message into one or more harness [`TurnItem`]s.
 ///
 /// `role:"user"` → a single `UserMessage`; `role:"assistant"` → an
-/// `AgentMessage` (text) plus one `McpToolCall` per emitted tool call; any other
-/// role (e.g. tool results) → a `CommandExecution` surfacing the rendered output.
+/// `AgentMessage` (text) plus one `McpToolCall` per emitted tool call; tool
+/// results → a `CommandExecution` surfacing the rendered output.
+/// `system` / `developer` roles (the injected init-context batch) are
+/// LLM-visible only and NEVER render in the restored UI history — returning
+/// empty keeps them out of the conversation timeline.
 fn turn_items_for_message(message: &ThreadMessageRecord) -> Vec<TurnItem> {
     let id = message.id.clone();
     let record = &message.message;
     match record.role.as_str() {
+        "system" | "developer" => Vec::new(),
         "user" => vec![TurnItem::UserMessage {
             id,
             content: vec![UserMessageContent::Text { text: record.content.rendered_text() }],
@@ -203,85 +211,151 @@ fn turn_items_for_message(message: &ThreadMessageRecord) -> Vec<TurnItem> {
     }
 }
 
-/// Like [`thread_from_snapshot_with_id`] but populates `turns` for `thread/resume`.
+/// How many previously rendered messages the duplicate guard remembers. The
+/// historical emit-anchor drift re-appended a contiguous tail of old messages
+/// before each new user input, so duplicates always appear close together — a
+/// short window suppresses them without masking legitimate far-apart repeats.
+const RESTORE_DEDUPE_WINDOW: usize = 8;
+
+/// Duplicate guard for restored message entries.
 ///
-/// Turns with persisted full-fidelity `TurnItem` snapshots (in `turn_items`)
-/// are rebuilt verbatim from those — user prompt (from `messages`) followed by
-/// the assistant-side items in arrival order. Turns WITHOUT snapshots
-/// (pre-migration history that was never captured) fall back to lossy synthesis
-/// from `messages` via [`turn_items_for_message`], so old threads keep rendering
-/// whatever was persisted instead of going blank.
-fn thread_from_snapshot_with_turns(
+/// `true` when an identical (role, rendered text) message was already rendered
+/// within the last [`RESTORE_DEDUPE_WINDOW`] rendered messages; rendering a
+/// message records it in the window.
+#[derive(Default)]
+struct RestoreDedupe {
+    window: std::collections::VecDeque<(String, String)>,
+}
+
+impl RestoreDedupe {
+    fn seen(&self, role: &str, text: &str) -> bool {
+        self.window.iter().any(|(r, t)| r == role && t == text)
+    }
+
+    fn record(&mut self, role: &str, text: &str) {
+        if self.window.len() == RESTORE_DEDUPE_WINDOW {
+            self.window.pop_front();
+        }
+        self.window.push_back((role.to_owned(), text.to_owned()));
+    }
+}
+
+/// Like [`thread_from_snapshot_with_id`] but populates `turns` for
+/// `thread/resume`, from the interleaved rollout timeline.
+///
+/// The timeline (`list_turn_timeline`) carries `TurnItem` artifacts and
+/// `MessageAppend` records in the order their rollout lines were written, so
+/// the restored history renders in the same order the live event stream
+/// produced — no per-turn bucket re-merge. Per turn:
+/// - turns WITH persisted `TurnItem` snapshots render the turn's user
+///   messages followed by the items verbatim (assistant/tool messages are
+///   carried by the items);
+/// - turns WITHOUT snapshots (interrupted turns, legacy data) synthesize
+///   lossily from their messages via [`turn_items_for_message`], skipping the
+///   `system`/`developer` init-context batch;
+/// - message entries whose (role, text) matches a recently rendered message
+///   are dropped — rollout files written by the historical emit-anchor drift
+///   re-appended a tail of old messages before each new input.
+fn thread_from_timeline(
     id: &str,
     snapshot: &ThreadSnapshot,
-    messages: &[ThreadMessageRecord],
     turn_states: &[TurnStateRecord],
-    turn_items: &[TurnItemRecord],
+    timeline: &[slab_app_core::domain::services::TurnTimelineEntry],
 ) -> Thread {
     let created_at = chrono::DateTime::parse_from_rfc3339(&snapshot.created_at)
         .map(|dt| dt.timestamp_millis())
         .unwrap_or(0);
 
-    // Decode persisted TurnItem snapshots, grouped by turn. SQL returns them
-    // ordered by (turn_index, seq); decode failures are skipped with a warning.
-    let mut items_by_turn: std::collections::BTreeMap<u32, Vec<TurnItem>> =
-        std::collections::BTreeMap::new();
-    for record in turn_items {
-        match serde_json::from_str::<TurnItem>(&record.item_json) {
-            Ok(item) => items_by_turn.entry(record.turn_index).or_default().push(item),
-            Err(error) => {
-                tracing::warn!(
-                    thread_id = %snapshot.id,
-                    turn_index = record.turn_index,
-                    item_id = %record.id,
-                    error = %error,
-                    "failed to decode persisted TurnItem; skipping",
-                );
+    // Bucket the timeline by turn, preserving entry (file) order within a turn.
+    let mut by_turn: std::collections::BTreeMap<
+        u32,
+        Vec<&slab_app_core::domain::services::TurnTimelineEntry>,
+    > = std::collections::BTreeMap::new();
+    for entry in timeline {
+        let turn_index = match entry {
+            slab_app_core::domain::services::TurnTimelineEntry::Item(record) => record.turn_index,
+            slab_app_core::domain::services::TurnTimelineEntry::Message(record) => {
+                record.turn_index
             }
-        }
+        };
+        by_turn.entry(turn_index).or_default().push(entry);
     }
 
-    // Group messages by turn index, preserving chronological order within a turn.
-    let mut msgs_by_turn: std::collections::BTreeMap<u32, Vec<&ThreadMessageRecord>> =
-        std::collections::BTreeMap::new();
-    for message in messages {
-        msgs_by_turn.entry(message.turn_index).or_default().push(message);
-    }
-    for msgs in msgs_by_turn.values_mut() {
-        msgs.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-    }
-
-    // Union of turn indices across snapshots and messages.
-    let mut indices: std::collections::BTreeSet<u32> = items_by_turn.keys().copied().collect();
-    indices.extend(msgs_by_turn.keys().copied());
-
-    let turns = indices
+    let mut dedupe = RestoreDedupe::default();
+    let turns = by_turn
         .into_iter()
-        .map(|index| {
-            let persisted = items_by_turn.remove(&index).unwrap_or_default();
-            let msgs = msgs_by_turn.get(&index);
+        .map(|(index, entries)| {
+            // Decode the turn's persisted TurnItem snapshots; decode failures
+            // are skipped with a warning.
+            let mut persisted: Vec<TurnItem> = Vec::new();
+            for entry in &entries {
+                if let slab_app_core::domain::services::TurnTimelineEntry::Item(record) = entry {
+                    match serde_json::from_str::<TurnItem>(&record.item_json) {
+                        Ok(item) => persisted.push(item),
+                        Err(error) => {
+                            tracing::warn!(
+                                thread_id = %snapshot.id,
+                                turn_index = record.turn_index,
+                                item_id = %record.id,
+                                error = %error,
+                                "failed to decode persisted TurnItem; skipping",
+                            );
+                        }
+                    }
+                }
+            }
+
+            let messages: Vec<&ThreadMessageRecord> = entries
+                .iter()
+                .filter_map(|entry| match entry {
+                    slab_app_core::domain::services::TurnTimelineEntry::Message(record) => {
+                        Some(record)
+                    }
+                    _ => None,
+                })
+                .collect();
+
             let items = if !persisted.is_empty() {
-                // Full-fidelity turn: user prompt (from messages) + persisted items.
+                // Full-fidelity turn: user prompts (from the timeline's
+                // message entries) + persisted items; assistant/tool messages
+                // are carried by the items and skipped.
                 let mut items = Vec::new();
-                if let Some(user) = msgs.and_then(|ms| ms.iter().find(|m| m.message.role == "user"))
-                    && let Some(item) = user_message_item(user)
-                {
-                    items.push(item);
+                for record in &messages {
+                    if record.message.role != "user" {
+                        continue;
+                    }
+                    let text = record.message.content.rendered_text();
+                    if dedupe.seen("user", &text) {
+                        continue;
+                    }
+                    dedupe.record("user", &text);
+                    if let Some(item) = user_message_item(record) {
+                        items.push(item);
+                    }
                 }
                 items.extend(persisted);
                 items
             } else {
-                // Pre-migration turn (no snapshots): synthesize from messages.
+                // Snapshot-less turn (interrupted / legacy): synthesize from
+                // the message entries, skipping system/developer.
                 let mut items = Vec::new();
-                if let Some(msgs) = msgs {
-                    for message in msgs {
-                        items.extend(turn_items_for_message(message));
+                for record in &messages {
+                    let role = record.message.role.as_str();
+                    let text = record.message.content.rendered_text();
+                    if dedupe.seen(role, &text) {
+                        continue;
                     }
+                    dedupe.record(role, &text);
+                    items.extend(turn_items_for_message(record));
                 }
                 items
             };
+            // LAST-wins: a turn emits several TurnState lines (sampling entry
+            // → phase lines → terminal); `.find()` used to pick the FIRST,
+            // so restored turns always showed the entry status ("running").
             let status = turn_states
                 .iter()
+                .rev()
                 .find(|state| state.turn_index == index)
                 .map(|state| state.status.clone())
                 .filter(|status| !status.trim().is_empty())
@@ -292,7 +366,11 @@ fn thread_from_snapshot_with_turns(
 
     Thread {
         id: id.to_owned(),
-        preview: snapshot.completion_text.clone().unwrap_or_default(),
+        preview: snapshot
+            .completion_text
+            .as_deref()
+            .map(slab_agent::strip_think_blocks)
+            .unwrap_or_default(),
         model_provider: String::new(),
         created_at,
         turns,
@@ -343,6 +421,22 @@ fn standard_reasoning_efforts() -> Vec<ReasoningEffortOption> {
         description: format!("{effort:?}").to_lowercase(),
     })
     .collect()
+}
+
+/// Map the harness wire [`ReasoningEffort`] onto the agent-config enum the
+/// LLM adapter consumes. `xhigh` clamps to `High` — the config enum has no
+/// xhigh variant (same closed set the REST `parse_reasoning_effort` accepts).
+pub(crate) fn chat_reasoning_effort_from_proto(
+    effort: ReasoningEffort,
+) -> slab_types::chat::ChatReasoningEffort {
+    match effort {
+        ReasoningEffort::Off => slab_types::chat::ChatReasoningEffort::None,
+        ReasoningEffort::Low => slab_types::chat::ChatReasoningEffort::Low,
+        ReasoningEffort::Medium => slab_types::chat::ChatReasoningEffort::Medium,
+        ReasoningEffort::High | ReasoningEffort::Xhigh => {
+            slab_types::chat::ChatReasoningEffort::High
+        }
+    }
 }
 
 /// Scan workspace + global skills for the active workspace. Used to expand
@@ -537,6 +631,8 @@ fn messages_from_input(
 mod tests {
     use super::*;
 
+    use slab_agent::port::TurnItemRecord;
+
     #[test]
     fn join_user_text_concatenates_text_inputs() {
         let input = vec![
@@ -649,6 +745,7 @@ mod tests {
             remote_model_id: remote.to_owned(),
             display_name: label.to_owned(),
             description: label.to_owned(),
+            context_window: None,
             is_default,
         }
     }
@@ -680,6 +777,17 @@ mod tests {
                 ReasoningEffort::Xhigh,
             ]
         );
+    }
+
+    #[test]
+    fn chat_reasoning_effort_from_proto_maps_full_wire_set() {
+        use slab_types::chat::ChatReasoningEffort as Config;
+        assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::Off), Config::None);
+        assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::Low), Config::Low);
+        assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::Medium), Config::Medium);
+        assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::High), Config::High);
+        // No xhigh variant on the config side — clamped to High.
+        assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::Xhigh), Config::High);
     }
 
     #[test]
@@ -723,13 +831,17 @@ mod tests {
     }
 
     #[test]
-    fn thread_from_snapshot_with_turns_groups_messages_into_turns() {
-        let messages = vec![
+    fn thread_from_timeline_groups_messages_into_turns() {
+        let messages = [
             record("m1", 0, "user", "hello", "2024-01-01T00:00:01Z"),
             record("m2", 0, "assistant", "hi there", "2024-01-01T00:00:02Z"),
             record("m3", 1, "user", "again", "2024-01-01T00:00:03Z"),
             record("m4", 1, "assistant", "yes", "2024-01-01T00:00:04Z"),
         ];
+        let timeline: Vec<slab_app_core::domain::services::TurnTimelineEntry> = messages
+            .iter()
+            .map(|m| slab_app_core::domain::services::TurnTimelineEntry::Message(m.clone()))
+            .collect();
         let turn_states = vec![TurnStateRecord {
             thread_id: "t1".to_owned(),
             turn_index: 0,
@@ -742,8 +854,7 @@ mod tests {
             completed_at: None,
         }];
 
-        let thread =
-            thread_from_snapshot_with_turns("hthread-1", &snapshot(), &messages, &turn_states, &[]);
+        let thread = thread_from_timeline("hthread-1", &snapshot(), &turn_states, &timeline);
 
         assert_eq!(thread.id, "hthread-1");
         assert_eq!(thread.preview, "hi there");
@@ -765,10 +876,10 @@ mod tests {
     }
 
     #[test]
-    fn thread_from_snapshot_with_turns_replays_full_fidelity_items() {
+    fn thread_from_timeline_replays_full_fidelity_items() {
         // Turn 0 has persisted snapshots → rendered verbatim; turn 1 has none →
         // falls back to message synthesis.
-        let messages = vec![
+        let messages = [
             record("u1", 0, "user", "hello", "2024-01-01T00:00:01Z"),
             record("a1", 0, "assistant", "stale lossy text", "2024-01-01T00:00:02Z"),
         ];
@@ -806,8 +917,18 @@ mod tests {
             },
         ];
 
-        let thread =
-            thread_from_snapshot_with_turns("hthread-1", &snapshot(), &messages, &[], &persisted);
+        // Timeline: user message, then the turn's items in write order, then
+        // the assistant append (carried by the items — must not re-render).
+        let mut timeline: Vec<slab_app_core::domain::services::TurnTimelineEntry> = Vec::new();
+        timeline
+            .push(slab_app_core::domain::services::TurnTimelineEntry::Message(messages[0].clone()));
+        for item in &persisted {
+            timeline.push(slab_app_core::domain::services::TurnTimelineEntry::Item(item.clone()));
+        }
+        timeline
+            .push(slab_app_core::domain::services::TurnTimelineEntry::Message(messages[1].clone()));
+
+        let thread = thread_from_timeline("hthread-1", &snapshot(), &[], &timeline);
 
         assert_eq!(thread.turns.len(), 1);
         let turn0 = &thread.turns[0];
@@ -825,5 +946,132 @@ mod tests {
             TurnItem::CommandExecution { command, cwd, exit_code: Some(0), .. }
             if command == "ls -la" && cwd == "/workspace"
         ));
+    }
+
+    // Regression for the restore-ordering bug: a timeline shaped like the real
+    // broken session (init batch, historical emit-drift re-appends, tool
+    // items, snapshot-less tail turn) must restore as the LIVE event sequence
+    // — user prompt + items per turn, duplicates and init-context messages
+    // dropped — not a bare assistant block followed by re-merged history.
+    #[test]
+    fn thread_from_timeline_restores_live_order_from_drifted_file() {
+        let mut timeline: Vec<slab_app_core::domain::services::TurnTimelineEntry> = Vec::new();
+        let mut msg_id = 0;
+        let mut msg = |turn: u32, role: &str, text: &str| {
+            msg_id += 1;
+            slab_app_core::domain::services::TurnTimelineEntry::Message(record(
+                &format!("m{msg_id}"),
+                turn,
+                role,
+                text,
+                "2024-01-01T00:00:00Z",
+            ))
+        };
+        let item = |id: &str, turn: u32, item: TurnItem| {
+            slab_app_core::domain::services::TurnTimelineEntry::Item(TurnItemRecord {
+                id: id.to_owned(),
+                thread_id: "t1".to_owned(),
+                turn_index: turn,
+                seq: 0,
+                item_json: serde_json::to_string(&item).unwrap(),
+                created_at: "2024-01-01T00:00:00Z".to_owned(),
+            })
+        };
+
+        // Turn 0: init batch + user "你是谁" + reply items.
+        timeline.extend([
+            msg(0, "system", "You are Slab, an AI agent."),
+            msg(0, "developer", "<environment_context>…"),
+            msg(0, "user", "你是谁"),
+            item(
+                "r0",
+                0,
+                TurnItem::Reasoning {
+                    id: "r0".to_owned(),
+                    summary: slab_agent::protocol::ReasoningText::one(""),
+                    content: slab_agent::protocol::ReasoningText::one("thinking"),
+                },
+            ),
+            item(
+                "a0",
+                0,
+                TurnItem::AgentMessage { id: "a0".to_owned(), text: "我是 Slab".to_owned() },
+            ),
+        ]);
+        // Turn 1: historical emit-drift re-append of the prior tail + the new
+        // input + tool items (the permission-test turn).
+        timeline.extend([
+            msg(1, "developer", "<environment_context>…"),
+            msg(1, "user", "你是谁"),
+            msg(1, "user", "我现在需要进行权限测试，你随便执行一个命令"),
+            item(
+                "r1",
+                1,
+                TurnItem::Reasoning {
+                    id: "r1".to_owned(),
+                    summary: slab_agent::protocol::ReasoningText::one(""),
+                    content: slab_agent::protocol::ReasoningText::one("need approval"),
+                },
+            ),
+            item(
+                "a1",
+                1,
+                TurnItem::AgentMessage {
+                    id: "a1".to_owned(), text: "需要用户批准".to_owned()
+                },
+            ),
+            item(
+                "c1",
+                1,
+                TurnItem::CommandExecution {
+                    id: "c1".to_owned(),
+                    command: "echo hi".to_owned(),
+                    cwd: "/".to_owned(),
+                    process_id: None,
+                    status: "completed".to_owned(),
+                    aggregated_output: None,
+                    exit_code: Some(0),
+                    duration_ms: None,
+                },
+            ),
+        ]);
+        // Turn 2: snapshot-less (interrupted) turn — synthesized from messages.
+        timeline.extend([msg(2, "user", "你能做什么")]);
+
+        let thread = thread_from_timeline("hthread-1", &snapshot(), &[], &timeline);
+        assert_eq!(thread.turns.len(), 3);
+
+        // Turn 0: user prompt + items — no system/developer rendered, no bare
+        // assistant block.
+        let t0 = &thread.turns[0];
+        assert_eq!(t0.items.len(), 3);
+        assert!(matches!(&t0.items[0], TurnItem::UserMessage { content, .. }
+            if matches!(&content[0], UserMessageContent::Text { text } if text == "你是谁")));
+        assert!(matches!(&t0.items[1], TurnItem::Reasoning { .. }));
+        assert!(matches!(&t0.items[2], TurnItem::AgentMessage { text, .. } if text == "我是 Slab"));
+
+        // Turn 1: drifted dupes dropped; only the real input + items render.
+        let t1 = &thread.turns[1];
+        assert_eq!(t1.items.len(), 4);
+        assert!(matches!(&t1.items[0], TurnItem::UserMessage { content, .. }
+            if matches!(&content[0], UserMessageContent::Text { text }
+                if text == "我现在需要进行权限测试，你随便执行一个命令")));
+        assert!(matches!(&t1.items[1], TurnItem::Reasoning { .. }));
+        assert!(matches!(
+            &t1.items[3],
+            TurnItem::CommandExecution { command, .. } if command == "echo hi"
+        ));
+
+        // Turn 2: synthesized user message.
+        let t2 = &thread.turns[2];
+        assert_eq!(t2.items.len(), 1);
+        assert!(matches!(&t2.items[0], TurnItem::UserMessage { .. }));
+    }
+
+    #[test]
+    fn turn_items_for_message_skips_init_context_roles() {
+        // system/developer messages are LLM-visible only — never UI items.
+        assert!(turn_items_for_message(&record("s1", 0, "system", "persona", "t")).is_empty());
+        assert!(turn_items_for_message(&record("d1", 0, "developer", "<skills>", "t")).is_empty());
     }
 }

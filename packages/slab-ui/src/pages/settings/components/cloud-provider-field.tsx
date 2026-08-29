@@ -334,7 +334,7 @@ export function CloudProviderField({ value, errorState, onChange }: CloudProvide
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="ghost">
-                {t('pages.settings.providerRegistry.dialog.cancel')}
+                {t('common.actions.cancel')}
               </Button>
             </DialogClose>
             <Button type="submit" form="cloud-provider-form">

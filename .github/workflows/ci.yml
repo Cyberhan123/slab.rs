@@ -48,7 +48,8 @@ jobs:
           sudo apt-get install -y \
             libssl-dev \
             pkg-config \
-            python3-dev
+            python3-dev \
+            libglib2.0-dev
 
       - name: Apply patches (vendor setup)
         run: bun run scripts/apply-patches.ts
@@ -102,6 +103,9 @@ jobs:
       - name: Apply patches (vendor setup)
         run: bun run scripts/apply-patches.ts
 
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
+
       - name: Check API type drift
         run: |
           bun run gen:api
@@ -136,6 +140,48 @@ jobs:
       - name: Check desktop bundle budget
         run: bun run check:bundle-budget
 
+  mobile-check:
+    name: Mobile (Flutter) asset drift / analyze / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.38.5
+          cache: true
+
+      - name: Regenerate mobile assets (tokens + locales)
+        run: bun run gen:mobile
+
+      - name: Check generated drift
+        run: |
+          git diff --exit-code flutter/slab-mobile/design/tokens.json \
+            flutter/slab-mobile/lib/core/theme/slab_tokens.g.dart \
+            flutter/slab-mobile/assets/theme/tdesign-theme.json \
+            flutter/slab-mobile/lib/core/l10n/arb \
+            flutter/slab-mobile/lib/core/l10n/catalog_entries.g.dart
+
+      - name: flutter pub get
+        run: bun ./scripts/mobile/run.ts pub get
+
+      - name: flutter analyze
+        run: bun run check:mobile
+
+      - name: flutter test
+        run: bun run test:mobile
+
   fullstack-e2e:
     name: Fullstack E2E (manual / nightly)
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
@@ -162,7 +208,8 @@ jobs:
           sudo apt-get install -y \
             libssl-dev \
             pkg-config \
-            python3-dev
+            python3-dev \
+            libglib2.0-dev
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

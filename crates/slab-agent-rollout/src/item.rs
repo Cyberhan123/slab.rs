@@ -114,6 +114,11 @@ pub struct CompactedPayload {
     pub compacted_messages: Vec<ConversationMessage>,
     /// Number of messages removed by this compaction.
     pub removed_messages: u32,
+    /// Tool results the deterministic micro tier stubbed (content-only
+    /// shrink — distinguishes a micro-only compaction from a summarize pass
+    /// that removed messages). Defaults to `0` for older rollout files.
+    #[serde(default)]
+    pub stubbed_messages: u32,
     /// Token count of the summary, when known.
     pub output_tokens: u32,
     /// Free-form compaction status (e.g. `"auto"`, `"manual"`).
@@ -278,6 +283,7 @@ mod tests {
                 thread_id: "t1".to_owned(),
                 compacted_messages: vec![],
                 removed_messages: 3,
+                stubbed_messages: 2,
                 output_tokens: 10,
                 status: "auto".to_owned(),
                 turn_index: 1,
@@ -371,5 +377,21 @@ mod tests {
         assert_eq!(ts.turn_index(), 5);
         assert_eq!(RolloutItem::TurnContext(ts).turn_index(), Some(5));
         assert_eq!(RolloutItem::TurnItem(sample_turn_item()).turn_index(), None);
+    }
+
+    #[test]
+    fn compacted_payload_defaults_stubbed_messages_for_old_lines() {
+        // Rollout files written before the micro-tier stub count existed have
+        // no `stubbedMessages` key — they must deserialize with 0.
+        let json = serde_json::json!({
+            "threadId": "t1",
+            "compactedMessages": [],
+            "removedMessages": 3,
+            "outputTokens": 10,
+            "status": "auto",
+            "turnIndex": 1,
+        });
+        let payload: CompactedPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(payload.stubbed_messages, 0);
     }
 }

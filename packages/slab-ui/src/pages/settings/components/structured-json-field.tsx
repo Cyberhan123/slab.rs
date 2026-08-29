@@ -577,8 +577,8 @@ function BooleanEditor({
     <div className="flex items-center justify-between rounded-2xl border border-border/70 bg-background/70 px-4 py-3">
       <span className="text-sm text-muted-foreground">
         {value === true
-          ? t('pages.settings.field.enabled')
-          : t('pages.settings.field.disabled')}
+          ? t('common.status.enabled')
+          : t('common.status.disabled')}
       </span>
       <Switch checked={value === true} onCheckedChange={(nextValue) => onChange(nextValue)} />
     </div>

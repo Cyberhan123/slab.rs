@@ -49,7 +49,7 @@ export function HubDeleteModelDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>
-            {t('pages.hub.dialogs.delete.cancel')}
+            {t('common.actions.cancel')}
           </AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"

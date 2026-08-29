@@ -13,6 +13,7 @@ import {
   TerminalTitle,
 } from "./terminal"
 import {
+  isApprovalPending,
   deriveState,
   isToolActive,
   Tool,
@@ -20,6 +21,33 @@ import {
   ToolHeader,
   type ToolPartLike,
 } from "./message-tool-part"
+
+/** Parsed shape of the shell tool's `SandboxedOutput` JSON result. */
+interface CommandExecutionOutput {
+  stdout?: string
+  stderr?: string
+  exit_code?: number
+  timed_out?: boolean
+}
+
+/**
+ * Parse a finalized command output that the shell tool serializes as a
+ * `{"stdout","stderr","exit_code","timed_out"}` JSON string. Returns `null` for
+ * plain-text output (older rollouts, other command-like tools), so the terminal
+ * falls back to rendering the raw string.
+ */
+export function parseCommandExecutionOutput(raw: string): CommandExecutionOutput | null {
+  if (!raw.startsWith("{")) return null
+  try {
+    const value = JSON.parse(raw) as unknown
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return null
+    const candidate = value as Record<string, unknown>
+    if (typeof candidate.stdout !== "string" && typeof candidate.stderr !== "string") return null
+    return candidate as CommandExecutionOutput
+  } catch {
+    return null
+  }
+}
 
 /**
  * Renders a `commandExecution` tool call as an interactive terminal (ANSI
@@ -29,7 +57,9 @@ import {
  * composed `<Terminal>`:
  *   - `TerminalHeader` shows the agent's input (the command), via `TerminalTitle`.
  *   - `TerminalContent` shows only the command output (live while running, the
- *     finalized aggregated output once complete).
+ *     finalized aggregated output once complete). A finalized
+ *     `SandboxedOutput` JSON result is split into stdout (terminal body) and
+ *     stderr (separate block), instead of dumping the raw JSON envelope.
  *
  * Registered under `messagePartComponents.tools["commandExecution"]` so the
  * parts engine routes command tools here ahead of the generic `tool` renderer
@@ -51,14 +81,17 @@ function MessageToolCommandPart({
   const input = (p.input ?? {}) as { command?: string; cwd?: string }
   const command = input.command?.trim() ?? ""
   const cwd = input.cwd?.trim() ?? ""
-  const finalizedOutput = typeof p.output === "string" ? p.output : p.errorText ?? ""
+  const finalizedRaw = typeof p.output === "string" ? p.output : p.errorText ?? ""
+  const parsed = finalizedRaw ? parseCommandExecutionOutput(finalizedRaw) : null
+  const finalizedStdout = parsed ? parsed.stdout ?? "" : finalizedRaw
+  const finalizedStderr = parsed?.stderr ?? ""
   // While the command is still running, render the streamed output deltas; once
   // it completes, the finalized output (aggregated by the server) takes over.
   const liveOutput = toolCallId ? liveOutputByItemId.get(toolCallId) : undefined
-  const body = active && liveOutput !== undefined ? liveOutput : finalizedOutput
+  const body = active && liveOutput !== undefined ? liveOutput : finalizedStdout
 
   return (
-    <Tool defaultOpen={active}>
+    <Tool defaultOpen={isApprovalPending(state)}>
       <ToolHeader title="commandExecution" state={state} />
       <ToolContent>
         {/* `output` feeds both the TerminalContent body and the copy button, so
@@ -77,6 +110,14 @@ function MessageToolCommandPart({
           </TerminalHeader>
           <TerminalContent />
         </Terminal>
+        {finalizedStderr ? (
+          <pre
+            data-testid="assistant-command-stderr"
+            className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/60 p-2 font-mono text-caption text-destructive"
+          >
+            {finalizedStderr}
+          </pre>
+        ) : null}
       </ToolContent>
     </Tool>
   )

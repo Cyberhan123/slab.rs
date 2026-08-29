@@ -122,7 +122,7 @@ export function useAssistantSessions({ lockedSessionId }: { lockedSessionId?: st
       } catch (error) {
         if (!options?.quiet) {
           toast.error(t("pages.assistant.toast.failedToCreateSession"), {
-            description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t, {
+            description: getAssistantErrorDescription(error, t("common.toasts.unknownError"), t, {
               preferServerEnvelope: assistantErrorEnvelopeRenderingEnabled,
             }),
           })
@@ -150,7 +150,7 @@ export function useAssistantSessions({ lockedSessionId }: { lockedSessionId?: st
         })
       } catch (error) {
         toast.error(t("pages.assistant.toast.failedToDeleteSession"), {
-          description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t, {
+          description: getAssistantErrorDescription(error, t("common.toasts.unknownError"), t, {
             preferServerEnvelope: assistantErrorEnvelopeRenderingEnabled,
           }),
         })
@@ -208,7 +208,7 @@ export function useAssistantSessions({ lockedSessionId }: { lockedSessionId?: st
         return true
       } catch (error) {
         toast.error(t("pages.assistant.toast.failedToUpdateSession"), {
-          description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t, {
+          description: getAssistantErrorDescription(error, t("common.toasts.unknownError"), t, {
             preferServerEnvelope: assistantErrorEnvelopeRenderingEnabled,
           }),
         })

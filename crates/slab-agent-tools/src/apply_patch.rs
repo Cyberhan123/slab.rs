@@ -14,8 +14,9 @@ use slab_agent::{
     ToolOutputStream, protocol::TurnItem,
 };
 use slab_apply_patch::{
-    AppliedPatchDelta, AppliedPatchFileChange, PatchProgress, PatchProgressKind, PatchProgressSink,
-    apply_patch_with_progress as apply_patch_engine, local_file_system,
+    AppliedPatchDelta, AppliedPatchFileChange, Hunk, PatchProgress, PatchProgressKind,
+    PatchProgressSink, UpdateFileChunk, apply_patch_with_progress as apply_patch_engine,
+    local_file_system, parse_patch,
 };
 use slab_file::{FileSystemSandboxContext, FileSystemSandboxPolicy};
 use slab_utils::path::absolute::AbsolutePathBuf;
@@ -79,11 +80,7 @@ impl ToolHandler for ApplyPatchTool {
         let patch = render.args.get("patch").and_then(Value::as_str).unwrap_or("");
         TurnItem::FileChange {
             id: render.call.id.clone(),
-            changes: vec![serde_json::json!({
-                "path": first_path_in_patch(patch),
-                "type": "edit",
-                "diff": patch,
-            })],
+            changes: patch_changes(patch),
             status: render.status.to_owned(),
         }
     }
@@ -103,8 +100,9 @@ impl ToolHandler for ApplyPatchTool {
         // sandbox `workspace_root` MUST be the same absolute path: the engine
         // strips `cwd` to form a relative path string and the local filesystem
         // adapter re-anchors it via `resolve_path(workspace_root, …)`.
-        let base = std::env::current_dir()
-            .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
+        let base = std::env::current_dir().map_err(|error| {
+            crate::error::io_tool_error("resolve current directory", &self.workspace_root, &error)
+        })?;
         let cwd = AbsolutePathBuf::resolve_path_against_base(&self.workspace_root, &base);
         let root = cwd.as_path().to_path_buf();
         let sandbox = FileSystemSandboxContext {
@@ -253,6 +251,71 @@ fn first_path_in_patch(patch: &str) -> String {
     "patch".to_owned()
 }
 
+/// Build the per-file change list for the `FileChange` turn item (and the
+/// file-change approval banner derived from it). Parses the patch into hunks
+/// so multi-file patches surface every file with its kind; falls back to the
+/// legacy single-entry form (first path + the whole patch text) when the
+/// patch is not parseable (e.g. unified diffs or heredoc wrappers) — the same
+/// parse the engine itself applies, so the card never disagrees with the
+/// execution outcome.
+fn patch_changes(patch: &str) -> Vec<Value> {
+    let hunks = match parse_patch(patch) {
+        Ok(args) if !args.hunks.is_empty() => args.hunks,
+        _ => {
+            return vec![serde_json::json!({
+                "path": first_path_in_patch(patch),
+                "type": "edit",
+                "diff": patch,
+            })];
+        }
+    };
+    hunks
+        .iter()
+        .map(|hunk| match hunk {
+            Hunk::AddFile { path, contents } => serde_json::json!({
+                "path": path.to_string_lossy(),
+                "type": "add",
+                "diff": contents
+                    .lines()
+                    .map(|line| format!("+{line}"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            }),
+            Hunk::DeleteFile { path } => serde_json::json!({
+                "path": path.to_string_lossy(),
+                "type": "delete",
+            }),
+            Hunk::UpdateFile { path, move_path, chunks } => serde_json::json!({
+                "path": move_path.as_ref().unwrap_or(path).to_string_lossy(),
+                "type": "edit",
+                "diff": update_chunks_diff(chunks),
+            }),
+        })
+        .collect()
+}
+
+/// Synthesize a display-only diff from update chunks. The apply-patch dialect
+/// stores `old_lines`/`new_lines` without unchanged context, so each chunk
+/// renders as its `@@` context header followed by the removed/added lines.
+/// Sync and filesystem-free (the render path must not touch the FS); this is
+/// for the preview card, not for application.
+fn update_chunks_diff(chunks: &[UpdateFileChunk]) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for chunk in chunks {
+        match chunk.change_context.as_deref() {
+            Some(context) if !context.is_empty() => lines.push(format!("@@ {context}")),
+            _ => lines.push("@@".to_owned()),
+        }
+        for line in &chunk.old_lines {
+            lines.push(format!("-{line}"));
+        }
+        for line in &chunk.new_lines {
+            lines.push(format!("+{line}"));
+        }
+    }
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -292,7 +355,94 @@ mod tests {
         match tool.render_turn_item(&render) {
             TurnItem::FileChange { changes, status, .. } => {
                 assert_eq!(status, "completed");
+                assert_eq!(changes.len(), 1);
                 assert_eq!(changes[0]["path"].as_str(), Some("x.rs"));
+                assert_eq!(changes[0]["type"].as_str(), Some("edit"));
+                assert_eq!(changes[0]["diff"].as_str(), Some(patch));
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_patch_renders_per_file_changes_from_begin_patch_dialect() {
+        let tool = ApplyPatchTool::new(PathBuf::from("."));
+        let patch = concat!(
+            "*** Begin Patch\n",
+            "*** Add File: new.txt\n",
+            "+hello\n",
+            "+world\n",
+            "*** Update File: mod.rs\n",
+            "@@ fn main\n",
+            "-old\n",
+            "+new\n",
+            "*** Delete File: gone.txt\n",
+            "*** End Patch\n",
+        );
+        let call = slab_agent::port::ParsedToolCall {
+            id: "c1".into(),
+            name: "apply_patch".into(),
+            arguments: "{}".into(),
+        };
+        let args = json!({ "patch": patch });
+        let render = ToolCallRender {
+            call: &call,
+            args: &args,
+            status: "running",
+            output: None,
+            workspace_root: None,
+            exit_code: None,
+            duration_ms: None,
+        };
+        match tool.render_turn_item(&render) {
+            TurnItem::FileChange { changes, status, .. } => {
+                assert_eq!(status, "running");
+                assert_eq!(changes.len(), 3);
+                assert_eq!(changes[0]["path"].as_str(), Some("new.txt"));
+                assert_eq!(changes[0]["type"].as_str(), Some("add"));
+                assert_eq!(changes[0]["diff"].as_str(), Some("+hello\n+world"));
+                assert_eq!(changes[1]["path"].as_str(), Some("mod.rs"));
+                assert_eq!(changes[1]["type"].as_str(), Some("edit"));
+                assert_eq!(changes[1]["diff"].as_str(), Some("@@ fn main\n-old\n+new"));
+                assert_eq!(changes[2]["path"].as_str(), Some("gone.txt"));
+                assert_eq!(changes[2]["type"].as_str(), Some("delete"));
+                assert!(changes[2].get("diff").is_none());
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_patch_render_falls_back_for_heredoc_wrapped_patch() {
+        let tool = ApplyPatchTool::new(PathBuf::from("."));
+        let patch = concat!(
+            "apply_patch <<'EOF'\n",
+            "*** Begin Patch\n",
+            "*** Add File: foo\n",
+            "+hi\n",
+            "*** End Patch\n",
+            "EOF",
+        );
+        let call = slab_agent::port::ParsedToolCall {
+            id: "c1".into(),
+            name: "apply_patch".into(),
+            arguments: "{}".into(),
+        };
+        let args = json!({ "patch": patch });
+        let render = ToolCallRender {
+            call: &call,
+            args: &args,
+            status: "running",
+            output: None,
+            workspace_root: None,
+            exit_code: None,
+            duration_ms: None,
+        };
+        match tool.render_turn_item(&render) {
+            TurnItem::FileChange { changes, .. } => {
+                assert_eq!(changes.len(), 1);
+                assert_eq!(changes[0]["path"].as_str(), Some("foo"));
+                assert_eq!(changes[0]["type"].as_str(), Some("edit"));
                 assert_eq!(changes[0]["diff"].as_str(), Some(patch));
             }
             other => panic!("unexpected item: {other:?}"),

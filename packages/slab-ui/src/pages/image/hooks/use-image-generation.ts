@@ -127,7 +127,7 @@ export function useImageGeneration() {
   }, []);
 
   const toPollingErrorMessage = useCallback(
-    (message: string) => t('pages.image.toast.pollingError', { message }),
+    (message: string) => t('common.toasts.pollingError', { message }),
     [t],
   );
   const {
@@ -166,10 +166,10 @@ export function useImageGeneration() {
       })),
       onChange: setSelectedModelId,
       groupLabel: t('pages.image.modelPicker.groupLabel'),
-      placeholder: t('pages.image.modelPicker.placeholder'),
+      placeholder: t('common.fields.selectModel'),
       loading: catalogLoading,
       disabled: catalogLoading || isBusy || modelOptions.length === 0,
-      emptyLabel: t('pages.image.modelPicker.emptyLabel'),
+      emptyLabel: t('common.diffusion.noModels'),
     }),
     [catalogLoading, isBusy, modelOptions, selectedModelId, setSelectedModelId, t],
   );
@@ -257,7 +257,7 @@ export function useImageGeneration() {
     setStrength(request.strength ?? strength);
     setInitImageDataUri(null);
     setHistoryDialogOpen(false);
-    toast.success(t('pages.image.history.refilled'));
+    toast.success(t('common.diffusion.historyRefilled'));
   }, [
     cfgScale,
     guidance,
@@ -294,7 +294,7 @@ export function useImageGeneration() {
         const dataUri = await fileToDataUri(file);
         setInitImageDataUri(dataUri);
       } catch {
-        toast.error(t('pages.image.error.readImageFileFailed'));
+        toast.error(t('common.diffusion.readImageFileFailed'));
       }
     },
     [t],
@@ -307,7 +307,7 @@ export function useImageGeneration() {
     }
 
     if (!prompt.trim()) {
-      toast.error(t('pages.image.error.enterPrompt'));
+      toast.error(t('common.diffusion.enterPrompt'));
       return;
     }
 

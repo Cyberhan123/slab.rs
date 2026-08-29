@@ -303,7 +303,7 @@ graph LR
 
 - [08_model_hub.md](./08_model_hub.md) - 模型中心系统（为 Agent 提供模型能力）
 - [09_plugin_system.md](./09_plugin_system.md) - 插件系统（通过 agentHooks 扩展 Agent）
-- [05_chat_system.md](./05_chat_system.md) - 聊天系统（Agent 与用户交互界面）
+- [11_desktop_frontend.md](./11_desktop_frontend.md) - 聊天系统（Agent 与用户交互界面）
 
 ---
 

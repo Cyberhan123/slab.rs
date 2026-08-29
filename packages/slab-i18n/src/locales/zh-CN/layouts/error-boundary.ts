@@ -2,7 +2,6 @@ export const errorBoundary = {
   details: '错误详情',
   global: {
     description: '桌面壳遇到了意外错误。查看详情后可以重试应用壳。',
-    retry: '重试',
     title: '出现错误',
   },
   page: {

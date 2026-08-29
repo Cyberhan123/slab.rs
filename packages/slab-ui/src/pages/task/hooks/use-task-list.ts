@@ -114,7 +114,7 @@ export function useTaskList() {
     } catch (err) {
       toast.error(
         t('pages.task.toast.fetchTaskResultFailed', {
-          message: getErrorDescription(err, t('pages.task.toast.unknownError')),
+          message: getErrorDescription(err, t('common.toasts.unknownError')),
         }),
       );
     }
@@ -154,7 +154,7 @@ export function useTaskList() {
     } catch (err) {
       toast.error(
         t('pages.task.toast.cancelTaskFailed', {
-          message: getErrorDescription(err, t('pages.task.toast.unknownError')),
+          message: getErrorDescription(err, t('common.toasts.unknownError')),
         }),
       );
     }
@@ -175,7 +175,7 @@ export function useTaskList() {
     } catch (err) {
       toast.error(
         t('pages.task.toast.restartTaskFailed', {
-          message: getErrorDescription(err, t('pages.task.toast.unknownError')),
+          message: getErrorDescription(err, t('common.toasts.unknownError')),
         }),
       );
     }

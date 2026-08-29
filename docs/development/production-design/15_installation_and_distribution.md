@@ -298,7 +298,7 @@ flowchart LR
 | RUNTIME-005 | 运行时配置 | ggml 配置 | 配置 ggml 加速 | Tauri 打包 | P0 |
 | RUNTIME-006 | 运行时配置 | 环境变量 | 设置运行时环境变量 | bin/slab-windows-full-installer/ | P0 |
 | RUNTIME-007 | 运行时配置 | 配置持久化 | 保存运行时配置 | bin/slab-windows-full-installer/ | P0 |
-| BUILD-001 | 构建打包 | build:app | 构建桌面应用 | package.json | P0 |
+| BUILD-001 | 构建打包 | build:desktop | 构建桌面应用 | package.json | P0 |
 | BUILD-002 | 构建打包 | build:sidecars | 构建桌面 sidecars | package.json | P0 |
 | BUILD-003 | 构建打包 | build:windows-installer | 构建 Windows 安装程序 | package.json | P0 |
 | BUILD-004 | 构建打包 | gen:plugin-packs | 打包插件 | package.json | P0 |
@@ -419,7 +419,7 @@ flowchart LR
 
 ```bash
 # 构建桌面应用 (不含安装程序)
-bun run build:app
+bun run build:desktop
 
 # 构建桌面 sidecars
 bun run build:sidecars

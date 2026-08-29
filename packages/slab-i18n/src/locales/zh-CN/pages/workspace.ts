@@ -1,16 +1,9 @@
 export const workspace = {
-  header: {
-    title: '工作区',
-    subtitle: '文件夹模式',
-  },
   actions: {
     backToOpen: '返回打开页面',
     openFolder: '打开文件夹',
     openPath: '打开路径',
-    closeWorkspace: '关闭',
-    reopen: '打开',
     pathPlaceholder: '工作区文件夹路径',
-    upDirectory: '上级',
   },
   empty: {
     title: '未打开工作区',
@@ -28,11 +21,7 @@ export const workspace = {
     suspended_other: '已挂起 {{count}} 个 Agent 任务',
   },
   tree: {
-    title: '文件',
     loading: '正在加载文件',
-    truncated: '目录数量已达上限',
-    empty: '没有文件',
-    root: '根目录',
   },
   explorer: {
     title: '资源管理器',
@@ -41,8 +30,6 @@ export const workspace = {
     git: 'Git',
   },
   editor: {
-    emptyTitle: '未选择文件',
-    emptyDescription: '从文件树中选择一个源文件。',
     tooLarge: '无法预览',
     fileTooLarge: '文件过大，无法预览（{{size}}；上限 {{limit}}）。',
     preview: '预览',
@@ -54,14 +41,6 @@ export const workspace = {
     renameSymbol: '重命名符号',
     formatDocument: '格式化文档',
     toggleLineComment: '切换行注释',
-    breadcrumbs: '文件面包屑导航',
-    settings: '编辑器设置',
-    settingsFontSize: '字体大小',
-    settingsTabSize: 'Tab 宽度',
-    settingsWordWrap: '自动换行',
-    settingsWordWrapOn: '开启',
-    settingsWordWrapOff: '关闭',
-    settingsMinimap: '缩略图',
     problems: '问题',
     noProblems: '没有问题',
     problemSummary: '{{count}} 个问题',
@@ -70,7 +49,7 @@ export const workspace = {
     problemInfos: '{{count}} 条信息',
     problemLineColumn: '第 {{line}} 行，第 {{column}} 列',
     statusLineColumn: '第 {{line}} 行，第 {{column}} 列',
-    statusTabSize: '空格: {{size}}',
+    statusTabSize: '空格：{{size}}',
   },
   search: {
     placeholder: '搜索文件或文本',
@@ -80,9 +59,6 @@ export const workspace = {
   },
   textSearch: {
     results: '文本匹配',
-    placeholder: '搜索文本',
-    clear: '清除搜索',
-    empty: '没有文本匹配',
     truncated: '仅显示前几个匹配',
   },
   commandPalette: {
@@ -91,7 +67,6 @@ export const workspace = {
     trigger: '打开工作区命令面板',
     placeholder: '搜索操作或文件',
     empty: '没有匹配的操作或文件',
-    actions: '操作',
     files: '文件',
     tabs: '已打开的标签',
     recent: '最近工作区',
@@ -111,8 +86,6 @@ export const workspace = {
     discard: '丢弃',
     commit: '提交',
     commitPlaceholder: '提交信息',
-    diff: '差异',
-    noDiff: '没有可显示的差异',
     status: {
       added: '新增',
       modified: '修改',
@@ -147,38 +120,24 @@ export const workspace = {
       zsh: 'zsh',
     },
     clear: '清空控制台',
-    empty: '运行工作区命令后，输出会显示在这里。',
-    placeholder: '输入命令',
-    run: '运行',
-    timedOut: '超时',
-    exitCode: '退出码 {{code}}',
   },
   confirm: {
     closeUnsaved: '此文件有未保存的更改，仍要关闭吗？',
     discardUnsaved: '此文件有未保存的更改，要丢弃并打开其他文件吗？',
     discardGitChange: '丢弃 {{path}} 中的更改？此操作无法撤销。',
     title: '未保存的更改',
-    cancel: '取消',
     discard: '放弃更改',
     closeAnyway: '仍然关闭',
   },
   tabs: {
     close: '关闭 {{name}}',
   },
-  plugins: {
-    title: '工作区插件',
-    empty: '没有可用插件',
-    enable: '在工作区启用',
-  },
   toast: {
     openFailed: '打开工作区失败',
     closeFailed: '关闭工作区失败',
     fileFailed: '打开文件失败',
-    fileSaved: '文件已保存',
-    saveFailed: '保存文件失败',
     gitCommitted: '提交已创建',
     gitFailed: 'Git 操作失败',
-    pluginFailed: '更新插件偏好失败',
     consoleFailed: '运行命令失败',
   },
 } as const;

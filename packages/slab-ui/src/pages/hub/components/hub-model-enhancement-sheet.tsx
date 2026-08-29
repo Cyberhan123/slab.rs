@@ -318,7 +318,7 @@ export function HubModelEnhancementSheet({
                     value={data.model_summary.display_name}
                   />
                   <ReadOnlyBlock
-                    label={t('pages.hub.sheet.blocks.backend')}
+                    label={t('common.fields.backend')}
                     value={data.model_summary.backend_id ?? data.model_summary.kind}
                   />
                   <FieldBlock label={t('pages.hub.sheet.blocks.preset')}>
@@ -407,7 +407,7 @@ export function HubModelEnhancementSheet({
 
           <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border/60 px-6 py-4">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              {t('pages.hub.sheet.blocks.close')}
+              {t('common.actions.close')}
             </Button>
             <Button onClick={handleSave} disabled={!canSave}>
               {isSaving ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />}
@@ -427,7 +427,7 @@ export function HubModelEnhancementSheet({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={handleSkipReload}>
-              {t('pages.hub.sheet.reload.skip')}
+              {t('common.actions.later')}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={(event) => {
@@ -436,7 +436,7 @@ export function HubModelEnhancementSheet({
               }}
             >
               <RotateCw className="mr-2 size-4" />
-              {t('pages.hub.sheet.reload.confirm')}
+              {t('common.actions.reload')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -559,8 +559,8 @@ function renderEditableControl(
           <Switch checked={Boolean(value)} onCheckedChange={(checked) => onChange(checked)} />
           <span className="text-sm font-medium text-foreground">
             {value
-              ? t('pages.hub.sheet.blocks.enabled')
-              : t('pages.hub.sheet.blocks.disabled')}
+              ? t('common.status.enabled')
+              : t('common.status.disabled')}
           </span>
         </div>
       );
@@ -621,8 +621,8 @@ function renderFieldValue(
     return (
       <div className="rounded-[14px] border border-border/60 bg-secondary px-4 py-3 text-sm font-medium text-foreground">
         {value
-          ? t('pages.hub.sheet.blocks.enabled')
-          : t('pages.hub.sheet.blocks.disabled')}
+          ? t('common.status.enabled')
+          : t('common.status.disabled')}
       </div>
     );
   }

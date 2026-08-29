@@ -1,8 +1,4 @@
 export const hub = {
-  header: {
-    title: 'Hub',
-    subtitle: 'Models Repository',
-  },
   hero: {
     badge: 'New release',
     titleLead: 'Shape your local',
@@ -38,7 +34,6 @@ export const hub = {
       not_downloaded: 'Not downloaded',
       error: 'Error',
     },
-    statusPlaceholder: 'Status',
   },
   alerts: {
     loadFailedTitle: 'Model catalog failed to load',
@@ -57,7 +52,6 @@ export const hub = {
     vad: 'VAD',
     download: 'Download',
     downloading: 'Downloading...',
-    source: 'Source',
     size: 'Size {{value}}',
     unknownSize: 'Unknown',
     vramRisk: {
@@ -121,7 +115,6 @@ export const hub = {
       descriptionWithModel:
         'Remove <strong>{{model}}</strong> from the model catalog and delete its stored .slab pack. This does not delete any downloaded model file on disk.',
       descriptionFallback: 'Remove this model entry from the catalog.',
-      cancel: 'Cancel',
       confirm: 'Delete entry',
     },
   },
@@ -134,19 +127,15 @@ export const hub = {
     selectionWarningTitle: 'Selection warning',
     blocks: {
       displayName: 'Display name',
-      backend: 'Backend',
       preset: 'Preset',
       variant: 'Variant',
       presetPlaceholder: 'Select a preset',
       variantPlaceholder: 'Select a variant',
-      close: 'Close',
       saveSelection: 'Save selection',
       packLocked: 'Pack locked',
       edited: 'Edited',
       resetToPack: 'Reset to default',
       notSet: 'Not set',
-      enabled: 'Enabled',
-      disabled: 'Disabled',
       origin: {
         pack_manifest: 'Pack manifest',
         selected_preset: 'Preset',
@@ -160,8 +149,6 @@ export const hub = {
       title: 'Reload model?',
       description:
         'Load-parameter changes need a model reload to take effect. This briefly interrupts the current model.',
-      confirm: 'Reload',
-      skip: 'Later',
     },
   },
   toast: {
@@ -182,7 +169,6 @@ export const hub = {
   error: {
     taskEndedWithStatus: 'Task {{taskId}} ended with status: {{status}}',
     downloadTimedOut: 'Model download timed out',
-    missingDownloadedPath: 'Model download completed, but local_path is empty',
     startDownloadFailed: 'Failed to start model download task',
     onlySlabPacks: 'Only .slab model packs are supported.',
   },

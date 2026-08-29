@@ -1,8 +1,4 @@
 export const settings = {
-  header: {
-    title: '设置',
-    subtitle: '配置应用与后端选项',
-  },
   page: {
     adminTokenWarningTitle: '需要管理员令牌',
     adminTokenWarningDescription:
@@ -10,7 +6,6 @@ export const settings = {
     loadingTitle: '正在加载设置文档',
     loadingDescription: '正在获取运行时 schema 与当前值。',
     failedLoadTitle: '设置加载失败',
-    tryAgain: '重试',
     warningsTitle: '已恢复的设置警告',
     noSettingsTitle: '暂无可用设置',
     noSettingsDescription: '当前设置文档为空。',
@@ -43,7 +38,6 @@ export const settings = {
       'en-US': 'English',
       'zh-CN': '中文',
     },
-    current: '当前界面语言：{{language}}',
   },
   modelSource: {
     title: '模型来源',
@@ -64,8 +58,6 @@ export const settings = {
     valuePlaceholder: '输入值',
     enterNamedValue: '输入{{label}}',
     propertyNamePlaceholder: '属性名',
-    enabled: '已启用',
-    disabled: '已禁用',
   },
   effect: {
     live: '实时生效',
@@ -90,7 +82,6 @@ export const settings = {
     itemTitle: '{{label}} {{index}}',
   },
   providerRegistry: {
-    title: '云模型提供商',
     configuredProviders_one: '已配置 {{count}} 个提供商',
     configuredProviders_other: '已配置 {{count}} 个提供商',
     addProvider: '添加提供商',
@@ -100,8 +91,7 @@ export const settings = {
     dialog: {
       addTitle: '添加云提供商',
       editTitle: '编辑云提供商',
-      description: '选择提供商家族以自动填充端点默认值，再填写凭据。保存后即激活该供应商的模型列表。',
-      cancel: '取消',
+      description: '选择提供商家族以自动填充端点默认值，再填写凭据。保存后即激活该提供商的模型列表。',
       add: '添加提供商',
       save: '保存更改',
     },
@@ -143,7 +133,6 @@ export const settings = {
     number: '值必须是有限数字。',
     integer: '值必须是整数。',
     json: '值必须是有效的 JSON。',
-    emptyString: '（空字符串）',
   },
   autosave: {
     needsAttention: '自动保存前需要先处理此项。',

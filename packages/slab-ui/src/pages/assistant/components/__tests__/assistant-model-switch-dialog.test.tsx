@@ -95,7 +95,7 @@ describe("AssistantModelSwitchDialog", () => {
     const onOpenChange = vi.fn<(open: boolean) => void>()
     const screen = await render(<AssistantModelSwitchDialog {...baseProps({ onOpenChange })} />)
 
-    await userEvent.click(screen.getByRole("button", { name: "pages.assistant.dialog.cancel" }))
+    await userEvent.click(screen.getByRole("button", { name: "common.actions.cancel" }))
 
     expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false)
   })

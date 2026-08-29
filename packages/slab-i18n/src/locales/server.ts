@@ -125,12 +125,14 @@ export const SERVER_I18N_KEYS = [
   'server.settings.properties.label.externalHooks',
   'server.settings.properties.label.legacyHookScripts',
   'server.settings.properties.label.agentMemories',
+  'server.settings.properties.label.memoryRecall',
   'server.settings.properties.label.memoryRoot',
   'server.settings.properties.label.phase1ScanLimit',
   'server.settings.properties.label.phase1Concurrency',
   'server.settings.properties.label.phase1IdleSeconds',
   'server.settings.properties.label.phase1LeaseSeconds',
   'server.settings.properties.label.phase1RetrySeconds',
+  'server.settings.properties.label.phase1MaxAttempts',
   'server.settings.properties.label.phase1MaxAgeDays',
   'server.settings.properties.label.phase2Limit',
   'server.settings.properties.label.phase2LeaseSeconds',
@@ -194,6 +196,7 @@ export const SERVER_I18N_KEYS = [
   'server.settings.properties.description.externalHooks',
   'server.settings.properties.description.legacyHookScripts',
   'server.settings.properties.description.agentMemories',
+  'server.settings.properties.description.memoryRecall',
   'server.settings.properties.description.agentMemoryModel',
   'server.settings.properties.description.memoryRoot',
   'server.settings.properties.description.phase1ScanLimit',
@@ -201,6 +204,7 @@ export const SERVER_I18N_KEYS = [
   'server.settings.properties.description.phase1IdleSeconds',
   'server.settings.properties.description.phase1LeaseSeconds',
   'server.settings.properties.description.phase1RetrySeconds',
+  'server.settings.properties.description.phase1MaxAttempts',
   'server.settings.properties.description.phase1MaxAgeDays',
   'server.settings.properties.description.phase2Limit',
   'server.settings.properties.description.phase2LeaseSeconds',
@@ -491,12 +495,14 @@ export const enUSServerMessages = {
   'server.settings.properties.label.externalHooks': 'External Hooks',
   'server.settings.properties.label.legacyHookScripts': 'Legacy Hook Scripts',
   'server.settings.properties.label.agentMemories': 'Agent Memories',
+  'server.settings.properties.label.memoryRecall': 'Memory Recall',
   'server.settings.properties.label.memoryRoot': 'Memory Root',
   'server.settings.properties.label.phase1ScanLimit': 'Phase 1 Scan Limit',
   'server.settings.properties.label.phase1Concurrency': 'Phase 1 Concurrency',
   'server.settings.properties.label.phase1IdleSeconds': 'Phase 1 Idle Seconds',
   'server.settings.properties.label.phase1LeaseSeconds': 'Phase 1 Lease Seconds',
   'server.settings.properties.label.phase1RetrySeconds': 'Phase 1 Retry Seconds',
+  'server.settings.properties.label.phase1MaxAttempts': 'Phase 1 Max Attempts',
   'server.settings.properties.label.phase1MaxAgeDays': 'Phase 1 Max Age Days',
   'server.settings.properties.label.phase2Limit': 'Phase 2 Limit',
   'server.settings.properties.label.phase2LeaseSeconds': 'Phase 2 Lease Seconds',
@@ -560,6 +566,7 @@ export const enUSServerMessages = {
   'server.settings.properties.description.externalHooks': 'Enable external agent lifecycle hooks registered by plugins or legacy local script settings. Built-in hooks are unaffected.',
   'server.settings.properties.description.legacyHookScripts': 'Legacy local script hooks executed through the supervised JS/Python runtimes when external hooks are enabled.',
   'server.settings.properties.description.agentMemories': 'Enable the built-in agent memory instruction and consolidation pipeline.',
+  'server.settings.properties.description.memoryRecall': 'Select and inject the most relevant rollout summaries at agent start via a lightweight model side query.',
   'server.settings.properties.description.agentMemoryModel': 'Optional model override used by the agent memory pipeline.',
   'server.settings.properties.description.memoryRoot': 'Optional filesystem root for generated and consolidated agent memories.',
   'server.settings.properties.description.phase1ScanLimit': 'Maximum completed root agent threads scanned by each memory phase 1 run.',
@@ -567,6 +574,7 @@ export const enUSServerMessages = {
   'server.settings.properties.description.phase1IdleSeconds': 'Minimum idle age before a completed thread becomes eligible for memory phase 1.',
   'server.settings.properties.description.phase1LeaseSeconds': 'Lease duration for memory phase 1 extraction claims.',
   'server.settings.properties.description.phase1RetrySeconds': 'Retry delay after a memory phase 1 extraction failure.',
+  'server.settings.properties.description.phase1MaxAttempts': 'Maximum phase 1 extraction attempts per rollout before it is abandoned.',
   'server.settings.properties.description.phase1MaxAgeDays': 'Maximum completed-thread age considered by memory phase 1 extraction.',
   'server.settings.properties.description.phase2Limit': 'Maximum memory candidates consolidated during a phase 2 run.',
   'server.settings.properties.description.phase2LeaseSeconds': 'Lease duration for memory phase 2 consolidation.',
@@ -766,12 +774,14 @@ export const zhCNServerMessages = {
   'server.settings.properties.label.externalHooks': '外部 Hooks',
   'server.settings.properties.label.legacyHookScripts': '旧版 Hook 脚本',
   'server.settings.properties.label.agentMemories': 'Agent 记忆',
+  'server.settings.properties.label.memoryRecall': '记忆召回',
   'server.settings.properties.label.memoryRoot': '记忆根目录',
   'server.settings.properties.label.phase1ScanLimit': 'Phase 1 扫描上限',
   'server.settings.properties.label.phase1Concurrency': 'Phase 1 并发数',
   'server.settings.properties.label.phase1IdleSeconds': 'Phase 1 空闲秒数',
   'server.settings.properties.label.phase1LeaseSeconds': 'Phase 1 租约秒数',
   'server.settings.properties.label.phase1RetrySeconds': 'Phase 1 重试秒数',
+  'server.settings.properties.label.phase1MaxAttempts': 'Phase 1 最大尝试次数',
   'server.settings.properties.label.phase1MaxAgeDays': 'Phase 1 最大天数',
   'server.settings.properties.label.phase2Limit': 'Phase 2 上限',
   'server.settings.properties.label.phase2LeaseSeconds': 'Phase 2 租约秒数',
@@ -873,6 +883,7 @@ export const zhCNServerMessages = {
   'server.settings.properties.description.externalHooks': '启用插件或旧版本地脚本设置注册的外部 Agent 生命周期 Hook。内置 Hook 不受影响。',
   'server.settings.properties.description.legacyHookScripts': '启用外部 Hook 时，通过受监督 JS/Python 运行时执行的旧版本地脚本 Hook。',
   'server.settings.properties.description.agentMemories': '启用内置 Agent 记忆指令和整理流水线。',
+  'server.settings.properties.description.memoryRecall': 'Agent 启动时通过轻量模型旁路查询，挑选并注入最相关的 rollout 摘要。',
   'server.settings.properties.description.agentMemoryModel': 'Agent 记忆流水线使用的可选模型覆盖项。',
   'server.settings.properties.description.memoryRoot': '生成和整理 Agent 记忆时使用的可选文件系统根目录。',
   'server.settings.properties.description.phase1ScanLimit': '每次记忆 phase 1 运行扫描的最大已完成根 Agent 线程数。',
@@ -880,6 +891,7 @@ export const zhCNServerMessages = {
   'server.settings.properties.description.phase1IdleSeconds': '已完成线程进入记忆 phase 1 候选前需要达到的最小空闲时间。',
   'server.settings.properties.description.phase1LeaseSeconds': '记忆 phase 1 提取 claim 的租约时长。',
   'server.settings.properties.description.phase1RetrySeconds': '记忆 phase 1 提取失败后的重试延迟。',
+  'server.settings.properties.description.phase1MaxAttempts': '记忆 phase 1 对单个 rollout 的最大提取尝试次数，超过后放弃。',
   'server.settings.properties.description.phase1MaxAgeDays': '记忆 phase 1 提取会考虑的最大已完成线程年龄。',
   'server.settings.properties.description.phase2Limit': '每次 phase 2 运行整理的最大记忆候选数。',
   'server.settings.properties.description.phase2LeaseSeconds': '记忆 phase 2 整理的租约时长。',
@@ -1013,6 +1025,16 @@ export function translateServerField(
   return translated && translated !== ref.key ? translated : (fallback ?? '');
 }
 
+/**
+ * The message tables above are Partial on purpose: keys without an entry are
+ * filled with '' here, and `translateServerField` falls back to the backend
+ * field's own fallback text for empty translations (the backend stays the
+ * single source of truth for that copy). Currently the 32
+ * `server.modelConfig.*.description` keys are intentionally blank — the exact
+ * set is pinned by `__tests__/server-empty-keys.test.ts`. When adding a new
+ * SERVER_I18N_KEY, decide explicitly whether to provide a translation or let
+ * the backend fallback own it (and extend the test list in the latter case).
+ */
 function buildServerLocale(messages: ServerLocaleMessages): LocaleNode {
   const root: LocaleNode = {};
   for (const key of SERVER_I18N_KEYS) {

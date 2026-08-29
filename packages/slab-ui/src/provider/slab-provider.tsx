@@ -10,7 +10,7 @@ import type { SlabPorts } from "@slab/core";
 import { queryClient as defaultQueryClient } from "../lib/query-client";
 
 /**
- * Dependencies injected by each shell (desktop/web/h5) at assembly time.
+ * Dependencies injected by each shell (desktop/web) at assembly time.
  *
  * Shells pick the concrete infra adapters (`@slab/core/infra/*`) — UI code
  * only ever sees the port interfaces through this context.

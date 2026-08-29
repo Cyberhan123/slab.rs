@@ -192,7 +192,7 @@
 
 #### 4.2 [slab-agent-tracing/lib.rs](crates/slab-agent-tracing/src/) — 手写 JSONL 文件写入器
 - **行号**: 93
-- **描述**: FileAgentTraceSink 手动管理 BufWriter、Mutex<HashMap>、原子序列号等，重复了 tracing crate 已有的文件 subscriber 功能。
+- **描述**: FileAgentTraceSink 手动管理 `BufWriter`、`Mutex<HashMap>`、原子序列号等，重复了 tracing crate 已有的文件 subscriber 功能。
 - **建议**: 内部委托给 tracing_subscriber 的 JSON 文件写入器。
 
 #### 4.3 [slab-js-runtime/jsonrpc/mod.rs](bin/slab-js-runtime/src/api/jsonrpc/) — 手写 JSON-RPC 2.0 协议

@@ -39,6 +39,8 @@ mod mac;
 #[cfg(target_os = "windows")]
 mod marker;
 #[cfg(target_os = "windows")]
+mod owner;
+#[cfg(target_os = "windows")]
 mod pipe;
 #[cfg(target_os = "windows")]
 mod request;
@@ -69,6 +71,8 @@ pub use ipc::{
     SignedResult, read_signed_payload, read_signed_result, write_signed_payload,
     write_signed_result,
 };
+#[cfg(target_os = "windows")]
+pub use job::JobHandle;
 #[cfg(target_os = "windows")]
 pub use marker::{has_drift, read_marker, write_marker};
 #[cfg(target_os = "windows")]

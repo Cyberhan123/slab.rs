@@ -208,6 +208,7 @@ async fn process_event_msg(
                 thread_id: thread_id.to_owned(),
                 compacted_messages: Vec::new(),
                 removed_messages: params.removed_messages.unwrap_or(0),
+                stubbed_messages: params.stubbed_messages.unwrap_or(0),
                 output_tokens: params.output_tokens.unwrap_or(0),
                 status: params.status.clone().unwrap_or_else(|| "compacted".to_owned()),
                 turn_index: *current_turn,
@@ -356,6 +357,7 @@ mod tests {
                     thread_id: "t".to_owned(),
                     status: Some("compacted".to_owned()),
                     removed_messages: Some(5),
+                    stubbed_messages: Some(7),
                     output_tokens: Some(42),
                 }),
             )
@@ -385,6 +387,7 @@ mod tests {
             .expect("compacted marker present");
         assert_eq!(compacted.turn_index, 3, "turn_index tracked from TurnStarted");
         assert_eq!(compacted.removed_messages, 5);
+        assert_eq!(compacted.stubbed_messages, 7, "micro-tier stub count persisted");
         assert_eq!(compacted.output_tokens, 42);
         // F7a: status is preserved from upstream (not hardcoded "auto").
         assert_eq!(compacted.status, "compacted");
@@ -413,6 +416,7 @@ mod tests {
                         ..Default::default()
                     },
                     usage: None,
+                    reason: None,
                 }),
             )
             .await;
@@ -530,6 +534,7 @@ mod tests {
                     thread_id: "t".to_owned(),
                     status: None,
                     removed_messages: None,
+                    stubbed_messages: None,
                     output_tokens: None,
                 }),
             )
@@ -775,7 +780,7 @@ mod tests {
 
         for (turn, item_id, user_text) in [(0u32, "a0", "u0"), (1, "a1", "u1")] {
             // The user MessageAppended (M5 anchor) — emitted BEFORE the turn's
-            // ItemCompleted, exactly as slab-agent's `emit_from` loop does.
+            // ItemCompleted, exactly as slab-agent's `emit_new` loop does.
             events
                 .on_event_msg(
                     "t",
@@ -891,6 +896,7 @@ mod tests {
                     thread_id: "t".to_owned(),
                     status: Some("compacted".to_owned()),
                     removed_messages: Some(1),
+                    stubbed_messages: None,
                     output_tokens: Some(3),
                 }),
             )

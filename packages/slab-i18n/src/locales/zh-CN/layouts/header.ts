@@ -7,12 +7,7 @@ export const header = {
     noOptions: '暂无可用选项',
   },
   search: {
-    chat: '搜索任务...',
     default: '搜索页面、工具或设置...',
-  },
-  context: {
-    activeWorkspace: '当前工作区',
-    desktop: 'Slab 桌面端',
   },
   windowControls: {
     toolbar: '窗口控制',

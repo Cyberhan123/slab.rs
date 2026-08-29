@@ -160,7 +160,7 @@ export function SetupWorkbench({
             }}
           >
             <RefreshCw className="size-4" />
-            {t('pages.setup.hostError.reload')}
+            {t('common.actions.reload')}
           </Button>
         }
       />
@@ -426,7 +426,7 @@ export function SetupWorkbench({
                       }}
                       data-testid="setup-skip"
                     >
-                      {t('pages.setup.actions.later')}
+                      {t('common.actions.later')}
                     </Button>
                   </>
                 ) : canRetry ? (

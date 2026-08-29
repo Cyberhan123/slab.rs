@@ -140,7 +140,7 @@ describe('settings core flow e2e', () => {
     await expect.element(page.getByRole('heading', { name: '上下文长度' })).toBeVisible();
     await expect.element(page.getByRole('heading', { name: '提供商注册表' })).toBeVisible();
     await expect.element(page.getByRole('button', { name: '添加提供商' })).toBeVisible();
-    await expect.element(page.getByText('暂无配置的提供商。')).toBeVisible();
+    await expect.element(page.getByText('暂未配置云提供商。添加一个即可激活其模型。')).toBeVisible();
     await expect.element(page.getByText('服务器名称')).toBeVisible();
     await expect.element(page.getByText('命令')).toBeVisible();
     await expect.element(page.getByText('已启用')).toBeVisible();

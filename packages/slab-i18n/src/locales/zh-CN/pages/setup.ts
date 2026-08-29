@@ -1,8 +1,4 @@
 export const setup = {
-  header: {
-    title: '初始化',
-    subtitle: '准备本地运行时依赖',
-  },
   checking: {
     title: '正在检查桌面环境',
     description: '正在检查本地 Slab host、打包运行时和 FFmpeg 可用性。',
@@ -11,7 +7,6 @@ export const setup = {
   hostError: {
     title: '无法连接本地 host',
     hint: '确认 <code>slab-server</code> 正在运行，然后重新加载此页面。',
-    reload: '重新加载',
   },
   errors: {
     completeFailed: '初始化已完成，但未能保存完成状态。',
@@ -58,7 +53,6 @@ export const setup = {
     succeeded: '初始化已完成。Slab 会自动进入应用。',
   },
   actions: {
-    later: '稍后',
     retry: '重试初始化',
     start: '开始初始化',
     launching: '正在启动 Slab...',

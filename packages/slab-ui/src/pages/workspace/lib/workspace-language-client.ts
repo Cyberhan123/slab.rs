@@ -6,7 +6,7 @@ import {
   type LanguageClientOptions,
   type MessageTransports,
   State,
-} from "vscode-languageclient/browser.js"
+} from "vscode-languageclient/browser"
 import { SERVER_BASE_URL } from "@slab/api/config"
 import {
   ensureWorkspaceLspServices,

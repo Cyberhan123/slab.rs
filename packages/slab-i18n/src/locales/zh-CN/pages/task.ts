@@ -1,8 +1,4 @@
 export const task = {
-  header: {
-    title: '任务',
-    subtitle: '跟踪并管理系统任务',
-  },
   metrics: {
     successRate: '成功率',
     successful_one: '{{count}} 个成功',
@@ -19,7 +15,6 @@ export const task = {
     activeLabel: '活跃',
   },
   alerts: {
-    errorTitle: '错误',
     fetchFailed: '获取任务列表失败',
   },
   states: {
@@ -32,9 +27,7 @@ export const task = {
     headers: {
       taskId: '任务 ID',
       type: '类型',
-      status: '状态',
       createdAt: '创建时间',
-      actions: '操作',
     },
     openDomain: '打开详情',
     pagination: {
@@ -47,10 +40,8 @@ export const task = {
   dialog: {
     detailsButton: '详情',
     title: '任务详情',
-    taskId: '任务 ID：{{id}}',
     fields: {
       type: '类型',
-      status: '状态',
       created: '创建时间',
       updated: '更新时间',
     },
@@ -71,7 +62,6 @@ export const task = {
     fetchTaskDetailsFailed: '获取任务详情失败',
     cancelTaskFailed: '取消任务失败：{{message}}',
     restartTaskFailed: '重新执行任务失败：{{message}}',
-    unknownError: '未知错误',
   },
   status: {
     succeeded: '成功',

@@ -5,7 +5,7 @@ import type { SlabRouteObject } from "./route-meta";
 /**
  * Shell-agnostic route assembly. Shells pick the route modules they mount:
  * the desktop passes the full set (sidebar layout + every feature module),
- * the web/h5 shells mount a lazy assistant island plus their chosen top-level
+ * the web shell mounts a lazy assistant island plus its chosen top-level
  * routes without the sidebar layout. Omitting `layoutChildren` skips the
  * sidebar Layout route entirely.
  *

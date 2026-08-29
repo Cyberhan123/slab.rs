@@ -16,8 +16,9 @@ bun install
 
 # Development
 bun run dev
-bun run dev:app
 bun run dev:desktop
+bun run dev:server
+bun run dev:desktop:ui
 
 # Checks
 bun run check
@@ -36,8 +37,8 @@ bun run test:e2e
 # Builds
 bun run build:sidecars
 bun run build:desktop
+bun run build:desktop:ui
 bun run build:language-servers
-bun run build:app
 bun run build:windows-installer
 ```
 
@@ -47,12 +48,16 @@ bun run build:windows-installer
 `bun run build:windows-installer` uses release sidecars before building the NSIS
 bundle.
 
-`bun run dev` is the canonical full development stack alias for `bun run dev:app`.
+`bun run dev` is the canonical full development stack alias for `bun run dev:desktop`
+(Tauri spawns `slab-server` itself). `bun run dev:server` builds and runs the
+headless `slab-server` alone from `target/debug/` (default bind `127.0.0.1:3000`),
+for browser/mobile/remote clients; `bun run dev:desktop:ui` starts only the
+desktop frontend Vite server.
 `bun run test:e2e` is the only root E2E entrypoint; it owns starting that full
 dev stack, waiting for the desktop UI and server `/health`, running
 `packages/slab-desktop/tests/e2e`, and cleaning up the spawned process tree.
 Browser-mode component and visual tests remain under `bun run test:browser`.
-Run `bun run build:desktop` before `bun run check:bundle-budget`; the budget
+Run `bun run build:desktop:ui` before `bun run check:bundle-budget`; the budget
 script reads `packages/slab-desktop/dist` and enforces the Plan F desktop main
 chunk budget while reporting workspace chunk baselines.
 

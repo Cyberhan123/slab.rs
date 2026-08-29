@@ -220,7 +220,7 @@ export function AudioWorkbench({
 
             {transcribe?.isError && (
               <Alert variant="destructive">
-                <AlertTitle>{t('pages.audio.alerts.transcribeErrorTitle')}</AlertTitle>
+                <AlertTitle>{t('common.status.error')}</AlertTitle>
                 <AlertDescription>
                   {(transcribe?.error as { error?: string })?.error ||
                     t('pages.audio.alerts.transcribeErrorDescription')}
@@ -419,11 +419,11 @@ export function AudioWorkbench({
                   <GenerationProgressView
                     progress={generationProgress}
                     labels={{
-                      eta: t('pages.audio.progress.eta'),
+                      eta: t('common.progress.eta'),
                       finalizing: t('pages.audio.progress.finalizing'),
-                      queued: t('pages.audio.progress.queued'),
+                      queued: t('common.progress.queued'),
                       running: t('pages.audio.progress.running'),
-                      step: t('pages.audio.progress.step'),
+                      step: t('common.progress.step'),
                       title: t('pages.audio.progress.title'),
                     }}
                     testId="audio-generation-progress"
@@ -458,7 +458,7 @@ export function AudioWorkbench({
                     </p>
                     {taskId ? (
                       <p className="text-xs font-medium text-primary">
-                        {t('pages.audio.workbench.taskIdLabel', { id: taskId })}
+                        {t('common.fields.taskId', { id: taskId })}
                       </p>
                     ) : null}
                   </div>
@@ -514,7 +514,7 @@ export function AudioWorkbench({
                   {historyLoading
                     ? t('pages.audio.history.loading')
                     : historyError
-                      ? t('pages.audio.history.error', { message: historyError })
+                      ? t('common.toasts.historyLoadFailed', { message: historyError })
                       : t('pages.audio.history.description')}
                 </p>
               </div>

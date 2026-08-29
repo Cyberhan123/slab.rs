@@ -148,7 +148,7 @@ describe('useImageModelPreparation', () => {
     });
 
     expect(modelPath).toBe('/models/sdxl.gguf');
-    expect(toastMock.success).toHaveBeenCalledWith('pages.image.toast.downloaded');
+    expect(toastMock.success).toHaveBeenCalledWith('common.toasts.modelDownloaded');
   });
 
   it('throws when the loaded model exposes no local path', async () => {
@@ -176,6 +176,6 @@ describe('useImageModelPreparation', () => {
       }
     });
 
-    expect((thrown as Error).message).toBe('pages.image.error.missingDownloadedPath');
+    expect((thrown as Error).message).toBe('common.errors.missingDownloadedPath');
   });
 });

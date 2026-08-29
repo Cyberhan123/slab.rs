@@ -17,14 +17,16 @@ use crate::{
     port::{ApprovalDecision, ParsedToolCall, ToolRiskAssessment},
     protocol::{
         CommandExecutionOutputDeltaParams, CommandExecutionRequestApprovalParams, EventMsg,
-        FileChangeOutputDeltaParams, ItemCompletedParams, ItemStartedParams, TurnItem,
+        FileChangeApprovalChange, FileChangeOutputDeltaParams, FileChangeRequestApprovalParams,
+        ItemCompletedParams, ItemStartedParams, TurnItem,
     },
     state::ToolCallStateMachine,
     tool::{
         PlanRef, ToolApprovalRequest, ToolCallRender, ToolContext, ToolHandler, ToolOutput,
         ToolOutputObserver, ToolOutputStream,
     },
-    turn::TurnExecutionContext,
+    turn::{TurnExecutionContext, emit_turn_phase},
+    turn_state::TurnPhase,
     turn_tool_record::{
         persist_tool_message_record, record_failed_tool_call_without_persisting_message,
     },
@@ -126,7 +128,7 @@ fn workspace_root_of(context: &TurnExecutionContext<'_>) -> Option<String> {
 /// `output` is the tool result text (filled only on completion). The item id is
 /// the provider-assigned `tool_call.id`.
 #[allow(clippy::too_many_arguments)]
-fn render_tool_call_item(
+pub(crate) fn render_tool_call_item(
     handler: Option<&dyn ToolHandler>,
     tool_call: &ParsedToolCall,
     args: &serde_json::Value,
@@ -254,6 +256,7 @@ async fn emit_item_started(context: &TurnExecutionContext<'_>, item: TurnItem) {
 
 /// Emit `EventMsg::ItemCompleted` for `item` on the harness channel.
 async fn emit_item_completed(context: &TurnExecutionContext<'_>, item: TurnItem) {
+    context.items.record_completed(item.id());
     let msg = EventMsg::ItemCompleted(ItemCompletedParams {
         item,
         thread_id: context.thread_id.to_owned(),
@@ -352,39 +355,84 @@ fn default_allowed_scopes() -> Vec<slab_exec_policy::ApprovalScope> {
     ]
 }
 
-/// Emit `EventMsg::CommandExecutionRequestApproval` for a tool that the
-/// exec-policy engine gated behind approval. `item_id` is the per-call UUID
-/// (`call_id`) — the same key the approval resolution flow correlates on, so
-/// the client can match the banner back to the pending decision.
+/// The id approval notifications and the approval resolution flow correlate
+/// on. This is the provider-assigned `tool_call.id` — the same id the
+/// `ItemStarted`/`ItemCompleted`/output-delta events use — so the client can
+/// merge the approval banner onto the in-stream tool card. Falls back to the
+/// per-call UUID when the provider id is empty (some local backends).
+fn approval_correlation_id<'a>(tool_call_id: &'a str, call_id: &'a str) -> &'a str {
+    if tool_call_id.is_empty() { call_id } else { tool_call_id }
+}
+
+/// Extract the typed approval-change list from a rendered
+/// [`TurnItem::FileChange`]'s untyped `changes` JSON entries. Missing fields
+/// degrade gracefully (`edit` kind, no diff) so a partial render still yields a
+/// usable banner.
+fn file_change_approval_changes(changes: &[serde_json::Value]) -> Vec<FileChangeApprovalChange> {
+    changes
+        .iter()
+        .map(|change| FileChangeApprovalChange {
+            path: change.get("path").and_then(serde_json::Value::as_str).unwrap_or("").to_owned(),
+            change_type: change
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("edit")
+                .to_owned(),
+            diff: change.get("diff").and_then(serde_json::Value::as_str).map(str::to_owned),
+        })
+        .collect()
+}
+
+/// Emit the approval-request notification for a tool that the exec-policy
+/// engine gated behind approval. `item_id` is [`approval_correlation_id`] —
+/// the same key `request_approval` registers the pending decision under, so
+/// the client's `approval/resolve` routes back to this call.
+///
+/// Tools whose render is a [`TurnItem::FileChange`] (apply_patch, write_file)
+/// get the dedicated [`EventMsg::FileChangeRequestApproval`] with the per-file
+/// change list; everything else keeps the command-style notification.
 async fn emit_approval_request(run: &ToolRunContext<'_, '_>) {
     let Some(request) = &run.approval_request else {
         return;
     };
-    let msg = EventMsg::CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams {
-        thread_id: run.context.thread_id.to_owned(),
-        turn_id: run.context.turn_index.to_string(),
-        item_id: run.call_id.to_owned(),
-        command: request.display.clone(),
-        cwd: String::new(),
-        reason: None,
-        category: Some(request.descriptor.category),
-        allowed_scopes: default_allowed_scopes(),
-        plan_snapshot: None,
-    });
+    let item_id = approval_correlation_id(&run.tool_call.id, run.call_id).to_owned();
+    let msg = match &run.started_item {
+        TurnItem::FileChange { changes, .. } => {
+            EventMsg::FileChangeRequestApproval(FileChangeRequestApprovalParams {
+                thread_id: run.context.thread_id.to_owned(),
+                turn_id: run.context.turn_index.to_string(),
+                item_id,
+                changes: file_change_approval_changes(changes),
+                allowed_scopes: default_allowed_scopes(),
+            })
+        }
+        _ => EventMsg::CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams {
+            thread_id: run.context.thread_id.to_owned(),
+            turn_id: run.context.turn_index.to_string(),
+            item_id,
+            command: request.display.clone(),
+            cwd: String::new(),
+            reason: None,
+            category: Some(request.descriptor.category),
+            allowed_scopes: default_allowed_scopes(),
+            plan_snapshot: None,
+        }),
+    };
     run.context.notify.on_event_msg(run.context.thread_id, &msg).await;
 }
 
 /// Drive the `present_plan` approval gate after the tool ran. Emits the plan
 /// for approval via the existing `CommandExecutionRequestApproval` channel
 /// (plan summary shown as `command`), awaits the host approval decision, and
-/// returns the verdict. On approval the caller (the UI, by clearing the plan
-/// chip) runs the next turn as the default agent with the full tool set — this
-/// gate no longer flips a server-side mode. Returns the content + status to
-/// surface as the tool result (the verdict flows back to the LLM as the tool
-/// output).
+/// returns the verdict. `approval_id` is [`approval_correlation_id`] — the
+/// notification `item_id` and the pending-decision key in one. On approval the
+/// caller (the UI, by clearing the plan chip) runs the next turn as the
+/// default agent with the full tool set — this gate no longer flips a
+/// server-side mode. Returns the content + status to surface as the tool
+/// result (the verdict flows back to the LLM as the tool output).
 async fn drive_present_plan_approval(
     context: &TurnExecutionContext<'_>,
-    call_id: &str,
+    approval_id: &str,
     plan_summary: String,
     plan_snapshot: Option<serde_json::Value>,
     risk: &ToolRiskAssessment,
@@ -395,7 +443,7 @@ async fn drive_present_plan_approval(
     let msg = EventMsg::CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams {
         thread_id: context.thread_id.to_owned(),
         turn_id: context.turn_index.to_string(),
-        item_id: call_id.to_owned(),
+        item_id: approval_id.to_owned(),
         command: plan_summary,
         cwd: String::new(),
         reason: Some("Plan ready for approval".to_owned()),
@@ -409,13 +457,13 @@ async fn drive_present_plan_approval(
         &context.trace_context,
         "slab-agent",
         "plan_approval_required",
-        serde_json::json!({ "item_id": call_id, "tool_name": PRESENT_PLAN_TOOL_NAME }),
+        serde_json::json!({ "item_id": approval_id, "tool_name": PRESENT_PLAN_TOOL_NAME }),
     );
 
     let decision = tokio::select! {
         decision = context.approval.request_approval(
             context.thread_id,
-            call_id,
+            approval_id,
             PRESENT_PLAN_TOOL_NAME,
             &descriptor,
             Some(risk.clone()),
@@ -430,7 +478,7 @@ async fn drive_present_plan_approval(
                 &context.trace_context,
                 "slab-agent",
                 "plan_approval_resolved",
-                serde_json::json!({ "item_id": call_id, "approved": true }),
+                serde_json::json!({ "item_id": approval_id, "approved": true }),
             );
             // On approval the caller (the UI, by clearing the plan chip) runs the
             // next turn as the default agent with the full tool set. Mutation
@@ -447,7 +495,7 @@ async fn drive_present_plan_approval(
                 &context.trace_context,
                 "slab-agent",
                 "plan_approval_resolved",
-                serde_json::json!({ "item_id": call_id, "approved": false }),
+                serde_json::json!({ "item_id": approval_id, "approved": false }),
             );
             (
                 "Plan not approved. Stay in Plan mode, revise the plan, and call present_plan again when ready.".to_owned(),
@@ -455,6 +503,71 @@ async fn drive_present_plan_approval(
             )
         }
     })
+}
+
+/// A partitioned slice of one assistant tool batch: a maximal run of
+/// consecutive concurrency-safe calls (executed in parallel, bounded by
+/// `max_parallel`), or a single non-safe call (executed alone, strictly
+/// ordered against its neighbors).
+struct ToolCallBatch<'a> {
+    calls: Vec<(usize, &'a ParsedToolCall)>,
+}
+
+/// Partition call indices into parallel/serial batches from precomputed
+/// safety flags. Consecutive safe indices merge into one parallel batch
+/// capped at `max_parallel`; every non-safe index is its own batch. Original
+/// relative order is preserved, so results land in call order exactly as the
+/// old uniform chunking produced.
+fn partition_indices(safe: &[bool], max_parallel: usize) -> Vec<Vec<usize>> {
+    let max_parallel = max_parallel.max(1);
+    let mut batches: Vec<Vec<usize>> = Vec::new();
+    let mut run: Vec<usize> = Vec::new();
+    let flush = |run: &mut Vec<usize>, batches: &mut Vec<Vec<usize>>| {
+        if !run.is_empty() {
+            batches.push(std::mem::take(run));
+        }
+    };
+    for (index, is_safe) in safe.iter().enumerate() {
+        if *is_safe {
+            if run.len() >= max_parallel {
+                flush(&mut run, &mut batches);
+            }
+            run.push(index);
+        } else {
+            flush(&mut run, &mut batches);
+            batches.push(vec![index]);
+        }
+    }
+    flush(&mut run, &mut batches);
+    batches
+}
+
+/// Partition the batch by per-call concurrency safety (see
+/// [`ToolHandler::is_concurrency_safe`]). Read-only calls that arrive
+/// consecutively run in parallel (bounded by the configured
+/// `tool_concurrency`); mutating calls always run alone in original order.
+fn partition_tool_calls<'a>(
+    context: &TurnExecutionContext<'_>,
+    tool_calls: &'a [ParsedToolCall],
+    max_parallel: usize,
+) -> Vec<ToolCallBatch<'a>> {
+    let safe: Vec<bool> = tool_calls
+        .iter()
+        .map(|tool_call| {
+            let args = serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+                .unwrap_or(serde_json::Value::Null);
+            context
+                .tools
+                .get(&tool_call.name)
+                .is_some_and(|handler| handler.is_concurrency_safe(&args))
+        })
+        .collect();
+    partition_indices(&safe, max_parallel)
+        .into_iter()
+        .map(|indices| ToolCallBatch {
+            calls: indices.into_iter().map(|index| (index, &tool_calls[index])).collect(),
+        })
+        .collect()
 }
 
 /// Execute the given tool calls and persist their results.
@@ -495,12 +608,15 @@ pub(crate) async fn handle_tool_calls(
 
     let concurrency = context.config.effective_tool_concurrency().min(total);
     emit_tool_concurrency_started(context, total, concurrency).await;
+    // Advisory phase: the tool batch is in flight (status-only TurnState —
+    // empty input_messages is a replay no-op).
+    emit_turn_phase(context, TurnPhase::ExecutingTools).await;
 
     let mut results = Vec::with_capacity(total);
     let conversation_context = messages.clone();
-    for (chunk_index, chunk) in tool_calls.chunks(concurrency).enumerate() {
-        let base_index = chunk_index * concurrency;
-        let batch = chunk.iter().enumerate().map(|(offset, tool_call)| {
+    for batch in partition_tool_calls(context, tool_calls, concurrency) {
+        let batch_calls = batch.calls;
+        let batch = batch_calls.iter().map(|(index, tool_call)| {
             let created_at = now.clone();
             let tool_context = tool_context.clone();
             let conversation_messages = conversation_context.as_slice();
@@ -509,7 +625,7 @@ pub(crate) async fn handle_tool_calls(
                     context,
                     &tool_context,
                     conversation_messages,
-                    base_index + offset,
+                    *index,
                     tool_call,
                     &created_at,
                 )
@@ -805,20 +921,21 @@ async fn handle_tool_call(
         if approval_request.is_some() { ToolCallStatus::Pending } else { ToolCallStatus::Running };
     let mut tool_state = ToolCallStateMachine::new(initial_status);
     let workspace_root = workspace_root_of(context);
-    emit_item_started(
-        context,
-        render_tool_call_item(
-            handler.as_deref(),
-            tool_call,
-            &effective_args,
-            "running",
-            None,
-            workspace_root.as_deref(),
-            None,
-            None,
-        ),
-    )
-    .await;
+    let started_item = render_tool_call_item(
+        handler.as_deref(),
+        tool_call,
+        &effective_args,
+        "running",
+        None,
+        workspace_root.as_deref(),
+        None,
+        None,
+    );
+    // Track the open item so an interrupt/error teardown can still emit its
+    // terminal ItemCompleted (the immediately-paired failure paths above never
+    // register — their start is completed in the same breath).
+    context.items.record_started(context.turn_index, tool_call, &effective_args);
+    emit_item_started(context, started_item.clone()).await;
 
     // Stream incremental command output (display-only) while the tool runs. A
     // channel-backed observer on the tool context forwards each delta to the
@@ -844,6 +961,7 @@ async fn handle_tool_call(
             handler,
             approval_request,
             tool_state: &mut tool_state,
+            started_item,
         })
         .await
     };
@@ -894,7 +1012,7 @@ async fn handle_tool_call(
                 plan_snapshot_for(PRESENT_PLAN_TOOL_NAME, tool_output.metadata.as_ref());
             let (approved_content, resolved_status) = drive_present_plan_approval(
                 context,
-                &call_id,
+                approval_correlation_id(&tool_call.id, &call_id),
                 tool_output.content.clone(),
                 plan_snapshot,
                 &risk,
@@ -905,6 +1023,23 @@ async fn handle_tool_call(
         } else {
             tool_output.content
         };
+    // Central context-budget net: bound every non-plan tool result before it
+    // becomes conversation history. Applied AFTER the exit-code sniff above
+    // (which parses the raw shell JSON) and BEFORE the trace record below, so
+    // the on-disk trace is bounded too. Present-plan content is the approved
+    // plan summary and flows through the approval channel unchanged.
+    let bounded = if tool_call.name == PRESENT_PLAN_TOOL_NAME {
+        None
+    } else {
+        Some(context.tool_result_guard.bound(&call_id, &content))
+    };
+    let (output_bytes, output_truncated, duplicate_of) = match bounded {
+        Some(result) => {
+            content = result.content;
+            (result.original_bytes, result.truncated, result.duplicate_of)
+        }
+        None => (content.len(), false, None),
+    };
     info!(
         thread_id = context.thread_id,
         turn_index = context.turn_index,
@@ -913,6 +1048,8 @@ async fn handle_tool_call(
         tool_name = %tool_call.name,
         status = ?call_status,
         output_len = content.len(),
+        output_bytes,
+        output_truncated,
         "agent tool call output"
     );
     record_json(
@@ -926,6 +1063,9 @@ async fn handle_tool_call(
             "tool_name": tool_call.name,
             "status": call_status,
             "output": content,
+            "output_bytes": output_bytes,
+            "output_truncated": output_truncated,
+            "duplicate_of": duplicate_of,
         }),
     );
     append_hook_observations(&mut content, pre_observations);
@@ -981,6 +1121,10 @@ struct ToolRunContext<'a, 'ctx> {
     handler: Option<Arc<dyn ToolHandler>>,
     approval_request: Option<ToolApprovalRequest>,
     tool_state: &'a mut ToolCallStateMachine,
+    /// The already-emitted `ItemStarted` render. The approval emitter reuses it
+    /// to pick the notification type (FileChange vs command) and to keep the
+    /// banner's change list identical to the in-stream card.
+    started_item: TurnItem,
 }
 
 async fn run_tool_with_optional_approval(
@@ -989,6 +1133,8 @@ async fn run_tool_with_optional_approval(
     let Some(ref request) = run.approval_request else {
         return run_tool_without_approval(&run).await;
     };
+    // Advisory phase: the batch is blocked on a user approval (status-only).
+    emit_turn_phase(run.context, TurnPhase::AwaitingApproval).await;
     emit_approval_request(&run).await;
 
     record_json(
@@ -1017,7 +1163,7 @@ async fn run_tool_with_optional_approval(
     let decision = tokio::select! {
         decision = run.context.approval.request_approval(
             run.context.thread_id,
-            run.call_id,
+            approval_correlation_id(&run.tool_call.id, run.call_id),
             &run.tool_call.name,
             &request.descriptor,
             Some(run.risk.clone()),
@@ -1270,6 +1416,33 @@ mod tests {
             name: name.to_owned(),
             arguments: "{}".to_owned(),
         }
+    }
+
+    #[test]
+    fn partition_reads_parallel_writes_serial_preserving_order() {
+        // [Grep, Glob, Read, Write, Grep, Read] →
+        // {Grep, Glob, Read} ∥ {Write} serial {Grep, Read} ∥
+        let safe = [true, true, true, false, true, true];
+        let batches = partition_indices(&safe, 4);
+        assert_eq!(
+            batches,
+            vec![vec![0, 1, 2], vec![3], vec![4, 5]],
+            "consecutive safe runs merge; unsafe breaks them and runs alone"
+        );
+    }
+
+    #[test]
+    fn partition_caps_parallel_run_at_max_parallel() {
+        let safe = [true, true, true, true, true];
+        assert_eq!(partition_indices(&safe, 2), vec![vec![0, 1], vec![2, 3], vec![4]]);
+        // cap of 1 degenerates to fully serial.
+        assert_eq!(partition_indices(&safe, 1), vec![vec![0], vec![1], vec![2], vec![3], vec![4]]);
+    }
+
+    #[test]
+    fn partition_all_unsafe_is_fully_serial() {
+        let safe = [false, false, false];
+        assert_eq!(partition_indices(&safe, 4), vec![vec![0], vec![1], vec![2]]);
     }
 
     #[test]

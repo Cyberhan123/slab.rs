@@ -1,14 +1,6 @@
 export const image = {
-  header: {
-    title: '图像',
-    subtitle: '生成和管理 AI 图像',
-    subtitleTxt2Img: '根据文本提示词生成图像',
-    subtitleImg2Img: '结合输入图像与扩散参数进行重绘',
-  },
   modelPicker: {
     groupLabel: '图像模型',
-    placeholder: '选择模型',
-    emptyLabel: '暂无扩散模型',
   },
   options: {
     mode: {
@@ -39,7 +31,6 @@ export const image = {
   },
   workbench: {
     sectionTitle: '生成参数',
-    modelHint: '请从全局顶部栏选择当前扩散模型。',
     initImage: {
       currentLabel: '初始图像',
       uploadLabel: '上传初始图像',
@@ -53,7 +44,6 @@ export const image = {
       placeholder: '一张带有电影感边缘光的人像...',
     },
     negativePrompt: {
-      label: '负面提示词',
       placeholder: '模糊、低质量、畸变...',
     },
     dimensions: {
@@ -66,22 +56,12 @@ export const image = {
     },
     advanced: {
       title: '高级设置',
-      width: '宽度',
-      height: '高度',
-      cfgScale: 'CFG Scale',
-      guidance: 'Guidance',
-      steps: '步数',
-      strength: '强度',
-      seed: '种子（-1 为随机）',
-      sampler: '采样器',
-      scheduler: '调度器',
       clipSkip: 'CLIP Skip',
       eta: 'Eta (DDIM)',
     },
     actions: {
       loadingPreset: '正在加载预设...',
       preparingModel: '正在准备模型...',
-      generating: '正在生成...',
       generate: '生成图像',
       cancel: '取消生成',
     },
@@ -105,53 +85,30 @@ export const image = {
     },
   },
   history: {
-    title: '最近历史',
     loading: '正在加载最近的图像生成记录...',
-    error: '加载历史失败：{{message}}',
     description: '重新查看最近图像任务的提示词、预览图和已保存输出。',
     empty: '暂无图像历史。已完成的图像任务会显示在这里。',
     detailTitle: '图像任务详情',
-    refilled: '已回填历史参数。再次生成前请先确认。',
-    actions: {
-      refill: '复用参数',
-    },
     fields: {
       mode: '模式',
-      size: '尺寸',
-      backend: '后端',
-      model: '模型',
     },
   },
   progress: {
     title: '生成进度',
-    queued: '已入队，等待运行时处理',
     running: '运行时正在采样生成',
     finalizing: '正在整理生成产物',
-    eta: '预计剩余',
-    step: '步骤',
   },
   toast: {
-    downloaded: '已下载 {{model}}',
-    modelLoadRetry: '模型加载失败，正在重新下载并再试一次...',
     generated_one: '已生成 {{count}} 张图像！',
     generated_other: '已生成 {{count}} 张图像！',
-    generationTimedOut: '生成超时',
     historyDetailFailed: '打开图像历史详情失败：{{message}}',
-    pollingError: '轮询出错：{{message}}',
     resultFetchFailed: '获取生成结果失败：{{message}}',
   },
   error: {
     modelPresetLoading: '模型预设仍在加载中',
-    enterPrompt: '请输入提示词',
     uploadInitImage: '图生图模式请先上传初始图像',
-    readImageFileFailed: '读取图像文件失败',
     selectModelFirst: '请先选择图像模型。',
     selectedModelUnavailable: '所选模型不可用',
-    selectedModelMissing: '所选模型不存在于目录中',
-    selectedModelNotLocal: '所选模型不是本地图像模型',
-    downloadTimedOut: '模型下载超时',
-    startDownloadFailed: '启动模型下载任务失败',
-    missingDownloadedPath: '模型下载完成，但 local_path 为空',
     generationFailed: '图像生成失败',
   },
 } as const;

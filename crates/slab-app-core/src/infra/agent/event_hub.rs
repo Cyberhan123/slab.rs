@@ -39,9 +39,9 @@ const CHANNEL_CAPACITY: usize = 256;
 /// NOTE: this NO LONGER gates routing. `on_event_msg` routes EVERY
 /// event to the dedicated unbounded persistence channel; the observer's
 /// `EventPersistenceMode::should_persist` fallback decides which non-structural
-/// variants (Error/Warning under Limited, deltas/approvals under Extended)
+/// variants (Error under Limited, deltas/approvals under Extended)
 /// become `RolloutItem::EventMsg` lines. Routing only the structural subset
-/// would make that fallback unreachable and silently drop Error/Warning from
+/// would make that fallback unreachable and silently drop Error from
 /// the rollout under the default Limited mode. This helper is retained as a
 /// structural classifier for test sanity assertions (e.g. Test C confirms its
 /// chosen flood event is a real structural event).
@@ -52,7 +52,6 @@ fn is_persistence_grade(msg: &EventMsg) -> bool {
         EventMsg::ItemCompleted(_)
             | EventMsg::ContextCompacting(_)
             | EventMsg::ContextCompacted(_)
-            | EventMsg::ThreadStarted(_)
             | EventMsg::TurnStarted(_)
             | EventMsg::TurnCompleted(_)
             | EventMsg::TurnAborted(_)
@@ -69,8 +68,12 @@ const APPROVAL_TIMEOUT_SECS: u64 = 300;
 pub struct AgentEventHub {
     /// Per-thread event channels with a bounded replay history.
     channels: Arc<DashMap<String, EventChannel>>,
-    /// Pending approval requests: "<thread_id>:<call_id>" → oneshot sender.
-    approvals: Arc<DashMap<String, oneshot::Sender<ApprovalDecision>>>,
+    /// Pending approval requests: `approval:<call_id>` → [`PendingApproval`].
+    /// The key stays call_id-scoped (the correlation id is globally unique in
+    /// practice and avoids the fragile harness↔real thread-id remap); the
+    /// VALUE carries the owning thread id for ownership verification and
+    /// teardown clearing.
+    approvals: Arc<DashMap<String, PendingApproval>>,
     /// Per-thread DEDICATED UNBOUNDED persistence channel.
     /// Replaces the bounded broadcast for the rollout persistence observer so
     /// a flood of persistence-grade events CANNOT `Lagged`-drop conversation
@@ -173,17 +176,22 @@ impl AgentEventHub {
 
     /// Send an approval decision for a pending tool call.
     ///
-    /// The pending entry is matched by `call_id` alone — it is a fresh
-    /// per-call UUID (globally unique), so no `thread_id` scoping is needed.
-    /// Keying by `call_id` only avoids the fragile harness↔real thread-id
-    /// remap that previously caused resolves to miss the pending entry.
+    /// The pending entry is matched by the approval correlation id — normally
+    /// the provider-assigned `tool_call.id` (the same id the item lifecycle
+    /// events use), falling back to a fresh per-call UUID when the provider id
+    /// is empty. Keying by this id alone avoids the fragile harness↔real
+    /// thread-id remap that previously caused resolves to miss the pending
+    /// entry. The entry's owning thread id is verified against `thread_id`
+    /// when both are known, so a resolve routed to the wrong thread cannot
+    /// deliver a decision cross-thread.
     ///
     /// `scope` is the user's persistence choice (run-once / workspace / always
     /// / deny); it flows back to the exec-policy engine via the returned
     /// [`ApprovalDecision`].
     ///
     /// Returns `true` if the pending approval was found and the decision was
-    /// delivered; `false` if no matching pending approval exists.
+    /// delivered; `false` if no matching pending approval exists (or the
+    /// ownership check failed).
     pub fn approve_call(
         &self,
         thread_id: &str,
@@ -191,18 +199,57 @@ impl AgentEventHub {
         approved: bool,
         scope: slab_exec_policy::ApprovalScope,
     ) -> bool {
-        let _ = thread_id;
         let key = approval_key(call_id);
-        if let Some((_, tx)) = self.approvals.remove(&key) {
-            let decision = if approved {
-                ApprovalDecision::Approved(scope)
-            } else {
-                ApprovalDecision::Rejected
-            };
-            tx.send(decision).is_ok()
-        } else {
-            false
+        // Ownership check BEFORE removal: a mismatched resolve must refuse
+        // without consuming the entry (a correctly-routed retry still works).
+        if let Some(entry) = self.approvals.get(&key)
+            && !entry.value().thread_id.is_empty()
+            && !thread_id.is_empty()
+            && entry.value().thread_id != thread_id
+        {
+            warn!(
+                call_id,
+                owner_thread = %entry.value().thread_id,
+                resolve_thread = %thread_id,
+                "approval resolve routed to the wrong thread; refusing cross-thread delivery"
+            );
+            return false;
         }
+        let Some((_, pending)) = self.approvals.remove(&key) else {
+            return false;
+        };
+        let decision =
+            if approved { ApprovalDecision::Approved(scope) } else { ApprovalDecision::Rejected };
+        pending.tx.send(decision).is_ok()
+    }
+
+    /// Resolve every pending approval owned by `thread_id` as Rejected and
+    /// drop the map entries. Called on interrupt/shutdown teardown: the
+    /// waiting `request_approval` future is cancelled by the turn loop's
+    /// cancellation, so its own cleanup (timeout/decision path) never runs —
+    /// without this, the oneshot entries leak in the map forever.
+    ///
+    /// Removal alone resolves any still-listening receiver: dropping the
+    /// oneshot sender surfaces as `RecvError` in `request_approval`, whose
+    /// `Ok(Err(_))` arm rejects the call. Returns the number of entries
+    /// cleared.
+    pub fn clear_pending_approvals(&self, thread_id: &str) -> usize {
+        let mut cleared = 0usize;
+        self.approvals.retain(|_key, pending| {
+            let keep = pending.thread_id != thread_id;
+            if !keep {
+                cleared += 1;
+            }
+            keep
+        });
+        if cleared > 0 {
+            debug!(
+                thread_id,
+                cleared,
+                "cleared pending approvals on teardown (dropped senders reject their waiters)"
+            );
+        }
+        cleared
     }
 
     fn broadcast_msg(&self, thread_id: &str, msg: EventMsg) {
@@ -305,6 +352,13 @@ fn approval_key(call_id: &str) -> String {
     format!("approval:{call_id}")
 }
 
+/// A pending approval decision: the waiting thread's id (for ownership checks
+/// and teardown clearing) plus the oneshot back to the turn loop.
+struct PendingApproval {
+    thread_id: String,
+    tx: oneshot::Sender<ApprovalDecision>,
+}
+
 #[async_trait]
 impl AgentNotifyPort for AgentEventHub {
     async fn on_status_change(&self, thread_id: &str, status: ThreadStatus) {
@@ -371,7 +425,7 @@ impl ApprovalPort for AgentEventHub {
     ) -> ApprovalDecision {
         let (tx, rx) = oneshot::channel();
         let key = approval_key(call_id);
-        self.approvals.insert(key.clone(), tx);
+        self.approvals.insert(key.clone(), PendingApproval { thread_id: thread_id.to_owned(), tx });
 
         // Wait for an operator decision, but auto-reject after the timeout so
         // the agent turn is never permanently blocked.
@@ -521,5 +575,88 @@ mod tests {
             _ => false,
         };
         assert!(is_turn_3, "expected the live turn-3 event on the mpsc");
+    }
+
+    // ── pending-approval ownership + teardown clearing ──────────────────────
+
+    use slab_agent::ApprovalPort as _;
+
+    fn approval_descriptor() -> slab_exec_policy::OperationDescriptor {
+        slab_exec_policy::OperationDescriptor::read_only("test_tool".to_owned())
+    }
+
+    #[tokio::test]
+    async fn approve_call_refuses_cross_thread_delivery_and_keeps_entry() {
+        let hub = AgentEventHub::new();
+        let waiter = {
+            let hub = hub.clone();
+            let descriptor = approval_descriptor();
+            tokio::spawn(async move {
+                hub.request_approval("t-owner", "call-x", "test_tool", &descriptor, None).await
+            })
+        };
+        // Let the waiter register its pending entry.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        // Wrong thread → refused, and the entry survives for a correct retry.
+        assert!(!hub.approve_call(
+            "t-other",
+            "call-x",
+            true,
+            slab_exec_policy::ApprovalScope::RunOnce
+        ));
+        assert!(hub.approve_call(
+            "t-owner",
+            "call-x",
+            true,
+            slab_exec_policy::ApprovalScope::RunOnce
+        ));
+        let decision = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("waiter resolved")
+            .expect("waiter task ok");
+        assert!(matches!(decision, slab_agent::port::ApprovalDecision::Approved(_)));
+    }
+
+    #[tokio::test]
+    async fn clear_pending_approvals_scopes_by_thread_and_rejects_waiters() {
+        let hub = AgentEventHub::new();
+        let waiter_a = {
+            let hub = hub.clone();
+            let descriptor = approval_descriptor();
+            tokio::spawn(async move {
+                hub.request_approval("t-clear", "call-a", "test_tool", &descriptor, None).await
+            })
+        };
+        let waiter_b = {
+            let hub = hub.clone();
+            let descriptor = approval_descriptor();
+            tokio::spawn(async move {
+                hub.request_approval("t-keep", "call-b", "test_tool", &descriptor, None).await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        // Teardown clearing removes ONLY the thread's entries; the dropped
+        // sender resolves the still-listening waiter as Rejected.
+        assert_eq!(hub.clear_pending_approvals("t-clear"), 1);
+        let decision_a = tokio::time::timeout(std::time::Duration::from_secs(1), waiter_a)
+            .await
+            .expect("cleared waiter resolved promptly")
+            .expect("waiter task ok");
+        assert!(matches!(decision_a, slab_agent::port::ApprovalDecision::Rejected));
+
+        // The other thread's approval is untouched and resolvable.
+        assert!(hub.approve_call(
+            "t-keep",
+            "call-b",
+            false,
+            slab_exec_policy::ApprovalScope::RunOnce
+        ));
+        let decision_b = tokio::time::timeout(std::time::Duration::from_secs(1), waiter_b)
+            .await
+            .expect("kept waiter resolved")
+            .expect("waiter task ok");
+        assert!(matches!(decision_b, slab_agent::port::ApprovalDecision::Rejected));
     }
 }

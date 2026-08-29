@@ -11,15 +11,27 @@ child processes via an elevated helper (`slab-sandbox-helper`), opt-in through U
   network isolation** (S3 — the child runs as an AppContainer without `internetClient`, so the OS
   default WFP rule blocks outbound traffic, plus a session-scoped user-mode WFP filter keyed on the
   package SID), and the elevated helper IPC (HMAC-signed payload/result files,
-  `ShellExecuteExW("runas")`).
+  `ShellExecuteExW("runas")`). `JobHandle` (re-exported, `new_kill_on_close()` +
+  `assign_process()`) is the public Job Object seam — `slab-sandboxing`'s pass-through driver
+  uses it for tree-kill on Windows.
 - Owns the `SpawnedChild` seam: returns a raw `tokio::process::Child` + `kill_tree` closure to
-  `slab-sandboxing`, which feeds it into the **shared** `wait_for_child` output loop.
+  `slab-sandboxing`, which feeds it into the **shared** `wait_for_child` output loop. The elevated
+  path's `kill_tree` aborts the connection-reader task (a tokio `JoinHandle` drop merely detaches —
+  without the explicit abort the daemon never sees the disconnect and its Job stays alive).
 - **ConPTY (S6a, opt-in):** `conpty.rs` can spawn the elevated child under a Windows pseudoconsole
   (`CreatePseudoConsole` + `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` combined with the AppContainer
   `SECURITY_CAPABILITIES` attribute) for terminal-aware output (ANSI/TUI fidelity) instead of piped
   stdio. Default off (`windows_use_conpty` config knob); the piped path remains the safe default.
   The AppContainer+ConPTY combination is not a documented Win32 scenario and must be empirically
   validated via the gated `os_conpty_*` test before it is relied on; fail-closed on attach failure.
+- **Daemon lifetime (owner watchdog):** `owner.rs` ties the daemon to the orchestrator that
+  launched it (slab-server threads `--owner-pid` into both launch paths in `elevation.rs`). The
+  watchdog waits on the owner's process handle and shuts the daemon down the moment it is signaled
+  (clean shutdown, crash, or taskkill), aborting every connection so each Job's
+  `KILL_ON_JOB_CLOSE` tears the sandboxed children down too. Consequence: each slab-server start
+  pays one UAC when the sandbox is enabled on a non-elevated host. Known edge: a second
+  slab-server instance reusing a live daemon inherits the first instance's owner, so the daemon
+  dies under it when the first instance exits (next spawn fails until that server restarts).
 
 ## Hard boundaries
 

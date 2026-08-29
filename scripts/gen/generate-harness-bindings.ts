@@ -122,7 +122,7 @@ async function main() {
   if (byName.size === 0) throw new Error("no bindings generated");
 
   const sections = [...byName.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+    .toSorted(([a], [b]) => a.localeCompare(b))
     .map(([name, body]) => `// ── ${name} ──\n${body}`)
     .join("\n\n");
 
@@ -182,6 +182,32 @@ async function assertMethodConstantsInSync(): Promise<void> {
   }
   if (drift.length > 0) {
     throw new Error(`HARNESS_METHOD drift vs crates/slab-proto mod.rs:\n${drift.join("\n")}`);
+  }
+
+  // The Flutter client mirrors the same constants by hand (no ts-rs Dart
+  // emitter exists); keep the Dart file honest with a string-presence check.
+  const dartPath = path.join(
+    repoRoot,
+    "flutter",
+    "slab-mobile",
+    "lib",
+    "data",
+    "harness",
+    "harness_methods.dart",
+  );
+  const dartSource = await readFile(dartPath, "utf8").catch(() => null);
+  if (dartSource === null) {
+    // A missing file must fail loudly — silently skipping would turn the
+    // drift check into a no-op after any future move.
+    throw new Error(
+      `flutter/slab-mobile/lib/data/harness/harness_methods.dart not found — the harness-constant mirror moved or was deleted; update this script.`,
+    );
+  }
+  const dartDrift = [...tsValues.values()].filter((value) => !dartSource.includes(`'${value}'`));
+  if (dartDrift.length > 0) {
+    throw new Error(
+      `HARNESS_METHOD values missing from flutter/slab-mobile/lib/data/harness/harness_methods.dart:\n${dartDrift.map((v) => `  ${v}`).join("\n")}`,
+    );
   }
   console.log(`Method constants in sync (${rustConsts.size} consts checked).`);
 }

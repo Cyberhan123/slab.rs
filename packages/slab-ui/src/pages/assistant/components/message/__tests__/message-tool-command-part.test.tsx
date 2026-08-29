@@ -130,6 +130,57 @@ describe("MessageToolCommandPart", () => {
     expect(screen.getByTestId("badge").element().textContent).toContain("Denied")
   })
 
+  it("splits a finalized SandboxedOutput JSON into stdout + stderr instead of raw JSON", async () => {
+    const screen = await renderPart(
+      {
+        type: "tool-output-available",
+        input: { command: "whoami", cwd: "/repo" },
+        output: '{"stdout":"cyberhan\\n","stderr":"","exit_code":0,"timed_out":false}',
+        state: "output-available",
+      },
+      {},
+    )
+    const content = screen.getByTestId("terminal-content").element().textContent ?? ""
+    expect(content).toContain("cyberhan")
+    expect(content).not.toContain('"stdout"')
+    expect(content).not.toContain("exit_code")
+    // Empty stderr renders no stderr block.
+    await expect.element(screen.getByTestId("assistant-command-stderr")).not.toBeInTheDocument()
+  })
+
+  it("renders stderr separately and parses the JSON on failed commands", async () => {
+    const screen = await renderPart(
+      {
+        type: "tool-output-error",
+        input: { command: "cargo build", cwd: "/repo" },
+        errorText: '{"stdout":"compiling\\n","stderr":"error[E0308]: mismatch","exit_code":101,"timed_out":false}',
+        state: "output-error",
+      },
+      {},
+    )
+    const content = screen.getByTestId("terminal-content").element().textContent ?? ""
+    expect(content).toContain("compiling")
+    expect(content).not.toContain("exit_code")
+    expect(screen.getByTestId("assistant-command-stderr").element().textContent).toContain(
+      "error[E0308]: mismatch",
+    )
+    expect(screen.getByTestId("badge").element().textContent).toContain("Error")
+  })
+
+  it("keeps plain-text output rendering unchanged (unparseable JSON)", async () => {
+    const screen = await renderPart(
+      {
+        type: "tool-output-available",
+        input: { command: "echo hi", cwd: "/repo" },
+        output: "plain text result",
+        state: "output-available",
+      },
+      {},
+    )
+    expect(screen.getByTestId("terminal-content").element().textContent).toContain("plain text result")
+    await expect.element(screen.getByTestId("assistant-command-stderr")).not.toBeInTheDocument()
+  })
+
   it("does not crash when toolCallId is empty and renders no approval lookup", async () => {
     // Empty toolCallId is falsy → the component skips the approval/output map lookups.
     const screen = await renderPart(

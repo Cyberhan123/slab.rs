@@ -1,12 +1,6 @@
 export const video = {
-  header: {
-    title: '视频',
-    subtitle: '视频工具与处理',
-  },
   modelPicker: {
     groupLabel: '视频模型',
-    placeholder: '选择模型',
-    emptyLabel: '暂无扩散模型',
     optionDownloadInHub: '{{model}}（请先在模型库下载）',
   },
   options: {
@@ -25,29 +19,18 @@ export const video = {
   },
   workbench: {
     configTitle: '配置',
-    modelHint: '请从全局顶部栏选择当前扩散模型。',
     prompt: {
       label: '创意提示词',
       placeholder: '用电影镜头语言详细描述这个场景...',
     },
     negativePrompt: {
-      label: '负面提示词',
       placeholder: '模糊、低质量、畸变...',
     },
     fields: {
-      width: '宽度',
-      height: '高度',
       frames: '帧数',
       fps: '帧率',
       referenceImage: '参考图像',
       advanced: '高级参数',
-      cfgScale: 'CFG Scale',
-      guidance: 'Guidance',
-      steps: '步数',
-      strength: '强度',
-      seed: '种子（-1 为随机）',
-      sampler: '采样器',
-      scheduler: '调度器',
     },
     referenceImage: {
       readyTitle: '参考帧已就绪',
@@ -58,7 +41,6 @@ export const video = {
       removeAria: '移除参考图像',
     },
     actions: {
-      generating: '正在生成...',
       generate: '生成视频',
       cancel: '取消当前渲染',
     },
@@ -72,35 +54,25 @@ export const video = {
     },
   },
   history: {
-    title: '最近历史',
     loading: '正在加载最近的视频生成记录...',
-    error: '加载历史失败：{{message}}',
     description: '重新查看最近视频任务的生成片段、提示词和渲染参数。',
     empty: '暂无视频历史。已完成的渲染结果会显示在这里。',
     detailTitle: '视频任务详情',
     noArtifact: '这个任务暂时还没有可持久化查看的视频产物。',
-    refilled: '已回填历史参数。再次生成前请先确认。',
     compareArtifact: '对比产物 {{index}}',
     actions: {
       compare: '加入对比',
       openWorkspace: '在工作区打开',
-      refill: '复用参数',
       removeCompare: '移出对比',
     },
     fields: {
-      size: '尺寸',
       clip: '片段',
-      backend: '后端',
-      model: '模型',
     },
   },
   progress: {
     title: '渲染进度',
-    queued: '已入队，等待运行时处理',
     running: '运行时正在渲染帧',
     finalizing: '正在整理视频产物',
-    eta: '预计剩余',
-    step: '步骤',
   },
   stage: {
     title: {
@@ -130,16 +102,12 @@ export const video = {
     started: '视频生成已开始（{{frames}} 帧，{{fps}} fps）...',
     generated: '视频已生成！',
     historyDetailFailed: '打开视频历史详情失败：{{message}}',
-    timedOut: '视频生成超时',
-    pollingError: '轮询出错：{{message}}',
     completedWithoutPath: '视频生成完成，但没有返回视频路径',
     resultFetchFailed: '获取视频结果失败：{{message}}',
   },
   error: {
-    enterPrompt: '请输入提示词',
     selectDownloadedModel: '所选模型尚未下载，请先在模型库中下载。',
     chooseImageFile: '请选择图像文件',
-    readImageFileFailed: '读取图像文件失败',
     generationFailed: '视频生成失败',
   },
 } as const;

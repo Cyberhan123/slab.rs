@@ -8,7 +8,7 @@ import { queryClient } from "@slab/ui/lib/query-client";
 import { AppLanguageSync, SetupGuard } from "./app-guards";
 
 /**
- * App shell for the non-desktop shells (web/h5): the shell-agnostic guards
+ * App shell for the non-desktop web shell: the shell-agnostic guards
  * only — setup gate + language sync. Deliberately excludes the desktop-only
  * syncs: WorkspaceModeSync would redirect `/` to a route these shells don't
  * mount, PluginThemeSync is a no-op without the Tauri plugin host, and the

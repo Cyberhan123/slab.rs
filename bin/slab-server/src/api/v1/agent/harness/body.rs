@@ -33,8 +33,9 @@ use tokio::sync::mpsc;
 use super::session::HarnessSession;
 use super::transform::Established;
 use super::{
-    build_user_message_from_input, messages_from_input, model_info_from_spec, scan_known_skills,
-    thread_from_snapshot, thread_from_snapshot_with_id, thread_from_snapshot_with_turns,
+    build_user_message_from_input, chat_reasoning_effort_from_proto, messages_from_input,
+    model_info_from_spec, scan_known_skills, thread_from_snapshot, thread_from_snapshot_with_id,
+    thread_from_timeline,
 };
 use crate::api::v1::agent::schema::AgentConfigInput;
 
@@ -87,6 +88,13 @@ pub(crate) async fn turn_start(
     // non-default agent after a plan is approved.
     let agent_def = session.service().resolve_agent_definition(params.agent_type.as_deref());
 
+    // Per-run LLM-iteration budget from settings. Re-applied on every turn so
+    // legacy threads persisted with the old default (`10`) are upgraded on
+    // their next user message; `resume_thread` re-reads `config_json` each
+    // turn, making the persisted config the chokepoint.
+    let max_turns = session.state().context.pmid.config().agent.runtime.limits.clamped().max_turns;
+
+    let mut queued = false;
     match session.existing_real(&params.thread_id) {
         Some(real_id) => {
             // Re-apply (or clear) the agent override on the persisted config so
@@ -96,12 +104,29 @@ pub(crate) async fn turn_start(
                 .apply_agent_override(&real_id, agent_def.as_ref())
                 .await
                 .map_err(|e| e.to_string())?;
+            // Re-apply (or clear) the per-turn reasoning-effort override on the
+            // persisted config BEFORE the turn starts — `resume_thread` re-reads
+            // `config_json` for every turn, so this is what actually reaches the
+            // LLM request. `None` clears a previous override (no sticky state).
+            session
+                .service()
+                .set_thread_reasoning_effort(
+                    &real_id,
+                    params.effort.map(chat_reasoning_effort_from_proto),
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            session
+                .service()
+                .set_thread_max_turns(&real_id, max_turns)
+                .await
+                .map_err(|e| e.to_string())?;
             let known_skills = scan_known_skills(session.state().workspace_root().as_deref());
             // Structured input carries image parts (VLM) through to
             // `send_input_message`; empty input is a silent no-op, mirroring the
             // prior `join_user_text` → `send_input` text path.
             if let Some(message) = build_user_message_from_input(&params.input, &known_skills) {
-                session
+                queued = session
                     .service()
                     .send_input_message(&real_id, message)
                     .await
@@ -111,12 +136,20 @@ pub(crate) async fn turn_start(
         None => {
             // First turn materializes the slab thread (create + run).
             let known_skills = scan_known_skills(session.state().workspace_root().as_deref());
-            let mut config: slab_agent::AgentConfig =
-                AgentConfigInput { model: params.model.clone(), ..Default::default() }.into();
+            let mut config: slab_agent::AgentConfig = AgentConfigInput {
+                model: params.model.clone(),
+                max_turns: Some(max_turns),
+                ..Default::default()
+            }
+            .into();
             if let Some(def) = &agent_def {
                 config.agent_type = Some(def.agent_type.clone());
                 config.system_prompt = Some(def.system_prompt.clone());
             }
+            // First turn: seed the config with the requested effort directly
+            // (post-into assignment — `AgentConfigInput` carries no effort field
+            // from this path).
+            config.reasoning_effort = params.effort.map(chat_reasoning_effort_from_proto);
             let messages = messages_from_input(&params.input, &known_skills);
             let real_id = session
                 .service()
@@ -142,9 +175,10 @@ pub(crate) async fn turn_start(
         turn: Turn {
             id: "0".to_owned(),
             items: vec![],
-            status: "inProgress".to_owned(),
+            status: if queued { "queued".to_owned() } else { "inProgress".to_owned() },
             error: None,
         },
+        queued: queued.then_some(true),
     })
 }
 
@@ -474,24 +508,19 @@ pub(crate) async fn thread_resume(
         }
     };
     // `bind` + `spawn_event_fanout` are run centrally by the establish_op
-    // adapter once we return the Established thread.
-    let messages =
-        session.service().list_thread_messages(&snapshot.id).await.map_err(|e| e.to_string())?;
+    // adapter once we return the Established thread. The history projection
+    // comes from the single interleaved rollout timeline (items + messages in
+    // write order) — the bucket-merge over separate reads restamped every
+    // message onto the last turn and misordered the restored history.
     let turn_states =
         session.service().list_turn_states(&snapshot.id).await.map_err(|e| e.to_string())?;
-    let turn_items =
-        session.service().list_turn_items(&snapshot.id).await.map_err(|e| e.to_string())?;
+    let timeline =
+        session.service().list_turn_timeline(&snapshot.id).await.map_err(|e| e.to_string())?;
     Ok(Established {
         real_id: snapshot.id.clone(),
         harness_id: harness_id.clone(),
         result: ThreadResumeResult {
-            thread: thread_from_snapshot_with_turns(
-                &harness_id,
-                &snapshot,
-                &messages,
-                &turn_states,
-                &turn_items,
-            ),
+            thread: thread_from_timeline(&harness_id, &snapshot, &turn_states, &timeline),
         },
     })
 }

@@ -15,6 +15,7 @@ use crate::domain::models::{
     UnifiedModelStatus, UpdateModelCommand, UpdateModelConfigSelectionCommand,
     normalize_model_capabilities,
 };
+use crate::domain::services::cloud_activation;
 use crate::error::AppCoreError;
 use crate::infra::db::{
     ModelConfigStateRecord, ModelConfigStateStore, ModelDownloadStore, ModelStore,
@@ -45,6 +46,7 @@ impl ModelService {
         display_name: &str,
         provider_id: &str,
         remote_model_id: &str,
+        context_window: Option<u32>,
     ) -> Result<(), AppCoreError> {
         let req = CreateModelCommand {
             id: Some(id.to_owned()),
@@ -56,6 +58,7 @@ impl ModelService {
             spec: ModelSpec {
                 provider_id: Some(provider_id.to_owned()),
                 remote_model_id: Some(remote_model_id.to_owned()),
+                context_window,
                 ..ModelSpec::default()
             },
             runtime_presets: None,
@@ -231,11 +234,25 @@ impl ModelService {
         &self,
         query: ListModelsFilter,
     ) -> Result<Vec<UnifiedModel>, AppCoreError> {
+        // Self-heal the cloud catalog against the configured providers (cheap curated diff +
+        // background live refresh) so external settings edits surface without a restart.
+        cloud_activation::reconcile_catalogs_for_read(self, &self.model_state).await;
         load_models_from_state(&self.model_state, query).await
     }
 
     pub async fn list_chat_models(&self) -> Result<Vec<ChatModelOption>, AppCoreError> {
+        cloud_activation::reconcile_catalogs_for_read(self, &self.model_state).await;
         list_chat_models_from_state(&self.model_state).await
+    }
+
+    /// Bootstrap-time cloud catalog sync: curated models are activated inline; live `/models`
+    /// discovery refreshes are spawned in the background. Follows `sync_model_packs_from_disk`.
+    pub async fn sync_cloud_provider_catalogs(&self) {
+        cloud_activation::bootstrap_cloud_catalogs(self, &self.model_state).await;
+    }
+
+    pub(crate) fn cloud_catalog(&self) -> std::sync::Arc<cloud_activation::CloudCatalogContext> {
+        std::sync::Arc::clone(&self.cloud_catalog)
     }
 
     pub async fn list_available_models(
@@ -539,19 +556,6 @@ pub(crate) async fn list_chat_models_from_state(
     });
 
     Ok(items)
-}
-
-/// Best-effort lookup of a model's advertised context window (in tokens) by id.
-///
-/// Used by the summarizing compaction policy to decide when auto-compaction
-/// should fire. Returns `None` when the model is unknown or has no recorded
-/// window — the caller then falls back to a fixed threshold.
-pub(crate) async fn context_window_for(state: &ModelState, model_id: &str) -> Option<u32> {
-    let models = load_models_from_state(state, ListModelsFilter { capability: None }).await.ok()?;
-    models
-        .into_iter()
-        .find(|model| model.id == model_id)
-        .and_then(|model| model.spec.context_window)
 }
 
 async fn load_cloud_provider_map_for_chat(

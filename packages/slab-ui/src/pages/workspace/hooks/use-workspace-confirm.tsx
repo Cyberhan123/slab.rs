@@ -87,7 +87,7 @@ export function useWorkspaceConfirmDialog() {
         </DialogHeader>
         <DialogFooter>
           <Button variant="quiet" onClick={() => settle(false)} data-testid="workspace-confirm-cancel">
-            {t("pages.workspace.confirm.cancel")}
+            {t("common.actions.cancel")}
           </Button>
           <Button
             variant={state.tone === "danger" ? "destructive" : "cta"}

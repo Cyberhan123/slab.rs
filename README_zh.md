@@ -114,7 +114,6 @@ Slab 适合希望在本地电脑上完成 AI 任务的个人开发者、研究�
 
 - 安装 Rust 稳定版工具链。
 - 安装 Bun。
-- 如果要运行服务兼容性测试，额外安装 Python。
 
 ```sh
 # 在仓库根目录执行
@@ -127,10 +126,13 @@ bun install
 
 ```sh
 # 启动主开发流程（桌面宿主 + sidecar + server/runtime）
-bun run dev:app
-
-# 只启动桌面前端
 bun run dev:desktop
+
+# 单独运行 headless slab-server（默认绑定 127.0.0.1:3000）
+bun run dev:server
+
+# 只启动桌面前端（Vite，无桌面宿主）
+bun run dev:desktop:ui
 ```
 
 ### 构建
@@ -153,13 +155,13 @@ bun run test:browser
 bun run test:e2e
 
 # 只构建桌面前端
-bun run build:desktop
+bun run build:desktop:ui
 
 # 构建并 staging 桌面 sidecar
 bun run build:sidecars
 
 # 构建桌面应用二进制，不生成安装包
-bun run build:app
+bun run build:desktop
 
 # 构建 Windows 全量安装器
 bun run build:windows-installer

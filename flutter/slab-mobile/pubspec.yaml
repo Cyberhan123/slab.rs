@@ -1,0 +1,85 @@
+name: slab_mobile
+description: "slab mobile client — a thin Flutter client for a running slab-server."
+publish_to: 'none'
+
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.10.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Material/widgets chrome localizations for the MaterialApp locale wiring
+  # (SlabLocalizations delegate rides the same lifecycle). intl stays
+  # transitive — nothing imports it directly.
+  flutter_localizations:
+    sdk: flutter
+
+  # Declarative redirect ladder (connect gate → setup gate), the analog of
+  # SetupGuard/app-guards.
+  go_router: ^17.5.0
+  # Harness WS (JSON-RPC 2.0). The client takes an injectable factory for tests.
+  web_socket_channel: ^3.0.3
+  # REST transport. The settings/models surface grows the header/auth/log
+  # cross-cutting that made interceptors worth it (bearer token, error-envelope
+  # mapping, debug request logging); see lib/core/network/.
+  dio: ^5.11.0
+  # Human-readable dio request logs; installed debug-only via buildSlabDio.
+  pretty_dio_logger: ^1.4.0
+  # Bloc/Cubit state management: page cubits live in BlocProvider, infra and
+  # app-wide cubits in get_it (see lib/core/di/service_locator.dart).
+  flutter_bloc: ^9.1.1
+  # Responsive scaling for the ported screens (assistant/settings); legacy
+  # screens stay in logical pixels, so extensions are used opt-in per widget.
+  flutter_screenutil: ^5.9.3
+  # Local relational store: session labels, current session pointer,
+  # composer drafts. Connection config + language stay in shared_preferences.
+  drift: ^2.34.3
+  # sqlite3 3.x bundles the native library for every platform via native
+  # assets — the old sqlite3_flutter_libs companion package is EOL.
+  sqlite3: ^3.5.2
+  path_provider: ^2.1.6
+  path: ^1.9.1
+  # Fixed-size spacing slots (SizedBox.shrink ergonomics).
+  gap: ^3.0.1
+  # Image parts over http(s) (/v1/... refs); data: URLs decode to bytes.
+  cached_network_image: ^3.4.1
+  # Gallery image attachments -> data-URL turn inputs. Exact pin mirrors
+  # tdesign_flutter_adaptation's own constraint (it hard-pins 1.1.2).
+  image_picker: 1.1.2
+  # Service locator for infra + app-wide cubits (composition root).
+  get_it: ^9.2.1
+  # Connection config + language preference storage.
+  shared_preferences: ^2.5.3
+  # LLM-streaming-tolerant markdown (survives unterminated fences mid-delta).
+  gpt_markdown: ^1.1.2
+  # UI component library (TNavBar/TCell/TButton/TDialog/…). Exact pin on
+  # purpose: the lib is pre-1.0-stable (alpha maturity) — range re-resolution
+  # could pull breaking API churn; upgrades are deliberate diffs.
+  # 1.0.0-alpha.1: TD*→T* rename, IconData-final fix, icons split into
+  # tdesign_flutter_icons (auto-pulled), EasyRefresh vendored inside.
+  tdesign_flutter: 1.0.0-alpha.1
+  # Pull-to-refresh shell around TDesign's TDRefreshHeader (tdesign_flutter
+  # itself only ships the header); mirrored constraint from its pubspec.
+  easy_refresh: ^3.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  # cubit/bloc unit tests (blocTest helper).
+  bloc_test: ^10.0.0
+  # Codegen: drift schema (generated files are committed, same policy as
+  # slab_tokens.g.dart). build_runner stays for drift_dev. The freezed /
+  # json_serializable experiment was dropped — every wire codec in this
+  # codebase is hand-written (harness_types / model_types / settings_types),
+  # which the generators could not express more safely.
+  build_runner: ^2.16.0
+  drift_dev: ^2.34.5
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/theme/

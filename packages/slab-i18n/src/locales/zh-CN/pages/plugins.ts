@@ -1,8 +1,4 @@
 export const plugins = {
-  header: {
-    title: "插件",
-    subtitle: "在工作区中运行 Extism 插件",
-  },
   search: {
     placeholder: "搜索已安装插件...",
     ariaLabel: "搜索已安装插件",
@@ -102,11 +98,6 @@ export const plugins = {
       revoke: "撤销",
       revokeAll: "全部撤销",
     },
-  },
-  desktopOnly: {
-    title: "插件功能需要 Tauri 桌面运行时",
-    description:
-      "这个页面管理桌面插件，因此启动和生命周期控制仅在 Tauri 模式下可用。",
   },
   empty: {
     noInstalled: {

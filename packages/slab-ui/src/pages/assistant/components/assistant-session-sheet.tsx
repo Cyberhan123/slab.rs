@@ -109,7 +109,7 @@ export function AssistantSessionSheet({
                         disabled={busy}
                         data-testid={`assistant-session-actions-${conversation.key}`}
                       >
-                        <span className="sr-only">{t("pages.assistant.sessionSheet.open")}</span>
+                        <span className="sr-only">{t("common.actions.open")}</span>
                         <MoreHorizontal className="size-4" />
                       </Button>
                     </DropdownMenuTrigger>
@@ -119,7 +119,7 @@ export function AssistantSessionSheet({
                         data-testid={`assistant-session-open-${conversation.key}`}
                         onClick={() => onSelect(conversation.key)}
                       >
-                        {t("pages.assistant.sessionSheet.open")}
+                        {t("common.actions.open")}
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         disabled={busy}

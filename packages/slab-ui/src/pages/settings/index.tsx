@@ -179,7 +179,7 @@ export default function SettingsPage() {
         <div>
           <Button variant="pill" size="pill" onClick={() => void refetch()}>
             <RefreshCw className="mr-2 h-4 w-4" />
-            {t('pages.settings.page.tryAgain')}
+            {t('common.actions.tryAgain')}
           </Button>
         </div>
       </div>

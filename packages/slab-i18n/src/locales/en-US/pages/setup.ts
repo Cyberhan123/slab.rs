@@ -1,8 +1,4 @@
 export const setup = {
-  header: {
-    title: 'Setup',
-    subtitle: 'Initialize local runtime dependencies',
-  },
   checking: {
     title: 'Checking desktop environment',
     description: 'Inspecting the local Slab host, the packaged runtime, and FFmpeg availability.',
@@ -11,7 +7,6 @@ export const setup = {
   hostError: {
     title: 'Could not reach the local host',
     hint: 'Make sure <code>slab-server</code> is running, then reload this page.',
-    reload: 'Reload',
   },
   errors: {
     completeFailed: 'Setup finished, but Slab could not save the completion state.',
@@ -58,7 +53,6 @@ export const setup = {
     succeeded: 'Setup has completed. Slab will enter the application automatically.',
   },
   actions: {
-    later: 'Later',
     retry: 'Retry setup',
     start: 'Start setup',
     launching: 'Launching Slab...',

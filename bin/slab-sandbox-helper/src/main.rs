@@ -33,6 +33,9 @@ enum Command {
         /// Path to the setup marker JSON. Defaults to `<app_home>/sandbox-marker.json`.
         #[arg(long)]
         marker: Option<PathBuf>,
+        /// PID of the owner process (slab-server). The daemon exits as soon as this process dies.
+        #[arg(long)]
+        owner_pid: Option<u32>,
     },
     /// Print version.
     Version,
@@ -59,9 +62,10 @@ fn run(cli: Cli) {
             let code = slab_windows_sandbox::run_payload(&payload, &key_path);
             std::process::exit(code);
         }
-        Some(Command::Serve { pipe, key, marker }) => {
-            // The long-lived elevated daemon. Runs until killed. S2b1 handled Ping/Pong only;
-            // S2b2 drives Provision/Spawn/Kill for the real Low-IL restricted-token child.
+        Some(Command::Serve { pipe, key, marker, owner_pid }) => {
+            // The long-lived elevated daemon. Runs until its owner process (`--owner-pid`) exits —
+            // or it is killed. S2b1 handled Ping/Pong only; S2b2 drives Provision/Spawn/Kill for
+            // the real Low-IL restricted-token child.
             let rt = match tokio::runtime::Runtime::new() {
                 Ok(rt) => rt,
                 Err(e) => {
@@ -73,7 +77,8 @@ fn run(cli: Cli) {
             let key_path = key.unwrap_or_else(|| app_home.join("sandbox-helper.key"));
             let marker_path = marker.unwrap_or_else(|| app_home.join("sandbox-marker.json"));
             let code = rt.block_on(async {
-                match slab_windows_sandbox::run_daemon(pipe, key_path, marker_path).await {
+                match slab_windows_sandbox::run_daemon(pipe, key_path, marker_path, owner_pid).await
+                {
                     Ok(()) => 0,
                     Err(e) => {
                         eprintln!("slab-sandbox-helper daemon exited: {e}");
