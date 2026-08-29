@@ -1838,6 +1838,7 @@ mod tests {
             thread_id: thread_id.to_owned(),
             compacted_messages: summary,
             removed_messages: 0,
+            stubbed_messages: 0,
             output_tokens: 0,
             status: status.to_owned(),
             turn_index,

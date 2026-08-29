@@ -274,12 +274,14 @@ mod tests {
             thread_id: "t1".to_owned(),
             status: Some("compacted".to_owned()),
             removed_messages: Some(12),
+            stubbed_messages: Some(4),
             output_tokens: Some(340),
         });
         let json = serde_json::to_value(&n).unwrap();
         assert_eq!(json["method"], "context/compacted");
         assert_eq!(json["params"]["status"], "compacted");
         assert_eq!(json["params"]["removedMessages"], 12);
+        assert_eq!(json["params"]["stubbedMessages"], 4);
         let back: ServerNotification = serde_json::from_value(json).unwrap();
         assert_eq!(n, back);
     }

@@ -85,8 +85,18 @@ fn memory_pressure_compact(memory_pressure: Option<f64>) -> bool {
 /// threshold so the cheap clearing happens first and the expensive tier fires
 /// later (or never).
 const MICRO_THRESHOLD_RATIO: f32 = 0.55;
+/// Progressive stubbing stops once the raw estimate falls to this fraction of
+/// the window — strictly below [`MICRO_THRESHOLD_RATIO`] so the cheap tier
+/// keeps as many original tool results as possible while still leaving headroom
+/// below the micro trigger line.
+const STUB_STOP_RATIO: f32 = 0.45;
 /// Most-recent assistant tool-call batches whose results stay verbatim.
 const KEEP_TOOL_BATCHES: usize = 5;
+/// Tools whose results are never stubbed: a `delegate_subagent` result's
+/// `completion_text` IS the child agent's conclusion — `extract_file_refs`
+/// needs a `matches[]` array and `extract_artifact_ref` only knows the
+/// built-in spill keys, so a stub would drop the conclusion entirely.
+const PROTECTED_TOOLS: &[&str] = &["delegate_subagent"];
 /// Tool results below this size are not worth stubbing.
 const STUB_MIN_BYTES: usize = 512;
 /// Head-of-content excerpt kept in a stub.
@@ -185,9 +195,9 @@ impl CompactPort for SummarizingCompactPort {
             return Ok(CompactOutcome::Skipped { reason: "not enough messages to compact".into() });
         }
 
-        // One resolve feeds the tier gates and the keep target.
+        // One resolve feeds the tier gates, the keep target and the stub stop.
         let resolved = resolve_window(&self.state, ctx.model_id).await;
-        let (micro_threshold, threshold, keep_target) = effective_limits(
+        let (micro_threshold, threshold, keep_target, stub_stop) = effective_limits(
             &resolved,
             self.threshold_ratio,
             self.target_ratio,
@@ -211,8 +221,9 @@ impl CompactPort for SummarizingCompactPort {
         // Tier 1 (deterministic): stub old tool results beyond the most
         // recent tool batches — zero LLM cost, conversation text preserved
         // verbatim, pairing untouched (only message CONTENT shrinks, so no
-        // orphan tool results can appear).
-        let (micro, stubbed) = micro_compact(messages);
+        // orphan tool results can appear). Progressive: oldest batches first,
+        // stopping at the stub-stop budget so mid-region results survive.
+        let (micro, stubbed) = micro_compact(messages, stub_stop);
         let micro_estimate = self.estimate_tokens(&micro);
 
         // Tier 2 (LLM summarize): only when the deterministic pass is not
@@ -227,6 +238,7 @@ impl CompactPort for SummarizingCompactPort {
                     messages: micro,
                     replaced_messages: 0,
                     output_tokens: micro_estimate,
+                    stubbed_messages: stubbed,
                 });
             }
             return Ok(CompactOutcome::Skipped { reason: "nothing to micro-compact".into() });
@@ -245,6 +257,7 @@ impl CompactPort for SummarizingCompactPort {
                     messages: micro,
                     replaced_messages: 0,
                     output_tokens: micro_estimate,
+                    stubbed_messages: stubbed,
                 });
             }
             return Ok(CompactOutcome::Skipped { reason: "nothing to summarize".into() });
@@ -273,11 +286,11 @@ impl CompactPort for SummarizingCompactPort {
             Ok(summary) if !summary.trim().is_empty() => summary,
             Ok(_) => {
                 warn!("compaction summarizer returned empty content; falling back to trim");
-                return self.fallback.compact(&micro, ctx).await;
+                return Self::with_stubbed(self.fallback.compact(&micro, ctx).await, stubbed);
             }
             Err(error) => {
                 warn!(%error, "compaction summarizer failed; falling back to trim");
-                return self.fallback.compact(&micro, ctx).await;
+                return Self::with_stubbed(self.fallback.compact(&micro, ctx).await, stubbed);
             }
         };
 
@@ -309,6 +322,29 @@ impl CompactPort for SummarizingCompactPort {
             replaced_messages: messages.len() - compacted.len(),
             messages: compacted,
             output_tokens,
+            stubbed_messages: stubbed,
+        })
+    }
+}
+
+impl SummarizingCompactPort {
+    /// Restore the tier-1 stub count on a fallback trim outcome — the fallback
+    /// received the already-stubbed set, so its `stubbed_messages: 0` undercounts
+    /// what this pass actually condensed.
+    fn with_stubbed(
+        outcome: Result<CompactOutcome, slab_agent::AgentError>,
+        stubbed: usize,
+    ) -> Result<CompactOutcome, slab_agent::AgentError> {
+        Ok(match outcome? {
+            CompactOutcome::Replaced { messages, output_tokens, replaced_messages, .. } => {
+                CompactOutcome::Replaced {
+                    messages,
+                    output_tokens,
+                    replaced_messages,
+                    stubbed_messages: stubbed,
+                }
+            }
+            skipped => skipped,
         })
     }
 }
@@ -437,13 +473,18 @@ fn skip_orphan_tool_results(messages: &[ConversationMessage], mut start: usize) 
 
 /// Deterministic micro-compaction tier: replace the CONTENT of old tool
 /// messages (beyond the most recent [`KEEP_TOOL_BATCHES`] assistant
-/// tool-call batches) with a structured stub. Every message, its role and
-/// its `tool_call_id` survive, so pairing is untouched (no orphan tool
+/// tool-call batches) with a structured stub — progressively, oldest batches
+/// first, stopping once the estimate falls to `stop_tokens` so as many original
+/// tool results as possible survive. Every message, its role and its
+/// `tool_call_id` survive, so pairing is untouched (no orphan tool
 /// results can appear) and conversation text is preserved verbatim — this
 /// tier never rewrites user/assistant messages.
 ///
 /// Returns the new message set and how many tool results were stubbed.
-fn micro_compact(messages: &[ConversationMessage]) -> (Vec<ConversationMessage>, usize) {
+fn micro_compact(
+    messages: &[ConversationMessage],
+    stop_tokens: usize,
+) -> (Vec<ConversationMessage>, usize) {
     // Tool messages carry only `tool_call_id`; resolve tool names from the
     // assistant `tool_calls` that produced them.
     let mut tool_names: HashMap<&str, &str> = HashMap::new();
@@ -471,18 +512,33 @@ fn micro_compact(messages: &[ConversationMessage]) -> (Vec<ConversationMessage>,
         .copied()
         .unwrap_or(usize::MAX);
 
+    // Raw (uncalibrated, per-message-ceil) accounting: the deterministic tier
+    // must not depend on the process-global EMA. The entry gate and the
+    // escalate check in `compact` re-measure with the calibrated estimator —
+    // under heavy calibration drift the gate may fire while this raw sum sits
+    // below the stop target, in which case nothing is stubbed and the
+    // summarize tier is the relief valve.
+    let mut running = messages.iter().map(estimate_message_tokens).sum::<usize>();
+
     let mut stubbed = 0usize;
     let mut compacted = Vec::with_capacity(messages.len());
     for (index, message) in messages.iter().enumerate() {
         // Content only — `Message::rendered_text` would append the
         // `tool_call_id:` line and break the JSON-based stub helpers.
         let text = message.content.rendered_text();
+        let tool = message.tool_call_id.as_deref().and_then(|id| tool_names.get(id).copied());
         if message.role == "tool"
             && index < protected_start
             && text.len() > STUB_MIN_BYTES
             && !is_stub(&text)
+            && running > stop_tokens
+            && !tool.is_some_and(|name| PROTECTED_TOOLS.contains(&name))
         {
-            compacted.push(stub_tool_message(message, &text, &tool_names));
+            let stub = stub_tool_message(message, &text, tool.unwrap_or("unknown"));
+            running = running
+                .saturating_sub(estimate_message_tokens(message))
+                .saturating_add(estimate_message_tokens(&stub));
+            compacted.push(stub);
             stubbed += 1;
         } else {
             compacted.push(message.clone());
@@ -494,16 +550,7 @@ fn micro_compact(messages: &[ConversationMessage]) -> (Vec<ConversationMessage>,
 /// Build the stub replacement for one old tool result: tool name, original
 /// byte size, a head excerpt, file references (for grep/glob JSON results)
 /// and the spill artifact reference when the result carried one.
-fn stub_tool_message(
-    message: &ConversationMessage,
-    text: &str,
-    tool_names: &HashMap<&str, &str>,
-) -> ConversationMessage {
-    let tool = message
-        .tool_call_id
-        .as_deref()
-        .and_then(|id| tool_names.get(id).copied())
-        .unwrap_or("unknown");
+fn stub_tool_message(message: &ConversationMessage, text: &str, tool: &str) -> ConversationMessage {
     let mut stub = serde_json::json!({
         "slab_stub": true,
         "tool": tool,
@@ -640,27 +687,31 @@ impl ResolvedWindow {
     }
 }
 
-/// `(micro_threshold, macro_threshold, keep_target)` for a resolved window.
+/// `(micro_threshold, macro_threshold, keep_target, stub_stop)` for a resolved
+/// window.
 ///
 /// The micro threshold is where the deterministic tool-result-stubbing tier
 /// starts; the macro threshold is where the LLM summarize tier fires. The
 /// keep target is strictly below the macro threshold in every branch — an
 /// equal pair re-fires compaction on the next turn (the kept window lands at
-/// the trigger line). A cloud model with no recorded window assumes the
-/// modern cloud floor instead of the local 12k fallback; a genuine overflow
-/// is recovered by the turn loop's force-compaction-on-context-error path.
+/// the trigger line). The stub stop is where progressive stubbing halts
+/// ([`STUB_STOP_RATIO`], strictly below the micro threshold). A cloud model
+/// with no recorded window assumes the modern cloud floor instead of the
+/// local 12k fallback; a genuine overflow is recovered by the turn loop's
+/// force-compaction-on-context-error path.
 fn effective_limits(
     resolved: &ResolvedWindow,
     threshold_ratio: f32,
     target_ratio: f32,
     fallback_threshold_tokens: usize,
-) -> (usize, usize, usize) {
+) -> (usize, usize, usize, usize) {
     if let Some(window) = resolved.window.filter(|window| *window > 0) {
         let window = window as f32;
         return (
             (window * MICRO_THRESHOLD_RATIO) as usize,
             (window * threshold_ratio) as usize,
             (window * target_ratio) as usize,
+            (window * STUB_STOP_RATIO) as usize,
         );
     }
     if resolved.is_cloud {
@@ -669,12 +720,14 @@ fn effective_limits(
             (window * MICRO_THRESHOLD_RATIO) as usize,
             (window * threshold_ratio) as usize,
             (window * target_ratio) as usize,
+            (window * STUB_STOP_RATIO) as usize,
         );
     }
     (
         (fallback_threshold_tokens as f32 * MICRO_THRESHOLD_RATIO) as usize,
         fallback_threshold_tokens,
         DEFAULT_FALLBACK_KEEP_TARGET_TOKENS,
+        (fallback_threshold_tokens as f32 * STUB_STOP_RATIO) as usize,
     )
 }
 
@@ -820,7 +873,8 @@ mod tests {
     /// Effective limits: known window scales by ratio; unknown cloud assumes
     /// the modern cloud floor (NOT the 12k local fallback); unknown local
     /// keeps a keep target strictly below the threshold so a fallback
-    /// compaction quiesces instead of re-firing every turn.
+    /// compaction quiesces instead of re-firing every turn. The stub stop is
+    /// strictly below the micro threshold in every branch.
     #[test]
     fn effective_limits_branches_by_window_and_class() {
         let ratios = (DEFAULT_THRESHOLD_RATIO, DEFAULT_TARGET_RATIO);
@@ -829,25 +883,29 @@ mod tests {
         let windowed = ResolvedWindow { window: Some(1_000_000), is_cloud: false };
         assert_eq!(
             effective_limits(&windowed, ratios.0, ratios.1, fallback_threshold),
-            (550_000, 800_000, 600_000)
+            (550_000, 800_000, 600_000, 450_000)
         );
 
         let cloud_unknown = ResolvedWindow { window: None, is_cloud: true };
-        let (micro, threshold, keep) =
+        let (micro, threshold, keep, stub_stop) =
             effective_limits(&cloud_unknown, ratios.0, ratios.1, fallback_threshold);
         assert_eq!(micro, (CLOUD_FALLBACK_CONTEXT_TOKENS as f32 * MICRO_THRESHOLD_RATIO) as usize);
         assert_eq!(threshold, (CLOUD_FALLBACK_CONTEXT_TOKENS as f32 * ratios.0) as usize);
         assert_eq!(keep, (CLOUD_FALLBACK_CONTEXT_TOKENS as f32 * ratios.1) as usize);
+        assert_eq!(stub_stop, (CLOUD_FALLBACK_CONTEXT_TOKENS as f32 * STUB_STOP_RATIO) as usize);
         assert!(threshold > fallback_threshold, "cloud default must dwarf the local fallback");
         assert!(micro < threshold, "micro tier must fire before the summarize tier");
+        assert!(stub_stop < micro, "stub stop must sit below the micro trigger");
 
         let local_unknown = ResolvedWindow { window: None, is_cloud: false };
-        let (micro, threshold, keep) =
+        let (micro, threshold, keep, stub_stop) =
             effective_limits(&local_unknown, ratios.0, ratios.1, fallback_threshold);
         assert_eq!(threshold, fallback_threshold);
         assert_eq!(keep, DEFAULT_FALLBACK_KEEP_TARGET_TOKENS);
+        assert_eq!(stub_stop, (fallback_threshold as f32 * STUB_STOP_RATIO) as usize);
         assert!(keep < threshold, "fallback keep target must sit below the trigger");
         assert!(micro < keep, "micro tier must fire before the fallback summarize tier");
+        assert!(stub_stop < micro, "stub stop must sit below the micro trigger");
     }
 
     /// The bug report: a 1M-window cloud model compacted at ~14k tokens. With
@@ -1263,6 +1321,10 @@ mod tests {
     use slab_types::{ConversationToolCall, ConversationToolFunction};
 
     fn tool_call_message(index: usize) -> ConversationMessage {
+        tool_call_message_named(index, "grep")
+    }
+
+    fn tool_call_message_named(index: usize, name: &str) -> ConversationMessage {
         ConversationMessage {
             role: "assistant".into(),
             content: ConversationMessageContent::Text(String::new()),
@@ -1271,7 +1333,10 @@ mod tests {
             tool_calls: vec![ConversationToolCall {
                 id: Some(format!("call-{index}")),
                 r#type: "function".into(),
-                function: ConversationToolFunction { name: "grep".into(), arguments: "{}".into() },
+                function: ConversationToolFunction {
+                    name: name.to_owned(),
+                    arguments: "{}".into(),
+                },
             }],
         }
     }
@@ -1286,12 +1351,45 @@ mod tests {
         )
     }
 
+    /// A `delegate_subagent`-shaped result: the child agent's conclusion lives
+    /// in `completion_text` — none of the stub extraction helpers know this
+    /// shape, which is exactly why the tool is on `PROTECTED_TOOLS`.
+    fn delegate_result_text(padding: usize) -> String {
+        format!(
+            "{{\"child_thread_id\":\"child-1\",\"status\":\"completed\",\"completion_text\":\"{}\",\"artifact_refs\":[]}}",
+            "c".repeat(padding)
+        )
+    }
+
     fn tool_batch_history(batches: usize, result_padding: usize) -> Vec<ConversationMessage> {
         let mut messages = vec![text_message("system", "sys")];
         for index in 0..batches {
             messages.push(text_message("user", &format!("query {index}")));
             messages.push(tool_call_message(index));
             let mut result = text_message("tool", &tool_result_text(index, result_padding));
+            result.tool_call_id = Some(format!("call-{index}"));
+            messages.push(result);
+        }
+        messages.push(text_message("user", "final question"));
+        messages
+    }
+
+    /// Mixed-size history: the oldest `old_batches` tool batches carry
+    /// `old_padding`-sized results, the rest `recent_padding`-sized ones —
+    /// the shape progressive stubbing has to reason about (big old results,
+    /// cheap recent tail).
+    fn tool_batch_history_mixed(
+        batches: usize,
+        old_batches: usize,
+        old_padding: usize,
+        recent_padding: usize,
+    ) -> Vec<ConversationMessage> {
+        let mut messages = vec![text_message("system", "sys")];
+        for index in 0..batches {
+            let padding = if index < old_batches { old_padding } else { recent_padding };
+            messages.push(text_message("user", &format!("query {index}")));
+            messages.push(tool_call_message(index));
+            let mut result = text_message("tool", &tool_result_text(index, padding));
             result.tool_call_id = Some(format!("call-{index}"));
             messages.push(result);
         }
@@ -1358,12 +1456,17 @@ mod tests {
         // gate, and stubbing the 3 oldest batches lands below the macro gate.
         let messages = tool_batch_history(8, 3_900);
         let outcome = port.compact(&messages, &auto_ctx("micro-model")).await.expect("compact");
-        let CompactOutcome::Replaced { messages: compacted, replaced_messages, output_tokens } =
-            outcome
+        let CompactOutcome::Replaced {
+            messages: compacted,
+            replaced_messages,
+            output_tokens,
+            stubbed_messages,
+        } = outcome
         else {
             panic!("deterministic tier must replace: {outcome:?}");
         };
         assert_eq!(replaced_messages, 0, "no messages removed — only content shrinks");
+        assert_eq!(stubbed_messages, 3, "every stubbable old batch stubbed");
         assert_eq!(compacted.len(), messages.len(), "message count preserved");
         assert!(output_tokens < port.estimate_tokens(&messages), "estimate must shrink");
 
@@ -1454,5 +1557,139 @@ mod tests {
                 assert!(ids.contains(&id), "orphan tool result survived: {id}");
             }
         }
+    }
+
+    /// `delegate_subagent` results carry the child agent's conclusion
+    /// (`completion_text`) with no artifact/ref fallback — stubbing one drops
+    /// the conclusion entirely, so the micro tier must skip them even when
+    /// they sit deep in the stubbable region and the budget wants the space.
+    #[tokio::test]
+    async fn micro_compact_preserves_delegate_subagent_results() {
+        use crate::test_support::TestAppCore;
+
+        let app = TestAppCore::new().await;
+        // Window 8192 -> micro ~4505, stop ~3686.
+        ledger_window(&app, "delegate-model", 8192).await;
+        let port = SummarizingCompactPort::new(app.model_state.clone());
+
+        // 8 batches: the three stubbable slots alternate grep / delegate /
+        // grep with ~8k-char results (~6.3k tokens total — above the micro
+        // gate); the five protected batches stay small.
+        let mut messages = vec![text_message("system", "sys")];
+        for index in 0..8 {
+            let name = if index == 1 { "delegate_subagent" } else { "grep" };
+            let padding = if index < 3 { 8_000 } else { 100 };
+            messages.push(text_message("user", &format!("query {index}")));
+            messages.push(tool_call_message_named(index, name));
+            let body = if index == 1 {
+                delegate_result_text(padding)
+            } else {
+                tool_result_text(index, padding)
+            };
+            let mut result = text_message("tool", &body);
+            result.tool_call_id = Some(format!("call-{index}"));
+            messages.push(result);
+        }
+        messages.push(text_message("user", "final question"));
+
+        let outcome = port.compact(&messages, &auto_ctx("delegate-model")).await.expect("compact");
+        let CompactOutcome::Replaced {
+            messages: compacted,
+            replaced_messages,
+            stubbed_messages,
+            ..
+        } = outcome
+        else {
+            panic!("deterministic tier must replace: {outcome:?}");
+        };
+        assert_eq!(replaced_messages, 0);
+        assert_eq!(stubbed_messages, 2, "only the two grep batches stubbed");
+
+        let tool_texts: Vec<String> = compacted
+            .iter()
+            .filter(|message| message.role == "tool")
+            .map(|message| message.content.rendered_text())
+            .collect();
+        // The delegate result survives byte-identical.
+        assert_eq!(
+            tool_texts[1],
+            delegate_result_text(8_000),
+            "delegate result must stay verbatim"
+        );
+        // Its grep neighbours became stubs.
+        for batch in [0, 2] {
+            let stub: serde_json::Value =
+                serde_json::from_str(&tool_texts[batch]).expect("stub json");
+            assert_eq!(stub[STUB_MARKER_FIELD], true, "grep batch {batch} stubbed");
+            assert_eq!(stub["tool"], "grep");
+        }
+        // The protected tail stays verbatim.
+        for (batch, text) in tool_texts.iter().enumerate().take(8).skip(3) {
+            assert_eq!(*text, tool_result_text(batch, 100), "recent batch {batch} verbatim");
+        }
+    }
+
+    /// Progressive stubbing: only the oldest batches are stubbed, and the pass
+    /// stops as soon as the estimate reaches the stop budget (~0.45×W) — a
+    /// mid-region batch that is NOT in the protected window still survives
+    /// verbatim because the budget no longer demands its space.
+    #[tokio::test]
+    async fn micro_compact_stubs_progressively_down_to_stop_budget() {
+        use crate::test_support::TestAppCore;
+
+        let app = TestAppCore::new().await;
+        // Window 8192 -> micro ~4505, macro ~6553, stop ~3686.
+        ledger_window(&app, "progressive-model", 8192).await;
+        let port = SummarizingCompactPort::new(app.model_state.clone());
+
+        // 9 batches: the 4 stubbable old ones carry ~4.9k-char results
+        // (~1.2k tokens each), the 5 protected ones stay tiny. Total ~5.2k
+        // tokens — above the micro gate. Stubbing batch 0 leaves ~4.0k
+        // (still above the stop budget, so batch 1 is stubbed too); after
+        // batch 1 the running estimate is ~2.9k, at/below the budget —
+        // batches 2 and 3 keep their original results.
+        let messages = tool_batch_history_mixed(9, 4, 4_800, 100);
+        let outcome =
+            port.compact(&messages, &auto_ctx("progressive-model")).await.expect("compact");
+        let CompactOutcome::Replaced {
+            messages: compacted,
+            replaced_messages,
+            output_tokens,
+            stubbed_messages,
+        } = outcome
+        else {
+            panic!("deterministic tier must replace: {outcome:?}");
+        };
+        assert_eq!(replaced_messages, 0);
+        assert_eq!(stubbed_messages, 2, "stubbing stops at the budget, not at the region edge");
+        assert!(output_tokens < port.estimate_tokens(&messages), "estimate must shrink");
+
+        let tool_texts: Vec<String> = compacted
+            .iter()
+            .filter(|message| message.role == "tool")
+            .map(|message| message.content.rendered_text())
+            .collect();
+        assert_eq!(tool_texts.len(), 9);
+        for (batch, text) in tool_texts.iter().enumerate() {
+            if batch < 2 {
+                let stub: serde_json::Value = serde_json::from_str(text).expect("stub json");
+                assert_eq!(stub[STUB_MARKER_FIELD], true, "oldest batch {batch} stubbed");
+            } else {
+                // Batches 2 and 3 are outside the protected window yet kept
+                // verbatim — the progressive stop in action.
+                let padding = if batch < 4 { 4_800 } else { 100 };
+                assert_eq!(
+                    *text,
+                    tool_result_text(batch, padding),
+                    "batch {batch} beyond the stop budget stays verbatim"
+                );
+            }
+        }
+
+        // The post-stub estimate sits below the micro gate — a second pass
+        // quiesces instead of stubbing batches 2/3.
+        let second =
+            port.compact(&compacted, &auto_ctx("progressive-model")).await.expect("second");
+        assert!(matches!(second, CompactOutcome::Skipped { .. }), "must quiesce: {second:?}");
     }
 }

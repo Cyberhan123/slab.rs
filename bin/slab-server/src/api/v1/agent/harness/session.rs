@@ -321,6 +321,7 @@ mod tests {
                 thread_id: "real-1".to_owned(),
                 status: Some("compacted".to_owned()),
                 removed_messages: Some(2),
+                stubbed_messages: None,
                 output_tokens: Some(80),
             }),
             "hthread-1",

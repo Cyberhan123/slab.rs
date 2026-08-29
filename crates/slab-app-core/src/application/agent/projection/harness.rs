@@ -93,6 +93,7 @@ mod tests {
             thread_id: "t".to_owned(),
             status: Some("compacted".to_owned()),
             removed_messages: Some(3),
+            stubbed_messages: None,
             output_tokens: Some(120),
         });
         let n = event_msg_to_notification(event).unwrap();

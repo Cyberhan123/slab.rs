@@ -115,6 +115,10 @@ pub struct ContextCompactedParams {
     pub status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub removed_messages: Option<u32>,
+    /// Tool results condensed into structured stubs by the deterministic
+    /// micro tier (content-only shrink; absent when no stubbing ran).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stubbed_messages: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u32>,
 }

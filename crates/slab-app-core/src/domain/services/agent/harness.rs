@@ -430,8 +430,12 @@ impl HarnessService {
         };
         let outcome =
             self.0.compact().compact(&messages, &ctx).await.map_err(AppCoreError::from)?;
-        let CompactOutcome::Replaced { messages: compacted, output_tokens, replaced_messages } =
-            outcome
+        let CompactOutcome::Replaced {
+            messages: compacted,
+            output_tokens,
+            replaced_messages,
+            stubbed_messages,
+        } = outcome
         else {
             // Skipped: history was already minimal — nothing to persist.
             return Ok((snapshot, 0, 0));
@@ -450,6 +454,7 @@ impl HarnessService {
             thread_id: thread_id.to_owned(),
             compacted_messages: compacted.clone(),
             removed_messages: replaced_messages as u32,
+            stubbed_messages: stubbed_messages as u32,
             output_tokens: output_tokens as u32,
             status: "manual".to_owned(),
             turn_index: 0,

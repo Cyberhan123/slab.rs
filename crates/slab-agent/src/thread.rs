@@ -1008,6 +1008,7 @@ impl AgentThread {
                 messages: compacted,
                 output_tokens,
                 replaced_messages,
+                stubbed_messages,
             }) => {
                 *messages = compacted;
                 record_json(
@@ -1022,6 +1023,22 @@ impl AgentThread {
                         "messages": messages,
                     }),
                 );
+                // Micro-tier observability: how many old tool results the
+                // deterministic pass condensed into stubs, and the estimate
+                // movement it bought (before/after this compaction).
+                if stubbed_messages > 0 {
+                    record_json(
+                        trace,
+                        trace_context,
+                        "slab-agent",
+                        "micro_compact",
+                        serde_json::json!({
+                            "stubbed_messages": stubbed_messages,
+                            "estimate_before": input_tokens,
+                            "estimate_after": output_tokens,
+                        }),
+                    );
+                }
                 notify
                     .on_event_msg(
                         &self.id,
@@ -1029,6 +1046,7 @@ impl AgentThread {
                             thread_id: self.id.clone(),
                             status: Some("compacted".to_owned()),
                             removed_messages: Some(replaced_messages as u32),
+                            stubbed_messages: Some(stubbed_messages as u32),
                             output_tokens: Some(output_tokens as u32),
                         }),
                     )
@@ -1091,6 +1109,7 @@ impl AgentThread {
                     thread_id: thread_id.to_owned(),
                     status: Some("skipped".to_owned()),
                     removed_messages: None,
+                    stubbed_messages: None,
                     output_tokens: None,
                 }),
             )

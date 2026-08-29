@@ -4741,6 +4741,7 @@ impl CompactPort for ShrinkOnceCompactPort {
             messages: kept,
             output_tokens: 4,
             replaced_messages: replaced,
+            stubbed_messages: 0,
         })
     }
 
@@ -4754,6 +4755,44 @@ impl CompactPort for ShrinkOnceCompactPort {
 
     fn policy_name(&self) -> &'static str {
         "test-shrink"
+    }
+}
+
+/// Test compact port: replaces once (identity messages, zero removals) while
+/// REPORTING a stub count, then skips — lets a notification-level test assert
+/// `ContextCompacted` carries the micro-tier stub count through `maybe_compact`.
+struct StubReportingCompactPort {
+    calls: std::sync::atomic::AtomicU8,
+}
+
+#[async_trait]
+impl CompactPort for StubReportingCompactPort {
+    async fn compact(
+        &self,
+        messages: &[ConversationMessage],
+        _ctx: &CompactContext<'_>,
+    ) -> Result<CompactOutcome, AgentError> {
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            return Ok(CompactOutcome::Skipped { reason: "already reported".to_owned() });
+        }
+        Ok(CompactOutcome::Replaced {
+            messages: messages.to_vec(),
+            output_tokens: 42,
+            replaced_messages: 0,
+            stubbed_messages: 3,
+        })
+    }
+
+    fn estimate_tokens(&self, messages: &[ConversationMessage]) -> usize {
+        messages.len().saturating_mul(10)
+    }
+
+    fn threshold_tokens(&self) -> usize {
+        usize::MAX
+    }
+
+    fn policy_name(&self) -> &'static str {
+        "test-stub-reporting"
     }
 }
 
@@ -4885,6 +4924,66 @@ async fn token_budget_preflight_skips_the_llm_call_entirely() {
     let status = run_to_terminal(&control, &store, &thread_id).await;
     assert_eq!(status, ThreadStatus::Interrupted, "budget exhaustion is an interrupted end");
     assert_eq!(*llm.calls.lock().unwrap(), 0, "preflight must skip the LLM call");
+}
+
+/// A micro-tier compaction (content-only shrink: `replaced_messages == 0`,
+/// `stubbed_messages > 0`) must surface BOTH counts on the terminal
+/// `ContextCompacted` notification — the stub count is the only signal that
+/// anything happened at all.
+#[tokio::test]
+async fn maybe_compact_notifies_stubbed_messages() {
+    let llm = Arc::new(TransientThenOkLlm::new(0));
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = Arc::new(ToolRouter::new());
+
+    let approval = Arc::clone(&notify) as Arc<dyn ApprovalPort>;
+    let control = AgentControl::new_with_ports(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        router,
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        Arc::new(StubReportingCompactPort { calls: std::sync::atomic::AtomicU8::new(0) }),
+        Arc::new(crate::risk::BasicToolRiskAnalyzer::default()),
+    );
+
+    let thread_id = control
+        .spawn(
+            "session-stub-count".into(),
+            fast_retry_config(),
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("hello".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    let status = run_to_terminal(&control, &store, &thread_id).await;
+    assert_eq!(status, ThreadStatus::Completed);
+
+    let compacted: Vec<crate::protocol::ContextCompactedParams> = notify
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::ContextCompacted(params) => Some(params.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        compacted.iter().any(|params| params.thread_id == thread_id
+            && params.status.as_deref() == Some("compacted")
+            && params.removed_messages == Some(0)
+            && params.stubbed_messages == Some(3)),
+        "ContextCompacted must carry the stub count: {compacted:?}"
+    );
 }
 
 /// Returns a tool call with usage large enough to trip the POST-response

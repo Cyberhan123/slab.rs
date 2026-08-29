@@ -120,7 +120,12 @@ export type ContextCompactedParams = { threadId: string,
 /**
  * `"compacted"` (default when absent) or `"skipped"`.
  */
-status?: string, removedMessages?: number, outputTokens?: number, };
+status?: string, removedMessages?: number, 
+/**
+ * Tool results condensed into structured stubs by the deterministic
+ * micro tier (content-only shrink; absent when no stubbing ran).
+ */
+stubbedMessages?: number, outputTokens?: number, };
 
 // ── ContextCompactingParams ──
 /**

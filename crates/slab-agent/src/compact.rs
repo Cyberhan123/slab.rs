@@ -102,8 +102,18 @@ pub trait CompactPort: Send + Sync {
 
 #[derive(Debug, Clone)]
 pub enum CompactOutcome {
-    Replaced { messages: Vec<ConversationMessage>, output_tokens: usize, replaced_messages: usize },
-    Skipped { reason: String },
+    Replaced {
+        messages: Vec<ConversationMessage>,
+        output_tokens: usize,
+        replaced_messages: usize,
+        /// Tool results the deterministic micro tier condensed into stubs
+        /// during this pass (0 for pure trim outcomes — a summary absorbs
+        /// the stubs it consumed, but the tier-1 count stays observable).
+        stubbed_messages: usize,
+    },
+    Skipped {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +219,7 @@ impl CompactPort for SlidingWindowCompactPort {
             replaced_messages: messages.len() - compacted.len(),
             messages: compacted,
             output_tokens,
+            stubbed_messages: 0,
         })
     }
 }
