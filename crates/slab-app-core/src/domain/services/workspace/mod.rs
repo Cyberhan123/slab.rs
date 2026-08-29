@@ -8,6 +8,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -37,6 +39,11 @@ use crate::schemas::workspace::{
 use self::file_system::LocalExecutorFileSystem;
 
 const CONSOLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Fixed exit code reported when a console command is killed by its timeout —
+/// the GNU `timeout` convention, unified with the agent-shell path in
+/// `slab-sandboxing` (`TIMEOUT_EXIT_CODE`). Never derived from the process:
+/// once the kill has started the real status is meaningless.
+const CONSOLE_TIMEOUT_EXIT_CODE: i32 = 124;
 const MAX_CONSOLE_COMMAND_BYTES: usize = 2_000;
 const MAX_CONSOLE_OUTPUT_BYTES: usize = 64 * 1024;
 // The file tree is fetched in one deep recursive request (see WORKSPACE_PRELOAD_DEPTH in
@@ -563,31 +570,64 @@ impl WorkspaceService {
                 |error| AppCoreError::Internal(format!("failed to run workspace command: {error}")),
             )?;
         let session = spawned.session;
-        let stdout_task = tokio::spawn(collect_limited_output(spawned.stdout_rx));
-        let stderr_task = tokio::spawn(collect_limited_output(spawned.stderr_rx));
+        let stdout_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let stderr_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let mut stdout_task =
+            tokio::spawn(collect_limited_output(spawned.stdout_rx, stdout_buf.clone()));
+        let mut stderr_task =
+            tokio::spawn(collect_limited_output(spawned.stderr_rx, stderr_buf.clone()));
 
+        // Await the exit plus the readers (borrowed, so the handles stay
+        // abortable when the timeout future below is dropped).
         let console_output = async {
             let exit_code = spawned.exit_rx.await.unwrap_or(-1);
-            let stdout = stdout_task.await.unwrap_or_default();
-            let stderr = stderr_task.await.unwrap_or_default();
-            (exit_code, stdout, stderr)
+            let _ = (&mut stdout_task).await;
+            let _ = (&mut stderr_task).await;
+            exit_code
         };
-        let (exit_code, stdout, stderr) = match timeout(timeout_duration, console_output).await {
-            Ok(output) => output,
+        let exit_code = match timeout(timeout_duration, console_output).await {
+            Ok(exit_code) => exit_code,
             Err(_) => {
+                // Timed out. Terminate the process tree, give the readers a
+                // short bounded window to land in-flight chunks in the shared
+                // buffers, then abort them — the pre-deadline output is
+                // preserved; output from a writer that survived the terminate
+                // cannot arrive (the upstream pipe readers are aborted by
+                // `terminate` itself).
                 session.terminate();
+                let _ = timeout(Duration::from_secs(2), async {
+                    let _ = (&mut stdout_task).await;
+                    let _ = (&mut stderr_task).await;
+                })
+                .await;
+                stdout_task.abort();
+                stderr_task.abort();
+                let stdout = stdout_buf.lock().map(|buffer| buffer.clone()).unwrap_or_default();
+                let stderr = stderr_buf.lock().map(|buffer| buffer.clone()).unwrap_or_default();
+                let stderr = if stderr.is_empty() {
+                    format!("command timed out after {}s", timeout_duration.as_secs()).into_bytes()
+                } else {
+                    stderr
+                };
                 return Ok(WorkspaceConsoleOutput {
                     command: command.to_string(),
-                    exit_code: None,
-                    stdout: String::new(),
-                    stderr: format!(
-                        "Command timed out after {} seconds.",
-                        timeout_duration.as_secs()
+                    exit_code: Some(CONSOLE_TIMEOUT_EXIT_CODE),
+                    stdout: slab_utils::string::decode_truncated_prefix(
+                        &stdout,
+                        MAX_CONSOLE_OUTPUT_BYTES,
+                        "\n[output truncated]\n",
+                    ),
+                    stderr: slab_utils::string::decode_truncated_prefix(
+                        &stderr,
+                        MAX_CONSOLE_OUTPUT_BYTES,
+                        "\n[output truncated]\n",
                     ),
                     timed_out: true,
                 });
             }
         };
+        let stdout = stdout_buf.lock().map(|buffer| buffer.clone()).unwrap_or_default();
+        let stderr = stderr_buf.lock().map(|buffer| buffer.clone()).unwrap_or_default();
 
         Ok(WorkspaceConsoleOutput {
             command: command.to_string(),
@@ -939,16 +979,19 @@ fn shell_command(command: &str) -> (String, Vec<String>) {
     ("sh".to_owned(), vec!["-lc".to_owned(), command.to_owned()])
 }
 
-async fn collect_limited_output(mut rx: mpsc::Receiver<Vec<u8>>) -> Vec<u8> {
-    let mut output = Vec::new();
+async fn collect_limited_output(mut rx: mpsc::Receiver<Vec<u8>>, buffer: Arc<Mutex<Vec<u8>>>) {
     let limit = MAX_CONSOLE_OUTPUT_BYTES + 1;
     while let Some(chunk) = rx.recv().await {
-        if output.len() < limit {
+        // Append into the shared buffer so whatever already arrived survives
+        // even when this task is aborted on the timeout path (mirrors the
+        // `read_stream` accumulator pattern in `slab-sandboxing`).
+        if let Ok(mut output) = buffer.lock()
+            && output.len() < limit
+        {
             let remaining = limit - output.len();
             output.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
         }
     }
-    output
 }
 
 fn normalize_relative_path(raw: &str) -> Result<String, AppCoreError> {
@@ -1492,9 +1535,46 @@ mod tests {
         .await
         .expect("console output");
 
-        assert_eq!(output.exit_code, None);
+        // Unified timeout contract (GNU `timeout` convention, matches the
+        // agent-shell path): fixed 124 exit code, pre-deadline stdout kept,
+        // stderr note when no stderr of its own was captured.
+        assert_eq!(output.exit_code, Some(124));
         assert!(output.timed_out);
         assert!(output.stdout.is_empty());
-        assert!(output.stderr.contains("Command timed out after"));
+        assert!(output.stderr.contains("command timed out after"));
+    }
+
+    #[tokio::test]
+    async fn run_console_command_timeout_preserves_pre_deadline_output_and_kills_tree() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let command = if cfg!(windows) {
+            "Write-Output early-marker; Start-Sleep -Seconds 30"
+        } else {
+            "echo early-marker; sleep 30"
+        }
+        .to_string();
+
+        let started = std::time::Instant::now();
+        let output = WorkspaceService::run_console_command_with_timeout(
+            root.path(),
+            &command,
+            Duration::from_secs(1),
+        )
+        .await
+        .expect("console output");
+
+        assert!(output.timed_out);
+        assert_eq!(output.exit_code, Some(124));
+        assert!(
+            output.stdout.contains("early-marker"),
+            "pre-deadline output was dropped: {:?}",
+            output.stdout
+        );
+        // The tree must die at the 1s deadline — not run the 30s sleep out.
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "run took {:?} — tree kill did not land?",
+            started.elapsed()
+        );
     }
 }

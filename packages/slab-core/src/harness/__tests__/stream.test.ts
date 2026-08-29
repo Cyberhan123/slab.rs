@@ -153,6 +153,75 @@ describe("harness stream convertNotification", () => {
     ])
   })
 
+  it("closes an unclosed tool card at turn end with a terminal error (interrupt safety net)", () => {
+    // Client-side fallback for servers whose interrupt path leaves
+    // item/started dangling: finish must emit tool-output-error so the card
+    // can never render as perpetually running.
+    const state = createStreamState()
+    const item: TurnItem = {
+      type: "commandExecution",
+      id: "dangling",
+      command: "sleep 1000",
+      cwd: "/tmp",
+      status: "running",
+    }
+    convertNotification(
+      { method: "item/started", params: { item, threadId: THREAD, turnId: TURN } },
+      state,
+    )
+    expect(state.openTools.has("dangling")).toBe(true)
+
+    const terminal = convertNotification(
+      {
+        method: "turn/completed",
+        params: { threadId: THREAD, turn: { id: TURN, items: [], status: "interrupted" } },
+      },
+      state,
+    )
+    expect(terminal).toContainEqual({
+      errorText: "interrupted",
+      toolCallId: "dangling",
+      type: "tool-output-error",
+    })
+    expect(state.openTools.size).toBe(0)
+  })
+
+  it("does not emit a fallback error for a tool closed before finish", () => {
+    const state = createStreamState()
+    const started: TurnItem = {
+      type: "commandExecution",
+      id: "ok-call",
+      command: "ls",
+      cwd: "/tmp",
+      status: "running",
+    }
+    convertNotification(
+      { method: "item/started", params: { item: started, threadId: THREAD, turnId: TURN } },
+      state,
+    )
+    const completed: TurnItem = {
+      ...started,
+      status: "completed",
+      exitCode: 0,
+      aggregatedOutput: "file-a\nfile-b",
+    }
+    convertNotification(
+      { method: "item/completed", params: { item: completed, threadId: THREAD, turnId: TURN } },
+      state,
+    )
+    expect(state.openTools.size).toBe(0)
+    const terminal = convertNotification(
+      {
+        method: "turn/completed",
+        params: { threadId: THREAD, turn: { id: TURN, items: [], status: "completed" } },
+      },
+      state,
+    )
+    expect(terminal).not.toContainEqual(
+      expect.objectContaining({ type: "tool-output-error", toolCallId: "ok-call" }),
+    )
+  })
+
   it("creates the Running card on item/started(fileChange) with the change list", () => {
     const state = createStreamState()
     const item: TurnItem = {

@@ -112,6 +112,12 @@ impl RecordingRuntimeGateway {
         self
     }
 
+    /// In-place variant of [`Self::with_scripted_chat`] for tests that get the
+    /// gateway already wrapped in an `Arc` (e.g. `TestAppCore::runtime`).
+    pub(crate) fn set_scripted_chat(&self, response: RuntimeTextGenerationResponse) {
+        *self.scripted_chat.lock().unwrap_or_else(|error| error.into_inner()) = Some(response);
+    }
+
     /// Script a canned chunk sequence yielded by every subsequent `chat_stream`
     /// call.
     pub(crate) fn with_scripted_stream(self, chunks: Vec<RuntimeTextGenerationChunk>) -> Self {
@@ -629,7 +635,9 @@ fn write_test_settings(
         id: TEST_PROVIDER_ID.to_owned(),
         family: ProviderFamily::OpenaiCompatible,
         display_name: "OpenAI Test".to_owned(),
-        api_base: "https://api.openai.test/v1".to_owned(),
+        // Non-routable local endpoint: catalog read-reconcile may spawn a live discovery for
+        // this OpenaiCompatible provider, and tests must never leave localhost.
+        api_base: "http://127.0.0.1:9/v1".to_owned(),
         auth: Default::default(),
     });
 

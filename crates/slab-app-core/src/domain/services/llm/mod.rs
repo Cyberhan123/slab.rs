@@ -58,12 +58,17 @@ fn estimate_token_count(text: &str) -> u32 {
     byte_estimate.max(whitespace_groups).max(1)
 }
 
-/// Infer the finish_reason from produced tokens vs. the token budget.
-pub(crate) fn finish_reason_from_token_budget(completion_tokens: u32, max_tokens: u32) -> String {
-    if completion_tokens >= max_tokens && max_tokens > 0 {
-        "length".to_owned()
-    } else {
-        "stop".to_owned()
+/// Infer the finish_reason from produced tokens vs. the token budget. A `None`
+/// budget means no cap was sent on the wire — there is nothing to truncate at.
+pub(crate) fn finish_reason_from_token_budget(
+    completion_tokens: u32,
+    max_tokens: Option<u32>,
+) -> String {
+    match max_tokens {
+        Some(max_tokens) if max_tokens > 0 && completion_tokens >= max_tokens => {
+            "length".to_owned()
+        }
+        _ => "stop".to_owned(),
     }
 }
 

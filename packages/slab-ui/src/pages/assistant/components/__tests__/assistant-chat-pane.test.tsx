@@ -31,8 +31,16 @@ vi.mock("../../hooks/use-greeting", () => ({
 }))
 
 vi.mock("@slab/ui/pages/assistant/components/message-list", () => ({
-  default: ({ messages }: { messages: UIMessage[] }) => (
-    <div data-testid="message-list">{messages.length} messages</div>
+  default: ({
+    messages,
+    queuedTexts,
+  }: {
+    messages: UIMessage[]
+    queuedTexts?: readonly string[]
+  }) => (
+    <div data-testid="message-list" data-queued={queuedTexts?.length ?? 0}>
+      {messages.length} messages
+    </div>
   ),
 }))
 
@@ -109,6 +117,11 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     onRollbackFromTurn: vi.fn(),
     planMode: false,
     onPlanModeChange: vi.fn(),
+    threadStatus: null,
+    abortReason: null,
+    queuedTexts: [],
+    onSteerSubmit: vi.fn(),
+    onInterrupt: vi.fn(),
     ...overrides,
   }
 }
@@ -142,6 +155,16 @@ describe("AssistantChatPane", () => {
     ]
     const screen = await render(<AssistantChatPane {...baseProps()} />)
     expect(screen.getByTestId("message-list").element().textContent).toContain("2 messages")
+  })
+
+  it("forwards queued steering texts to the message list (ghost bubbles)", async () => {
+    chatState.messages = [{ id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] }]
+    const screen = await render(
+      <AssistantChatPane {...baseProps({ queuedTexts: ["also check the tests"] })} />,
+    )
+    expect(screen.getByTestId("message-list").element().getAttribute("data-queued")).toBe("1")
+    // The footer count chip is gone — the in-stream bubbles replace it.
+    expect(screen.getByTestId("assistant-queued-count").query()).toBeNull()
   })
 
   it("reports the busy state and message count via the effect callbacks", async () => {

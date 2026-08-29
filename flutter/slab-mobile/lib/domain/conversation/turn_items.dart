@@ -364,7 +364,7 @@ class LiveTurnProjector {
         _finish();
         return true;
       default:
-        break; // thread/started, turn/started, model/load/*, context/* — out-of-band
+        break; // turn/started, model/load/*, context/* — out-of-band
     }
     return false;
   }

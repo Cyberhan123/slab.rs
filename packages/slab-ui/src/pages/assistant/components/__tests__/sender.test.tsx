@@ -93,6 +93,59 @@ describe("Sender", () => {
   })
 })
 
+describe("Sender single-button stop/steer state", () => {
+  it("shows Stop while generating with an empty composer and stops on click", async () => {
+    const onStop = vi.fn()
+
+    const screen = await renderSender(
+      <Sender
+        loading
+        steerable
+        onStop={onStop}
+        onSubmit={vi.fn()}
+        commands={COMMANDS}
+        planMode={false}
+        onPlanModeChange={vi.fn()}
+      />,
+    )
+
+    const button = screen.getByTestId("assistant-send-button")
+    await expect.element(button).toHaveAttribute("data-mode", "stop")
+    await userEvent.click(button)
+    expect(onStop).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows Send while generating with text and submits (steering) on click", async () => {
+    const onStop = vi.fn()
+    const onSubmit = vi.fn()
+
+    const screen = await renderSender(
+      <Sender
+        loading
+        steerable
+        onStop={onStop}
+        onSubmit={onSubmit}
+        commands={COMMANDS}
+        planMode={false}
+        onPlanModeChange={vi.fn()}
+      />,
+    )
+
+    await userEvent.type(screen.getByLabelText("Message"), "steer this")
+    const button = screen.getByTestId("assistant-send-button")
+    await expect.element(button).toHaveAttribute("data-mode", "send")
+    await expect.element(button).toBeEnabled()
+    await userEvent.click(button)
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      "steer this",
+      expect.objectContaining({ files: [] }),
+      expect.anything(),
+    )
+    expect(onStop).not.toHaveBeenCalled()
+  })
+})
+
 describe("Sender slash-command menu", () => {
   it("opens the command menu when the user types a leading slash", async () => {
     const screen = await renderSender(

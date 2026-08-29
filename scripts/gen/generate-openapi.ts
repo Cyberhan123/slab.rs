@@ -7,7 +7,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import openapiTS, { astToString } from "openapi-typescript";
-import ts from "typescript";
+// The repo toolchain is TS 7 (the native port, no compiler JS API); the
+// `typescript-compiler` alias pins the classic TS5 package that the
+// openapi-typescript AST builder (patched to import the same alias) and the
+// Blob transform below drive.
+import ts from "typescript-compiler";
 
 import { cargoEnv } from "../cargo/env";
 
