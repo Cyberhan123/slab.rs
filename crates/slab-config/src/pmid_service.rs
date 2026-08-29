@@ -1426,12 +1426,14 @@ fn property_label(path: &str) -> String {
         "agent.hooks.enabled" => "External Hooks".to_owned(),
         "agent.hooks.scripts" => "Legacy Hook Scripts".to_owned(),
         "agent.memories.enabled" => "Agent Memories".to_owned(),
+        "agent.memories.recall_enabled" => "Memory Recall".to_owned(),
         "agent.memories.memory_root" => "Memory Root".to_owned(),
         "agent.memories.phase1_scan_limit" => "Phase 1 Scan Limit".to_owned(),
         "agent.memories.phase1_concurrency" => "Phase 1 Concurrency".to_owned(),
         "agent.memories.phase1_idle_seconds" => "Phase 1 Idle Seconds".to_owned(),
         "agent.memories.phase1_lease_seconds" => "Phase 1 Lease Seconds".to_owned(),
         "agent.memories.phase1_retry_seconds" => "Phase 1 Retry Seconds".to_owned(),
+        "agent.memories.phase1_max_attempts" => "Phase 1 Max Attempts".to_owned(),
         "agent.memories.phase1_max_age_days" => "Phase 1 Max Age Days".to_owned(),
         "agent.memories.phase2_limit" => "Phase 2 Limit".to_owned(),
         "agent.memories.phase2_lease_seconds" => "Phase 2 Lease Seconds".to_owned(),
@@ -1505,6 +1507,9 @@ fn property_description(path: &str) -> String {
         "agent.memories.enabled" => {
             "Enable the built-in agent memory instruction and consolidation pipeline.".to_owned()
         }
+        "agent.memories.recall_enabled" => {
+            "Select and inject the most relevant rollout summaries at agent start via a lightweight model side query.".to_owned()
+        }
         "agent.memories.model" => {
             "Optional model override used by the agent memory pipeline.".to_owned()
         }
@@ -1525,6 +1530,9 @@ fn property_description(path: &str) -> String {
         }
         "agent.memories.phase1_retry_seconds" => {
             "Retry delay after a memory phase 1 extraction failure.".to_owned()
+        }
+        "agent.memories.phase1_max_attempts" => {
+            "Maximum phase 1 extraction attempts per rollout before it is abandoned.".to_owned()
         }
         "agent.memories.phase1_max_age_days" => {
             "Maximum completed-thread age considered by memory phase 1 extraction.".to_owned()
@@ -1659,6 +1667,7 @@ fn property_label_key(path: &str) -> Option<ServerI18nKey> {
         "agent.hooks.enabled" => Some(ServerI18nKey::SettingsPropertyLabelExternalHooks),
         "agent.hooks.scripts" => Some(ServerI18nKey::SettingsPropertyLabelLegacyHookScripts),
         "agent.memories.enabled" => Some(ServerI18nKey::SettingsPropertyLabelAgentMemories),
+        "agent.memories.recall_enabled" => Some(ServerI18nKey::SettingsPropertyLabelMemoryRecall),
         "agent.memories.model" => Some(ServerI18nKey::SettingsPropertyLabelAgentMemoryModel),
         "agent.memories.memory_root" => Some(ServerI18nKey::SettingsPropertyLabelMemoryRoot),
         "agent.memories.phase1_scan_limit" => {
@@ -1675,6 +1684,9 @@ fn property_label_key(path: &str) -> Option<ServerI18nKey> {
         }
         "agent.memories.phase1_retry_seconds" => {
             Some(ServerI18nKey::SettingsPropertyLabelPhase1RetrySeconds)
+        }
+        "agent.memories.phase1_max_attempts" => {
+            Some(ServerI18nKey::SettingsPropertyLabelPhase1MaxAttempts)
         }
         "agent.memories.phase1_max_age_days" => {
             Some(ServerI18nKey::SettingsPropertyLabelPhase1MaxAgeDays)
@@ -1800,6 +1812,9 @@ fn property_description_key(path: &str) -> Option<ServerI18nKey> {
         "agent.hooks.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionExternalHooks),
         "agent.hooks.scripts" => Some(ServerI18nKey::SettingsPropertyDescriptionLegacyHookScripts),
         "agent.memories.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionAgentMemories),
+        "agent.memories.recall_enabled" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionMemoryRecall)
+        }
         "agent.memories.model" => Some(ServerI18nKey::SettingsPropertyDescriptionAgentMemoryModel),
         "agent.memories.memory_root" => Some(ServerI18nKey::SettingsPropertyDescriptionMemoryRoot),
         "agent.memories.phase1_scan_limit" => {
@@ -1816,6 +1831,9 @@ fn property_description_key(path: &str) -> Option<ServerI18nKey> {
         }
         "agent.memories.phase1_retry_seconds" => {
             Some(ServerI18nKey::SettingsPropertyDescriptionPhase1RetrySeconds)
+        }
+        "agent.memories.phase1_max_attempts" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionPhase1MaxAttempts)
         }
         "agent.memories.phase1_max_age_days" => {
             Some(ServerI18nKey::SettingsPropertyDescriptionPhase1MaxAgeDays)

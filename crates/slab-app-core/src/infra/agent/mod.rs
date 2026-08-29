@@ -9,6 +9,7 @@ pub(crate) mod hooks;
 pub(crate) mod image_tool;
 pub(crate) mod memory;
 pub(crate) mod memory_breaker;
+pub(crate) mod memory_project;
 pub(crate) mod plan_store;
 pub(crate) mod plugin_capability;
 pub(crate) mod rollout_persistence;

@@ -92,12 +92,28 @@ pub trait CompactPort: Send + Sync {
     ) -> Result<CompactOutcome, AgentError> {
         Ok(CompactOutcome::Skipped { reason: "no compact provider configured".to_owned() })
     }
+
+    /// Feed a provider-reported prompt size back to the estimator so its
+    /// heuristic (chars/4) can self-calibrate — chars/4 under-estimates
+    /// CJK-heavy content by 2-3x, which delays compaction well past the real
+    /// threshold. Default: ignore.
+    fn note_usage(&self, _estimated_tokens: usize, _actual_prompt_tokens: usize) {}
 }
 
 #[derive(Debug, Clone)]
 pub enum CompactOutcome {
-    Replaced { messages: Vec<ConversationMessage>, output_tokens: usize, replaced_messages: usize },
-    Skipped { reason: String },
+    Replaced {
+        messages: Vec<ConversationMessage>,
+        output_tokens: usize,
+        replaced_messages: usize,
+        /// Tool results the deterministic micro tier condensed into stubs
+        /// during this pass (0 for pure trim outcomes — a summary absorbs
+        /// the stubs it consumed, but the tier-1 count stays observable).
+        stubbed_messages: usize,
+    },
+    Skipped {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -203,6 +219,7 @@ impl CompactPort for SlidingWindowCompactPort {
             replaced_messages: messages.len() - compacted.len(),
             messages: compacted,
             output_tokens,
+            stubbed_messages: 0,
         })
     }
 }

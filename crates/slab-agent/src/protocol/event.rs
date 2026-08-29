@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::error::{ErrorEvent, WarningEvent};
+use super::error::ErrorEvent;
 use super::notification::*;
 use super::turn::Turn;
 
@@ -36,6 +36,15 @@ impl Event {
 pub struct TurnAbortedParams {
     pub thread_id: String,
     pub turn: Turn,
+    /// Why the run aborted (`interrupted` / `max_turns_reached` /
+    /// `budget_exhausted` / `repetition_detected` / `error`). Absent on
+    /// events written by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Token usage of the last completed LLM call in the aborted run, when
+    /// known. Absent on events written by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TurnUsage>,
 }
 
 /// Response event from the agent.
@@ -45,9 +54,8 @@ pub struct TurnAbortedParams {
 #[non_exhaustive]
 pub enum EventMsg {
     Error(ErrorEvent),
-    Warning(WarningEvent),
 
-    ThreadStarted(ThreadStartedParams),
+    ThreadStatusChanged(ThreadStatusChangedParams),
     TurnStarted(TurnStartedParams),
     TurnCompleted(TurnCompletedParams),
     TurnAborted(TurnAbortedParams),

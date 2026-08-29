@@ -76,7 +76,7 @@ impl LlmPort for ServerLlmAdapter {
         let svc = crate::domain::services::ChatService::new((*self.state).clone());
         let output = svc.create_chat_completion(command).await.map_err(|e| {
             warn!(error = %e, "ServerLlmAdapter: chat completion failed");
-            AgentError::Llm(e.to_string())
+            slab_agent::classify_llm_error(&e.to_string())
         })?;
 
         match output {
@@ -122,7 +122,7 @@ impl LlmPort for ServerLlmAdapter {
         let svc = crate::domain::services::ChatService::new((*self.state).clone());
         let output = svc.create_chat_completion(command).await.map_err(|e| {
             warn!(error = %e, "ServerLlmAdapter: streaming chat completion failed");
-            AgentError::Llm(e.to_string())
+            slab_agent::classify_llm_error(&e.to_string())
         })?;
 
         match output {

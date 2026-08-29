@@ -51,6 +51,27 @@ struct ChatCompletionChunkDelta<'a> {
     content: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_content: Option<&'a str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<ChatCompletionChunkToolCall>,
+}
+
+/// One complete native tool call inside a stream delta. Emitted as a single
+/// finalized entry (id + name + full arguments) rather than OpenAI-style
+/// argument fragments — consumers that append fragments still assemble it
+/// correctly because no further fragments follow for the same index.
+#[derive(Serialize)]
+struct ChatCompletionChunkToolCall {
+    index: u32,
+    id: String,
+    #[serde(rename = "type")]
+    tool_type: &'static str,
+    function: ChatCompletionChunkToolCallFunction,
+}
+
+#[derive(Serialize)]
+struct ChatCompletionChunkToolCallFunction {
+    name: String,
+    arguments: String,
 }
 
 #[derive(Serialize)]
@@ -155,6 +176,45 @@ pub(super) fn build_finish_chunk(
             index: 0,
             delta: ChatCompletionChunkDelta::default(),
             finish_reason: Some(finish_reason),
+        }],
+        usage: None,
+    })
+}
+
+/// Build an OpenAI-compatible SSE chunk carrying complete native tool calls
+/// (the cloud stream finalizes them at its `End` event).
+pub(super) fn build_tool_calls_chunk(
+    id: &str,
+    created: i64,
+    model: &str,
+    calls: &[crate::domain::models::ConversationToolCall],
+) -> String {
+    serialize_chunk(&ChatCompletionChunkPayload {
+        id,
+        object_type: "chat.completion.chunk",
+        created,
+        model,
+        system_fingerprint: SYSTEM_FINGERPRINT,
+        choices: vec![ChatCompletionChunkChoice {
+            index: 0,
+            delta: ChatCompletionChunkDelta {
+                role: Some("assistant"),
+                tool_calls: calls
+                    .iter()
+                    .enumerate()
+                    .map(|(index, call)| ChatCompletionChunkToolCall {
+                        index: index as u32,
+                        id: call.id.clone().unwrap_or_else(|| format!("call_{index}")),
+                        tool_type: "function",
+                        function: ChatCompletionChunkToolCallFunction {
+                            name: call.function.name.clone(),
+                            arguments: call.function.arguments.clone(),
+                        },
+                    })
+                    .collect(),
+                ..Default::default()
+            },
+            finish_reason: None,
         }],
         usage: None,
     })

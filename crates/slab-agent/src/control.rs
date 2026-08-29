@@ -1,6 +1,6 @@
 //! Top-level agent controller — manages all active agent threads.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, collections::VecDeque, sync::Arc};
 
 use tokio::{
     sync::{RwLock, watch},
@@ -21,7 +21,7 @@ use crate::{
     error::AgentError,
     hook::{AgentHook, AgentHookRegistry},
     port::{AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadSnapshot, ThreadStatus},
-    protocol::{EventMsg, Turn, TurnAbortedParams},
+    protocol::{EventMsg, ThreadStatusChangedParams},
     risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
     state::ThreadStateMachine,
     thread::{AgentThread, AgentThreadRuntime},
@@ -30,11 +30,65 @@ use crate::{
 
 // ── Internal handle stored per active thread ─────────────────────────────────
 
-struct ThreadEntry {
-    status_rx: watch::Receiver<ThreadStatus>,
-    state: Arc<ThreadStateMachine>,
-    abort: tokio::task::AbortHandle,
-    cancellation: CancellationToken,
+/// Registry entry for a thread known to the controller.
+///
+/// `Reserved` closes the resume TOCTOU: the busy check and the registry
+/// insert happen atomically under one write lock, BEFORE the async spawn work
+/// (store fetch, gate admission, runtime assembly). Previously the check ran
+/// against a read lock and the entry only appeared after the task spawned —
+/// two concurrent `turn/start` calls could both pass and double-run the
+/// thread. Interrupt/shutdown on a reserved slot act on the state machine
+/// alone; the spawned run observes the resulting status at startup and ends
+/// before its first turn.
+enum ThreadEntry {
+    Reserved {
+        state: Arc<ThreadStateMachine>,
+    },
+    Live {
+        status_rx: watch::Receiver<ThreadStatus>,
+        state: Arc<ThreadStateMachine>,
+        join: Option<tokio::task::JoinHandle<Result<String, AgentError>>>,
+        abort: tokio::task::AbortHandle,
+        cancellation: CancellationToken,
+        /// Steering input queued while the run is in flight; drained by the
+        /// run loop at the next iteration boundary (see
+        /// [`AgentControl::queue_input`]).
+        pending_input: Arc<std::sync::Mutex<VecDeque<ConversationMessage>>>,
+    },
+}
+
+impl ThreadEntry {
+    fn state(&self) -> &Arc<ThreadStateMachine> {
+        match self {
+            Self::Reserved { state } | Self::Live { state, .. } => state,
+        }
+    }
+}
+
+/// How long a graceful shutdown waits for the run tail (terminal-status
+/// persist + `OnAgentEnd` hooks, incl. host memory extraction) before
+/// falling back to a hard task abort.
+const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Upper bound for [`AgentControl::wait_for_persisted_terminal_snapshot`]'s
+/// poll loop — previously unbounded (100 ms forever) when a thread never
+/// reached a terminal persisted status.
+const TERMINAL_SNAPSHOT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Upper bound on queued steering input. When full the caller gets an
+/// `AgentError::Internal("input queue full")` — an unbounded queue would let
+/// a runaway client balloon a single run.
+const MAX_QUEUED_INPUT: usize = 32;
+
+/// Outcome of [`AgentControl::queue_input`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendOutcome {
+    /// Thread idle — the caller owns the resume flow (the rollout read and
+    /// `starting_turn_index` live in app-core) and must run it.
+    NeedsResume,
+    /// Thread busy — the message was queued and will be injected at the next
+    /// iteration boundary, after the current LLM call / tool batch finishes.
+    Queued { position: usize },
 }
 
 struct SpawnRequest {
@@ -489,6 +543,34 @@ impl AgentControl {
         Ok(())
     }
 
+    /// Overwrite the persisted run-iteration budget for a thread (flows from the
+    /// `agent.runtime.limits.max_turns` setting on every harness `turn/start`).
+    /// Same read-modify-write as [`Self::set_thread_reasoning_effort`]:
+    /// `resume_thread` re-reads the persisted `config_json` every turn, so this
+    /// is also what retroactively upgrades legacy threads that still carry the
+    /// old default (`10`) in their stored config.
+    pub async fn set_thread_max_turns(
+        &self,
+        thread_id: &str,
+        max_turns: u32,
+    ) -> Result<(), AgentError> {
+        let snapshot = self
+            .store
+            .get_thread(thread_id)
+            .await?
+            .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+        let mut config =
+            serde_json::from_str::<AgentConfig>(&snapshot.config_json).map_err(|e| {
+                AgentError::Internal(format!("failed to deserialize agent config: {e}"))
+            })?;
+        config.max_turns = max_turns;
+        let config_json = serde_json::to_string(&config)
+            .map_err(|e| AgentError::Internal(format!("failed to serialize agent config: {e}")))?;
+        let updated = ThreadSnapshot { config_json, ..snapshot };
+        self.store.upsert_thread(&updated).await?;
+        Ok(())
+    }
+
     /// Return a persisted thread snapshot.
     pub async fn thread_snapshot(
         &self,
@@ -542,10 +624,8 @@ impl AgentControl {
         starting_turn_index: u32,
         emit_new: Option<usize>,
     ) -> Result<(), AgentError> {
-        if self.threads.read().await.contains_key(thread_id) {
-            return Err(AgentError::ThreadBusy(thread_id.to_owned()));
-        }
-
+        // Phase A — async prep with NO lock held: snapshot fetch + config
+        // parse + thread construction.
         let snapshot = self
             .store
             .get_thread(thread_id)
@@ -560,7 +640,6 @@ impl AgentControl {
         let config = serde_json::from_str::<AgentConfig>(&snapshot.config_json).map_err(|e| {
             AgentError::Internal(format!("failed to deserialize agent config: {e}"))
         })?;
-
         let (thread, status_rx) = AgentThread::new_with_id(
             snapshot.id.clone(),
             snapshot.session_id,
@@ -568,8 +647,72 @@ impl AgentControl {
             snapshot.depth,
             config,
         );
-        self.start_thread(thread, status_rx, messages, starting_turn_index, emit_new).await?;
+
+        // Phase B — reserve the registry slot ATOMICALLY with the busy check
+        // (short write-lock critical section, no awaits). This closes the
+        // TOCTOU where two concurrent resumes both passed a read-lock check
+        // before either spawned task registered.
+        let reserved_state = Arc::clone(&thread.state);
+        {
+            let mut guard = self.threads.write().await;
+            if guard.contains_key(thread_id) {
+                return Err(AgentError::ThreadBusy(thread_id.to_owned()));
+            }
+            guard.insert(
+                thread_id.to_owned(),
+                ThreadEntry::Reserved { state: Arc::clone(&reserved_state) },
+            );
+        }
+
+        // Phase C — spawn. Admission (memory pressure / gate) can still
+        // reject; roll back OUR reservation (never a Live entry a concurrent
+        // path installed).
+        if let Err(error) =
+            self.start_thread(thread, status_rx, messages, starting_turn_index, emit_new).await
+        {
+            let mut guard = self.threads.write().await;
+            if let Some(ThreadEntry::Reserved { state }) = guard.get(thread_id)
+                && Arc::ptr_eq(state, &reserved_state)
+            {
+                guard.remove(thread_id);
+            }
+            drop(guard);
+            return Err(error);
+        }
         Ok(())
+    }
+
+    /// Steering: deliver user input to a RUNNING thread. Busy threads used to
+    /// hard-fail with [`AgentError::ThreadBusy`]; now the message queues and
+    /// the run loop injects it at the next iteration boundary (needs_follow_up
+    /// = model wants more OR queue non-empty). Returns
+    /// [`SendOutcome::NeedsResume`] for an idle thread — the caller (app-core)
+    /// owns the resume flow.
+    pub async fn queue_input(
+        &self,
+        thread_id: &str,
+        message: ConversationMessage,
+    ) -> Result<SendOutcome, AgentError> {
+        let guard = self.threads.read().await;
+        let Some(entry) = guard.get(thread_id) else {
+            return Ok(SendOutcome::NeedsResume);
+        };
+        match entry {
+            ThreadEntry::Live { pending_input, .. } => {
+                let mut queue =
+                    pending_input.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                if queue.len() >= MAX_QUEUED_INPUT {
+                    return Err(AgentError::Internal(
+                        "input queue full; interrupt or wait for the run to finish".to_owned(),
+                    ));
+                }
+                queue.push_back(message);
+                Ok(SendOutcome::Queued { position: queue.len() })
+            }
+            // A resume is being assembled (TOCTOU reservation) — nothing is
+            // runnable to drain a queue yet; the honest answer is busy.
+            ThreadEntry::Reserved { .. } => Err(AgentError::ThreadBusy(thread_id.to_owned())),
+        }
     }
 
     /// Get a [`watch::Receiver`] that emits the latest status for the given thread.
@@ -577,16 +720,21 @@ impl AgentControl {
         &self,
         thread_id: &str,
     ) -> Result<watch::Receiver<ThreadStatus>, AgentError> {
-        self.threads
-            .read()
-            .await
-            .get(thread_id)
-            .map(|e| e.status_rx.clone())
-            .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))
+        let guard = self.threads.read().await;
+        let entry =
+            guard.get(thread_id).ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+        match entry {
+            ThreadEntry::Live { status_rx, .. } => Ok(status_rx.clone()),
+            // A reserved slot has no spawned task yet, but its state machine
+            // already broadcasts — subscribe straight from it.
+            ThreadEntry::Reserved { state } => Ok(state.subscribe()),
+        }
     }
 
-    /// Abort a running thread, broadcast the `Shutdown` status, persist it,
-    /// and remove the entry from the registry.
+    /// Shut a thread down: broadcast and persist `Shutdown`, cancel the run,
+    /// and wait (gracefully) for the run tail — the terminal-status persist
+    /// and the `OnAgentEnd` hooks (host memory extraction, sleep-inhibitor
+    /// release) — before falling back to a hard task abort.
     pub async fn shutdown(&self, thread_id: &str) -> Result<(), AgentError> {
         let entry = self
             .threads
@@ -595,18 +743,48 @@ impl AgentControl {
             .remove(thread_id)
             .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
 
-        // Signal the terminal status before aborting so all watch subscribers
-        // see `Shutdown` rather than the last intermediate status.
-        entry.state.transition(ThreadStatus::Shutdown)?;
-        entry.abort.abort();
+        // Signal the terminal status before cancelling so all watch
+        // subscribers see `Shutdown` rather than the last intermediate status.
+        entry.state().transition(ThreadStatus::Shutdown)?;
+        let live_parts = match entry {
+            ThreadEntry::Reserved { .. } => None,
+            ThreadEntry::Live { cancellation, join, abort, .. } => {
+                Some((cancellation, join, abort))
+            }
+        };
 
         // Persist and fan-out the Shutdown transition.
         self.notify.on_status_change(thread_id, ThreadStatus::Shutdown).await;
+        let status_msg = EventMsg::ThreadStatusChanged(ThreadStatusChangedParams {
+            thread_id: thread_id.to_owned(),
+            status: ThreadStatus::Shutdown.to_string(),
+            reason: Some("shutdown".to_owned()),
+        });
+        self.notify.on_event_msg(thread_id, &status_msg).await;
         self.store
             .update_thread_status(thread_id, ThreadStatus::Shutdown, Some("shutdown"))
             .await
             .ok();
 
+        if let Some((cancellation, mut join, abort)) = live_parts {
+            // Cancel FIRST so the run's teardown (status persist + OnAgentEnd
+            // hooks) executes; the hard abort is the last resort after the
+            // grace window. Previously the abort fired immediately and the
+            // run tail never ran.
+            cancellation.cancel();
+            let graceful = match join.as_mut() {
+                Some(join) => tokio::time::timeout(SHUTDOWN_GRACE, join).await.is_ok(),
+                None => true,
+            };
+            if !graceful {
+                warn!(
+                    thread_id,
+                    grace_ms = SHUTDOWN_GRACE.as_millis() as u64,
+                    "shutdown grace expired; aborting thread task"
+                );
+                abort.abort();
+            }
+        }
         Ok(())
     }
 
@@ -615,28 +793,31 @@ impl AgentControl {
         let guard = self.threads.read().await;
         let entry =
             guard.get(thread_id).ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
-        let state = Arc::clone(&entry.state);
-        let cancellation = entry.cancellation.clone();
+        let state = Arc::clone(entry.state());
+        let cancellation = match entry {
+            ThreadEntry::Live { cancellation, .. } => Some(cancellation.clone()),
+            // Reserved: no task to cancel — the state transition alone ends
+            // the run at its startup check.
+            ThreadEntry::Reserved { .. } => None,
+        };
         drop(guard);
 
         state.transition(ThreadStatus::Interrupting)?;
-        cancellation.cancel();
+        if let Some(cancellation) = cancellation {
+            cancellation.cancel();
+        }
         self.notify.on_status_change(thread_id, ThreadStatus::Interrupting).await;
-        // Surface the interrupt on the harness protocol channel. `turn_index`
-        // is unknown here (no active turn context), so the turn id is the
-        // placeholder `"current"` — matching what the legacy projection derived
-        // from a `None` turn index. The authoritative `TurnAborted` is also
-        // emitted by the turn loop when it observes the cancellation.
-        let abort_msg = EventMsg::TurnAborted(TurnAbortedParams {
+        // Instant UI feedback for the interrupt: the authoritative turn-level
+        // terminal event is emitted by the turn loop's teardown (it knows the
+        // active turn index; this layer does not). The eager placeholder
+        // `TurnAborted { turn: "current" }` this used to emit was removed —
+        // clients saw a wrong-id terminal before the real one landed.
+        let status_msg = EventMsg::ThreadStatusChanged(ThreadStatusChangedParams {
             thread_id: thread_id.to_owned(),
-            turn: Turn {
-                id: "current".to_owned(),
-                items: Vec::new(),
-                status: "interrupted".to_owned(),
-                error: None,
-            },
+            status: ThreadStatus::Interrupting.to_string(),
+            reason: None,
         });
-        self.notify.on_event_msg(thread_id, &abort_msg).await;
+        self.notify.on_event_msg(thread_id, &status_msg).await;
         self.store
             .update_thread_status(thread_id, ThreadStatus::Interrupting, Some("interrupting"))
             .await
@@ -755,6 +936,8 @@ impl AgentControl {
         let trace_dir = self.trace_dir.clone();
         let thread_context = self.thread_context.clone();
         let cancellation = CancellationToken::new();
+        let pending_input: Arc<std::sync::Mutex<VecDeque<ConversationMessage>>> =
+            Arc::new(std::sync::Mutex::new(VecDeque::new()));
         let threads_cleanup = Arc::clone(&self.threads);
         let id_cleanup = thread_id.clone();
         let runtime = AgentThreadRuntime {
@@ -774,6 +957,7 @@ impl AgentControl {
             trace_dir,
             thread_context,
             cancellation: cancellation.clone(),
+            pending_input: Arc::clone(&pending_input),
         };
 
         // Spawn the thread task first to obtain the AbortHandle.
@@ -792,8 +976,20 @@ impl AgentControl {
 
         let abort = join_handle.abort_handle();
 
+        // Replaces the resume-path reservation (same state machine instance)
+        // or inserts fresh (spawn path, brand-new id).
         let mut guard = self.threads.write().await;
-        guard.insert(thread_id.clone(), ThreadEntry { status_rx, state, abort, cancellation });
+        guard.insert(
+            thread_id.clone(),
+            ThreadEntry::Live {
+                status_rx,
+                state,
+                join: Some(join_handle),
+                abort,
+                cancellation,
+                pending_input,
+            },
+        );
         drop(guard);
 
         Ok(thread_id)
@@ -803,16 +999,36 @@ impl AgentControl {
         &self,
         thread_id: &str,
     ) -> Result<crate::port::ThreadSnapshot, AgentError> {
-        loop {
-            let snapshot = self
-                .store
-                .get_thread(thread_id)
-                .await?
-                .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
-            if is_terminal_status(snapshot.status) {
-                return Ok(snapshot);
+        // Bounded: previously an unbounded 100 ms poll that hung forever when
+        // a thread never reached a terminal persisted status. On expiry,
+        // return the latest snapshot even if non-terminal — callers prefer a
+        // stale answer over hanging.
+        let mut last_snapshot: Option<crate::port::ThreadSnapshot> = None;
+        match tokio::time::timeout(TERMINAL_SNAPSHOT_TIMEOUT, async {
+            loop {
+                let snapshot = self
+                    .store
+                    .get_thread(thread_id)
+                    .await?
+                    .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+                if is_terminal_status(snapshot.status) {
+                    return Ok(snapshot);
+                }
+                last_snapshot = Some(snapshot);
+                sleep(Duration::from_millis(100)).await;
             }
-            sleep(Duration::from_millis(100)).await;
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(_elapsed) => {
+                warn!(
+                    thread_id,
+                    timeout_ms = TERMINAL_SNAPSHOT_TIMEOUT.as_millis() as u64,
+                    "terminal snapshot wait timed out; returning latest non-terminal snapshot"
+                );
+                last_snapshot.ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))
+            }
         }
     }
 }
