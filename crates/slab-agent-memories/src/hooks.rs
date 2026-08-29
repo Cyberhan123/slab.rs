@@ -1,45 +1,8 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use slab_agent::{AgentHook, HookEvent, HookOutcome, HookToolAction};
 use slab_types::{ConversationMessage, ConversationMessageContent, PluginPermissionsManifest};
-
-use crate::read::{MemoryReadConfig, render_read_developer_turn};
-
-#[derive(Debug, Clone)]
-pub struct MemoryInstructionHook {
-    enabled: bool,
-    memory_root: PathBuf,
-}
-
-impl MemoryInstructionHook {
-    pub fn new(enabled: bool, memory_root: PathBuf) -> Self {
-        Self { enabled, memory_root }
-    }
-}
-
-#[async_trait]
-impl AgentHook for MemoryInstructionHook {
-    async fn on_event(&self, event: &HookEvent) -> HookOutcome {
-        let HookEvent::OnAgentStart { config, .. } = event else {
-            return HookOutcome::Continue;
-        };
-        if !self.enabled || config.transient {
-            return HookOutcome::Continue;
-        }
-        let config = MemoryReadConfig {
-            memory_root: self.memory_root.clone(),
-            inject_hook_instructions: true,
-        };
-        match render_read_developer_turn(&config) {
-            Ok(Some(message)) => HookOutcome::inject_message(message),
-            Ok(None) => HookOutcome::Continue,
-            Err(error) => HookOutcome::AppendObservation {
-                observation: format!("memory instruction injection skipped: {error}"),
-            },
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -231,7 +194,14 @@ fn merge_script_tool_action(
 
 fn hook_event_payload(event: &HookEvent) -> (&'static str, serde_json::Value) {
     match event {
-        HookEvent::OnAgentStart { thread_id, session_id, parent_id, depth, config } => (
+        HookEvent::OnAgentStart {
+            thread_id,
+            session_id,
+            parent_id,
+            depth,
+            config,
+            input_message,
+        } => (
             "on_agent_start",
             serde_json::json!({
                 "thread_id": thread_id,
@@ -239,6 +209,7 @@ fn hook_event_payload(event: &HookEvent) -> (&'static str, serde_json::Value) {
                 "parent_id": parent_id,
                 "depth": depth,
                 "config": config,
+                "input_message": input_message,
             }),
         ),
         HookEvent::OnLlmStart { thread_id, session_id, turn_index, messages, tools } => (
@@ -376,7 +347,8 @@ mod tests {
                 session_id: "session".into(),
                 parent_id: None,
                 depth: 0,
-                config: AgentConfig::default(),
+                config: Box::new(AgentConfig::default()),
+                input_message: None,
             })
             .await;
 

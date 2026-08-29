@@ -6,6 +6,7 @@ import type { MessagePartRenderProps } from "../message/message-parts"
 import type { TMessage, TMessagePart } from "../message/message-item"
 import MessageToolPart, {
   deriveState,
+  isApprovalPending,
   isToolActive,
   type ToolPartLike,
   type ToolState,
@@ -102,6 +103,15 @@ describe("isToolActive", () => {
   })
 })
 
+describe("isApprovalPending", () => {
+  it("is the only default-open case", () => {
+    expect(isApprovalPending("approval-requested")).toBe(true)
+    expect(isApprovalPending("input-available")).toBe(false)
+    expect(isApprovalPending("input-streaming")).toBe(false)
+    expect(isApprovalPending("output-available")).toBe(false)
+  })
+})
+
 type ToolPartProps = MessagePartRenderProps<TMessagePart, TMessage>
 
 function baseProps(overrides: {
@@ -142,6 +152,12 @@ describe("MessageToolPart", () => {
 
     await expect.element(screen.getByText("Awaiting Approval")).toBeInTheDocument()
     await expect.element(screen.getByTestId("collapsible")).toHaveAttribute("data-default-open", "true")
+  })
+
+  it("stays collapsed by default while merely running (no approval pending)", async () => {
+    const screen = await render(<MessageToolPart {...baseProps()} />)
+
+    await expect.element(screen.getByTestId("collapsible")).toHaveAttribute("data-default-open", "false")
   })
 
   it("shows the completed badge and stays closed once output is available", async () => {

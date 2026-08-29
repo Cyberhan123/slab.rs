@@ -45,10 +45,15 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
             None
         };
     // Rollout JSONL true source. One shared file store for the whole
-    // process; one recorder per thread, files under <app_home>/sessions in the
-    // date-partitioned layout `YYYY/MM/DD/rollout-<ts>-<thread_id>.jsonl`.
-    let rollout =
-        Arc::new(slab_agent_rollout::RolloutFileStore::new(slab_utils::app_home::sessions_dir()));
+    // process; one recorder per thread, files under the configured session
+    // state dir (default `<app_home>/sessions`) in the date-partitioned layout
+    // `YYYY/MM/DD/rollout-<ts>-<thread_id>.jsonl`. MUST come from the resolved
+    // config — embedding it to app_home would ignore `--session-state-dir`
+    // (e2e passes a per-run dir and asserts the rollout files there) and would
+    // cross-contaminate concurrent servers sharing one app-home.
+    let rollout = Arc::new(slab_agent_rollout::RolloutFileStore::new(PathBuf::from(
+        ctx.config.session_state_dir.clone(),
+    )));
     // One-shot startup migration of pre-migration FLAT rollout
     // files (`<thread_id>.rollout.jsonl` at the sessions root) into the new
     // date-partitioned layout. Runs synchronously BEFORE any recorder is spawned
@@ -203,7 +208,11 @@ fn build_agent_control(
         sandbox_driver,
         workspace_root.clone(),
         mcp_client,
-        false,
+        // Git tools ship with the production suite: the plan agent's prompt
+        // names `git_status`/`git_diff` (read-only category, visible even in
+        // read-only exposure) and `git_commit` is FileEdit-gated by the
+        // exec-policy engine, so registration is safe by construction.
+        true,
         web_search_config,
         shell_launcher,
         shell_config.bash_path.clone(),
@@ -273,7 +282,6 @@ fn build_agent_control(
         memory_store,
         Arc::clone(&rollout),
         Arc::clone(&rollout_store),
-        workspace_root.clone(),
         Arc::clone(&ctx.model_state),
         memory_config.clone(),
         memory_root.clone(),
@@ -291,9 +299,9 @@ fn build_agent_control(
         Arc::new(slab_agent_context::ContextInstructionHook::new(Arc::new(
             super::context::AppContextSources::new(
                 (*ctx.model_state).clone(),
-                super::context::shell_kind(shell_config.launcher),
+                super::context::shell_kind(shell_config.launcher, shell_config.bash_path.clone()),
                 Arc::clone(&exec_policy),
-                memory_config.enabled,
+                memory_config.clone(),
                 memory_root.clone(),
             ),
         ))),

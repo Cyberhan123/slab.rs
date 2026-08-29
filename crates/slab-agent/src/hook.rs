@@ -23,7 +23,15 @@ pub enum HookEvent {
         session_id: String,
         parent_id: Option<String>,
         depth: u32,
-        config: AgentConfig,
+        /// Boxed: `AgentConfig` (system prompt, tool list, …) dominates the
+        /// variant's size and the event is cloned per registered hook.
+        config: Box<AgentConfig>,
+        /// The run's driving user message: the LAST user-role message without
+        /// a fragment `name` tag (tagged `slab_agents_md` fragments are
+        /// injected context, not user input). `None` when the run carries no
+        /// user message. Consumed by read-side memory recall to rank relevant
+        /// memories against the task at hand.
+        input_message: Option<String>,
     },
     OnLlmStart {
         thread_id: String,
@@ -252,7 +260,8 @@ mod tests {
             session_id: "session".to_owned(),
             parent_id: None,
             depth: 0,
-            config: AgentConfig::default(),
+            config: Box::new(AgentConfig::default()),
+            input_message: None,
         }
     }
 }

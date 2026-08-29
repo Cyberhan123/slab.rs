@@ -17,7 +17,7 @@ pub mod notification;
 pub mod thread;
 pub mod turn;
 
-pub use error::{ErrorEvent, WarningEvent};
+pub use error::ErrorEvent;
 pub use event::{Event, EventMsg, TurnAbortedParams};
 pub use item::{ReasoningText, TurnItem, UserMessageContent};
 pub use notification::{
@@ -25,7 +25,7 @@ pub use notification::{
     CommandExecutionRequestApprovalParams, ContextCompactedParams, ContextCompactingParams,
     FileChangeApprovalChange, FileChangeOutputDeltaParams, FileChangeRequestApprovalParams,
     ItemCompletedParams, ItemStartedParams, MessageAppendedParams, ReasoningSummaryTextDeltaParams,
-    ReasoningTextDeltaParams, ThreadStartedParams, TurnCompletedParams, TurnStartedParams,
+    ReasoningTextDeltaParams, ThreadStatusChangedParams, TurnCompletedParams, TurnStartedParams,
     TurnStateChangedParams, TurnUsage,
 };
 pub use thread::{GitInfo, Thread};

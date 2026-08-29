@@ -5,7 +5,7 @@
 //! attach to mark a step as objectively done (the Anthropic lesson: prefer
 //! deterministic verification over the model's self-assessment).
 //!
-//! The LLM picks a `target` (`workspace_build` / `lint` / `diff`); the command
+//! The LLM picks a `target` (`workspace_build` / `lint` / `test` / `diff`); the command
 //! each target maps to is fixed by the host and cannot be overridden by the
 //! model, so the result is deterministic for a given workspace state. The
 //! actual command execution lives behind the [`WorkspaceVerifier`] trait so the
@@ -26,6 +26,7 @@ use slab_sandboxing::{SandboxDriver, spawn_sandboxed_option};
 pub enum VerifyTarget {
     WorkspaceBuild,
     Lint,
+    Test,
     Diff,
 }
 
@@ -34,6 +35,7 @@ impl VerifyTarget {
         match self {
             Self::WorkspaceBuild => "workspace_build",
             Self::Lint => "lint",
+            Self::Test => "test",
             Self::Diff => "diff",
         }
     }
@@ -42,6 +44,7 @@ impl VerifyTarget {
         match value.trim().to_ascii_lowercase().as_str() {
             "workspace_build" | "build" => Some(Self::WorkspaceBuild),
             "lint" => Some(Self::Lint),
+            "test" | "tests" => Some(Self::Test),
             "diff" => Some(Self::Diff),
             _ => None,
         }
@@ -98,6 +101,8 @@ impl CommandWorkspaceVerifier {
             VerifyTarget::WorkspaceBuild => vec!["cargo", "check", "--quiet", "--workspace"],
             // `cargo fmt --check` is a deterministic formatting/lint signal.
             VerifyTarget::Lint => vec!["cargo", "fmt", "--check"],
+            // `cargo test` is the deterministic "do the tests pass" signal.
+            VerifyTarget::Test => vec!["cargo", "test", "--quiet", "--workspace"],
             // Empty porcelain output means a clean working tree.
             VerifyTarget::Diff => vec!["git", "status", "--porcelain"],
         }
@@ -202,7 +207,7 @@ impl ToolHandler for VerifyTool {
     }
 
     fn description(&self) -> &str {
-        "Run a deterministic workspace check (workspace_build / lint / diff) and return pass/fail with a result_ref for plan nodes."
+        "Run a deterministic workspace check (workspace_build / lint / test / diff) and return pass/fail with a result_ref for plan nodes."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -211,7 +216,7 @@ impl ToolHandler for VerifyTool {
             "properties": {
                 "target": {
                     "type": "string",
-                    "enum": ["workspace_build", "lint", "diff"],
+                    "enum": ["workspace_build", "lint", "test", "diff"],
                     "description": "Which deterministic check to run."
                 },
                 "path": {
@@ -232,7 +237,7 @@ impl ToolHandler for VerifyTool {
             .map_err(|error| AgentError::ToolExecution(format!("invalid verify args: {error}")))?;
         let target = VerifyTarget::from_str(&args.target).ok_or_else(|| {
             AgentError::ToolExecution(format!(
-                "verify target must be one of: workspace_build, lint, diff (got '{}')",
+                "verify target must be one of: workspace_build, lint, test, diff (got '{}')",
                 args.target
             ))
         })?;
@@ -382,13 +387,15 @@ mod tests {
             .await
             .expect_err("unknown target rejected");
 
-        assert!(error.to_string().contains("workspace_build, lint, diff"));
+        assert!(error.to_string().contains("workspace_build, lint, test, diff"));
     }
 
     #[test]
     fn verify_target_parses_aliases_case_insensitively() {
         assert_eq!(VerifyTarget::from_str("DIFF"), Some(VerifyTarget::Diff));
         assert_eq!(VerifyTarget::from_str("build"), Some(VerifyTarget::WorkspaceBuild));
+        assert_eq!(VerifyTarget::from_str("TEST"), Some(VerifyTarget::Test));
+        assert_eq!(VerifyTarget::from_str("tests"), Some(VerifyTarget::Test));
         assert_eq!(VerifyTarget::from_str("nope"), None);
     }
 
@@ -397,5 +404,8 @@ mod tests {
         // Lint maps to cargo fmt --check (deterministic), not an arbitrary command.
         let cmd = CommandWorkspaceVerifier::command_for(VerifyTarget::Lint);
         assert_eq!(cmd, vec!["cargo", "fmt", "--check"]);
+        // Test maps to the workspace test suite.
+        let cmd = CommandWorkspaceVerifier::command_for(VerifyTarget::Test);
+        assert_eq!(cmd, vec!["cargo", "test", "--quiet", "--workspace"]);
     }
 }

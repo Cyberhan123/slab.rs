@@ -13,6 +13,7 @@ slab-types    = { workspace = true }
 slab-agent-tracing = { workspace = true }
 slab-otel     = { workspace = true }
 slab-exec-policy = { workspace = true }
+slab-utils    = { workspace = true }
 ts-rs = { workspace = true, features = ["serde-json-impl", "no-serde-warnings"] }
 tokio         = { workspace = true }
 tokio-util    = { workspace = true }

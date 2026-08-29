@@ -8,6 +8,8 @@ Agent orchestration library for Slab.
 
 - Agent thread management and lifecycle control.
 - Tool routing and port-based orchestration abstractions.
+- `ToolResultGuard`, the run-scoped context-budget choke point: every dispatched tool result is bounded to a 64 KB net cap (70/30 head/tail middle-truncation) and identical results ≥ 2 KB are deduplicated by hash, so no single tool call can crowd out the context window.
+- Two-tier history compaction: a deterministic micro tier stubs old tool results at 0.55×W (progressively, down to 0.45×W, never touching `delegate_subagent` conclusions), escalating to an LLM summarize at 0.80×W; `CompactOutcome` reports both removed and stubbed counts.
 - Approval hooks for sensitive tool calls; host layers provide the approval transport.
 - Interfaces for composing multi-step AI workflows.
 
