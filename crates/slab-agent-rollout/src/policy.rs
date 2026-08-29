@@ -3,7 +3,7 @@
 //! Rollout files capture every [`TurnItem`](slab_agent::protocol::TurnItem) and
 //! every [`crate::TurnContextPayload`], but only a *filtered* subset of
 //! [`EventMsg`]s. [`EventPersistenceMode::Limited`] (the default) keeps the
-//! turn-lifecycle and error/warning events needed to reconstruct the session
+//! turn-lifecycle and error events needed to reconstruct the session
 //! timeline; [`EventPersistenceMode::Extended`] additionally keeps the streaming
 //! deltas and approval requests for high-fidelity debugging.
 
@@ -12,7 +12,7 @@ use slab_agent::protocol::EventMsg;
 /// How aggressively [`EventMsg`]s are persisted to the rollout file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EventPersistenceMode {
-    /// Persist only turn lifecycle + error/warning + compaction events.
+    /// Persist only turn lifecycle + error + compaction events.
     ///
     /// Drops the high-frequency `*Delta` and `*RequestApproval` variants.
     #[default]
@@ -33,8 +33,6 @@ impl EventPersistenceMode {
             Self::Limited => matches!(
                 msg,
                 EventMsg::Error(_)
-                    | EventMsg::Warning(_)
-                    | EventMsg::ThreadStarted(_)
                     | EventMsg::TurnStarted(_)
                     | EventMsg::TurnCompleted(_)
                     | EventMsg::TurnAborted(_)
@@ -68,6 +66,7 @@ mod tests {
                 ..Default::default()
             },
             usage: None,
+            reason: None,
         })
     }
 

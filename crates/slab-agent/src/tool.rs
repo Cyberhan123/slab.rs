@@ -461,6 +461,18 @@ pub trait ToolHandler: Send + Sync {
         slab_exec_policy::OperationCategory::ReadOnly
     }
 
+    /// Whether THIS invocation may run concurrently with other
+    /// concurrency-safe invocations in the same assistant tool batch. Pure
+    /// read-only tools (read_file / grep / glob / list_dir, read-only git
+    /// subcommands, web_search) override to `true`; everything else keeps the
+    /// conservative `false` so mutating calls stay strictly serialized. The
+    /// dispatch loop partitions a batch into runs of safe calls (executed in
+    /// parallel, bounded by `tool_concurrency`) interleaved with serial
+    /// single-call batches.
+    fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
+        false
+    }
+
     /// When/how the tool appears in the model-facing tool list. Defaults to
     /// [`ToolVisibility::Direct`] (always a candidate, subject to category
     /// exposure). Plugin/MCP tools override to [`ToolVisibility::Deferred`] so

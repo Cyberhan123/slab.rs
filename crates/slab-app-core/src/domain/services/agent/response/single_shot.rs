@@ -610,7 +610,11 @@ pub(crate) async fn run_create_response(
 /// output shape; reasoning streaming is a follow-up.
 enum DeltaEvent {
     Text(String),
-    Done { usage: Option<TextGenerationUsage> },
+    /// Complete native tool calls finalized at the cloud stream's end.
+    ToolCalls(Vec<ConversationToolCall>),
+    Done {
+        usage: Option<TextGenerationUsage>,
+    },
     Failed(String),
 }
 
@@ -622,15 +626,18 @@ struct StreamAccumulator {
     text: String,
     usage: Option<TextGenerationUsage>,
     failed: Option<String>,
+    tool_calls: Vec<ConversationToolCall>,
     /// Next envelope id (the lifecycle prefix uses 0 and 1; deltas start at 2).
     next_id: u64,
 }
 
 /// Build the cloud chat request config from the `/responses` request + resolved
 /// agent config (mirrors `chat/mod.rs`'s `CloudChatRequestConfig` mapping).
+/// No implicit max-tokens cap: cloud reasoning models spend it on reasoning
+/// first, and an accidental cap truncates the model mid-thought.
 fn cloud_stream_config(req: &OpenAICreateRequest, config: &AgentConfig) -> CloudChatRequestConfig {
     CloudChatRequestConfig {
-        max_tokens: config.max_tokens.unwrap_or(DEFAULT_RESPONSE_MAX_TOKENS),
+        max_tokens: config.max_tokens,
         temperature: config.temperature.unwrap_or(0.7),
         top_p: config.top_p,
         structured_output: config.structured_output.clone(),
@@ -688,7 +695,13 @@ async fn build_delta_events(
         let raw = cloud_chat_stream(&target, &input.messages, cfg, trace_http).await?;
         let mapped = raw.filter_map(|item| match item {
             Ok(CloudDelta::Content(t)) => futures::future::ready(Some(DeltaEvent::Text(t))),
-            // Reasoning + tool-call chunks are not surfaced (see DeltaEvent doc).
+            Ok(CloudDelta::Completed { tool_calls, .. }) => {
+                // The stop reason is folded into the terminal via the outcome.
+                futures::future::ready(
+                    (!tool_calls.is_empty()).then_some(DeltaEvent::ToolCalls(tool_calls)),
+                )
+            }
+            // Reasoning chunks are not surfaced (see DeltaEvent doc).
             Ok(CloudDelta::Reasoning(_)) => futures::future::ready(None),
             Err(error) => futures::future::ready(Some(DeltaEvent::Failed(error.to_string()))),
         });
@@ -728,22 +741,43 @@ async fn build_delta_events(
     }
 }
 
-/// Map one delta event to 0..1 frames, mutating the shared accumulator.
-fn map_delta_event(event: DeltaEvent, acc: &mut StreamAccumulator) -> Option<StreamFrame> {
+/// Map one delta event to 0..N frames, mutating the shared accumulator.
+fn map_delta_event(event: DeltaEvent, acc: &mut StreamAccumulator) -> Vec<StreamFrame> {
     match event {
         DeltaEvent::Text(t) => {
             acc.text.push_str(&t);
             let id = acc.next_id;
             acc.next_id += 1;
-            Some(StreamFrame::Envelope(text_delta_envelope(id, "msg_0", 0, &t)))
+            vec![StreamFrame::Envelope(text_delta_envelope(id, "msg_0", 0, &t))]
+        }
+        DeltaEvent::ToolCalls(calls) => {
+            // Mirrors synthesize_envelopes: text (when present) occupies
+            // output_index 0, tool calls follow. Completed arrives after the
+            // final text delta, so `acc.text` is already final here.
+            let base = u32::from(!acc.text.is_empty()) as i32;
+            let mut frames = Vec::new();
+            for (index, call) in calls.iter().enumerate() {
+                let id = acc.next_id;
+                acc.next_id += 1;
+                frames.push(StreamFrame::Envelope(function_call_done_envelope(
+                    id,
+                    &format!("fc_{index}"),
+                    call.id.as_deref().unwrap_or(&format!("call_{index}")),
+                    &call.function.name,
+                    &call.function.arguments,
+                    base + index as i32,
+                )));
+            }
+            acc.tool_calls.extend(calls);
+            frames
         }
         DeltaEvent::Done { usage } => {
             acc.usage = usage;
-            None
+            Vec::new()
         }
         DeltaEvent::Failed(message) => {
             acc.failed = Some(message);
-            None
+            Vec::new()
         }
     }
 }
@@ -758,13 +792,13 @@ fn outcome_from_accumulator(acc: &StreamAccumulator) -> SingleShotOutcome {
         },
         None => {
             let text = if acc.text.is_empty() { None } else { Some(acc.text.clone()) };
-            if text.is_none() && acc.usage.is_none() {
+            if text.is_none() && acc.usage.is_none() && acc.tool_calls.is_empty() {
                 SingleShotOutcome::Empty
             } else {
                 SingleShotOutcome::Completed {
                     text,
                     reasoning: None,
-                    tool_calls: Vec::new(),
+                    tool_calls: acc.tool_calls.clone(),
                     usage: acc.usage.clone(),
                 }
             }
@@ -797,9 +831,9 @@ fn build_frame_stream(
 ) -> super::StreamFrameStream {
     let response_id_for_lifecycle = response_id.clone();
     let acc_for_deltas = Arc::clone(&acc);
-    let delta_frames = events.filter_map(move |event| {
+    let delta_frames = events.flat_map(move |event| {
         let mut a = acc_for_deltas.lock().expect("stream accumulator lock");
-        futures::future::ready(map_delta_event(event, &mut a))
+        stream::iter(map_delta_event(event, &mut a))
     });
 
     let core_for_terminal = core;
@@ -827,11 +861,12 @@ fn build_frame_stream(
     Box::pin(lifecycle.chain(delta_frames).chain(terminal))
 }
 
-/// Run one `/responses` stream. Text-only requests stream token-by-token
-/// (cloud via `cloud_chat_stream`, local via `local_chat_stream`); a request
-/// carrying `tools` falls back to the whole-envelope burst (tool calls only
-/// surface in the non-streaming result). A pre-stream error becomes a
-/// `response.failed` (consistent with [`run_llm_or_failure`]).
+/// Run one `/responses` stream. Requests stream token-by-token (cloud via
+/// `cloud_chat_stream` — native tool calls finalize at the stream end; local
+/// via `local_chat_stream`). A LOCAL request carrying `tools` falls back to the
+/// whole-envelope burst (`RuntimeTextGenerationChunk` has no tool channel).
+/// A pre-stream error becomes a `response.failed` (consistent with
+/// [`run_llm_or_failure`]).
 pub(crate) async fn run_stream_response(
     core: &AgentCore,
     state: &ModelState,
@@ -850,10 +885,12 @@ pub(crate) async fn run_stream_response(
     }
     persist_input(core, &input, session_id, &config).await?;
 
-    // Burst fallback: a request carrying tools may yield tool_calls, which only
-    // surface in the non-streaming result (cloud_chat_stream filters
-    // ToolCallChunk; RuntimeTextGenerationChunk has no tool channel).
-    if !req.function_tools().is_empty() {
+    // Burst fallback for the LOCAL route: `RuntimeTextGenerationChunk` has no
+    // tool channel, so a request carrying tools may yield tool_calls that only
+    // surface in the non-streaming result. The cloud route streams natively —
+    // `cloud_chat_stream` finalizes tool calls at its end event.
+    let route_to_cloud = should_route_to_cloud(state, &config.model).await?;
+    if !route_to_cloud && !req.function_tools().is_empty() {
         let command = build_command(req, input.messages.clone(), &config);
         let outcome = run_llm_or_failure(state, command).await;
         persist_assistant_and_complete(core, &input.response_id, input.turn_index, &outcome)
@@ -1106,7 +1143,7 @@ mod tests {
         let d2 = map_delta_event(DeltaEvent::Text("lo".into()), &mut acc);
         let d3 = map_delta_event(DeltaEvent::Done { usage: None }, &mut acc);
         // Text deltas emit text-delta envelopes with monotonic ids; Done emits none.
-        assert!(d3.is_none());
+        assert!(d3.is_empty());
         let delta_frames: Vec<StreamFrame> = [d1, d2].into_iter().flatten().collect();
         assert_eq!(delta_frames.len(), 2);
         assert!(matches!(
@@ -1162,6 +1199,39 @@ mod tests {
         let term = terminal_frames(&acc, &outcome);
         assert_eq!(term.len(), 1);
         assert!(matches!(term[0], StreamFrame::Terminal(TerminalKind::Completed, _)));
+    }
+
+    #[test]
+    fn stream_mapping_native_tool_calls_emit_envelopes_and_incomplete() {
+        let mut acc = StreamAccumulator { next_id: 2, ..Default::default() };
+        map_delta_event(DeltaEvent::Text("let me check".into()), &mut acc);
+        let frames = map_delta_event(
+            DeltaEvent::ToolCalls(vec![ConversationToolCall {
+                id: Some("call_7".into()),
+                r#type: "function".into(),
+                function: ConversationToolFunction {
+                    name: "read_file".into(),
+                    arguments: r#"{"path":"a.txt"}"#.into(),
+                },
+            }]),
+            &mut acc,
+        );
+        // One function-call envelope, indexed after the text at output_index 0.
+        assert_eq!(frames.len(), 1);
+        assert!(matches!(
+            frames[0],
+            StreamFrame::Envelope(ref e) if matches!(
+                kind(e),
+                AgentEventKind::ResponseFunctionCallArgumentsDone {
+                    call_id, name, output_index, ..
+                } if call_id == "call_7" && name == "read_file" && *output_index == 1
+            )
+        ));
+        let outcome = outcome_from_accumulator(&acc);
+        assert!(outcome.has_tool_calls());
+        // Terminal: text-done (msg_0) + Incomplete { ToolCalls }.
+        let term = terminal_frames(&acc, &outcome);
+        assert!(matches!(term[1], StreamFrame::Terminal(TerminalKind::Incomplete { .. }, _)));
     }
 
     fn output_index_of(e: &AgentEventKind) -> i32 {

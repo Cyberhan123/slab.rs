@@ -27,6 +27,8 @@ type MessageListProps = {
     modelLoad?: ModelLoadState | null
     /** True while restoring; renders a session-load Marker when there are no messages yet. */
     sessionLoading?: boolean
+    /** Steering inputs queued on the running turn; ghost user bubbles at the tail. */
+    queuedTexts?: readonly string[]
 }
 
 function MessageList({
@@ -38,6 +40,7 @@ function MessageList({
     compactionMarkers,
     modelLoad,
     sessionLoading = false,
+    queuedTexts,
 }: MessageListProps) {
     const viewportRef = useRef<HTMLDivElement>(null)
 
@@ -48,8 +51,9 @@ function MessageList({
                 historyCount,
                 modelLoad,
                 sessionLoading,
+                queuedTexts,
             }),
-        [messages, showHistoryMarker, historyCount, compactionMarkers, modelLoad, sessionLoading],
+        [messages, showHistoryMarker, historyCount, compactionMarkers, modelLoad, sessionLoading, queuedTexts],
     )
 
     const virtualizer = useVirtualizer({

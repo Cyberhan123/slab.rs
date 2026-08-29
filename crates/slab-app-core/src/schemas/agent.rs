@@ -69,6 +69,10 @@ impl From<AgentConfigInput> for AgentConfig {
                 .invalid_tool_call_retries
                 .unwrap_or(defaults.invalid_tool_call_retries)
                 .clamp(0, MAX_INVALID_TOOL_CALL_RETRIES),
+            // LLM retry policy is not (yet) part of the public /responses
+            // input surface — defaults apply; persisted config_json overrides.
+            llm_max_retries: defaults.llm_max_retries,
+            llm_retry_base_delay_ms: defaults.llm_retry_base_delay_ms,
             structured_output: v.structured_output.map(Into::into),
             transient: v.transient.unwrap_or(defaults.transient),
             agent_type: None,
@@ -527,7 +531,15 @@ impl From<ThreadSnapshot> for AgentThreadResponse {
 impl From<ThreadMessageRecord> for AgentThreadMessageResponse {
     fn from(record: ThreadMessageRecord) -> Self {
         let message = record.message;
-        let content = message.content.rendered_text();
+        // The rollout stores assistant messages in their LLM-grade form (the
+        // reasoning embedded as a `<think …>…</think>` block for the next
+        // prompt's chat template). This REST surface is UI-grade — strip the
+        // block so consumers never see raw thinking markup.
+        let content = if message.role == "assistant" {
+            slab_agent::strip_think_blocks(&message.content.rendered_text())
+        } else {
+            message.content.rendered_text()
+        };
         let tool_call_id = message.tool_call_id;
         let tool_calls = message.tool_calls.into_iter().map(Into::into).collect();
         Self {

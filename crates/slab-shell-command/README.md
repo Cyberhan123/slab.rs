@@ -6,6 +6,8 @@ Policy-aware shell execution for Slab agent tools.
 
 `slab-shell-command` owns command safety checks, execution policy resolution, optional sandbox-driver routing, timeout handling, and output truncation for shell tool calls.
 
+Oversized output is middle-truncated to `DEFAULT_OUTPUT_LIMIT_BYTES` (30 KB, `pub` — `slab-agent-tools` applies the same budget to its capture ceiling) keeping the head ~70% and tail ~30% via `decode_truncated_head_tail`, so exit summaries and error tails survive the cut. `ShellOutput` additionally reports `stdout_bytes` / `stderr_bytes` — the original captured lengths before truncation — letting callers decide whether to spill the full output to a workspace artifact.
+
 It does not own host approval transport. Callers inspect the execution policy and route approval through `slab-agent` / host ports before executing sensitive commands.
 
 ## Exec Rules

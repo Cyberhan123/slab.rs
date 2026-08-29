@@ -365,3 +365,8 @@ luwen-api = { path = "vendor/luwen-api-0.8.5" }
 # Relax sqlx-sqlite's libsqlite3-sys cap (<0.38 -> <0.39) so cargo can unify on
 # libsqlite3-sys 0.38 alongside deno_cache's rusqlite 0.40 (deno_core 0.408 cycle).
 sqlx-sqlite = { path = "vendor/sqlx-sqlite-0.9.0" }
+# Vendored lib-only copy. Upstream's DuckDuckGo parser degraded any unrecognized
+# page (bot challenge, markup change) to Ok(vec![]) — silently indistinguishable
+# from "no results". The vendored copy fails loudly on zero-result pages unless
+# a no-results marker confirms the query genuinely matched nothing.
+websearch = { path = "vendor/websearch-0.1.1" }
