@@ -41,7 +41,9 @@ impl ToolHandler for FileGlobTool {
     }
 
     fn description(&self) -> &str {
-        "Find files by gitignore-aware glob pattern inside a workspace path."
+        "Find files by gitignore-aware glob pattern inside a workspace path. \
+         Skips .git, node_modules, target, vendor, dist, lockfiles, and \
+         cargo-bazel generated files by default."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -140,6 +142,9 @@ fn glob_blocking(
     let mut builder = ignore::WalkBuilder::new(root);
     builder.hidden(false);
     builder.require_git(false);
+    // Prune non-source trees by name during traversal (see `exclusions`),
+    // shared with the grep tool so the two cannot drift.
+    builder.filter_entry(|entry| !crate::exclusions::is_default_excluded(entry));
 
     let mut results = Vec::new();
     for result in builder.build() {
@@ -422,6 +427,42 @@ mod tests {
         assert_eq!(schema["properties"]["max_results"]["default"], 200);
         assert_eq!(schema["properties"]["include_dirs"]["default"], false);
         assert_eq!(schema["required"], json!(["pattern"]));
+    }
+
+    #[tokio::test]
+    async fn file_glob_excludes_git_and_vendor_by_default() {
+        let root = temp_root("default_excludes");
+        for dir in [".git/objects", "node_modules/pkg", "vendor/crate", "dist"] {
+            fs::create_dir_all(root.join(dir)).expect("create excluded dir");
+        }
+        fs::write(root.join(".git").join("objects").join("x.txt"), "").expect("write git file");
+        fs::write(root.join("node_modules").join("pkg").join("x.js"), "").expect("write nm file");
+        fs::write(root.join("vendor").join("crate").join("x.rs"), "").expect("write vendor file");
+        fs::write(root.join("dist").join("x.js"), "").expect("write dist file");
+        fs::write(root.join("Cargo.lock"), "").expect("write lockfile");
+        fs::write(root.join("crates.bzl"), "").expect("write bazel file");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join("src").join("keep.rs"), "").expect("write kept file");
+        let tool = FileGlobTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": ".", "pattern": "**/*"}))
+            .await
+            .expect("glob output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        let paths: Vec<String> = value["matches"]
+            .as_array()
+            .expect("matches")
+            .iter()
+            .map(|m| m["path"].as_str().expect("path").replace('\\', "/"))
+            .collect();
+        for excluded in [".git/", "node_modules/", "vendor/", "dist/", "Cargo.lock", "crates.bzl"] {
+            assert!(!paths.iter().any(|p| p.contains(excluded)), "{excluded} leaked: {paths:?}");
+        }
+        assert!(paths.iter().any(|p| p.ends_with("src/keep.rs")), "src/keep.rs missing: {paths:?}");
+
+        let _ = fs::remove_dir_all(root);
     }
 
     fn temp_root(name: &str) -> PathBuf {

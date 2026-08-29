@@ -13,7 +13,7 @@ use slab_exec_policy::{CommandSafetyChecker, SafetyDecision};
 use slab_sandboxing::{
     OutputSink, PassThroughDriver, SandboxDriver, SandboxError, SandboxedCommand,
 };
-use slab_utils::string::decode_truncated_output;
+use slab_utils::string::decode_truncated_head_tail;
 use thiserror::Error;
 use tracing::{debug, warn};
 
@@ -30,7 +30,14 @@ pub type ShellRuleError = RuleError;
 pub type ShellRuleMatcher = RuleMatcher;
 pub type ShellRuleSet = RuleSet;
 
-const DEFAULT_OUTPUT_LIMIT_BYTES: usize = 100 * 1024;
+/// Per-stream (stdout/stderr) context-injection budget. Oversized streams
+/// keep the head 70% / tail 30% of the budget with an explicit omission
+/// marker — the tail matters more for command output than the middle does.
+/// `ShellTool` raises its executor's capture bound and re-applies this budget
+/// at the tool layer so it can spill the full output to disk first.
+pub const DEFAULT_OUTPUT_LIMIT_BYTES: usize = 30 * 1024;
+/// Head fraction of the kept budget when truncating.
+const OUTPUT_HEAD_RATIO: f32 = 0.7;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellCommand {
@@ -52,6 +59,13 @@ pub struct ShellOutput {
     pub stderr: String,
     pub exit_code: i32,
     pub timed_out: bool,
+    /// Original captured stdout length in bytes (before head/tail truncation)
+    /// — lets callers decide whether to spill the full output to disk.
+    #[serde(default)]
+    pub stdout_bytes: usize,
+    /// Original captured stderr length in bytes (before head/tail truncation).
+    #[serde(default)]
+    pub stderr_bytes: usize,
 }
 
 #[derive(Debug, Error)]
@@ -134,10 +148,20 @@ impl ShellExecutor {
         tracing::info!(command = %command.command, exit_code = output.exit_code, timed_out = output.timed_out, "execute_with_sink: driver returned");
 
         Ok(ShellOutput {
-            stdout: decode_truncated_output(&output.stdout, self.output_limit_bytes),
-            stderr: decode_truncated_output(&output.stderr, self.output_limit_bytes),
+            stdout: decode_truncated_head_tail(
+                &output.stdout,
+                self.output_limit_bytes,
+                OUTPUT_HEAD_RATIO,
+            ),
+            stderr: decode_truncated_head_tail(
+                &output.stderr,
+                self.output_limit_bytes,
+                OUTPUT_HEAD_RATIO,
+            ),
             exit_code: output.exit_code,
             timed_out: output.timed_out,
+            stdout_bytes: output.stdout.len(),
+            stderr_bytes: output.stderr.len(),
         })
     }
 }
@@ -359,6 +383,128 @@ mod tests {
         assert_eq!(command.cwd.as_deref(), Some(PathBuf::from("workspace").as_path()));
         assert_eq!(command.timeout.map(|timeout| timeout.as_secs()), Some(5));
         assert_eq!(command.env.get("TEXT").map(String::as_str), Some("value"));
+    }
+
+    /// Oversized stdout keeps head 70% / tail 30% of the budget with an
+    /// explicit omission marker; the original size is reported separately.
+    #[tokio::test]
+    async fn shell_executor_truncates_stdout_head_and_tail() {
+        // 200 lines x 1000 bytes = 200KB of stdout.
+        let lines: Vec<String> =
+            (0..200).map(|idx| format!("line-{idx:03}-{}", "x".repeat(990))).collect();
+        let stdout = lines.join("\n");
+        let stdout_bytes = stdout.len();
+        let executor = ShellExecutor::new(
+            None,
+            Some(Arc::new(RecordingDriver {
+                seen: Arc::new(Mutex::new(None)),
+                output: slab_sandboxing::SandboxedOutput {
+                    stdout: stdout.into_bytes(),
+                    stderr: b"short stderr".to_vec(),
+                    exit_code: 0,
+                    timed_out: false,
+                },
+            })),
+            ShellLauncher::PowerShell,
+            None,
+        );
+
+        let output = executor.execute(ShellCommand::new("huge")).await.expect("shell output");
+
+        assert_eq!(output.stdout_bytes, stdout_bytes);
+        assert_eq!(output.stderr_bytes, b"short stderr".len());
+        assert!(
+            output.stdout.len() < DEFAULT_OUTPUT_LIMIT_BYTES + 256,
+            "stdout not bounded: {}",
+            output.stdout.len()
+        );
+        assert!(output.stdout.contains("line-000-"), "head must survive");
+        assert!(output.stdout.contains("line-199-"), "tail must survive");
+        assert!(!output.stdout.contains("line-100-"), "middle must be omitted");
+        assert!(
+            output.stdout.contains("bytes omitted"),
+            "omission marker missing: {}",
+            output.stdout
+        );
+        assert_eq!(output.stderr, "short stderr"); // small stream untouched
+    }
+
+    #[tokio::test]
+    async fn shell_executor_preserves_short_output_verbatim() {
+        let executor = ShellExecutor::new(
+            None,
+            Some(Arc::new(RecordingDriver {
+                seen: Arc::new(Mutex::new(None)),
+                output: slab_sandboxing::SandboxedOutput {
+                    stdout: b"all good".to_vec(),
+                    stderr: Vec::new(),
+                    exit_code: 0,
+                    timed_out: false,
+                },
+            })),
+            ShellLauncher::PowerShell,
+            None,
+        );
+
+        let output = executor.execute(ShellCommand::new("echo")).await.expect("shell output");
+        assert_eq!(output.stdout, "all good");
+        assert_eq!(output.stderr, "");
+        assert!(!output.stdout.contains("omitted"));
+    }
+
+    #[tokio::test]
+    async fn shell_executor_truncates_stderr_independently() {
+        let stderr: String = "e".repeat(DEFAULT_OUTPUT_LIMIT_BYTES * 4);
+        let stderr_bytes = stderr.len();
+        let executor = ShellExecutor::new(
+            None,
+            Some(Arc::new(RecordingDriver {
+                seen: Arc::new(Mutex::new(None)),
+                output: slab_sandboxing::SandboxedOutput {
+                    stdout: Vec::new(),
+                    stderr: stderr.into_bytes(),
+                    exit_code: 1,
+                    timed_out: false,
+                },
+            })),
+            ShellLauncher::PowerShell,
+            None,
+        );
+
+        let output = executor.execute(ShellCommand::new("fail")).await.expect("shell output");
+        assert_eq!(output.stderr_bytes, stderr_bytes);
+        assert!(
+            output.stderr.len() < DEFAULT_OUTPUT_LIMIT_BYTES + 256,
+            "stderr not bounded: {}",
+            output.stderr.len()
+        );
+        assert!(output.stderr.contains("bytes omitted"));
+        assert_eq!(output.stdout, "");
+    }
+
+    /// Live acceptance check: a real `seq 1 100000` run comes back bounded
+    /// with head and tail intact.
+    #[tokio::test]
+    async fn shell_executor_live_seq_output_is_bounded() {
+        #[cfg(windows)]
+        let (launcher, command) = (ShellLauncher::PowerShell, "1..100000 | ForEach-Object { $_ }");
+        #[cfg(not(windows))]
+        let (launcher, command) = (ShellLauncher::Bash, "seq 1 100000");
+
+        let output = ShellExecutor::new(None, None, launcher, None)
+            .execute(ShellCommand::new(command))
+            .await
+            .expect("live output");
+
+        assert_eq!(output.exit_code, 0);
+        assert!(output.stdout.contains("1\r\n") || output.stdout.contains("1\n"), "head missing");
+        assert!(output.stdout.contains("100000"), "tail missing");
+        assert!(
+            output.stdout.len() < DEFAULT_OUTPUT_LIMIT_BYTES + 256,
+            "live output not bounded: {}",
+            output.stdout.len()
+        );
+        assert!(output.stdout.contains("bytes omitted"), "marker missing");
     }
 
     #[tokio::test]

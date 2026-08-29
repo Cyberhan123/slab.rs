@@ -1,6 +1,6 @@
 //! Single-turn execution logic (private to the crate).
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -12,7 +12,8 @@ use uuid::Uuid;
 
 use slab_agent_tracing::{AgentTraceContext, AgentTraceSink, record_json};
 use slab_types::{
-    ConversationMessage, ConversationMessageContent, ConversationToolCall, ConversationToolFunction,
+    ConversationContentPart, ConversationMessage, ConversationMessageContent, ConversationToolCall,
+    ConversationToolFunction,
 };
 
 use crate::{
@@ -84,6 +85,9 @@ pub(crate) struct TurnExecutionContext<'a> {
     /// AT MOST ONCE per run. A second overflow after compaction fails the
     /// turn (compacting again cannot shrink further).
     pub context_overflow_recovered: &'a AtomicBool,
+    /// Run-scoped context-budget net: bounds every tool result (byte cap +
+    /// exact-duplicate dedup) before it becomes conversation history.
+    pub tool_result_guard: &'a crate::tool_result_guard::ToolResultGuard,
 }
 
 pub(crate) enum TurnOutcome {
@@ -460,6 +464,7 @@ pub(crate) async fn execute_turn(
             "turn_completed",
             serde_json::json!({ "more_turns": false }),
         );
+        emit_turn_token_accounting(&context, messages, usage.as_ref());
         return Ok(TurnOutcome::Final { usage: usage.clone() });
     }
 
@@ -504,6 +509,7 @@ pub(crate) async fn execute_turn(
                 "turn_completed",
                 serde_json::json!({ "more_turns": false, "task_complete": true }),
             );
+            emit_turn_token_accounting(&context, messages, usage.as_ref());
             return Ok(TurnOutcome::Final { usage: usage.clone() });
         }
     }
@@ -519,6 +525,10 @@ pub(crate) async fn execute_turn(
         "turn_completed",
         serde_json::json!({ "more_turns": true }),
     );
+    // Emitted after `handle_tool_calls` so this turn's tool results are
+    // included in the breakdown — the accounting describes what the NEXT
+    // sampling request would re-send.
+    emit_turn_token_accounting(&context, messages, usage.as_ref());
     Ok(TurnOutcome::ToolCalls {
         invalid_tool_calls: validation.invalid.len(),
         signatures: validation.valid.iter().map(ToolCallSignature::new).collect(),
@@ -533,6 +543,120 @@ fn token_budget_would_be_exhausted(
 ) -> bool {
     token_budget
         .is_some_and(|budget| budget > 0 && consumed_tokens.saturating_add(token_usage) >= budget)
+}
+
+/// Per-turn context accounting (context-budget system): a pure estimate of
+/// what the next sampling request will re-send, broken down by message role
+/// and by tool, alongside the actual usage the provider reported for this
+/// turn. One free-form trace line — no LLM calls.
+fn emit_turn_token_accounting(
+    context: &TurnExecutionContext<'_>,
+    messages: &[ConversationMessage],
+    usage: Option<&LlmUsage>,
+) {
+    // Tool messages carry only `tool_call_id`; resolve tool names from the
+    // assistant `tool_calls` that produced them.
+    let mut tool_names: HashMap<&str, &str> = HashMap::new();
+    for message in messages {
+        for call in &message.tool_calls {
+            if let Some(id) = call.id.as_deref() {
+                tool_names.insert(id, call.function.name.as_str());
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct ToolStats {
+        messages: u64,
+        tokens: u64,
+        bytes: u64,
+    }
+
+    let mut segments: BTreeMap<&str, u64> = BTreeMap::new();
+    let mut by_tool: BTreeMap<&str, ToolStats> = BTreeMap::new();
+    // (bytes, tokens, call_id, tool name)
+    let mut largest: Vec<(u64, u64, &str, &str)> = Vec::new();
+
+    for message in messages {
+        let tokens = crate::compact::estimate_message_tokens(message) as u64;
+        *segments.entry(message.role.as_str()).or_default() += tokens;
+        if message.role == "tool" {
+            let bytes = message_content_bytes(message) as u64;
+            let call_id = message.tool_call_id.as_deref().unwrap_or("");
+            let name = message
+                .tool_call_id
+                .as_deref()
+                .and_then(|id| tool_names.get(id).copied())
+                .unwrap_or("unknown");
+            let stats = by_tool.entry(name).or_default();
+            stats.messages += 1;
+            stats.tokens += tokens;
+            stats.bytes += bytes;
+            largest.push((bytes, tokens, call_id, name));
+        }
+    }
+
+    largest.sort_by_key(|(bytes, ..)| std::cmp::Reverse(*bytes));
+    let largest_tool_results: Vec<serde_json::Value> = largest
+        .into_iter()
+        .take(5)
+        .map(|(bytes, tokens, call_id, name)| {
+            serde_json::json!({ "tool": name, "call_id": call_id, "bytes": bytes, "tokens": tokens })
+        })
+        .collect();
+
+    let by_tool_json: serde_json::Map<String, serde_json::Value> = by_tool
+        .iter()
+        .map(|(name, stats)| {
+            (
+                (*name).to_owned(),
+                serde_json::json!({
+                    "messages": stats.messages,
+                    "tokens": stats.tokens,
+                    "bytes": stats.bytes,
+                }),
+            )
+        })
+        .collect();
+
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "turn_token_accounting",
+        serde_json::json!({
+            "turn_index": context.turn_index,
+            "model": context.config.model,
+            "message_count": messages.len(),
+            "estimated_total_tokens": crate::compact::estimate_tokens(messages),
+            "by_segment": segments,
+            "by_tool": by_tool_json,
+            "largest_tool_results": largest_tool_results,
+            "usage": usage,
+            "consumed_tokens": context.consumed_tokens,
+            "token_budget": context.config.token_budget,
+        }),
+    );
+}
+
+/// Byte length of a message's textual payload (image parts are not
+/// text-injected and the estimator already caps them).
+fn message_content_bytes(message: &ConversationMessage) -> usize {
+    match &message.content {
+        ConversationMessageContent::Text(text) => text.len(),
+        ConversationMessageContent::Parts(parts) => parts
+            .iter()
+            .map(|part| match part {
+                ConversationContentPart::Text { text }
+                | ConversationContentPart::InputText { text }
+                | ConversationContentPart::OutputText { text }
+                | ConversationContentPart::Refusal { text } => text.len(),
+                ConversationContentPart::ToolResult { value, .. }
+                | ConversationContentPart::Json { value } => value.to_string().len(),
+                ConversationContentPart::Image { .. } => 0,
+            })
+            .sum(),
+    }
 }
 
 /// Land the terminal Failed turn state for an unrecoverable LLM failure.

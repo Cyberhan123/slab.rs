@@ -15276,6 +15276,7 @@ dependencies = [
  "slab-exec-policy",
  "slab-otel",
  "slab-types",
+ "slab-utils",
  "strum 0.28.0",
  "tempfile",
  "thiserror 2.0.19",

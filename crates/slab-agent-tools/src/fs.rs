@@ -7,10 +7,16 @@ use serde_json::Value;
 use slab_agent::{
     AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, protocol::TurnItem,
 };
+use slab_utils::string::truncate_middle_bytes;
 
 use crate::args::string_arg;
 
 const MAX_LINES: usize = 1000;
+/// Byte cap on the returned content — the line cap alone lets files with very
+/// long lines (minified/generated) inject unbounded payloads.
+const MAX_CONTENT_BYTES: usize = 48 * 1024;
+/// Head fraction of the kept budget when the byte cap fires.
+const CONTENT_HEAD_RATIO: f32 = 0.7;
 
 pub struct ReadFileTool {
     pub workspace_root: Option<PathBuf>,
@@ -42,7 +48,10 @@ impl ToolHandler for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "Read a file, optionally restricted to a 1-based inclusive line range."
+        "Read a file, optionally restricted to a 1-based inclusive line range. \
+         Returns at most 1000 lines and 48KB of content (head+tail kept, \
+         middle omitted with a marker) — narrow with start_line/end_line when \
+         the file is larger."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -67,7 +76,7 @@ impl ToolHandler for ReadFileTool {
 
     async fn execute(
         &self,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
         let path = string_arg(arguments, "path")?;
@@ -85,16 +94,42 @@ impl ToolHandler for ReadFileTool {
         let capped_end = requested_end.min(start_idx + MAX_LINES);
         let selected = lines.get(start_idx..capped_end).unwrap_or(&[]).to_vec();
 
-        Ok(ToolOutput {
-            content: serde_json::json!({
-                "content": selected.join("\n"),
-                "total_lines": total,
-                "returned_lines": selected.len(),
-                "truncated": capped_end < requested_end
-            })
-            .to_string(),
-            metadata: None,
-        })
+        let joined = selected.join("\n");
+        let total_bytes = joined.len();
+        let (bounded, omitted_bytes) =
+            truncate_middle_bytes(&joined, MAX_CONTENT_BYTES, CONTENT_HEAD_RATIO);
+
+        // Spill the full selected content when the byte cap fired — the model
+        // can read the artifact instead of paging through line ranges.
+        let full_content_artifact = if omitted_bytes > 0 {
+            use std::hash::{DefaultHasher, Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            path.to_string_lossy().hash(&mut hasher);
+            let nonce = format!("{:016x}", hasher.finish());
+            crate::artifact::write_tool_artifact(
+                ctx.workspace.as_ref().map(|workspace| workspace.root.as_path()),
+                &ctx.thread_id,
+                &format!("read-{nonce}-t{}.txt", ctx.turn_index),
+                joined.as_bytes(),
+            )
+            .await
+        } else {
+            None
+        };
+
+        let mut envelope = serde_json::json!({
+            "content": bounded,
+            "total_lines": total,
+            "returned_lines": selected.len(),
+            "total_bytes": total_bytes,
+            "omitted_bytes": omitted_bytes,
+            "truncated": capped_end < requested_end || omitted_bytes > 0
+        });
+        if let Some(reference) = full_content_artifact {
+            envelope["full_content_artifact"] = serde_json::json!(reference);
+        }
+
+        Ok(ToolOutput { content: envelope.to_string(), metadata: None })
     }
 }
 
@@ -431,6 +466,85 @@ mod tests {
             .await
             .expect_err("escape rejected");
         assert!(error.to_string().contains("workspace path `../outside.txt` is invalid"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// The line cap alone lets long-lined files inject unbounded payloads;
+    /// the byte cap keeps head and tail with an explicit marker.
+    #[tokio::test]
+    async fn read_file_tool_caps_content_bytes_with_marker() {
+        let root = temp_root("read_bytes");
+        let line = format!("line-{}-", "z".repeat(194));
+        let content =
+            (0..1_000).map(|idx| format!("{line}{idx:04}")).collect::<Vec<_>>().join("\n");
+        fs::write(root.join("wide.txt"), &content).expect("seed file");
+        let tool = ReadFileTool::new(Some(root.clone()));
+
+        let output = tool.execute(&ctx(), &json!({"path": "wide.txt"})).await.expect("read file");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        let returned = value["content"].as_str().expect("content");
+        assert!(
+            returned.len() < MAX_CONTENT_BYTES + 128,
+            "content not bounded: {}",
+            returned.len()
+        );
+        assert!(returned.starts_with("line-"), "head must survive");
+        assert!(returned.contains("0999"), "tail must survive");
+        assert!(returned.contains("bytes omitted"), "marker missing");
+        assert!(value["omitted_bytes"].as_u64().expect("omitted") > 0);
+        assert_eq!(value["total_bytes"].as_u64().expect("total") as usize, content.len());
+        assert_eq!(value["truncated"], true);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// P2 regression: write_file must never echo the written content back —
+    /// the model just wrote it and does not need it re-injected.
+    #[tokio::test]
+    async fn write_file_tool_does_not_echo_content() {
+        let root = temp_root("write_no_echo");
+        let payload = "SECRETPAYLOAD-".repeat(400); // ~6KB
+        let tool = WriteFileTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": "out.txt", "content": payload}))
+            .await
+            .expect("write file");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        assert_eq!(value["written"], "out.txt");
+        assert_eq!(value["bytes"], payload.len());
+        assert!(value.get("content").is_none(), "content key must not exist");
+        assert!(!output.content.contains("SECRETPAYLOAD"), "payload echoed back");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// When the byte cap fires, the full selected content spills to a
+    /// workspace artifact referenced from the envelope.
+    #[tokio::test]
+    async fn read_file_tool_spills_full_content_when_capped() {
+        let root = temp_root("read_spill");
+        let line = format!("line-{}-", "z".repeat(194));
+        let content =
+            (0..1_000).map(|idx| format!("{line}{idx:04}")).collect::<Vec<_>>().join("\n");
+        fs::write(root.join("wide.txt"), &content).expect("seed file");
+        let tool = ReadFileTool::new(Some(root.clone()));
+        let ctx = ToolContext::for_thread("spill-read-thread")
+            .workspace(slab_agent::WorkspaceRef { root: root.clone(), session_id: None })
+            .build();
+
+        let output = tool.execute(&ctx, &json!({"path": "wide.txt"})).await.expect("read file");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        assert!(value["omitted_bytes"].as_u64().expect("omitted") > 0);
+        let reference = value["full_content_artifact"].as_str().expect("artifact reference");
+        assert!(reference.starts_with(".slab/artifacts/spill-read-thread/read-"));
+        assert!(reference.ends_with("-t0.txt"));
+        let spilled = fs::read_to_string(root.join(reference)).expect("artifact exists");
+        assert_eq!(spilled.len(), content.len(), "artifact holds the full content");
 
         let _ = fs::remove_dir_all(root);
     }

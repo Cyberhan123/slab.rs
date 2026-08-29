@@ -443,6 +443,9 @@ impl AgentThread {
         // exit path) — both owned by this run.
         let lifecycle = TurnLifecycle::new();
         let items = OpenItemTracker::default();
+        // Run-scoped context-budget net for tool results (see
+        // `tool_result_guard`) — owned here so dedup memory spans the run.
+        let tool_result_guard = crate::tool_result_guard::ToolResultGuard::default();
         // Death-spiral guard for the context-overflow recovery: at most ONE
         // forced compaction per run (see `execute_turn`'s retry loop).
         let context_overflow_recovered = AtomicBool::new(false);
@@ -483,6 +486,20 @@ impl AgentThread {
             prompt_token_estimate = Some(
                 u32::try_from(compact.as_ref().estimate_tokens(&messages)).unwrap_or(u32::MAX),
             );
+            // Calibrate the estimator against the provider-reported prompt
+            // size on every real usage (chars/4 under-estimates CJK 2-3x,
+            // delaying compaction past the real threshold).
+            let note_calibration = |usage: Option<&crate::port::LlmUsage>| {
+                if let Some(usage) = usage
+                    && !usage.estimated
+                    && usage.prompt_tokens > 0
+                {
+                    compact.as_ref().note_usage(
+                        prompt_token_estimate.unwrap_or_default() as usize,
+                        usage.prompt_tokens as usize,
+                    );
+                }
+            };
             match execute_turn(
                 TurnExecutionContext {
                     thread_id: &thread_id,
@@ -510,6 +527,7 @@ impl AgentThread {
                     compact: compact.as_ref(),
                     prompt_token_estimate,
                     context_overflow_recovered: &context_overflow_recovered,
+                    tool_result_guard: &tool_result_guard,
                 },
                 &mut messages,
             )
@@ -519,6 +537,7 @@ impl AgentThread {
                     TurnOutcome::Final { usage } => {
                         let total = usage.as_ref().map(|u| u.total_tokens).unwrap_or_default();
                         consumed_tokens = consumed_tokens.saturating_add(total);
+                        note_calibration(usage.as_ref());
                         last_turn_usage = usage.map(TurnUsage::from);
                         // Extract the final assistant text.
                         reached_final_turn = true;
@@ -553,6 +572,7 @@ impl AgentThread {
                     TurnOutcome::BudgetExceeded { usage } => {
                         let total = usage.as_ref().map(|u| u.total_tokens).unwrap_or_default();
                         consumed_tokens = consumed_tokens.saturating_add(total);
+                        note_calibration(usage.as_ref());
                         last_turn_usage = usage.map(TurnUsage::from);
                         termination_reason = Some(TerminationReason::BudgetExhausted);
                         break 'turns;
@@ -560,6 +580,7 @@ impl AgentThread {
                     TurnOutcome::ToolCalls { invalid_tool_calls, signatures, usage } => {
                         let total = usage.as_ref().map(|u| u.total_tokens).unwrap_or_default();
                         consumed_tokens = consumed_tokens.saturating_add(total);
+                        note_calibration(usage.as_ref());
                         last_turn_usage = usage.map(TurnUsage::from);
                         if invalid_tool_calls == 0 {
                             invalid_tool_call_retries = 0;

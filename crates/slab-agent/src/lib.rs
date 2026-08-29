@@ -42,6 +42,7 @@ mod concurrency_gate;
 mod llm_output;
 mod repetition_guard;
 mod state;
+mod tool_result_guard;
 mod tool_validation;
 mod turn;
 mod turn_state;

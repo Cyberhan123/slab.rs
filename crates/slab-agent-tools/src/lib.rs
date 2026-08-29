@@ -12,7 +12,9 @@ use slab_sandboxing::SandboxDriver;
 
 pub mod apply_patch;
 mod args;
+mod artifact;
 pub(crate) mod error;
+mod exclusions;
 pub mod fs;
 pub mod fs_watch;
 pub mod git;

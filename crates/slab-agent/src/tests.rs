@@ -5598,3 +5598,212 @@ async fn agent_control_subscribe_to_nonexistent_thread_fails() {
         "subscribe to nonexistent thread should fail"
     );
 }
+
+// ── Context-budget system: per-turn token accounting + central result net ─────
+
+/// Tool that returns a large payload, exercising the dispatch-layer bounds.
+struct BigOutputTool {
+    name: &'static str,
+    payload_bytes: usize,
+}
+
+#[async_trait]
+impl ToolHandler for BigOutputTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn description(&self) -> &str {
+        "Returns a large fixed payload for context-budget tests."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({ "type": "object" })
+    }
+
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        _arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let payload = "m".repeat(self.payload_bytes);
+        Ok(ToolOutput { content: payload, metadata: None })
+    }
+}
+
+/// First call emits a tool request (with real usage numbers); every later
+/// call returns a final answer.
+struct OneToolCallWithUsageLlm {
+    tool_name: &'static str,
+    call_count: Mutex<u32>,
+}
+
+#[async_trait]
+impl LlmPort for OneToolCallWithUsageLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let call_index = {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            *count
+        };
+        if call_index > 1 {
+            return Ok(LlmResponse {
+                content: Some("done".into()),
+                content_already_streamed: false,
+                tool_calls: vec![],
+                finish_reason: Some("stop".into()),
+                usage: Some(LlmUsage {
+                    prompt_tokens: 130,
+                    completion_tokens: 5,
+                    total_tokens: 135,
+                    estimated: false,
+                }),
+            });
+        }
+        Ok(LlmResponse {
+            content: None,
+            content_already_streamed: false,
+            tool_calls: vec![ParsedToolCall {
+                id: "call-big".into(),
+                name: self.tool_name.to_owned(),
+                arguments: "{}".into(),
+            }],
+            finish_reason: Some("tool_calls".into()),
+            usage: Some(LlmUsage {
+                prompt_tokens: 100,
+                completion_tokens: 20,
+                total_tokens: 120,
+                estimated: false,
+            }),
+        })
+    }
+}
+
+#[tokio::test]
+async fn turn_token_accounting_breaks_down_by_role_and_tool_and_reports_usage() {
+    let trace = Arc::new(RecordingTraceSink::default());
+    let llm = Arc::new(OneToolCallWithUsageLlm { tool_name: "bigdata", call_count: Mutex::new(0) });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(BigOutputTool { name: "bigdata", payload_bytes: 5 * 1024 }));
+    let control = Arc::new(AgentControl::new_with_hooks_and_tracing(
+        llm,
+        store_port,
+        notify.clone(),
+        notify,
+        Arc::new(router),
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        Vec::new(),
+        trace.clone(),
+        None,
+    ));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("run bigdata".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id = control.spawn("accounting".into(), config, messages).await.expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    let events = trace.events.lock().unwrap();
+    let accounting: Vec<&AgentTraceEvent> = events
+        .iter()
+        .map(|(_, event)| event)
+        .filter(|event| event.event == "turn_token_accounting")
+        .collect();
+    assert!(accounting.len() >= 2, "expected accounting on tool and final turns");
+
+    // The post-tool accounting line describes the tool result it will re-send.
+    let with_tool = accounting
+        .iter()
+        .find(|event| event.payload["by_tool"]["bigdata"]["messages"].as_u64() == Some(1))
+        .expect("accounting line attributing tokens to the bigdata tool");
+    assert!(
+        with_tool.payload["by_tool"]["bigdata"]["bytes"].as_u64().unwrap_or(0) >= 5_000,
+        "tool bytes accounted: {}",
+        with_tool.payload
+    );
+    assert!(with_tool.payload["by_segment"]["tool"].as_u64().unwrap_or(0) > 0);
+    assert!(with_tool.payload["by_segment"]["user"].as_u64().unwrap_or(0) > 0);
+    assert!(with_tool.payload["estimated_total_tokens"].as_u64().unwrap_or(0) > 0);
+    assert_eq!(with_tool.payload["model"], "mock");
+    // Actual provider usage lands on the line.
+    assert_eq!(with_tool.payload["usage"]["total_tokens"], 120);
+    assert!(!with_tool.payload["largest_tool_results"].as_array().expect("largest").is_empty());
+}
+
+/// The dispatch-layer net: a 100KB tool result enters history bounded, with
+/// the original size recorded on the trace line.
+#[tokio::test]
+async fn oversized_tool_output_is_bounded_before_entering_history() {
+    let trace = Arc::new(RecordingTraceSink::default());
+    let llm =
+        Arc::new(OneToolCallWithUsageLlm { tool_name: "firehose", call_count: Mutex::new(0) });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let events_notify = Arc::clone(&notify);
+    let router = ToolRouter::new();
+    router.register(Box::new(BigOutputTool { name: "firehose", payload_bytes: 100 * 1024 }));
+    let control = Arc::new(AgentControl::new_with_hooks_and_tracing(
+        llm,
+        store_port,
+        notify.clone(),
+        notify,
+        Arc::new(router),
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        Vec::new(),
+        trace.clone(),
+        None,
+    ));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("run firehose".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id = control.spawn("bounded".into(), config, messages).await.expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    // Emitted history: the tool message is bounded with a marker.
+    let tool_messages: Vec<String> = events_notify
+        .emitted_messages(&thread_id)
+        .into_iter()
+        .filter(|message| message.role == "tool")
+        .filter_map(|message| match message.content {
+            ConversationMessageContent::Text(text) => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tool_messages.len(), 1, "one tool result persisted");
+    let bounded = &tool_messages[0];
+    assert!(bounded.len() < 64 * 1024 + 128, "tool result not bounded: {}", bounded.len());
+    assert!(bounded.contains("bytes omitted"), "marker missing");
+    assert!(bounded.starts_with('m'), "head survived");
+
+    // Trace line records the true size and the truncation.
+    let events = trace.events.lock().unwrap();
+    let output_event = events
+        .iter()
+        .map(|(_, event)| event)
+        .find(|event| event.event == "tool_call_output" && event.payload["tool_name"] == "firehose")
+        .expect("tool_call_output trace line");
+    assert_eq!(output_event.payload["output_bytes"], 100 * 1024);
+    assert_eq!(output_event.payload["output_truncated"], true);
+}

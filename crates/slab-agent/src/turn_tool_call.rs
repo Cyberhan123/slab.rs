@@ -1023,6 +1023,23 @@ async fn handle_tool_call(
         } else {
             tool_output.content
         };
+    // Central context-budget net: bound every non-plan tool result before it
+    // becomes conversation history. Applied AFTER the exit-code sniff above
+    // (which parses the raw shell JSON) and BEFORE the trace record below, so
+    // the on-disk trace is bounded too. Present-plan content is the approved
+    // plan summary and flows through the approval channel unchanged.
+    let bounded = if tool_call.name == PRESENT_PLAN_TOOL_NAME {
+        None
+    } else {
+        Some(context.tool_result_guard.bound(&call_id, &content))
+    };
+    let (output_bytes, output_truncated, duplicate_of) = match bounded {
+        Some(result) => {
+            content = result.content;
+            (result.original_bytes, result.truncated, result.duplicate_of)
+        }
+        None => (content.len(), false, None),
+    };
     info!(
         thread_id = context.thread_id,
         turn_index = context.turn_index,
@@ -1031,6 +1048,8 @@ async fn handle_tool_call(
         tool_name = %tool_call.name,
         status = ?call_status,
         output_len = content.len(),
+        output_bytes,
+        output_truncated,
         "agent tool call output"
     );
     record_json(
@@ -1044,6 +1063,9 @@ async fn handle_tool_call(
             "tool_name": tool_call.name,
             "status": call_status,
             "output": content,
+            "output_bytes": output_bytes,
+            "output_truncated": output_truncated,
+            "duplicate_of": duplicate_of,
         }),
     );
     append_hook_observations(&mut content, pre_observations);

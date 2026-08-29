@@ -92,6 +92,12 @@ pub trait CompactPort: Send + Sync {
     ) -> Result<CompactOutcome, AgentError> {
         Ok(CompactOutcome::Skipped { reason: "no compact provider configured".to_owned() })
     }
+
+    /// Feed a provider-reported prompt size back to the estimator so its
+    /// heuristic (chars/4) can self-calibrate — chars/4 under-estimates
+    /// CJK-heavy content by 2-3x, which delays compaction well past the real
+    /// threshold. Default: ignore.
+    fn note_usage(&self, _estimated_tokens: usize, _actual_prompt_tokens: usize) {}
 }
 
 #[derive(Debug, Clone)]

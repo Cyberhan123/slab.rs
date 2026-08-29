@@ -15,7 +15,15 @@ use slab_agent::{
 };
 use slab_sandboxing::{OutputSink, OutputStream, SandboxDriver};
 pub use slab_shell_command::ShellPolicy;
-use slab_shell_command::{ShellCommand, ShellExecutor, ShellLauncher};
+use slab_shell_command::{DEFAULT_OUTPUT_LIMIT_BYTES, ShellCommand, ShellExecutor, ShellLauncher};
+use slab_utils::string::truncate_middle_bytes;
+
+/// Executor capture bound — a memory ceiling for the accumulated stream, well
+/// above the context budget so the full (bounded) output can be spilled to
+/// disk before truncation.
+const SHELL_CAPTURE_LIMIT_BYTES: usize = 512 * 1024;
+/// Head fraction of the kept budget when the tool-layer truncation fires.
+const CONTEXT_STREAM_HEAD_RATIO: f32 = 0.7;
 
 /// Adapts the agent-side [`ToolOutputObserver`] to the sandbox's [`OutputSink`],
 /// mapping stream tags 1:1.
@@ -42,7 +50,10 @@ impl ShellTool {
         launcher: ShellLauncher,
         bash_path: Option<PathBuf>,
     ) -> Self {
-        Self { executor: ShellExecutor::new(workspace_root, sandbox_driver, launcher, bash_path) }
+        Self {
+            executor: ShellExecutor::new(workspace_root, sandbox_driver, launcher, bash_path)
+                .with_output_limit_bytes(SHELL_CAPTURE_LIMIT_BYTES),
+        }
     }
 }
 
@@ -155,12 +166,66 @@ impl ToolHandler for ShellTool {
             .await
             .map_err(|e| AgentError::ToolExecution(e.to_string()))?;
 
-        Ok(ToolOutput {
-            content: serde_json::to_string(&output)
-                .map_err(|e| AgentError::ToolExecution(e.to_string()))?,
-            metadata: None,
-        })
+        // Context budget: streams above the injection budget spill the full
+        // (capture-bounded) output to a workspace artifact first, then the
+        // context string is head/tail truncated with an explicit marker. The
+        // envelope keeps exit_code/timed_out top-level — the turn loop's
+        // exit-code sniff parses this JSON.
+        let stdout_artifact =
+            spill_stream(ctx, "stdout", output.stdout_bytes, output.stdout.as_str()).await;
+        let stderr_artifact =
+            spill_stream(ctx, "stderr", output.stderr_bytes, output.stderr.as_str()).await;
+
+        let stdout_for_context = bound_stream_for_context(&output.stdout, output.stdout_bytes);
+        let stderr_for_context = bound_stream_for_context(&output.stderr, output.stderr_bytes);
+
+        let mut envelope = serde_json::json!({
+            "stdout": stdout_for_context,
+            "stderr": stderr_for_context,
+            "exit_code": output.exit_code,
+            "timed_out": output.timed_out,
+            "stdout_bytes": output.stdout_bytes,
+            "stderr_bytes": output.stderr_bytes,
+        });
+        if let Some(reference) = stdout_artifact {
+            envelope["stdout_artifact"] = serde_json::json!(reference);
+        }
+        if let Some(reference) = stderr_artifact {
+            envelope["stderr_artifact"] = serde_json::json!(reference);
+        }
+
+        Ok(ToolOutput { content: envelope.to_string(), metadata: None })
     }
+}
+
+/// Spill one oversized stream to `<workspace>/.slab/artifacts/<thread>/` and
+/// return the workspace-relative reference (best-effort: `None` without a
+/// workspace or on write failure).
+async fn spill_stream(
+    ctx: &ToolContext,
+    stream: &str,
+    stream_bytes: usize,
+    content: &str,
+) -> Option<String> {
+    if stream_bytes <= DEFAULT_OUTPUT_LIMIT_BYTES {
+        return None;
+    }
+    crate::artifact::write_tool_artifact(
+        ctx.workspace.as_ref().map(|workspace| workspace.root.as_path()),
+        &ctx.thread_id,
+        &format!("shell-{stream}-t{}.txt", ctx.turn_index),
+        content.as_bytes(),
+    )
+    .await
+}
+
+/// Apply the context-injection budget to one stream (head/tail kept, middle
+/// omitted with a marker; under the budget the stream passes verbatim).
+fn bound_stream_for_context(stream: &str, stream_bytes: usize) -> String {
+    if stream_bytes <= DEFAULT_OUTPUT_LIMIT_BYTES {
+        return stream.to_owned();
+    }
+    truncate_middle_bytes(stream, DEFAULT_OUTPUT_LIMIT_BYTES, CONTEXT_STREAM_HEAD_RATIO).0
 }
 
 #[cfg(test)]
@@ -179,6 +244,21 @@ mod tests {
 
     fn ctx() -> ToolContext {
         ToolContext::for_thread("thread").build()
+    }
+
+    fn temp_workspace_ctx(name: &str, thread: &str) -> (std::path::PathBuf, ToolContext) {
+        let nonce =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "slab_shell_spill_{name}_{}_{}",
+            std::process::id(),
+            nonce
+        ));
+        std::fs::create_dir_all(&root).expect("create temp root");
+        let ctx = ToolContext::for_thread(thread)
+            .workspace(slab_agent::WorkspaceRef { root: root.clone(), session_id: None })
+            .build();
+        (root, ctx)
     }
 
     #[test]
@@ -226,6 +306,83 @@ mod tests {
             *self.seen.lock().unwrap() = Some(cmd);
             Ok(self.output.clone())
         }
+    }
+
+    /// Oversized stdout: the context string is bounded to the 30KB budget
+    /// (head+tail) while the FULL output spills to a workspace artifact whose
+    /// reference rides the envelope.
+    #[tokio::test]
+    async fn shell_tool_spills_oversized_output_to_artifact() {
+        let stdout: String =
+            (0..5_000).map(|idx| format!("line-{idx:04}\n")).collect::<Vec<_>>().join("");
+        let stdout_bytes = stdout.len();
+        let seen = Arc::new(Mutex::new(None));
+        let (root, ctx) = temp_workspace_ctx("spill", "spill-thread");
+        let tool = ShellTool::new(
+            Some(root.clone()),
+            Some(Arc::new(RecordingDriver {
+                seen: Arc::clone(&seen),
+                output: SandboxedOutput {
+                    stdout: stdout.into_bytes(),
+                    stderr: Vec::new(),
+                    exit_code: 0,
+                    timed_out: false,
+                },
+            })),
+            ShellLauncher::PowerShell,
+            None,
+        );
+
+        let output = tool.execute(&ctx, &json!({"command": "huge"})).await.expect("shell output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        let stdout_in_context = value["stdout"].as_str().expect("stdout");
+        assert!(
+            stdout_in_context.len() < DEFAULT_OUTPUT_LIMIT_BYTES + 256,
+            "context stdout not bounded: {}",
+            stdout_in_context.len()
+        );
+        assert!(stdout_in_context.contains("line-0000"), "head must survive");
+        assert!(stdout_in_context.contains("line-4999"), "tail must survive");
+        assert!(stdout_in_context.contains("bytes omitted"), "marker missing");
+        assert_eq!(value["stdout_bytes"], stdout_bytes);
+        assert_eq!(value["exit_code"], 0, "exit_code stays top-level for the loop sniff");
+
+        let reference = value["stdout_artifact"].as_str().expect("artifact reference on envelope");
+        assert_eq!(reference, ".slab/artifacts/spill-thread/shell-stdout-t0.txt");
+        let spilled = std::fs::read(
+            root.join(".slab").join("artifacts").join("spill-thread").join("shell-stdout-t0.txt"),
+        )
+        .expect("spilled artifact exists");
+        assert_eq!(spilled.len(), stdout_bytes, "artifact holds the full output");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Without a workspace the spill is skipped silently — the output stays
+    /// bounded either way.
+    #[tokio::test]
+    async fn shell_tool_without_workspace_skips_spill_silently() {
+        let stdout = "x".repeat(64 * 1024);
+        let tool = ShellTool::new(
+            None,
+            Some(Arc::new(RecordingDriver {
+                seen: Arc::new(Mutex::new(None)),
+                output: SandboxedOutput {
+                    stdout: stdout.into_bytes(),
+                    stderr: Vec::new(),
+                    exit_code: 0,
+                    timed_out: false,
+                },
+            })),
+            ShellLauncher::PowerShell,
+            None,
+        );
+
+        let output = tool.execute(&ctx(), &json!({"command": "huge"})).await.expect("shell output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        assert!(value["stdout_artifact"].is_null(), "no artifact without a workspace");
+        assert!(value["stdout"].as_str().expect("stdout").len() < DEFAULT_OUTPUT_LIMIT_BYTES + 256);
     }
 
     #[tokio::test]

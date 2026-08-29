@@ -53,4 +53,17 @@ mod tests {
         assert_eq!(context["workspace_bound"], true);
         assert_eq!(context["apply_patch_available"], false);
     }
+
+    /// The context-budget guidance must reach the model: scoped search,
+    /// truncation markers as a narrowing signal, and `delegate_subagent` for
+    /// exhaustive sweeps.
+    #[test]
+    fn rendered_prompt_guides_context_budget_behavior() {
+        let env = crate::helper::build_environment();
+        let body =
+            SystemInstructionFragment::default().render_body(&env).expect("render system template");
+        assert!(body.contains("delegate_subagent"), "delegation guidance missing:\n{body}");
+        assert!(body.contains("bytes omitted"), "truncation-marker guidance missing:\n{body}");
+        assert!(body.contains("artifact"), "artifact-spill guidance missing:\n{body}");
+    }
 }
