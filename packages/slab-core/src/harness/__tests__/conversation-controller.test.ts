@@ -240,7 +240,7 @@ describe("ConversationController", () => {
     expect(controller.getState().approvalStatusByItemId.get("call-1")).toBe("approved")
   })
 
-  it("reverts to pending and rejects when delivery failed (delivered=false)", async () => {
+  it("marks the approval denied (never rejects) when delivery failed (delivered=false)", async () => {
     const controller = makeController("s1")
     controller.start()
     await driveOpenAndInit()
@@ -260,21 +260,50 @@ describe("ConversationController", () => {
     await flush()
     await vi.waitFor(() => expect(controller.getState().approvals).toHaveLength(1))
 
-    // Capture the rejection (attached before the response arrives) so it is
-    // never momentarily unhandled.
     const p = controller.resolveApproval("call-1", true, "run_once")
-    const captured = p.then(
-      () => new Error("expected resolveApproval to reject, but it resolved"),
-      (err: unknown) => err,
-    )
     await flush()
     const resolveReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
     FakeWebSocket.last!.simMessage(rpcResponse(resolveReq.id, { delivered: false }))
     await flush()
-    expect(String(await captured)).toContain("approval not delivered")
-    await vi.waitFor(() =>
-      expect(controller.getState().approvalStatusByItemId.get("call-1")).toBe("pending"),
+    // No pending entry exists server-side, so retrying can never succeed:
+    // resolveApproval resolves (no unhandled rejection) and the approval
+    // lands in the terminal denied state — the banner clears (only pending
+    // entries render) and the tool row shows the Denied symbol.
+    await expect(p).resolves.toBeUndefined()
+    expect(controller.getState().approvalStatusByItemId.get("call-1")).toBe("denied")
+    expect(controller.getState().approvals).toHaveLength(0)
+  })
+
+  it("reverts to pending (never rejects) when the resolve RPC fails", async () => {
+    const controller = makeController("s1")
+    controller.start()
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(controller.getState().restoredThreadId).toBe("hthread-1"))
+    FakeWebSocket.last!.simMessage(
+      notification("item/commandExecution/requestApproval", {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "call-1",
+        command: "echo hi",
+        cwd: "/tmp",
+      }),
     )
+    await flush()
+    await vi.waitFor(() => expect(controller.getState().approvals).toHaveLength(1))
+
+    // A transport/RPC failure leaves the decision undelivered — the banner
+    // comes back for a genuine retry and the promise resolves (no unhandled
+    // rejection).
+    const p = controller.resolveApproval("call-1", true, "run_once")
+    await flush()
+    const resolveReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcError(resolveReq.id, "socket died mid-flight"))
+    await flush()
+    await expect(p).resolves.toBeUndefined()
+    expect(controller.getState().approvalStatusByItemId.get("call-1")).toBe("pending")
     expect(controller.getState().approvals).toHaveLength(1)
   })
 

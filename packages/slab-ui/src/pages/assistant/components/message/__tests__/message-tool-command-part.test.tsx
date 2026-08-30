@@ -53,7 +53,17 @@ vi.mock("../code-block", () => ({
 }))
 
 vi.mock("@slab/components/collapsible", () => ({
-  Collapsible: ({ children }: { children: ReactNode }) => <div data-testid="collapsible">{children}</div>,
+  Collapsible: ({
+    children,
+    open,
+  }: {
+    children: ReactNode
+    open?: boolean
+  }) => (
+    <div data-testid="collapsible" data-open={open ? "true" : "false"}>
+      {children}
+    </div>
+  ),
   CollapsibleContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CollapsibleTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
@@ -115,6 +125,20 @@ describe("MessageToolCommandPart", () => {
     expect(screen.getByTestId("collapsible").element().textContent).toContain("echo hi")
     // Status symbol reflects the approval-requested state.
     expectToolState(screen, "approval-requested")
+  })
+
+  it("stays collapsed by default even while approval is pending", async () => {
+    // Unlike the generic tool rows (which auto-open while awaiting a decision),
+    // the command row keeps its compact form: the ApprovalCard above the
+    // composer is the decision surface, and an expanded row would only park an
+    // empty terminal in the transcript that never closes for the session.
+    const screen = await renderPart(
+      { type: "tool-input-available", input: { command: "echo hi", cwd: "/repo" } },
+      { approval: "pending" },
+    )
+    await expect
+      .element(screen.getByTestId("collapsible"))
+      .toHaveAttribute("data-open", "false")
   })
 
   it("renders finalized output once the command completes", async () => {

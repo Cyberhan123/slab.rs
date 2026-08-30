@@ -123,7 +123,7 @@ void main() {
     await controller.dispose();
   });
 
-  test('approval notifications queue, resolve, and revert on delivered=false', () async {
+  test('approval notifications queue, resolve, and mark denied on delivered=false', () async {
     final socket = FakeSlabSocket(onRequest: (method, params) => threadPayload());
     final controller = buildController(socket);
     await controller.start();
@@ -140,16 +140,27 @@ void main() {
     expect(controller.state.approvals.length, 1);
     expect(controller.state.approvals.single.command, 'cargo build');
 
-    // delivered=false → revert to pending.
-    socket.onRequest = (method, params) => {'delivered': false, 'status': 'pending'};
-    await expectLater(controller.resolveApproval('c1', true), throwsStateError);
-    expect(controller.state.approvals.single.status.name, 'pending');
-
     // delivered=true → resolved and removed from pending.
     socket.onRequest = (method, params) => {'delivered': true};
     await controller.resolveApproval('c1', true);
     expect(controller.state.approvals, isEmpty);
     expect(controller.state.approvalStatusByItemId['c1']!.name, 'approved');
+
+    // delivered=false → terminal denied (no pending entry exists server-side,
+    // so a retry can never succeed) and the call never throws.
+    socket.push(HarnessNotification.itemCommandExecutionRequestApproval, {
+      'threadId': 't1',
+      'turnId': '0',
+      'itemId': 'c2',
+      'command': 'cargo test',
+      'cwd': '/repo',
+      'allowedScopes': ['run_once'],
+    });
+    await pumpEventQueue();
+    socket.onRequest = (method, params) => {'delivered': false, 'status': 'pending'};
+    await controller.resolveApproval('c2', true);
+    expect(controller.state.approvals, isEmpty);
+    expect(controller.state.approvalStatusByItemId['c2']!.name, 'denied');
     await controller.dispose();
   });
 

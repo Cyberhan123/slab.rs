@@ -441,8 +441,16 @@ class ConversationController implements Listenable {
     }
   }
 
-  /// Resolve a pending approval via `approval/resolve`; optimistic with
-  /// revert-to-pending when the server could not deliver the decision.
+  /// Resolve a pending approval via `approval/resolve`; optimistic, and NEVER
+  /// throws — the only caller (the approval card's tap handler) has no error
+  /// surface, and an escaping error surfaces as an unhandled exception.
+  ///
+  /// `delivered: false` means no pending entry exists server-side (turn
+  /// cancelled, timed out and auto-rejected, or the terminal notification that
+  /// would have cleared the banner was missed): retrying can never succeed, so
+  /// the approval lands in the terminal denied state instead of reverting to
+  /// pending, which left a dead banner failing on every tap. A transport error
+  /// keeps the entry pending for a genuine retry.
   Future<void> resolveApproval(String itemId, bool approved) async {
     final entry = state.approvals.where((a) => a.itemId == itemId).firstOrNull;
     if (entry == null) return;
@@ -464,14 +472,14 @@ class ConversationController implements Listenable {
         scope: scope,
       );
       if (result.delivered == false) {
-        entry.status = proto.ApprovalStatus.pending;
+        entry.status = proto.ApprovalStatus.denied;
         _commitApprovals();
-        throw StateError('approval not delivered');
       }
     } catch (_) {
+      // Transport failure: the decision may not have reached the server, so
+      // restore the banner for a genuine retry.
       entry.status = proto.ApprovalStatus.pending;
       _commitApprovals();
-      rethrow;
     }
   }
 

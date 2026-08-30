@@ -11,12 +11,17 @@
 //!   channel carries slab-agent's harness protocol [`EventMsg`] (turn lifecycle
 //!   / text / reasoning / tool items).
 //! - Pending approvals are stored as `oneshot::Sender<ApprovalDecision>` keyed
-//!   by `"<thread_id>:<call_id>"`. The HTTP approve handler must supply both
-//!   the thread ID (from the URL path) and the call_id to prevent cross-thread
-//!   approval. Requests that receive no decision within
-//!   `APPROVAL_TIMEOUT_SECS` are automatically rejected.
+//!   by `"approval:<call_id>"` (the entry carries the owning thread id for
+//!   cross-thread refusal and teardown clearing). The approve handler must
+//!   supply the thread ID and the call_id to prevent cross-thread approval.
+//!   Requests that receive no decision within `APPROVAL_TIMEOUT_SECS` are
+//!   automatically rejected; a request whose future is dropped (turn
+//!   cancelled) removes its own entry.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
 
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -216,11 +221,33 @@ impl AgentEventHub {
             return false;
         }
         let Some((_, pending)) = self.approvals.remove(&key) else {
+            // Distinguishable from the dead-receiver case below: the pending
+            // call was already resolved, timed out (auto-reject after
+            // APPROVAL_TIMEOUT_SECS), or cleared by run teardown — the client
+            // is clicking a stale banner.
+            warn!(
+                call_id,
+                resolve_thread = %thread_id,
+                "approval resolve found no pending entry (already resolved, timed out, or run ended)"
+            );
             return false;
         };
         let decision =
             if approved { ApprovalDecision::Approved(scope) } else { ApprovalDecision::Rejected };
-        pending.tx.send(decision).is_ok()
+        match pending.tx.send(decision) {
+            Ok(()) => true,
+            Err(_) => {
+                // Entry existed but its waiter was dropped — the turn cancelled
+                // while awaiting the decision and the `request_approval` future
+                // was abandoned mid-await.
+                warn!(
+                    call_id,
+                    resolve_thread = %thread_id,
+                    "approval resolve found a pending entry whose waiter is gone (turn cancelled?)"
+                );
+                false
+            }
+        }
     }
 
     /// Resolve every pending approval owned by `thread_id` as Rejected and
@@ -352,11 +379,39 @@ fn approval_key(call_id: &str) -> String {
     format!("approval:{call_id}")
 }
 
+/// Monotonic registration token so a dropped [`request_approval`] future can
+/// remove exactly its own pending entry — a same-`call_id` re-registration
+/// (provider tool-call id reuse) may own the map slot by then.
+static NEXT_APPROVAL_REGISTRATION: AtomicU64 = AtomicU64::new(1);
+
 /// A pending approval decision: the waiting thread's id (for ownership checks
 /// and teardown clearing) plus the oneshot back to the turn loop.
 struct PendingApproval {
     thread_id: String,
     tx: oneshot::Sender<ApprovalDecision>,
+    /// Token minted by this registration; paired with the entry guard.
+    registration: u64,
+}
+
+/// Removes the owning [`PendingApproval`] registration when the
+/// `request_approval` future is dropped mid-await. The turn loop awaits
+/// `request_approval` inside `tokio::select!` against its cancellation token,
+/// so a cancelled turn abandons the future AT the await point — without this
+/// guard the entry (holding a dead oneshot sender) leaks in the map until the
+/// thread's teardown clears it, and every later `approval/resolve` for that
+/// call finds a dead receiver instead of a clean miss.
+struct PendingEntryGuard {
+    approvals: Arc<DashMap<String, PendingApproval>>,
+    key: String,
+    registration: u64,
+}
+
+impl Drop for PendingEntryGuard {
+    fn drop(&mut self) {
+        // Only remove OUR registration: a newer `request_approval` under the
+        // same call id may own the entry now.
+        self.approvals.remove_if(&self.key, |_, pending| pending.registration == self.registration);
+    }
 }
 
 #[async_trait]
@@ -425,15 +480,19 @@ impl ApprovalPort for AgentEventHub {
     ) -> ApprovalDecision {
         let (tx, rx) = oneshot::channel();
         let key = approval_key(call_id);
-        self.approvals.insert(key.clone(), PendingApproval { thread_id: thread_id.to_owned(), tx });
+        let registration = NEXT_APPROVAL_REGISTRATION.fetch_add(1, Ordering::Relaxed);
+        self.approvals.insert(
+            key.clone(),
+            PendingApproval { thread_id: thread_id.to_owned(), tx, registration },
+        );
+        // Owns the entry's cleanup on EVERY exit path — decision delivered,
+        // timeout, and drop-mid-await (turn cancelled at the select! boundary).
+        let _guard = PendingEntryGuard { approvals: self.approvals.clone(), key, registration };
 
         // Wait for an operator decision, but auto-reject after the timeout so
         // the agent turn is never permanently blocked.
         let decision =
             tokio::time::timeout(std::time::Duration::from_secs(APPROVAL_TIMEOUT_SECS), rx).await;
-
-        // Always clean up the pending entry regardless of outcome.
-        self.approvals.remove(&key);
 
         match decision {
             Ok(Ok(d)) => d,
@@ -658,5 +717,91 @@ mod tests {
             .expect("kept waiter resolved")
             .expect("waiter task ok");
         assert!(matches!(decision_b, slab_agent::port::ApprovalDecision::Rejected));
+    }
+
+    // A `request_approval` future dropped mid-await (the turn loop's select!
+    // cancellation) must remove its own entry — otherwise the entry leaks with
+    // a dead sender and every later resolve reports a dead receiver.
+    #[tokio::test]
+    async fn cancelled_request_approval_removes_its_pending_entry() {
+        let hub = AgentEventHub::new();
+        let waiter = {
+            let hub = hub.clone();
+            let descriptor = approval_descriptor();
+            tokio::spawn(async move {
+                hub.request_approval("t-drop", "call-drop", "test_tool", &descriptor, None).await
+            })
+        };
+        // Let the waiter register its pending entry.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(hub.approvals.contains_key("approval:call-drop"));
+
+        // Aborting the task drops the future at its await point — the same
+        // shape as the turn loop abandoning the request on cancellation.
+        waiter.abort();
+        let _ = waiter.await;
+
+        assert!(
+            !hub.approvals.contains_key("approval:call-drop"),
+            "dropped request must remove its own pending entry"
+        );
+        // Resolving now reports the clean no-pending miss (not a dead receiver).
+        assert!(!hub.approve_call(
+            "t-drop",
+            "call-drop",
+            true,
+            slab_exec_policy::ApprovalScope::RunOnce
+        ));
+    }
+
+    // The drop-cleanup must be registration-scoped: abandoning an OLD
+    // registration may not remove a NEWER entry registered under the same
+    // call id (provider tool-call id reuse).
+    #[tokio::test]
+    async fn dropped_stale_registration_keeps_a_newer_entry_under_the_same_call() {
+        let hub = AgentEventHub::new();
+        let first = {
+            let hub = hub.clone();
+            let descriptor = approval_descriptor();
+            tokio::spawn(async move {
+                hub.request_approval("t-dup", "call-dup", "test_tool", &descriptor, None).await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let first_registration =
+            hub.approvals.get("approval:call-dup").expect("first entry present").registration;
+
+        // A second registration under the same call id replaces the first.
+        let second = {
+            let hub = hub.clone();
+            let descriptor = approval_descriptor();
+            tokio::spawn(async move {
+                hub.request_approval("t-dup", "call-dup", "test_tool", &descriptor, None).await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert_ne!(
+            hub.approvals.get("approval:call-dup").expect("second entry present").registration,
+            first_registration,
+            "second registration must have replaced the first"
+        );
+
+        // Abandon the FIRST waiter — its guard must leave the second entry alone.
+        first.abort();
+        let _ = first.await;
+        assert!(hub.approvals.contains_key("approval:call-dup"));
+
+        // The second waiter is still resolvable.
+        assert!(hub.approve_call(
+            "t-dup",
+            "call-dup",
+            true,
+            slab_exec_policy::ApprovalScope::RunOnce
+        ));
+        let decision = tokio::time::timeout(std::time::Duration::from_secs(1), second)
+            .await
+            .expect("second waiter resolved")
+            .expect("waiter task ok");
+        assert!(matches!(decision, slab_agent::port::ApprovalDecision::Approved(_)));
     }
 }

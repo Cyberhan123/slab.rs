@@ -651,7 +651,14 @@ export class ConversationController {
     this.commit()
   }
 
-  /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
+  /**
+   * Resolve a pending approval via `approval/resolve` with a persistence scope.
+   *
+   * NEVER rejects: the only caller (the approval card's click handler) has no
+   * error surface, and an escaping rejection used to surface as an unhandled
+   * promise rejection. Failures are reported via `console.warn` and reflected
+   * in state instead.
+   */
   readonly resolveApproval = async (
     itemId: string,
     approved: boolean,
@@ -677,16 +684,25 @@ export class ConversationController {
         approved,
         scope,
       })
-      // If the server couldn't deliver the decision (e.g. the pending entry
-      // was gone), revert to pending so the user sees it wasn't actioned.
       if (result.delivered === false) {
-        this.revertApprovalToPending(itemId)
-        throw new Error("approval not delivered")
+        // The server has no pending entry for this call — the turn was
+        // cancelled, the request timed out and auto-rejected server-side, or
+        // the terminal-status notification that would have cleared the banner
+        // was missed. Retrying can never succeed, so mark the terminal
+        // outcome (the same denied the server itself applies on auto-reject)
+        // instead of reverting to pending, which left a dead banner that
+        // failed delivery on every click.
+        this.markApprovalDenied(itemId)
+        console.warn(
+          `[harness] approval/resolve for ${itemId} was not delivered ` +
+            `(no pending entry server-side); marked denied`,
+        )
       }
     } catch (resolveError) {
-      // Revert to pending if the server rejected the resolution.
+      // Transport/RPC failure: the decision may never have reached the
+      // server, so restore the banner for a genuine retry.
       this.revertApprovalToPending(itemId)
-      throw resolveError
+      console.warn("[harness] approval/resolve failed:", resolveError)
     }
   }
 
@@ -823,6 +839,21 @@ export class ConversationController {
     if (!existing) return
     this.approvals = new Map(this.approvals)
     this.approvals.set(itemId, { ...existing, status: "pending" })
+    this.commit()
+  }
+
+  /**
+   * Mark one approval denied (terminal): hides the banner (only pending
+   * entries render) and shows the truthful Denied symbol on the in-stream
+   * tool row. Used when the server reports an approval decision as
+   * undeliverable — the pending call no longer exists server-side, so the
+   * same auto-reject outcome the server itself applies is surfaced here.
+   */
+  private markApprovalDenied(itemId: string): void {
+    const existing = this.approvals.get(itemId)
+    if (!existing) return
+    this.approvals = new Map(this.approvals)
+    this.approvals.set(itemId, { ...existing, status: "denied" })
     this.commit()
   }
 

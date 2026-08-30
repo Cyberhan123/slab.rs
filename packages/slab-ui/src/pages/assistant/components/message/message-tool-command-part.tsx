@@ -15,7 +15,6 @@ import {
   TerminalTitle,
 } from "./terminal"
 import {
-  isApprovalPending,
   deriveState,
   isToolActive,
   type ToolPartLike,
@@ -95,7 +94,13 @@ function MessageToolCommandPart({
   const body = active && liveOutput !== undefined ? liveOutput : finalizedStdout
 
   return (
-    <ToolRow defaultOpen={isApprovalPending(state)}>
+    // Collapsed by default in EVERY state — including a pending approval.
+    // Unlike the other tool rows (which auto-open while awaiting a decision),
+    // the command row has nothing to show at that point (no output exists
+    // yet), and the ApprovalCard above the composer already carries the full
+    // command + decision buttons. Auto-opening here would just park an empty
+    // terminal in the transcript, and never close for the rest of the session.
+    <ToolRow>
       <ToolRowTrigger
         icon={toolRowIcon("commandExecution")}
         label={summary.label}
