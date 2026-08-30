@@ -20,6 +20,7 @@ import {
 } from "@slab/core/workspace/bridge";
 import { RUNTIME_PLUGINS_QUERY_KEY } from "@slab/ui/pages/plugins/hooks/use-runtime-plugins";
 import { isPluginRunning } from "@slab/ui/pages/plugins/utils";
+import { useWorkspaceUiStore } from "@slab/ui/store/useWorkspaceUiStore";
 import { GUARDRAIL_PMIDS, useGuardrailFlag } from "@slab/ui/lib/guardrail-flags";
 
 const PLUGIN_THEME_OBSERVER_OPTIONS: MutationObserverInit = {
@@ -77,6 +78,12 @@ function WorkspaceModeSync() {
   });
   const workspace = workspaceQuery.data?.current ?? null;
   const workspaceConfig = workspaceQuery.data?.config ?? null;
+  // A workspace opened FROM the assistant page's Sender dropdown must not fire
+  // the `/` → `/workspace` redirect — the whole point of the live switch is to
+  // keep chatting on the same page. Session-scoped (see the store).
+  const assistantPinnedWorkspaceRoot = useWorkspaceUiStore(
+    (state) => state.assistantPinnedWorkspaceRoot,
+  );
 
   const {
     data: pluginRows,
@@ -97,12 +104,13 @@ function WorkspaceModeSync() {
       initialPathRef.current === "/" &&
       workspace &&
       redirectedWorkspaceRootRef.current !== workspace.rootPath &&
+      workspace.rootPath !== assistantPinnedWorkspaceRoot &&
       !hasSessionDeepLink
     ) {
       redirectedWorkspaceRootRef.current = workspace.rootPath;
       navigate("/workspace", { replace: true });
     }
-  }, [hasSessionDeepLink, navigate, workspace]);
+  }, [assistantPinnedWorkspaceRoot, hasSessionDeepLink, navigate, workspace]);
 
   useEffect(() => {
     if (!workspace) {

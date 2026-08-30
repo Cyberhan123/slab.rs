@@ -25,7 +25,11 @@ import MessageFallbackPart from "./message-fallback-part"
 import MessageToolPart from "./message-tool-part"
 import MessageToolCommandPart from "./message-tool-command-part"
 import MessageToolFileChangePart from "./message-tool-file-change-part"
+import MessageToolFileGlobPart from "./message-tool-file-glob-part"
+import MessageToolGrepPart from "./message-tool-grep-part"
+import MessageToolListDirPart from "./message-tool-list-dir-part"
 import MessageToolPlanPart from "./message-tool-plan-part"
+import MessageToolReadFilePart from "./message-tool-read-file-part"
 
 type TMessagePart = {
     state?: string;
@@ -100,9 +104,23 @@ const MessageItem = React.memo(function MessageItem({
 const messagePartComponents: MessagePartComponents<TMessagePart, TMessage> = {
     text: MessageTextPart,
     reasoning: MessageReasoningPart,
+    // Default for every tool call without a dedicated entry in `tools` below
+    // (unknown tools, MCP calls, not-yet-covered built-ins): compact row +
+    // generic Parameters/Result JSON cards.
     tool: MessageToolPart,
     fallback: MessageFallbackPart,
-    tools: { commandExecution: MessageToolCommandPart, fileChange: MessageToolFileChangePart, plan: MessageToolPlanPart },
+    // Keyed by the part's toolName as it rides the wire (`turn-items.ts`
+    // `toolItemFields`): camelCase synthetic names for the TurnItem-specific
+    // variants, raw snake_case tool names for generic built-in tool calls.
+    tools: {
+        commandExecution: MessageToolCommandPart,
+        fileChange: MessageToolFileChangePart,
+        plan: MessageToolPlanPart,
+        read_file: MessageToolReadFilePart,
+        list_dir: MessageToolListDirPart,
+        file_glob: MessageToolFileGlobPart,
+        grep: MessageToolGrepPart,
+    },
 }
 
 /**

@@ -60,14 +60,12 @@ export function useAssistantNewChat({ createSession, commands }: UseAssistantNew
     const currentRoot = currentWorkspace?.rootPath ?? null
 
     const openDialog = useCallback(() => {
-        // Default to the active workspace (a no-op switch); global when none.
-        setSelection(
-            currentRoot
-                ? { kind: "root", rootPath: currentRoot, name: currentWorkspace?.name }
-                : { kind: "global" },
-        )
+        // Global (no workspace) is the DEFAULT selection: a new chat starts
+        // global unless the user explicitly picks a workspace. The active
+        // workspace stays one click away at the top of the list.
+        setSelection({ kind: "global" })
         setOpen(true)
-    }, [currentRoot, currentWorkspace?.name])
+    }, [])
 
     const submit = useCallback(
         async (message: string, options: SenderSubmitOptions) => {

@@ -159,8 +159,10 @@ fn thread_from_snapshot_with_id(id: &str, snapshot: &ThreadSnapshot) -> Thread {
 /// Map one persisted message into one or more harness [`TurnItem`]s.
 ///
 /// `role:"user"` → a single `UserMessage`; `role:"assistant"` → an
-/// `AgentMessage` (text) plus one `McpToolCall` per emitted tool call; tool
-/// results → a `CommandExecution` surfacing the rendered output.
+/// `AgentMessage` (text) plus one `McpToolCall` per emitted tool call (its
+/// result is attached afterwards by the caller, see [`merge_tool_result`]);
+/// tool results that the caller could NOT pair with a call card fall through
+/// to a `CommandExecution` surfacing the rendered output.
 /// `system` / `developer` roles (the injected init-context batch) are
 /// LLM-visible only and NEVER render in the restored UI history — returning
 /// empty keeps them out of the conversation timeline. The same holds for the
@@ -209,10 +211,33 @@ fn turn_items_for_message(message: &ThreadMessageRecord) -> Vec<TurnItem> {
             cwd: String::new(),
             process_id: None,
             status: "completed".to_owned(),
-            aggregated_output: Some(record.rendered_text()),
+            // Content only — `ConversationMessage::rendered_text` would append
+            // a `tool_call_id: …` line, leaking the raw id into the card body.
+            aggregated_output: Some(record.content.rendered_text()),
             exit_code: None,
             duration_ms: None,
         }],
+    }
+}
+
+/// The join key between a synthesized call card and the `role:"tool"` message
+/// carrying its result.
+fn call_item_id(item: &TurnItem) -> Option<&str> {
+    match item {
+        TurnItem::McpToolCall { id, .. } | TurnItem::ToolCall { id, .. } => Some(id),
+        _ => None,
+    }
+}
+
+/// Attach a `role:"tool"` message's output to the call card awaiting it — the
+/// lossy-restore counterpart of the live render's `result` field (a plain
+/// string, matching `turn_tool_call`'s `serde_json::json!(text)` convention).
+fn merge_tool_result(item: &mut TurnItem, result: String) {
+    match item {
+        TurnItem::McpToolCall { result: slot, .. } | TurnItem::ToolCall { result: slot, .. } => {
+            *slot = Some(Value::String(result));
+        }
+        _ => {}
     }
 }
 
@@ -342,8 +367,12 @@ fn thread_from_timeline(
                 items
             } else {
                 // Snapshot-less turn (interrupted / legacy): synthesize from
-                // the message entries, skipping system/developer.
+                // the message entries, skipping system/developer. A tool
+                // result merges into the call card its `tool_call_id` pairs
+                // with; only orphans fall back to a standalone output card.
                 let mut items = Vec::new();
+                let mut awaiting_result: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
                 for record in &messages {
                     let role = record.message.role.as_str();
                     let text = record.message.content.rendered_text();
@@ -351,7 +380,23 @@ fn thread_from_timeline(
                         continue;
                     }
                     dedupe.record(role, &text);
+                    if role == "tool"
+                        && let Some(&index) = record
+                            .message
+                            .tool_call_id
+                            .as_deref()
+                            .and_then(|call_id| awaiting_result.get(call_id))
+                    {
+                        merge_tool_result(&mut items[index], text);
+                        continue;
+                    }
+                    let before = items.len();
                     items.extend(turn_items_for_message(record));
+                    for (offset, item) in items[before..].iter().enumerate() {
+                        if let Some(call_id) = call_item_id(item) {
+                            awaiting_result.insert(call_id.to_owned(), before + offset);
+                        }
+                    }
                 }
                 items
             };
@@ -894,6 +939,54 @@ mod tests {
         assert_eq!(turn1.id, "1");
         assert_eq!(turn1.status, "completed");
         assert!(turn1.items.iter().any(|item| matches!(item, TurnItem::UserMessage { .. })));
+    }
+
+    // Legacy snapshot-less turns restore tool results INTO their call card
+    // (paired by `tool_call_id`), not as a detached empty-command
+    // CommandExecution; orphan results keep the output-card fallback, minus
+    // the raw `tool_call_id` leak in the card body.
+    #[test]
+    fn thread_from_timeline_merges_tool_results_into_call_cards() {
+        let user = record("u1", 0, "user", "list the files", "2024-01-01T00:00:01Z");
+        let mut assistant = record("a1", 0, "assistant", "", "2024-01-01T00:00:02Z");
+        assistant.message.tool_calls = vec![slab_types::ConversationToolCall {
+            id: Some("call_1".to_owned()),
+            r#type: "function".to_owned(),
+            function: slab_types::ConversationToolFunction {
+                name: "read_file".to_owned(),
+                arguments: serde_json::json!({ "path": "a.rs" }).to_string(),
+            },
+        }];
+        let mut paired = record("t1", 0, "tool", "file contents", "2024-01-01T00:00:03Z");
+        paired.message.tool_call_id = Some("call_1".to_owned());
+        let mut orphan = record("t2", 0, "tool", "orphan output", "2024-01-01T00:00:04Z");
+        orphan.message.tool_call_id = Some("call_missing".to_owned());
+
+        let timeline: Vec<slab_app_core::domain::services::TurnTimelineEntry> =
+            [user, assistant, paired, orphan]
+                .into_iter()
+                .map(slab_app_core::domain::services::TurnTimelineEntry::Message)
+                .collect();
+
+        let thread = thread_from_timeline("hthread-1", &snapshot(), &[], &timeline);
+        assert_eq!(thread.turns.len(), 1);
+        let items = &thread.turns[0].items;
+        assert_eq!(items.len(), 3);
+        assert!(matches!(&items[0], TurnItem::UserMessage { .. }));
+        // The paired result rides the call card — no extra output card.
+        assert!(matches!(
+            &items[1],
+            TurnItem::McpToolCall { tool, arguments, result: Some(res), .. }
+                if tool == "read_file"
+                    && arguments["path"] == "a.rs"
+                    && res == &serde_json::json!("file contents")
+        ));
+        // The orphan keeps the fallback card, without the id leak.
+        assert!(matches!(
+            &items[2],
+            TurnItem::CommandExecution { command, aggregated_output: Some(out), .. }
+                if command.is_empty() && out == "orphan output"
+        ));
     }
 
     #[test]

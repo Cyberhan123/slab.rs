@@ -6,7 +6,6 @@ import { isValidElement, type ComponentProps, type ReactNode } from "react"
 import { CodeBlock } from "./code-block"
 import { useMessageInteraction, type ApprovalStatus } from "../message-interaction-context"
 import { summarizeToolCall } from "../../lib/tool-summaries"
-import { renderToolDetailBody } from "./message-tool-detail"
 import { ToolRow, ToolRowContent, ToolRowTrigger, toolRowIcon } from "./message-tool-row"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
@@ -153,16 +152,33 @@ export function isApprovalPending(state: ToolState): boolean {
   return state === "approval-requested"
 }
 
-function MessageToolPart({
+/**
+ * A structured per-tool detail body: renders the natural UI for one known
+ * tool's result envelope, or `null` when there is nothing structured to show
+ * (call in flight, envelope drift) so the row falls back to the generic
+ * Parameters/Result cards. A plain function, not a component — `ToolPartRow`
+ * depends on the `null` return for its fallback decision.
+ */
+export type ToolDetailBody = (input: unknown, output: unknown) => ReactNode | null
+
+/**
+ * The shared tool-row renderer behind every generic tool part: compact
+ * `label: detail` trigger + expanded content. `renderBody` supplies the
+ * structured per-tool body when the part has a dedicated renderer (registered
+ * under `messagePartComponents.tools[toolName]`); without one — or when the
+ * body yields `null` — the row shows the generic Parameters/Result JSON cards.
+ */
+export function ToolPartRow({
   part,
   kind,
   name,
   toolCallId,
-}: MessagePartRenderProps<TMessagePart, TMessage>) {
-  if (kind !== "tool") return null
-
+  renderBody,
+}: MessagePartRenderProps<TMessagePart, TMessage> & { renderBody?: ToolDetailBody }) {
   const p = part as ToolPartLike
   const { approvalStatusByItemId } = useMessageInteraction()
+  if (kind !== "tool") return null
+
   const approval = toolCallId ? approvalStatusByItemId.get(toolCallId) : undefined
   const state = deriveState(p, approval)
 
@@ -175,7 +191,7 @@ function MessageToolPart({
   const summary = summarizeToolCall(derivedName, p.input)
   // Structured per-tool body when one exists (read_file / list_dir / glob /
   // grep …); otherwise the generic Parameters/Result JSON cards.
-  const detail = renderToolDetailBody(derivedName, p.input, p.output)
+  const detail = renderBody?.(p.input, p.output) ?? null
 
   return (
     <ToolRow defaultOpen={isApprovalPending(state)}>
@@ -205,6 +221,16 @@ function MessageToolPart({
       </ToolRowContent>
     </ToolRow>
   )
+}
+
+/**
+ * The default tool-part renderer (`messagePartComponents.tool`): every tool
+ * call without a dedicated `tools[toolName]` renderer — unknown tools, MCP
+ * calls, not-yet-covered built-ins — gets the compact row + generic
+ * Parameters/Result JSON cards via {@link ToolPartRow}.
+ */
+function MessageToolPart(props: MessagePartRenderProps<TMessagePart, TMessage>) {
+  return <ToolPartRow {...props} />
 }
 
 export default MessageToolPart

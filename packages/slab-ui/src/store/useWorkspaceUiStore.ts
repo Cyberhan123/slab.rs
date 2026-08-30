@@ -41,8 +41,16 @@ type PersistedWorkspaceUiState = {
 
 type WorkspaceUiState = PersistedWorkspaceUiState & {
   hasHydrated: boolean;
+  /**
+   * Workspace root the user switched to FROM the assistant page's Sender
+   * dropdown (session-scoped, deliberately NOT persisted). `WorkspaceModeSync`
+   * skips its `/` → `/workspace` redirect for this root so the Sender's live
+   * switch never bounces the user off their running conversation.
+   */
+  assistantPinnedWorkspaceRoot: string | null;
   patchWorkspaceState: (rootPath: string, patch: Partial<WorkspaceUiSnapshot>) => void;
   rememberRecentWorkspace: (workspace: { rootPath: string; name: string; lastOpenedAt?: number }) => void;
+  setAssistantPinnedWorkspaceRoot: (rootPath: string | null) => void;
   setHasHydrated: (hasHydrated: boolean) => void;
 };
 
@@ -74,6 +82,7 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>()(
   persist(
     (set) => ({
       hasHydrated: false,
+      assistantPinnedWorkspaceRoot: null,
       ...initialPersistedState,
       patchWorkspaceState: (rootPath, patch) => {
         const trimmedRootPath = rootPath.trim();
@@ -112,6 +121,11 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>()(
             ...state.recentWorkspaces.filter((workspace) => workspace.rootPath !== trimmedRootPath),
           ].slice(0, MAX_RECENT_WORKSPACES),
         }));
+      },
+      setAssistantPinnedWorkspaceRoot: (rootPath) => {
+        const trimmedRootPath = rootPath?.trim();
+
+        set({ assistantPinnedWorkspaceRoot: trimmedRootPath || null });
       },
       setHasHydrated: (hasHydrated) => set({ hasHydrated }),
     }),

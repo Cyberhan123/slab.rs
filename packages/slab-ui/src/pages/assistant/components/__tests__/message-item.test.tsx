@@ -80,12 +80,13 @@ vi.mock("../message/message-tool-part", () => ({
   default: ({ part }: { part?: { type?: string } }) => (
     <div data-testid="tool-part">{part?.type}</div>
   ),
-  // Real consumers (e.g. message-tool-file-change-part, message-tool-plan-part)
+  // Real consumers (e.g. message-tool-read-file-part, message-tool-plan-part)
   // import these named exports; browser native ESM throws if a mock omits a
   // consumed named export, so expose stubs alongside the default.
   deriveState: () => "output-available",
   isApprovalPending: () => false,
   isToolActive: () => false,
+  ToolPartRow: () => <div data-testid="tool-part-row" />,
 }))
 vi.mock("../message/message-tool-command-part", () => ({
   default: () => <div data-testid="tool-command-part" />,
@@ -93,9 +94,21 @@ vi.mock("../message/message-tool-command-part", () => ({
 vi.mock("../message/message-tool-file-change-part", () => ({
   default: () => <div data-testid="tool-file-change-part" />,
 }))
+vi.mock("../message/message-tool-file-glob-part", () => ({
+  default: () => <div data-testid="tool-file-glob-part" />,
+}))
+vi.mock("../message/message-tool-grep-part", () => ({
+  default: () => <div data-testid="tool-grep-part" />,
+}))
+vi.mock("../message/message-tool-list-dir-part", () => ({
+  default: () => <div data-testid="tool-list-dir-part" />,
+}))
 vi.mock("../message/message-tool-plan-part", () => ({
   default: () => <div data-testid="tool-plan-part" />,
   PlanCardBody: () => <div data-testid="plan-card-body" />,
+}))
+vi.mock("../message/message-tool-read-file-part", () => ({
+  default: () => <div data-testid="tool-read-file-part" />,
 }))
 
 function message(overrides: Partial<TMessage> = {}): TMessage {
@@ -132,6 +145,28 @@ describe("MessageItem", () => {
 
     await expect.element(screen.getByTestId("tool-part")).toHaveTextContent("tool-call")
     await expect.element(screen.getByRole("button", { name: "Copy" })).not.toBeInTheDocument()
+  })
+
+  it("routes a known built-in tool part to its dedicated component, not the default", async () => {
+    // `tools[toolName]` dispatch: the part's toolName matches a registered
+    // dedicated renderer (raw snake_case names from `toolItemFields`).
+    const screen = await render(
+      <MessageItem
+        message={message({
+          parts: [
+            {
+              type: "tool-read_file",
+              toolName: "read_file",
+              toolCallId: "tc9",
+              state: "output-available",
+            },
+          ],
+        })}
+      />,
+    )
+
+    await expect.element(screen.getByTestId("tool-read-file-part")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("tool-part")).not.toBeInTheDocument()
   })
 
   it("shows a rollback button on a retracable user message and emits the message id", async () => {

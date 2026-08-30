@@ -21,6 +21,7 @@ import { useHarnessConversation } from "./hooks/use-harness-conversation"
 import { useWorkspaceSwitch, type WorkspaceSelection } from "./hooks/use-workspace-switch"
 import { useWorkspaceHandoffStore } from "@slab/ui/store/useWorkspaceHandoffStore"
 import { WorkspaceSelector } from "@slab/ui/components/workspace-selector"
+import { useWorkspaceUiStore } from "@slab/ui/store/useWorkspaceUiStore"
 
 function Assistant() {
     const { t } = useTranslation()
@@ -163,15 +164,24 @@ function Assistant() {
     // Live workspace selector in the Sender toolbar: switching here applies
     // immediately (shared open/close path with the dialog's submit). Disabled
     // while a turn runs — a switch would interrupt the running agent threads.
+    // Opening a root PINS it against the WorkspaceModeSync redirect, so the
+    // switch never bounces the user off the running conversation; switching to
+    // 全局 (no workspace) needs no pin — the redirect only fires on open.
     const { applyWorkspace, switching: isWorkspaceSwitching } = useWorkspaceSwitch()
+    const setAssistantPinnedWorkspaceRoot = useWorkspaceUiStore(
+        (state) => state.setAssistantPinnedWorkspaceRoot,
+    )
     const liveWorkspaceSelection = activeWorkspace
         ? { kind: "root" as const, rootPath: activeWorkspace.rootPath, name: activeWorkspace.name }
         : { kind: "global" as const }
     const handleLiveWorkspaceChange = useCallback(
         (selection: WorkspaceSelection) => {
+            if (selection.kind === "root") {
+                setAssistantPinnedWorkspaceRoot(selection.rootPath)
+            }
             void applyWorkspace(selection, activeWorkspace?.rootPath ?? null).catch(() => {})
         },
-        [activeWorkspace?.rootPath, applyWorkspace],
+        [activeWorkspace?.rootPath, applyWorkspace, setAssistantPinnedWorkspaceRoot],
     )
 
     // Draft handoff into the pane (consumed before sending — see the pane).

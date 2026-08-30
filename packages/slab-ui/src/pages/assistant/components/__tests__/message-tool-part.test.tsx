@@ -11,6 +11,10 @@ import MessageToolPart, {
   type ToolPartLike,
   type ToolState,
 } from "../message/message-tool-part"
+import MessageToolFileGlobPart from "../message/message-tool-file-glob-part"
+import MessageToolGrepPart from "../message/message-tool-grep-part"
+import MessageToolListDirPart from "../message/message-tool-list-dir-part"
+import MessageToolReadFilePart from "../message/message-tool-read-file-part"
 
 const interactionState = vi.hoisted(() => ({
   approvalStatusByItemId: new Map<string, "pending" | "approved" | "denied">(),
@@ -200,11 +204,11 @@ describe("MessageToolPart", () => {
     await expect.element(screen.getByText("search-web")).toBeInTheDocument()
   })
 
-  // ── structured per-tool detail bodies (instead of raw JSON cards) ─────────
+  // ── structured per-tool parts (tools[toolName] dispatch, not the generic default) ─────────
 
   it("renders read_file output as a file view, not the JSON envelope", async () => {
     const screen = await render(
-      <MessageToolPart
+      <MessageToolReadFilePart
         {...baseProps({
           name: "read_file",
           part: part({
@@ -227,7 +231,7 @@ describe("MessageToolPart", () => {
 
   it("renders list_dir output as an entry listing", async () => {
     const screen = await render(
-      <MessageToolPart
+      <MessageToolListDirPart
         {...baseProps({
           name: "list_dir",
           part: part({
@@ -253,7 +257,7 @@ describe("MessageToolPart", () => {
 
   it("renders file_glob output as a matched-path list", async () => {
     const screen = await render(
-      <MessageToolPart
+      <MessageToolFileGlobPart
         {...baseProps({
           name: "file_glob",
           part: part({
@@ -274,7 +278,7 @@ describe("MessageToolPart", () => {
 
   it("renders grep output as a match list with context", async () => {
     const screen = await render(
-      <MessageToolPart
+      <MessageToolGrepPart
         {...baseProps({
           name: "grep",
           part: part({
@@ -323,9 +327,32 @@ describe("MessageToolPart", () => {
     expect(screen.container.textContent).toContain("Result")
   })
 
+  it("falls back to the JSON cards when a known tool's output is not its envelope", async () => {
+    // A registered tool whose output never parses as the expected envelope
+    // (call in flight → no output yet, or a plain-text result) must degrade to
+    // the generic cards, not render an empty structured body.
+    const screen = await render(
+      <MessageToolReadFilePart
+        {...baseProps({
+          name: "read_file",
+          part: part({
+            type: "tool-read_file",
+            state: "output-available",
+            input: { path: "notes.txt" },
+            output: "plain text, not an envelope",
+          }),
+        })}
+      />,
+    )
+
+    expect(screen.container.textContent).toContain("Parameters")
+    expect(screen.container.textContent).toContain("Result")
+    expect(screen.container.textContent).toContain("plain text, not an envelope")
+  })
+
   it("shows the tool error under a structured body when the call failed", async () => {
     const screen = await render(
-      <MessageToolPart
+      <MessageToolReadFilePart
         {...baseProps({
           name: "read_file",
           part: part({

@@ -161,17 +161,20 @@ describe("useAssistantNewChat", () => {
         })
     })
 
-    it("does not deep-link when a workspace is already active (SPA case)", async () => {
+    it("defaults to global even when a workspace is active (closing, no deep link)", async () => {
         harness.workspaceData = { current: { rootPath: "C:\\old", name: "old" } }
         const createSession = vi.fn(async () => ({ id: "s3" }))
         const api = await setup(createSession)
-        // openDialog seeds the default selection = the active workspace.
+        // openDialog seeds the DEFAULT selection = 全局 (global), not the
+        // active workspace — submitting switches to global chat.
         await api.openDialog()
 
         await senderCapture.onSubmit("switch it", { files: [], effort: "low", permissionMode: "default" })
 
-        // Default selection = current workspace → no switch, no navigation.
-        expect(harness.apply).not.toHaveBeenCalled()
+        // Global selection + active workspace → a real close switch. Closing
+        // never deep-links (the WorkspaceModeSync redirect only fires when a
+        // workspace OPENS).
+        expect(harness.apply).toHaveBeenCalledWith({ kind: "global" }, "C:\\old")
         expect(harness.navigate).not.toHaveBeenCalled()
         expect(useWorkspaceHandoffStore.getState().draft).toMatchObject({ sessionId: "s3" })
     })
