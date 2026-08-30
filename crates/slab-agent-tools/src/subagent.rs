@@ -173,14 +173,20 @@ impl ToolHandler for DelegateSubagentTool {
         let child_thread_id =
             self.control.spawn_child_for_parent(&ctx.thread_id, child_config, messages).await?;
         let snapshot = self.control.wait_for_terminal_snapshot(&child_thread_id).await?;
+        // The snapshot's completion_text is LLM-grade (reasoning embedded as
+        // `<think>` blocks for the next chat-template round); the parent
+        // conversation and the persisted artifact only want the final answer.
+        // Same strip the UI-delta and history-preview paths already apply —
+        // this is the third exit that used to leak it.
+        let completion_text =
+            snapshot.completion_text.as_deref().map(slab_agent::strip_think_blocks);
         let artifact_refs = write_subagent_artifact(
             ctx.workspace.as_ref().map(|workspace| workspace.root.as_path()),
             &snapshot.id,
-            &snapshot.completion_text,
+            &completion_text,
         )
         .await?;
-        let completion_text =
-            if artifact_refs.is_empty() { snapshot.completion_text } else { None };
+        let completion_text = if artifact_refs.is_empty() { completion_text } else { None };
 
         Ok(ToolOutput {
             content: serde_json::json!({
@@ -480,6 +486,89 @@ mod tests {
         ) -> ApprovalDecision {
             ApprovalDecision::Approved(slab_agent::ApprovalScope::RunOnce)
         }
+    }
+
+    /// LLM double whose final answer embeds a `<think>` reasoning block
+    /// (LLM-grade text, as the chat-template round actually produces).
+    struct ThinkingLlm;
+
+    #[async_trait]
+    impl LlmPort for ThinkingLlm {
+        async fn chat_completion(
+            &self,
+            _model: &str,
+            _messages: &[ConversationMessage],
+            _tools: &[ToolSpec],
+            _config: &AgentConfig,
+            _trace_context: &AgentTraceContext,
+        ) -> Result<LlmResponse, AgentError> {
+            Ok(LlmResponse {
+                content: Some(
+                    "<think status=\"done\">plan the summary privately</think>child result"
+                        .to_owned(),
+                ),
+                content_already_streamed: false,
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".to_owned()),
+                usage: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn delegate_subagent_strips_think_blocks_from_completion() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(ThinkingLlm),
+            store.clone(),
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ));
+        let tool = DelegateSubagentTool::new(control);
+
+        // No workspace: the stripped completion flows into the parent tool
+        // output verbatim.
+        let output = tool
+            .execute(
+                &ToolContext::for_thread("parent").build(),
+                &serde_json::json!({ "task": "summarize", "max_turns": 1 }),
+            )
+            .await
+            .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        assert_eq!(value["status"], "completed");
+        assert_eq!(
+            value["completion_text"], "child result",
+            "think blocks must not leak into the parent conversation"
+        );
+
+        // Workspace variant: the persisted artifact carries the stripped text.
+        let temp_dir = std::env::temp_dir()
+            .join(format!("slab-agent-tools-subagent-think-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        tokio::fs::create_dir_all(&temp_dir).await.expect("temp workspace");
+        let output = tool
+            .execute(
+                &ToolContext::for_thread("parent")
+                    .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
+                    .build(),
+                &serde_json::json!({ "task": "summarize", "max_turns": 1 }),
+            )
+            .await
+            .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        let artifact_ref = value["artifact_refs"][0].as_str().expect("artifact ref");
+        let artifact =
+            tokio::fs::read_to_string(temp_dir.join(artifact_ref)).await.expect("artifact content");
+        let artifact: serde_json::Value = serde_json::from_str(&artifact).expect("artifact json");
+        assert_eq!(artifact["completion_text"], "child result");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[tokio::test]
