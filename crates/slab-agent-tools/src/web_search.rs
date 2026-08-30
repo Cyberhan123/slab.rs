@@ -57,7 +57,9 @@ impl ToolHandler for WebSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search the web through configured providers. Credentials are read from settings, not tool arguments."
+        "Search the web through configured providers. Credentials are read from settings, \
+         not tool arguments. On failure the search falls back through every other \
+         credential-resolvable provider before reporting an aggregated error."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -80,7 +82,7 @@ impl ToolHandler for WebSearchTool {
                         "brave",
                         "searxng"
                     ],
-                    "description": "Search provider. Defaults to agent.tools.websearch.default_provider."
+                    "description": "Search provider. An explicit choice is used strictly; the default falls back through the other configured providers on failure. Defaults to agent.tools.websearch.default_provider."
                 },
                 "max_results": {
                     "type": "integer",
@@ -173,6 +175,10 @@ impl ToolHandler for WebSearchTool {
 #[derive(Debug, Clone)]
 struct WebSearchRequest {
     provider: WebSearchProviderId,
+    /// `true` when the caller EXPLICITLY named the provider — an explicit
+    /// choice is used strictly (no fallback); only the defaulted request
+    /// falls through the provider chain on failure.
+    explicit_provider: bool,
     query: String,
     id_list: Option<String>,
     max_results: Option<u32>,
@@ -196,15 +202,19 @@ impl WebSearchRequest {
             .and_then(Value::as_str)
             .ok_or_else(|| AgentError::ToolExecution("missing 'query' argument".into()))?
             .to_owned();
-        let provider = match arguments.get("provider").and_then(Value::as_str) {
+        let (provider, explicit_provider) = match arguments.get("provider").and_then(Value::as_str)
+        {
             Some(value) => {
-                value.parse::<WebSearchProviderId>().map_err(AgentError::ToolExecution)?
+                let parsed =
+                    value.parse::<WebSearchProviderId>().map_err(AgentError::ToolExecution)?;
+                (parsed, true)
             }
-            None => default_provider,
+            None => (default_provider, false),
         };
 
         Ok(Self {
             provider,
+            explicit_provider,
             query,
             id_list: optional_string(arguments, "id_list"),
             max_results: optional_positive_u32(arguments, "max_results")?,
@@ -239,27 +249,128 @@ impl WebSearchRunner for DefaultWebSearchRunner {
         config: &AgentWebSearchConfig,
         request: WebSearchRequest,
     ) -> Result<Vec<SearchResult>, AgentError> {
-        let provider = build_provider(config, request.provider)?;
-        let options = SearchOptions {
-            query: request.query,
-            id_list: request.id_list,
-            max_results: request.max_results,
-            language: request.language,
-            region: request.region,
-            safe_search: request.safe_search,
-            page: request.page,
-            start: request.start,
-            sort_by: request.sort_by,
-            sort_order: request.sort_order,
-            timeout: request.timeout_ms,
-            provider,
-            ..Default::default()
+        // Fallback chain: the defaulted request walks the requested provider
+        // first, then every OTHER credential-resolvable provider. Without
+        // this, a DuckDuckGo captcha (the default provider's hard error) or a
+        // missing api key left web_search with NO usable path; with it, a
+        // keyless deployment still reaches arxiv and a keyed one tries each
+        // configured provider in turn. An EXPLICIT provider choice is used
+        // strictly — the model asked for that one and can re-request another
+        // itself. The final error aggregates every attempt so the model sees
+        // what was tried and why it failed.
+        let chain = if request.explicit_provider {
+            vec![request.provider]
+        } else {
+            provider_chain(config, request.provider)
         };
-
-        websearch::web_search(options)
-            .await
-            .map_err(|error| AgentError::ToolExecution(error.to_string()))
+        let mut attempts: Vec<(WebSearchProviderId, String)> = Vec::new();
+        for provider in chain {
+            match build_provider(config, provider) {
+                Ok(provider_impl) => {
+                    let options = SearchOptions {
+                        query: request.query.clone(),
+                        id_list: request.id_list.clone(),
+                        max_results: request.max_results,
+                        language: request.language.clone(),
+                        region: request.region.clone(),
+                        safe_search: request.safe_search.clone(),
+                        page: request.page,
+                        start: request.start,
+                        sort_by: request.sort_by.clone(),
+                        sort_order: request.sort_order.clone(),
+                        timeout: request.timeout_ms,
+                        provider: provider_impl,
+                        ..Default::default()
+                    };
+                    match websearch::web_search(options).await {
+                        Ok(results) => return Ok(results),
+                        Err(error) => attempts.push((provider, error.to_string())),
+                    }
+                }
+                Err(error) => attempts.push((provider, error.to_string())),
+            }
+        }
+        Err(AgentError::ToolExecution(format_web_search_failure(&attempts)))
     }
+}
+
+/// All known providers, in fallback preference order (credential-free ones
+/// lead the tail so a keyless deployment still has a path after the head).
+const PROVIDER_PREFERENCE: [WebSearchProviderId; 8] = [
+    WebSearchProviderId::Duckduckgo,
+    WebSearchProviderId::Arxiv,
+    WebSearchProviderId::Brave,
+    WebSearchProviderId::Tavily,
+    WebSearchProviderId::Exa,
+    WebSearchProviderId::Google,
+    WebSearchProviderId::Serpapi,
+    WebSearchProviderId::Searxng,
+];
+
+/// Whether `provider` has everything it needs under `config` (credentials +
+/// required settings). Mirrors [`build_provider`]'s requirements without
+/// constructing the provider.
+fn provider_usable(config: &AgentWebSearchConfig, provider: WebSearchProviderId) -> bool {
+    match provider {
+        WebSearchProviderId::Duckduckgo | WebSearchProviderId::Arxiv => true,
+        WebSearchProviderId::Google => {
+            resolve_api_key("google", &config.providers.google.auth).is_ok()
+                && trimmed(config.providers.google.cx.as_deref()).is_some()
+        }
+        WebSearchProviderId::Tavily => {
+            resolve_api_key("tavily", &config.providers.tavily.auth).is_ok()
+        }
+        WebSearchProviderId::Exa => resolve_api_key("exa", &config.providers.exa.auth).is_ok(),
+        WebSearchProviderId::Serpapi => {
+            resolve_api_key("serpapi", &config.providers.serpapi.auth).is_ok()
+        }
+        WebSearchProviderId::Brave => {
+            resolve_api_key("brave", &config.providers.brave.auth).is_ok()
+        }
+        WebSearchProviderId::Searxng => {
+            trimmed(config.providers.searxng.base_url.as_deref()).is_some()
+        }
+    }
+}
+
+/// The fallback chain for a request: `requested` first, then the remaining
+/// providers in [`PROVIDER_PREFERENCE`] order filtered to the ones whose
+/// credentials actually resolve under `config`.
+pub(crate) fn provider_chain(
+    config: &AgentWebSearchConfig,
+    requested: WebSearchProviderId,
+) -> Vec<WebSearchProviderId> {
+    let mut chain = vec![requested];
+    for candidate in PROVIDER_PREFERENCE {
+        if candidate == requested || !provider_usable(config, candidate) {
+            continue;
+        }
+        chain.push(candidate);
+    }
+    chain
+}
+
+/// Aggregate error for a fully-failed chain: one provider(reason) pair per
+/// attempt, each reason clipped so a stack of verbose provider errors stays
+/// readable.
+fn format_web_search_failure(attempts: &[(WebSearchProviderId, String)]) -> String {
+    let rendered = attempts
+        .iter()
+        .map(|(provider, reason)| {
+            let reason = reason.trim();
+            let clipped: String = reason.chars().take(160).collect();
+            if reason.chars().count() > 160 {
+                format!("{}({clipped}…)", provider.as_str())
+            } else {
+                format!("{}({clipped})", provider.as_str())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "web_search failed on all {} provider(s) tried: {rendered}; configure another provider's api key under agent.tools.websearch.providers.<name>.auth",
+        attempts.len()
+    )
 }
 
 fn build_provider(
@@ -561,8 +672,10 @@ mod tests {
         };
         config.providers.google.cx = Some("cx".to_owned());
         let tool = WebSearchTool::new(config);
+        // EXPLICIT provider: used strictly — the missing key must fail without
+        // the fallback chain firing (and without touching the network).
         let error = tool
-            .execute(&ctx(), &serde_json::json!({"query": "rust"}))
+            .execute(&ctx(), &serde_json::json!({"query": "rust", "provider": "google"}))
             .await
             .expect_err("missing credentials should fail");
 
@@ -577,7 +690,7 @@ mod tests {
         };
         google.providers.google.auth.api_key = Some("key".to_owned());
         let error = WebSearchTool::new(google)
-            .execute(&ctx(), &serde_json::json!({"query": "rust"}))
+            .execute(&ctx(), &serde_json::json!({"query": "rust", "provider": "google"}))
             .await
             .expect_err("missing cx should fail");
         assert!(error.to_string().contains("agent.tools.websearch.providers.google.cx"));
@@ -587,10 +700,62 @@ mod tests {
             ..AgentWebSearchConfig::default()
         };
         let error = WebSearchTool::new(searxng)
-            .execute(&ctx(), &serde_json::json!({"query": "rust"}))
+            .execute(&ctx(), &serde_json::json!({"query": "rust", "provider": "searxng"}))
             .await
             .expect_err("missing base url should fail");
         assert!(error.to_string().contains("agent.tools.websearch.providers.searxng.base_url"));
+    }
+
+    #[test]
+    fn provider_chain_heads_with_request_and_skips_unconfigured() {
+        // Keyless default: the head plus arxiv (the only other credential-free
+        // provider) — a DuckDuckGo captcha still has a fallback path.
+        let chain =
+            provider_chain(&AgentWebSearchConfig::default(), WebSearchProviderId::Duckduckgo);
+        assert_eq!(chain, vec![WebSearchProviderId::Duckduckgo, WebSearchProviderId::Arxiv]);
+
+        // A keyed provider joins the chain right after the credential-free
+        // ones, in preference order.
+        let mut config = AgentWebSearchConfig::default();
+        config.providers.brave.auth.api_key = Some("key".to_owned());
+        let chain = provider_chain(&config, WebSearchProviderId::Duckduckgo);
+        assert_eq!(
+            chain,
+            vec![
+                WebSearchProviderId::Duckduckgo,
+                WebSearchProviderId::Arxiv,
+                WebSearchProviderId::Brave
+            ]
+        );
+
+        // The head is never duplicated into the tail.
+        let chain = provider_chain(&config, WebSearchProviderId::Brave);
+        assert_eq!(
+            chain,
+            vec![
+                WebSearchProviderId::Brave,
+                WebSearchProviderId::Duckduckgo,
+                WebSearchProviderId::Arxiv
+            ]
+        );
+    }
+
+    #[test]
+    fn web_search_failure_aggregates_attempts_with_reasons() {
+        let rendered = format_web_search_failure(&[
+            (WebSearchProviderId::Duckduckgo, "captcha page blocked".to_owned()),
+            (WebSearchProviderId::Arxiv, "network error".to_owned()),
+        ]);
+        assert!(rendered.contains("failed on all 2 provider(s)"), "{rendered}");
+        assert!(rendered.contains("duckduckgo(captcha page blocked)"), "{rendered}");
+        assert!(rendered.contains("arxiv(network error)"), "{rendered}");
+        assert!(rendered.contains("agent.tools.websearch.providers"), "{rendered}");
+
+        // Long reasons are clipped so a chain of verbose errors stays readable.
+        let long = "x".repeat(500);
+        let rendered = format_web_search_failure(&[(WebSearchProviderId::Brave, long)]);
+        assert!(rendered.contains('…'), "{rendered}");
+        assert!(rendered.chars().count() < 400, "{rendered}");
     }
 
     #[tokio::test]
