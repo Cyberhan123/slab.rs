@@ -13,6 +13,7 @@ use slab_sandboxing::SandboxDriver;
 pub mod apply_patch;
 mod args;
 mod artifact;
+pub mod background;
 pub(crate) mod error;
 mod exclusions;
 pub mod fs;
@@ -30,6 +31,11 @@ pub mod verify;
 pub mod web_search;
 
 pub use apply_patch::ApplyPatchTool;
+pub use background::{
+    BackgroundTaskEvent, BackgroundTaskEventSink, BackgroundTaskRegistry, BackgroundTaskSnapshot,
+    BackgroundTaskStatus, DEFAULT_OUTPUT_TAIL_BYTES, NoopBackgroundTaskEventSink, TaskOutputTool,
+    TaskStatusTool, TaskStopTool,
+};
 pub use fs::{ListDirTool, ReadFileTool, WriteFileTool};
 pub use fs_watch::FsWatchTool;
 pub use git::{GitCommitTool, GitDiffTool, GitStatusTool};
@@ -65,13 +71,17 @@ pub fn register_all_tools(
     web_search_config: AgentWebSearchConfig,
     shell_launcher: ShellLauncher,
     shell_bash_path: Option<PathBuf>,
+    background_tasks: Arc<BackgroundTaskRegistry>,
 ) {
-    router.register(Box::new(ShellTool::new(
-        workspace_root.clone(),
-        sandbox_driver.clone(),
-        shell_launcher,
-        shell_bash_path,
-    )));
+    router.register(Box::new(
+        ShellTool::new(
+            workspace_root.clone(),
+            sandbox_driver.clone(),
+            shell_launcher,
+            shell_bash_path,
+        )
+        .with_background(Arc::clone(&background_tasks)),
+    ));
     router.register(Box::new(ReadFileTool::new(workspace_root.clone())));
     router.register(Box::new(WriteFileTool::new(workspace_root.clone())));
     router.register(Box::new(ListDirTool::new(workspace_root.clone())));
@@ -98,6 +108,10 @@ pub fn register_all_tools(
             router.register(Box::new(GitCommitTool::new(root, sandbox_driver.clone())));
         }
     }
+    // Background task controls (read-heavy; safe to run concurrently).
+    router.register(Box::new(TaskStatusTool::new(Arc::clone(&background_tasks))));
+    router.register(Box::new(TaskOutputTool::new(Arc::clone(&background_tasks))));
+    router.register(Box::new(TaskStopTool::new(background_tasks)));
     if let Some(client) = mcp_client {
         router.register(Box::new(McpListToolsTool::new(Arc::clone(&client))));
         router.register(Box::new(McpCallTool::new(Arc::clone(&client))));
@@ -116,6 +130,10 @@ pub fn register_all_tools(
 mod tests {
     use super::*;
 
+    fn background() -> Arc<BackgroundTaskRegistry> {
+        Arc::new(BackgroundTaskRegistry::default())
+    }
+
     #[test]
     fn register_all_tools_respects_workspace_and_git_switches() {
         let mut router = ToolRouter::new();
@@ -128,6 +146,7 @@ mod tests {
             AgentWebSearchConfig::default(),
             ShellLauncher::default(),
             None,
+            background(),
         );
         assert!(router.get("shell").is_some());
         assert!(router.get("file_glob").is_some());
@@ -139,6 +158,10 @@ mod tests {
         assert!(router.get("web_search").is_some());
         assert!(router.get("apply_patch").is_none());
         assert!(router.get("git_status").is_none());
+        // Background task controls are workspace-independent — always present.
+        assert!(router.get("task_status").is_some());
+        assert!(router.get("task_output").is_some());
+        assert!(router.get("task_stop").is_some());
 
         let mut router = ToolRouter::new();
         register_all_tools(
@@ -150,6 +173,7 @@ mod tests {
             AgentWebSearchConfig::default(),
             ShellLauncher::default(),
             None,
+            background(),
         );
         assert!(router.get("file_glob").is_some());
         assert!(router.get("plan").is_some());
@@ -166,6 +190,7 @@ mod tests {
             AgentWebSearchConfig::default(),
             ShellLauncher::default(),
             None,
+            background(),
         );
         assert!(router.get("git_status").is_some());
         assert!(router.get("git_diff").is_some());

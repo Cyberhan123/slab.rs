@@ -26,6 +26,10 @@ pub(crate) struct AgentRuntimeReloader {
     /// `read_thread_messages` path the runtime uses — so the memory model and
     /// the runtime never diverge (closes the G5 orphan window for memory).
     rollout_store: Arc<RolloutBackedAgentStore>,
+    /// Shared background-task registry: `refresh_workspace_tools` re-registers
+    /// the shell tool against it so background execution survives a workspace
+    /// switch (tasks of the OLD workspace are stopped by the migration path).
+    background: Arc<slab_agent_tools::BackgroundTaskRegistry>,
 }
 
 impl AgentRuntimeReloader {
@@ -34,9 +38,10 @@ impl AgentRuntimeReloader {
         runtime: AgentRuntime,
         rollout: Arc<RolloutFileStore>,
         rollout_store: Arc<RolloutBackedAgentStore>,
+        background: Arc<slab_agent_tools::BackgroundTaskRegistry>,
     ) -> Self {
         let tool_router = runtime.tool_router();
-        Self { state, runtime, tool_router, rollout, rollout_store }
+        Self { state, runtime, tool_router, rollout, rollout_store, background }
     }
 
     pub(crate) async fn reload(&self) -> Result<(), AppCoreError> {
@@ -146,12 +151,15 @@ impl AgentRuntimeReloader {
             slab_config::ShellLauncherKind::Cmd => slab_agent_tools::ShellLauncher::Cmd,
         };
 
-        self.tool_router.register(Box::new(slab_agent_tools::ShellTool::new(
-            root.clone(),
-            driver.clone(),
-            launcher,
-            shell_config.bash_path,
-        )));
+        self.tool_router.register(Box::new(
+            slab_agent_tools::ShellTool::new(
+                root.clone(),
+                driver.clone(),
+                launcher,
+                shell_config.bash_path,
+            )
+            .with_background(Arc::clone(&self.background)),
+        ));
         self.tool_router.register(Box::new(slab_agent_tools::VerifyTool::new(driver.clone())));
         match root.clone() {
             Some(root) => {

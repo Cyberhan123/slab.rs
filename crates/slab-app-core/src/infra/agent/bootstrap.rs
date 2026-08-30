@@ -92,6 +92,10 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     let compact: Arc<dyn slab_agent::CompactPort> = Arc::new(
         crate::domain::services::agent::SummarizingCompactPort::new((*ctx.model_state).clone()),
     );
+    // Shared background-task registry: the tool router registrations (shell +
+    // task_* tools, here and in the runtime workspace refresh) and the host
+    // event bridge (wired in the runtime layer) all see the SAME tasks.
+    let background_tasks = Arc::new(slab_agent_tools::BackgroundTaskRegistry::new(None));
     let control = build_agent_control(
         ctx,
         Arc::clone(&store),
@@ -102,6 +106,7 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         Arc::clone(&rollout),
         Arc::clone(&rollout_store),
         trace_dir.clone(),
+        Arc::clone(&background_tasks),
     );
     let agent_runtime = AgentRuntime::new(control);
     let core = AgentCore::new(
@@ -119,6 +124,7 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         core.runtime(),
         rollout,
         rollout_store,
+        background_tasks,
     );
     schedule_agent_runtime_reload(runtime.clone());
     let harness = HarnessService::new(core.clone());
@@ -151,6 +157,7 @@ fn build_agent_control(
     rollout: Arc<slab_agent_rollout::RolloutFileStore>,
     rollout_store: Arc<super::rollout_store::RolloutBackedAgentStore>,
     trace_dir: Option<PathBuf>,
+    background_tasks: Arc<slab_agent_tools::BackgroundTaskRegistry>,
 ) -> Arc<AgentControl> {
     let llm = Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
     // memory_store / exec_db stay on the original SQL store (metadata +
@@ -192,6 +199,7 @@ fn build_agent_control(
         web_search_config,
         shell_launcher,
         shell_config.bash_path.clone(),
+        background_tasks,
     );
     tool_router.register(Box::new(super::code_tools::CodeLspStatusTool::new(
         WorkspaceLspService::new(

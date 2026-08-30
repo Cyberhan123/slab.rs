@@ -41,6 +41,7 @@ impl OutputSink for ToolObserverSink {
 
 pub struct ShellTool {
     executor: ShellExecutor,
+    background: Option<Arc<crate::background::BackgroundTaskRegistry>>,
 }
 
 impl ShellTool {
@@ -53,7 +54,17 @@ impl ShellTool {
         Self {
             executor: ShellExecutor::new(workspace_root, sandbox_driver, launcher, bash_path)
                 .with_output_limit_bytes(SHELL_CAPTURE_LIMIT_BYTES),
+            background: None,
         }
+    }
+
+    /// Attach the shared background-task registry (enables `background=true`).
+    pub fn with_background(
+        mut self,
+        registry: Arc<crate::background::BackgroundTaskRegistry>,
+    ) -> Self {
+        self.background = Some(registry);
+        self
     }
 }
 
@@ -71,7 +82,12 @@ impl ToolHandler for ShellTool {
 
     fn description(&self) -> &str {
         "Execute a shell command and return stdout, stderr, exit_code, and timeout status. \
-         On timeout the process tree is killed and exit_code is 124."
+         FOREGROUND (default): waits for completion; on timeout the process tree \
+         is killed and exit_code is 124; backgrounded children (&) do NOT \
+         survive the call. background=true: starts a DETACHED task instead — \
+         returns immediately with a task_id; output streams to files; poll \
+         task_status/task_output and stop with task_stop. Use background only \
+         for long-running servers/watchers."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -84,8 +100,13 @@ impl ToolHandler for ShellTool {
                 },
                 "timeout_secs": {
                     "type": "integer",
-                    "description": "Maximum execution time in seconds.",
+                    "description": "Maximum execution time in seconds (foreground only; background tasks have no timeout).",
                     "default": 30
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "Run as a detached background task: returns a task_id immediately, output streams to files, poll task_status/task_output.",
+                    "default": false
                 },
                 "env": {
                     "type": "object",
@@ -153,6 +174,78 @@ impl ToolHandler for ShellTool {
                     .collect()
             })
             .unwrap_or_default();
+
+        // Detached background variant: spawn with file-redirected stdio,
+        // register the task, and return the handle immediately. The turn
+        // ends; the task stays resident (dev servers, watchers).
+        if arguments.get("background").and_then(Value::as_bool).unwrap_or(false) {
+            let registry = self.background.as_ref().ok_or_else(|| {
+                AgentError::ToolExecution(
+                    "background execution is not available in this configuration".into(),
+                )
+            })?;
+            let workspace_root = ctx.workspace.as_ref().map(|workspace| workspace.root.as_path());
+            let task_id = registry.alloc_task_id();
+            let output_dir = crate::background::BackgroundTaskRegistry::output_dir(
+                workspace_root,
+                &ctx.thread_id,
+                &task_id,
+            );
+            tokio::fs::create_dir_all(&output_dir).await.map_err(|error| {
+                AgentError::ToolExecution(format!(
+                    "failed to create background output dir {}: {error}",
+                    output_dir.display()
+                ))
+            })?;
+            let open_log = |name: &str| {
+                // CREATE/TRUNCATE, not append: each task owns a fresh
+                // directory (task_id-unique), so the semantics are identical —
+                // and MSYS bash (Git Bash) exits 1 with no output when it
+                // inherits an APPEND-mode stdout handle on Windows
+                // (msys-2.0.dll's std-handle setup rejects it).
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(output_dir.join(name))
+                    .map_err(|error| {
+                        AgentError::ToolExecution(format!(
+                            "failed to open background {name} log: {error}"
+                        ))
+                    })
+            };
+            let stdout = open_log("stdout.log")?;
+            let stderr = open_log("stderr.log")?;
+            let child = self
+                .executor
+                .execute_background(
+                    ShellCommand { command: command.clone(), timeout_secs, env },
+                    stdout,
+                    stderr,
+                )
+                .await
+                .map_err(|e| AgentError::ToolExecution(e.to_string()))?;
+            let snapshot = registry.register(
+                task_id,
+                ctx.thread_id.clone(),
+                command.clone(),
+                workspace_root,
+                child,
+            )?;
+            return Ok(ToolOutput {
+                content: serde_json::json!({
+                    "background": true,
+                    "task_id": snapshot.task_id,
+                    "pid": snapshot.pid,
+                    "status": snapshot.status.as_str(),
+                    "stdout_path": snapshot.stdout_ref,
+                    "stderr_path": snapshot.stderr_ref,
+                    "hint": "output streams to the log files; poll task_status / task_output (tail) and stop with task_stop",
+                })
+                .to_string(),
+                metadata: None,
+            });
+        }
 
         // When the agent attached a live-output observer, stream stdout/stderr
         // chunks through it while the command runs (display-only).
@@ -590,5 +683,119 @@ mod tests {
         let output = result.expect("execute");
         let value: Value = serde_json::from_str(&output.content).expect("json");
         assert_eq!(value["exit_code"], 0, "stderr: {}", value["stderr"]);
+    }
+
+    /// Background contract: `shell background=true` returns immediately with a
+    /// task handle, a finished task's output is readable via `task_output`,
+    /// a running task survives the tool-call return, and `task_stop`
+    /// terminates it. (Buffering note: shells block-buffer stdout to files —
+    /// output lands on flush/exit, which is why the output assertion uses a
+    /// self-terminating command and the residency assertion needs none.)
+    #[tokio::test]
+    async fn shell_background_returns_handle_output_and_stops() {
+        let (root, ctx) = temp_workspace_ctx("background", "bg-thread");
+        let registry = Arc::new(crate::background::BackgroundTaskRegistry::default());
+        let tool = ShellTool::new(Some(root.clone()), None, ShellLauncher::default(), None)
+            .with_background(Arc::clone(&registry));
+
+        // Phase 0 — control: the same executor in the foreground must work.
+        let output = tool
+            .execute(&ctx, &json!({ "command": "echo fg-control-marker" }))
+            .await
+            .expect("foreground control");
+        eprintln!("FG CONTROL: {}", output.content);
+
+        // Phase 1 — output contract: a self-terminating writer.
+        let started = std::time::Instant::now();
+        let output = tool
+            .execute(&ctx, &json!({ "command": "echo bg-done-marker", "background": true }))
+            .await
+            .expect("background spawn");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "background spawn must return immediately, took {:?}",
+            started.elapsed()
+        );
+        let value: Value = serde_json::from_str(&output.content).expect("json");
+        assert_eq!(value["background"], true);
+        let writer_id = value["task_id"].as_str().expect("task id").to_owned();
+        let stdout_path = value["stdout_path"].as_str().expect("stdout ref").to_owned();
+        assert!(stdout_path.contains("background"), "log under the background dir: {stdout_path}");
+
+        // The writer exits on its own; poll task_status until terminal.
+        let status_tool = crate::background::TaskStatusTool::new(Arc::clone(&registry));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let mut writer_status = String::from("running");
+        while std::time::Instant::now() < deadline {
+            let output =
+                status_tool.execute(&ctx, &json!({ "task_id": writer_id })).await.expect("status");
+            let value: Value = serde_json::from_str(&output.content).expect("json");
+            writer_status = value["task"]["status"].as_str().unwrap_or("").to_owned();
+            if writer_status != "running" {
+                let stderr_dump = std::fs::read_to_string(
+                    root.join(".slab")
+                        .join("artifacts")
+                        .join("bg-thread")
+                        .join("background")
+                        .join(&writer_id)
+                        .join("stderr.log"),
+                )
+                .unwrap_or_else(|e| format!("<stderr read failed: {e}>"));
+                assert_eq!(
+                    value["task"]["exit_code"], 0,
+                    "echo must exit cleanly; stderr: {stderr_dump:?}"
+                );
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        assert_ne!(writer_status, "running", "writer must terminate on its own");
+
+        let output_tool = crate::background::TaskOutputTool::new(Arc::clone(&registry));
+        let output =
+            output_tool.execute(&ctx, &json!({ "task_id": writer_id })).await.expect("tail");
+        let value: Value = serde_json::from_str(&output.content).expect("json");
+        assert!(
+            value["output"].as_str().unwrap_or("").contains("bg-done-marker"),
+            "log must carry the output: {value}"
+        );
+
+        // Phase 2 — residency + stop: a long runner survives the tool-call
+        // return and dies on task_stop.
+        let output = tool
+            .execute(&ctx, &json!({ "command": "sleep 30", "background": true }))
+            .await
+            .expect("background spawn 2");
+        let value: Value = serde_json::from_str(&output.content).expect("json");
+        let sleeper_id = value["task_id"].as_str().expect("task id").to_owned();
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let output =
+            status_tool.execute(&ctx, &json!({ "task_id": sleeper_id })).await.expect("status 2");
+        let value: Value = serde_json::from_str(&output.content).expect("json");
+        assert_eq!(
+            value["task"]["status"], "running",
+            "the task must outlive the tool call that started it"
+        );
+
+        let stop_tool = crate::background::TaskStopTool::new(Arc::clone(&registry));
+        let output =
+            stop_tool.execute(&ctx, &json!({ "task_id": sleeper_id })).await.expect("stop");
+        let value: Value = serde_json::from_str(&output.content).expect("json");
+        assert_eq!(value["stopped"]["status"], "stopped");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Background without a registry attached (legacy/test wiring) is a clear
+    /// error, not a silent foreground fallthrough.
+    #[tokio::test]
+    async fn shell_background_without_registry_errors() {
+        let tool = ShellTool::default();
+        let error = tool
+            .execute(&ctx(), &json!({ "command": "echo hi", "background": true }))
+            .await
+            .expect_err("no registry");
+        assert!(error.to_string().contains("not available"));
     }
 }

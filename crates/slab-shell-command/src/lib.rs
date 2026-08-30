@@ -164,6 +164,42 @@ impl ShellExecutor {
             stderr_bytes: output.stderr.len(),
         })
     }
+
+    /// Spawn a DETACHED background command: stdout/stderr append to the given
+    /// files (no pipes to drain), the tree stays resident, and the returned
+    /// [`BackgroundChild`] hands the caller the wait/kill lifecycle. The
+    /// dangerous-command defense-in-depth check applies exactly as the
+    /// foreground path; `timeout_secs` is ignored (background tasks have no
+    /// timeout — the caller stops them explicitly).
+    pub async fn execute_background(
+        &self,
+        command: ShellCommand,
+        stdout: std::fs::File,
+        stderr: std::fs::File,
+    ) -> Result<slab_sandboxing::BackgroundChild, ShellError> {
+        if let SafetyDecision::Dangerous(reason) = CommandSafetyChecker::check(&command.command) {
+            warn!(command = %command.command, reason, "blocked dangerous shell command");
+            return Err(ShellError::DangerousCommand(reason));
+        }
+
+        let argv = self.shell.argv(&command.command);
+        let driver: Arc<dyn SandboxDriver> =
+            self.sandbox_driver.clone().unwrap_or_else(|| Arc::new(PassThroughDriver));
+        debug!(driver = driver.name(), "spawning background shell command");
+        Ok(driver
+            .spawn_background(
+                SandboxedCommand {
+                    argv,
+                    env: command.env,
+                    cwd: self.workspace_root.clone(),
+                    timeout: None,
+                    output_sink: None,
+                },
+                stdout,
+                stderr,
+            )
+            .await?)
+    }
 }
 
 /// Configurable shell launcher preference. `Auto` probes for a POSIX shell
