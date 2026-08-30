@@ -212,6 +212,11 @@ async fn open_workspace(
 
     WorkspaceService::ensure_workspace_settings(&new_root)?;
     state.set_workspace_root(Some(new_root.clone())).map_err(ServerError::Internal)?;
+    // Re-point the live agent at the new root (sandbox-bound tools + the
+    // thread context future threads spawn with). The migration above already
+    // interrupted this workspace's threads; already-running threads from other
+    // workspaces keep their frozen context.
+    state.services.workspace_agent.refresh_workspace(Some(new_root.clone()));
 
     let mut response = workspace_state_response_for_root(state.as_ref(), &new_root)?;
     response.migrated = migrated;
@@ -230,6 +235,8 @@ async fn close_workspace(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<WorkspaceStateResponse>, ServerError> {
     state.set_workspace_root(None).map_err(ServerError::Internal)?;
+    // Retire the agent's workspace-bound tools and thread context with it.
+    state.services.workspace_agent.refresh_workspace(None);
     Ok(Json(workspace_state_response(None, None)))
 }
 

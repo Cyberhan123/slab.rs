@@ -46,6 +46,27 @@ use crate::context::{ModelState, WorkerState};
 use crate::infra::agent::runtime::AgentRuntimeReloader;
 use crate::infra::runtime::ManagedRuntimeHost;
 
+/// Runtime workspace-switch surface for the HTTP layer: re-points the live
+/// agent (sandbox-bound tool registrations + the thread context future
+/// threads spawn with) at a newly opened/closed workspace root. Wraps the
+/// infra reloader without exposing it outside app-core.
+#[derive(Clone)]
+pub struct WorkspaceAgentRuntime {
+    reloader: AgentRuntimeReloader,
+}
+
+impl WorkspaceAgentRuntime {
+    pub(crate) fn new(reloader: AgentRuntimeReloader) -> Self {
+        Self { reloader }
+    }
+
+    /// Refresh the agent's workspace-bound state for `root` (`None` = closed:
+    /// the workspace-bound tools are unregistered).
+    pub fn refresh_workspace(&self, root: Option<std::path::PathBuf>) {
+        self.reloader.refresh_workspace_tools(root);
+    }
+}
+
 #[derive(Clone)]
 pub struct AppServices {
     pub audio: AudioService,
@@ -66,6 +87,7 @@ pub struct AppServices {
     pub harness: HarnessService,
     pub response: ResponseService,
     pub workspace_lsp: WorkspaceLspService,
+    pub workspace_agent: WorkspaceAgentRuntime,
 }
 
 impl AppServices {
@@ -78,6 +100,7 @@ impl AppServices {
         runtime_host: Option<Arc<ManagedRuntimeHost>>,
     ) -> Self {
         let model = ModelService::new(model_state.clone(), worker_state.clone());
+        let workspace_agent = WorkspaceAgentRuntime::new(agent_runtime.clone());
         Self {
             audio: AudioService::new(worker_state.clone()),
             backend: BackendService::new(model_state.clone()),
@@ -107,6 +130,7 @@ impl AppServices {
                 Arc::clone(model_state.config()),
                 PluginService::new(model_state),
             ),
+            workspace_agent,
         }
     }
 }

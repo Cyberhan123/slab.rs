@@ -83,6 +83,18 @@ impl AgentRuntimeReloader {
 
     fn refresh_memory_tools(&self, config: &AgentMemoriesConfig, memory_root: &Path) {
         let workspace_root = workspace_root_from_config(self.state.config());
+        self.refresh_memory_tools_at(config, memory_root, workspace_root);
+    }
+
+    /// The memory file-tool overlay (extra roots) registered against an
+    /// EXPLICIT workspace root — `refresh_workspace_tools` passes the root the
+    /// UI just opened/closed instead of the config-derived one.
+    fn refresh_memory_tools_at(
+        &self,
+        config: &AgentMemoriesConfig,
+        memory_root: &Path,
+        workspace_root: Option<PathBuf>,
+    ) {
         let extra_roots = if config.enabled { vec![memory_root.to_path_buf()] } else { Vec::new() };
         self.tool_router.register(Box::new(slab_agent_tools::ReadFileTool::new_with_extra_roots(
             workspace_root.clone(),
@@ -104,6 +116,82 @@ impl AgentRuntimeReloader {
             workspace_root,
             extra_roots,
         )));
+    }
+
+    /// Re-point the live agent at a new workspace root (UI open/close):
+    /// rebuild the sandbox driver and the workspace-bound registrations
+    /// (shell / verify / apply_patch / git / the memory file-tool overlay),
+    /// and swap the thread context future threads spawn with.
+    /// Already-running threads keep their frozen `ToolContext` — the
+    /// workspace-migration path interrupts them before the switch. The
+    /// exec-policy engine is NOT rebuilt here (its rules live under the
+    /// app-home rules dir by default; rebuilding mid-flight would churn the
+    /// approval state).
+    pub(crate) fn refresh_workspace_tools(&self, root: Option<PathBuf>) {
+        let settings = self.state.pmid().config();
+        let permissions = settings.agent.permissions.clone();
+        let offline = settings.agent.offline;
+        let shell_config = settings.agent.tools.shell.clone();
+        let memory_config = settings.agent.memories.clone();
+        drop(settings);
+
+        let driver =
+            super::bootstrap::build_workspace_sandbox_driver(&permissions, root.as_deref());
+        let launcher = match shell_config.launcher {
+            slab_config::ShellLauncherKind::Auto => slab_agent_tools::ShellLauncher::Auto,
+            slab_config::ShellLauncherKind::Bash => slab_agent_tools::ShellLauncher::Bash,
+            slab_config::ShellLauncherKind::PowerShell => {
+                slab_agent_tools::ShellLauncher::PowerShell
+            }
+            slab_config::ShellLauncherKind::Cmd => slab_agent_tools::ShellLauncher::Cmd,
+        };
+
+        self.tool_router.register(Box::new(slab_agent_tools::ShellTool::new(
+            root.clone(),
+            driver.clone(),
+            launcher,
+            shell_config.bash_path,
+        )));
+        self.tool_router.register(Box::new(slab_agent_tools::VerifyTool::new(driver.clone())));
+        match root.clone() {
+            Some(root) => {
+                self.tool_router
+                    .register(Box::new(slab_agent_tools::ApplyPatchTool::new(root.clone())));
+                self.tool_router.register(Box::new(slab_agent_tools::GitStatusTool::new(
+                    root.clone(),
+                    driver.clone(),
+                )));
+                self.tool_router.register(Box::new(slab_agent_tools::GitDiffTool::new(
+                    root.clone(),
+                    driver.clone(),
+                )));
+                self.tool_router
+                    .register(Box::new(slab_agent_tools::GitCommitTool::new(root, driver)));
+            }
+            None => {
+                // Closed: the workspace-bound tools must not keep operating on
+                // the retired root.
+                for name in ["apply_patch", "git_status", "git_diff", "git_commit"] {
+                    self.tool_router.unregister(name);
+                }
+            }
+        }
+
+        // Memory file-tool overlay at the new root (same replay as reload()).
+        let memory_root = memory_root(&memory_config);
+        self.refresh_memory_tools_at(&memory_config, &memory_root, root.clone());
+
+        // Swap the thread context for future spawns (workspace ref + offline).
+        let thread_context = match root {
+            Some(root) => {
+                let workspace = slab_agent::WorkspaceRef { root, session_id: None };
+                slab_agent::AgentThreadContext::new()
+                    .with_workspace(workspace)
+                    .with_offline(offline)
+            }
+            None => slab_agent::AgentThreadContext::new().with_offline(offline),
+        };
+        self.runtime.control().replace_thread_context(thread_context);
     }
 
     fn internal_memory_hooks(

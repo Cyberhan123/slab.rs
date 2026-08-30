@@ -165,34 +165,10 @@ fn build_agent_control(
     // sandbox permissive even when the baseline was `ReadOnly`.
     let exec_baseline =
         super::exec_policy::baseline_from_config(ctx.pmid.config().agent.permissions.baseline);
-    let sandbox_policy = exec_baseline.to_sandbox_policy();
-    // Mirror the platform-specific sandbox knobs (e.g. `windows_setup_required`) into the
-    // runtime `SandboxPermissions`. The fail-closed gate in `available_sandbox_driver` then
-    // blocks the shell when elevation is required but not yet provisioned.
-    let platform_cfg = &ctx.pmid.config().agent.permissions.platform;
-    let sandbox_permissions = SandboxPermissions {
-        platform: SandboxPlatformConfig {
-            windows_setup_required: platform_cfg.windows_setup_required,
-            linux_allow_landlock_fallback: platform_cfg.linux_allow_landlock_fallback,
-            macos_use_sandbox_exec: platform_cfg.macos_use_sandbox_exec,
-            windows_use_conpty: platform_cfg.windows_use_conpty,
-        },
-        ..SandboxPermissions::default()
-    };
-    let sandbox_driver = workspace_root.clone().and_then(|root| {
-        let env = SandboxEnvironment::with_permissions(
-            Some(root),
-            sandbox_policy,
-            sandbox_permissions.clone(),
-        );
-        match create_platform_driver(env) {
-            Ok(driver) => available_sandbox_driver(driver),
-            Err(error) => {
-                tracing::warn!(%error, "sandbox driver is unavailable; shell tool stays blocked");
-                None
-            }
-        }
-    });
+    let sandbox_driver = build_workspace_sandbox_driver(
+        &ctx.pmid.config().agent.permissions,
+        workspace_root.as_deref(),
+    );
     let mut tool_router = ToolRouter::new();
     let web_search_config = ctx.pmid.config().agent.tools.websearch;
     let shell_config = ctx.pmid.config().agent.tools.shell;
@@ -374,6 +350,44 @@ fn build_agent_control(
         .register(Box::new(slab_agent_tools::DelegateSubagentTool::new(Arc::clone(&control))));
     memory_pipeline.set_control(Arc::clone(&control));
     control
+}
+
+/// Build the platform sandbox driver bound to `root`, mirroring the
+/// permission baseline and platform knobs exactly as the bootstrap wiring
+/// does (a ReadOnly baseline yields a ReadOnly sandbox; the fail-closed gate
+/// in `available_sandbox_driver` blocks the shell when elevation is required
+/// but not yet provisioned). `None` root → `None` (the shell tool stays
+/// blocked); a driver that cannot be created also degrades to `None` with a
+/// warning. Shared by the bootstrap and the runtime workspace refresh.
+pub(crate) fn build_workspace_sandbox_driver(
+    permissions: &slab_config::AgentPermissionsConfig,
+    root: Option<&Path>,
+) -> Option<Arc<dyn slab_sandboxing::SandboxDriver>> {
+    let sandbox_policy =
+        super::exec_policy::baseline_from_config(permissions.baseline).to_sandbox_policy();
+    let sandbox_permissions = SandboxPermissions {
+        platform: SandboxPlatformConfig {
+            windows_setup_required: permissions.platform.windows_setup_required,
+            linux_allow_landlock_fallback: permissions.platform.linux_allow_landlock_fallback,
+            macos_use_sandbox_exec: permissions.platform.macos_use_sandbox_exec,
+            windows_use_conpty: permissions.platform.windows_use_conpty,
+        },
+        ..SandboxPermissions::default()
+    };
+    root.and_then(|root| {
+        let env = SandboxEnvironment::with_permissions(
+            Some(root.to_path_buf()),
+            sandbox_policy,
+            sandbox_permissions,
+        );
+        match create_platform_driver(env) {
+            Ok(driver) => available_sandbox_driver(driver),
+            Err(error) => {
+                tracing::warn!(%error, "sandbox driver is unavailable; shell tool stays blocked");
+                None
+            }
+        }
+    })
 }
 
 /// Decouple contract: the agent trace directory (and therefore the
@@ -609,6 +623,17 @@ mod tests {
         });
 
         assert!(available_sandbox_driver(driver).is_none());
+    }
+
+    #[test]
+    fn workspace_sandbox_driver_follows_root() {
+        // No root → no driver (the shell tool stays blocked), mirroring the
+        // bootstrap behavior for workspace-less runs.
+        assert!(super::build_workspace_sandbox_driver(&Default::default(), None).is_none());
+        // A root with default permissions yields a real platform driver.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let driver = super::build_workspace_sandbox_driver(&Default::default(), Some(dir.path()));
+        assert!(driver.is_some(), "a rooted workspace must produce a sandbox driver");
     }
 
     #[test]

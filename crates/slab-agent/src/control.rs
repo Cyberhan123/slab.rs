@@ -144,7 +144,10 @@ pub struct AgentControl {
     risk: Arc<dyn ToolRiskAnalyzer>,
     trace: Arc<dyn AgentTraceSink>,
     trace_dir: Option<std::path::PathBuf>,
-    thread_context: AgentThreadContext,
+    /// Shared thread context, replaceable at runtime (workspace open/close
+    /// re-points the live agent at a new root). Read once per spawned thread;
+    /// already-running threads keep their frozen snapshot.
+    thread_context: Arc<std::sync::RwLock<AgentThreadContext>>,
     max_threads: usize,
     max_depth: u32,
     gate: Arc<ConcurrencyGate>,
@@ -228,7 +231,7 @@ impl AgentControl {
             risk: Arc::new(BasicToolRiskAnalyzer::default()),
             trace,
             trace_dir,
-            thread_context: AgentThreadContext::default(),
+            thread_context: Arc::new(std::sync::RwLock::new(AgentThreadContext::default())),
             max_threads: limits.max_threads,
             max_depth: limits.max_depth,
             gate: Arc::new(ConcurrencyGate::new(limits.max_threads, 0)),
@@ -263,7 +266,7 @@ impl AgentControl {
             risk,
             trace: Arc::new(NoopAgentTraceSink),
             trace_dir: None,
-            thread_context: AgentThreadContext::default(),
+            thread_context: Arc::new(std::sync::RwLock::new(AgentThreadContext::default())),
             max_threads: limits.max_threads,
             max_depth: limits.max_depth,
             gate: Arc::new(ConcurrencyGate::new(limits.max_threads, 0)),
@@ -273,8 +276,17 @@ impl AgentControl {
 
     /// Attach host-provided thread context used when building tool contexts.
     pub fn with_thread_context(mut self, thread_context: AgentThreadContext) -> Self {
-        self.thread_context = thread_context;
+        self.thread_context = Arc::new(std::sync::RwLock::new(thread_context));
         self
+    }
+
+    /// Swap the thread context future threads are spawned with (workspace
+    /// open/close). Already-running threads are unaffected — the migration
+    /// path interrupts them before the switch.
+    pub fn replace_thread_context(&self, thread_context: AgentThreadContext) {
+        let mut guard =
+            self.thread_context.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = thread_context;
     }
 
     /// Set the FIFO wait-queue capacity (INFRA-05). `0` (default) keeps the
@@ -997,7 +1009,8 @@ impl AgentControl {
         let risk = Arc::clone(&self.risk);
         let trace = Arc::clone(&self.trace);
         let trace_dir = self.trace_dir.clone();
-        let thread_context = self.thread_context.clone();
+        let thread_context =
+            self.thread_context.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
         let cancellation = CancellationToken::new();
         let pending_input: Arc<std::sync::Mutex<VecDeque<ConversationMessage>>> =
             Arc::new(std::sync::Mutex::new(VecDeque::new()));

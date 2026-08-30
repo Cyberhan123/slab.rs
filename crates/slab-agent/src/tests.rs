@@ -5550,6 +5550,112 @@ async fn queued_input_on_the_last_allowed_turn_still_gets_consumed() {
     );
 }
 
+/// Tool double that records the workspace root its ToolContext carried (the
+/// observable projection of `AgentControl`'s thread context).
+struct WorkspaceProbeTool {
+    seen: Arc<Mutex<Option<PathBuf>>>,
+}
+
+#[async_trait]
+impl ToolHandler for WorkspaceProbeTool {
+    fn name(&self) -> &str {
+        "echo"
+    }
+
+    fn description(&self) -> &str {
+        "Records the executing ToolContext's workspace root."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolContext,
+        _arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        *self.seen.lock().unwrap() = ctx.workspace.as_ref().map(|workspace| workspace.root.clone());
+        Ok(ToolOutput { content: "probed".to_owned(), metadata: None })
+    }
+}
+
+/// Stateless LLM double that always requests the probe tool (the run ends via
+/// max_turns; the probe value is what the test asserts on — a per-instance
+/// call counter would skip the tool on the second spawn's first call).
+struct AlwaysEchoLlm;
+
+#[async_trait]
+impl LlmPort for AlwaysEchoLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        Ok(LlmResponse {
+            content: None,
+            content_already_streamed: false,
+            tool_calls: vec![ParsedToolCall {
+                id: "call-probe".into(),
+                name: "echo".into(),
+                arguments: "{}".into(),
+            }],
+            finish_reason: Some("tool_calls".into()),
+            usage: None,
+        })
+    }
+}
+
+/// `replace_thread_context` (the workspace open/close seam) re-points only
+/// FUTURE threads: a thread spawned after the swap sees the new workspace
+/// root in its ToolContext.
+#[tokio::test]
+async fn replace_thread_context_points_new_threads_at_new_workspace() {
+    let seen = Arc::new(Mutex::new(None));
+    let llm = Arc::new(AlwaysEchoLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(WorkspaceProbeTool { seen: Arc::clone(&seen) }));
+    let approval = Arc::clone(&Arc::new(NoopNotify));
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
+    let config = AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() };
+
+    // No workspace initially: the probe records None.
+    let first = control
+        .spawn("session-ws-probe-1".into(), config.clone(), vec![user_text_message("probe")])
+        .await
+        .expect("spawn 1");
+    run_to_terminal(&control, &store, &first).await;
+    assert!(seen.lock().unwrap().is_none(), "no workspace before the swap");
+
+    // Swap the context (the runtime workspace-open seam); the next thread
+    // must see the new root.
+    let root = PathBuf::from(if cfg!(windows) { "C:\\ws\\opened" } else { "/ws/opened" });
+    control.replace_thread_context(
+        crate::AgentThreadContext::new()
+            .with_workspace(WorkspaceRef { root: root.clone(), session_id: None }),
+    );
+    let second = control
+        .spawn("session-ws-probe-2".into(), config, vec![user_text_message("probe again")])
+        .await
+        .expect("spawn 2");
+    run_to_terminal(&control, &store, &second).await;
+    assert_eq!(seen.lock().unwrap().clone(), Some(root), "new threads see the swapped workspace");
+}
+
 #[tokio::test]
 async fn queued_input_on_idle_thread_signals_needs_resume() {
     let llm = Arc::new(MockLlm::new());
