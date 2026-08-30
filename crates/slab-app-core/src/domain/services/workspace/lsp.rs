@@ -194,11 +194,32 @@ pub fn workspace_root_from_settings_path(settings_path: &Path) -> Option<PathBuf
     slab_dir.parent().map(Path::to_path_buf)
 }
 
+/// Whether `dir` carries a workspace marker: a `.git` (directory, or the
+/// file form a worktree/checkouts root uses) or a `.slab` directory.
+fn has_workspace_marker(dir: &Path) -> bool {
+    let git = dir.join(".git");
+    git.is_dir() || git.is_file() || dir.join(".slab").is_dir()
+}
+
+/// Find the nearest workspace root at or above `start`: the first ancestor
+/// carrying a workspace marker (`.git` / `.slab`). This is the fallback for
+/// processes spawned INSIDE a checkout without explicit configuration — the
+/// desktop sidecar inherits the Tauri host's CWD (e.g.
+/// `bin/slab-app/src-tauri` deep inside the monorepo), where neither
+/// `SLAB_WORKSPACE_ROOT` nor a `.slab`-relative settings path identifies the
+/// root, so workspace-scoped agent tools (`apply_patch`, `git_*`, `verify`)
+/// went unregistered. Production installs without a checkout naturally
+/// resolve to `None` and keep the explicit open/close semantics.
+pub fn workspace_root_from_ancestors(start: &Path) -> Option<PathBuf> {
+    start.ancestors().find(|candidate| has_workspace_marker(candidate)).map(Path::to_path_buf)
+}
+
 pub fn workspace_root_from_config(config: &AppConfig) -> Option<PathBuf> {
     config
         .workspace_root
         .clone()
         .or_else(|| workspace_root_from_settings_path(&config.settings_path))
+        .or_else(|| std::env::current_dir().ok().as_deref().and_then(workspace_root_from_ancestors))
 }
 
 fn normalize_language_id(language_id: &str) -> String {
@@ -437,8 +458,8 @@ fn describe_searched_locations(locations: &[PathBuf]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        builtin_language_server_provider, language_server_command_candidates,
-        resolve_language_server_command, workspace_root_from_config,
+        builtin_language_server_provider, has_workspace_marker, language_server_command_candidates,
+        resolve_language_server_command, workspace_root_from_ancestors, workspace_root_from_config,
         workspace_root_from_settings_path,
     };
     use crate::config::Config;
@@ -513,6 +534,46 @@ mod tests {
         let settings_path = workspace.path().join("settings.json");
 
         assert!(workspace_root_from_settings_path(&settings_path).is_none());
+    }
+
+    #[test]
+    fn resolves_workspace_root_from_ancestors() {
+        // The desktop sidecar shape: spawned three levels deep inside the
+        // checkout (bin/slab-app/src-tauri), workspace root reachable only by
+        // walking up to the .git marker.
+        let workspace = temp_workspace();
+        fs::create_dir_all(workspace.path().join(".git")).expect("git dir");
+        let deep = workspace.path().join("bin").join("slab-app").join("src-tauri");
+        fs::create_dir_all(&deep).expect("deep dir");
+
+        let root = workspace_root_from_ancestors(&deep).expect("root from ancestors");
+        assert_eq!(root, workspace.path().to_path_buf());
+    }
+
+    #[test]
+    fn ancestor_detection_accepts_git_file_and_slab_dir() {
+        // Worktree-style `.git` FILE counts, as does a bare `.slab` directory
+        // (the CWD itself may be the root).
+        let git_file_root = temp_workspace();
+        fs::write(git_file_root.path().join(".git"), "gitdir: elsewhere\n").expect("git file");
+        let leaf = git_file_root.path().join("nested");
+        fs::create_dir_all(&leaf).expect("nested dir");
+        assert_eq!(workspace_root_from_ancestors(&leaf), Some(git_file_root.path().to_path_buf()));
+
+        let slab_root = temp_workspace();
+        fs::create_dir_all(slab_root.path().join(".slab")).expect("slab dir");
+        assert_eq!(
+            workspace_root_from_ancestors(slab_root.path()),
+            Some(slab_root.path().to_path_buf())
+        );
+
+        // No marker anywhere in the tree under test → the pure marker check is
+        // false (the full ancestor chain above the tempdir is host-dependent,
+        // so the None path is asserted through the marker predicate).
+        let plain = temp_workspace();
+        let leaf = plain.path().join("plain");
+        fs::create_dir_all(&leaf).expect("plain dir");
+        assert!(!has_workspace_marker(&leaf));
     }
 
     #[test]
