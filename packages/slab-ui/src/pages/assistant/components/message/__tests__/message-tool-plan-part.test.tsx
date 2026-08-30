@@ -63,6 +63,49 @@ describe("MessageToolPlanPart", () => {
     expect(body).toContain("verify")
   })
 
+  // Regression: an in-flight or failed plan call reaches the UI as a generic
+  // ToolCall whose `arguments` are the raw model payload — no server-computed
+  // `counts`. The card must derive them instead of crashing on `undefined`.
+  it("derives counts from items for raw plan arguments (no counts/current_step)", async () => {
+    const screen = await renderPart({
+      type: "tool-plan",
+      input: { summary: "Draft plan", items: PLAN.items },
+      state: "input-streaming",
+    })
+
+    const body = screen.getByTestId("assistant-plan-body").element().textContent ?? ""
+    expect(body).toContain("Draft plan")
+    expect(body).toContain("3 steps")
+    expect(body).toContain("1 done")
+    expect(body).toContain("1 in progress")
+    expect(body).toContain("1 pending")
+  })
+
+  // Smaller models sometimes emit `items` as a JSON-encoded string; the
+  // server-side deserializer tolerates it, and so must the card.
+  it("accepts items as a JSON-encoded string", async () => {
+    const screen = await renderPart({
+      type: "tool-plan",
+      input: { summary: "String items", items: JSON.stringify(PLAN.items) },
+      state: "input-streaming",
+    })
+
+    const body = screen.getByTestId("assistant-plan-body").element().textContent ?? ""
+    expect(body).toContain("3 steps")
+    expect(body).toContain("inspect")
+  })
+
+  it("renders an empty card instead of crashing for junk input", async () => {
+    const screen = await renderPart({
+      type: "tool-plan",
+      input: "not-a-plan",
+      state: "input-streaming",
+    })
+
+    const body = screen.getByTestId("assistant-plan-body").element().textContent ?? ""
+    expect(body).toContain("0 steps")
+  })
+
   it("shows the completed status symbol for a finalized plan", async () => {
     const screen = await renderPart({ type: "tool-plan", input: PLAN, state: "output-available" })
     expect(

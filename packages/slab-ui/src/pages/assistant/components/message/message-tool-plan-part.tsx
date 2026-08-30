@@ -10,7 +10,7 @@ import {
 } from "lucide-react"
 import type { ReactNode } from "react"
 
-import type { Plan, PlanStatus } from "@slab/core/harness/types"
+import type { Plan, PlanCounts, PlanItem, PlanStatus } from "@slab/core/harness/types"
 import { useMessageInteraction } from "../message-interaction-context"
 import { ToolRow, ToolRowContent, ToolRowTrigger, toolRowIcon } from "./message-tool-row"
 import type { MessagePartRenderProps } from "./message-parts"
@@ -20,6 +20,60 @@ import {
   deriveState,
   type ToolPartLike,
 } from "./message-tool-part"
+
+/** Accept a real array or a JSON-encoded array string; junk becomes `[]`. */
+function parseItems(value: unknown): PlanItem[] {
+  let array: unknown = value
+  if (typeof array === "string") {
+    try {
+      array = JSON.parse(array)
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(array)) return []
+  return array.filter(
+    (item): item is PlanItem =>
+      typeof item === "object" && item !== null && typeof (item as PlanItem).step === "string",
+  )
+}
+
+/** Tally per-status counts, mirroring the server-side `build_plan`. */
+function countStatuses(items: PlanItem[]): PlanCounts {
+  const counts: PlanCounts = { pending: 0, in_progress: 0, completed: 0, blocked: 0 }
+  for (const item of items) {
+    if (item.status in counts) counts[item.status] += 1
+  }
+  return counts
+}
+
+/** Index of the first in-progress step, `undefined` when none is running. */
+function firstInProgress(items: PlanItem[]): number | undefined {
+  const index = items.findIndex((item) => item.status === "in_progress")
+  return index === -1 ? undefined : index
+}
+
+/**
+ * Tolerant {@link Plan} normalizer. The card is fed two payload shapes:
+ * - the finalized plan snapshot (`TurnItem::Plan` / approval `planSnapshot`),
+ *   which always carries the server-computed `counts` / `current_step`, and
+ * - the raw arguments of an in-flight or failed `plan` / `update_plan` call
+ *   (`{ summary?, items }`) — those fields only exist once the server executes
+ *   the tool, so they are derived here instead. Smaller models sometimes emit
+ *   `items` as a JSON-encoded string; accepted like the server-side
+ *   deserializer does.
+ */
+export function normalizePlan(value: unknown): Plan {
+  const raw = (typeof value === "object" && value !== null ? value : {}) as Partial<Plan>
+  const items = parseItems(raw.items)
+  return {
+    plan_id: raw.plan_id ?? "",
+    summary: raw.summary,
+    items,
+    counts: raw.counts ?? countStatuses(items),
+    current_step: raw.current_step ?? firstInProgress(items),
+  }
+}
 
 /** Icon + tone for a single step's lifecycle status. */
 function statusIcon(status: PlanStatus): ReactNode {
@@ -41,7 +95,8 @@ function statusIcon(status: PlanStatus): ReactNode {
  * current in-progress step is emphasized). Shared by the in-stream plan card
  * and the plan approval card so the two views cannot drift.
  */
-export function PlanCardBody({ plan }: { plan: Plan }) {
+export function PlanCardBody({ plan: raw }: { plan: Plan }) {
+  const plan = normalizePlan(raw)
   const total = plan.items.length
   const c = plan.counts
   return (
@@ -103,7 +158,7 @@ function MessageToolPlanPart({
   const approval = toolCallId ? approvalStatusByItemId.get(toolCallId) : undefined
   const state = deriveState(p, approval)
 
-  const plan = (p.input ?? {}) as Plan
+  const plan = normalizePlan(p.input)
   const title = plan.summary ?? "plan"
 
   return (
