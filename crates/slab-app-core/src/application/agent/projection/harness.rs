@@ -35,6 +35,7 @@ pub fn event_msg_to_notification(msg: EventMsg) -> Option<ServerNotification> {
             Some(ServerNotification::CommandExecutionOutputDelta(p))
         }
         EventMsg::FileChangeOutputDelta(p) => Some(ServerNotification::FileChangeOutputDelta(p)),
+        EventMsg::BackgroundTaskUpdated(p) => Some(ServerNotification::BackgroundTaskUpdated(p)),
         EventMsg::CommandExecutionRequestApproval(p) => {
             Some(ServerNotification::CommandExecutionRequestApproval(p))
         }
@@ -98,5 +99,24 @@ mod tests {
         });
         let n = event_msg_to_notification(event).unwrap();
         assert_eq!(n.method(), "context/compacted");
+    }
+
+    #[test]
+    fn background_task_event_lifts_to_notification() {
+        let event =
+            EventMsg::BackgroundTaskUpdated(slab_agent::protocol::BackgroundTaskUpdatedParams {
+                thread_id: "t".to_owned(),
+                task_id: "bg-1".to_owned(),
+                status: "exited".to_owned(),
+                exit_code: Some(0),
+                pid: Some(4242),
+                command: Some("npm run dev".to_owned()),
+            });
+        let n = event_msg_to_notification(event).unwrap();
+        assert_eq!(n.method(), "backgroundTask/updated");
+        let json = serde_json::to_value(&n).unwrap();
+        assert_eq!(json["params"]["taskId"], "bg-1");
+        assert_eq!(json["params"]["status"], "exited");
+        assert_eq!(json["params"]["pid"], 4242);
     }
 }

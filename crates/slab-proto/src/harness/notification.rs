@@ -15,7 +15,7 @@ use ts_rs::TS;
 // here (not re-exported) so the `ServerNotification` union variants below can
 // reference them. Consumers use `slab_agent::protocol` directly.
 use slab_agent::protocol::{
-    AgentMessageDeltaParams, CommandExecutionOutputDeltaParams,
+    AgentMessageDeltaParams, BackgroundTaskUpdatedParams, CommandExecutionOutputDeltaParams,
     CommandExecutionRequestApprovalParams, ContextCompactedParams, ContextCompactingParams,
     FileChangeOutputDeltaParams, FileChangeRequestApprovalParams, ItemCompletedParams,
     ItemStartedParams, ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams,
@@ -167,6 +167,8 @@ pub enum ServerNotification {
     CommandExecutionOutputDelta(CommandExecutionOutputDeltaParams),
     #[serde(rename = "item/fileChange/outputDelta")]
     FileChangeOutputDelta(FileChangeOutputDeltaParams),
+    #[serde(rename = "backgroundTask/updated")]
+    BackgroundTaskUpdated(BackgroundTaskUpdatedParams),
     #[serde(rename = "item/commandExecution/requestApproval")]
     CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams),
     #[serde(rename = "item/fileChange/requestApproval")]
@@ -199,6 +201,7 @@ impl ServerNotification {
                 crate::harness::method::ITEM_COMMAND_EXECUTION_OUTPUT_DELTA
             }
             Self::FileChangeOutputDelta(_) => crate::harness::method::ITEM_FILE_CHANGE_OUTPUT_DELTA,
+            Self::BackgroundTaskUpdated(_) => crate::harness::method::BACKGROUND_TASK_UPDATED,
             Self::CommandExecutionRequestApproval(_) => {
                 crate::harness::method::ITEM_COMMAND_EXECUTION_REQUEST_APPROVAL
             }

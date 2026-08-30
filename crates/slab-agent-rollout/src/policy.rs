@@ -38,6 +38,9 @@ impl EventPersistenceMode {
                     | EventMsg::TurnAborted(_)
                     | EventMsg::ContextCompacting(_)
                     | EventMsg::ContextCompacted(_)
+                    // Terminal task states (~2 lines per task) so a reconnect
+                    // can restore which background tasks ended and how.
+                    | EventMsg::BackgroundTaskUpdated(_)
             ),
         }
     }
@@ -87,5 +90,18 @@ mod tests {
     #[test]
     fn default_is_limited() {
         assert_eq!(EventPersistenceMode::default(), EventPersistenceMode::Limited);
+    }
+
+    #[test]
+    fn background_task_event_persists_under_limited() {
+        let event = EventMsg::BackgroundTaskUpdated(BackgroundTaskUpdatedParams {
+            thread_id: "t".to_owned(),
+            task_id: "bg-1".to_owned(),
+            status: "stopped".to_owned(),
+            exit_code: None,
+            pid: None,
+            command: None,
+        });
+        assert!(EventPersistenceMode::Limited.should_persist(&event));
     }
 }

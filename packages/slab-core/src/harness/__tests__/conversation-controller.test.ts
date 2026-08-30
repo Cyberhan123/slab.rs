@@ -698,10 +698,8 @@ describe("ConversationController", () => {
       }),
     )
     await flush()
-    expect(controller.getState().liveOutputByItemId.has("cmd-1")).toBe(
-      false,
-      "finalized items must not keep their streamed copies (unbounded growth)",
-    )
+    // Finalized items must not keep their streamed copies (unbounded growth).
+    expect(controller.getState().liveOutputByItemId.has("cmd-1")).toBe(false)
     controller.dispose()
   })
 
@@ -718,7 +716,8 @@ describe("ConversationController", () => {
     await flush()
     const after = controller.getState()
 
-    expect(after).not.toBe(before, "the snapshot itself changed")
+    // The snapshot itself changed…
+    expect(after).not.toBe(before)
     expect(after.liveOutputByItemId).toBe(before.liveOutputByItemId)
     expect(after.livePatchByItemId).toBe(before.livePatchByItemId)
     expect(after.userMessageTurnIndex).toBe(before.userMessageTurnIndex)
@@ -745,8 +744,9 @@ describe("ConversationController", () => {
     await vi.waitFor(() => expect(controller.getState().isHistoryLoading).toBe(false))
 
     const after = controller.getState()
-    expect(after.restoreVersion).toBe(version, "identical re-read must not remount the pane")
-    expect(after.restoredMessages).toBe(messages, "identical re-read keeps the prior objects")
+    // Identical re-read: no remount bump, prior message objects kept.
+    expect(after.restoreVersion).toBe(version)
+    expect(after.restoredMessages).toBe(messages)
     controller.dispose()
   })
 

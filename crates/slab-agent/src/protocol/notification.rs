@@ -249,6 +249,26 @@ pub struct FileChangeOutputDeltaParams {
     pub delta: String,
 }
 
+/// `backgroundTask/updated` — a lifecycle transition of a resident background
+/// task (started via `shell background=true`): spawned/stopped from the
+/// registry, or terminated on its own (exited/failed).
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BackgroundTaskUpdatedParams {
+    pub thread_id: String,
+    pub task_id: String,
+    /// `running` | `exited` | `stopped` | `failed`.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+}
+
 // ---- approvals ----
 
 #[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]

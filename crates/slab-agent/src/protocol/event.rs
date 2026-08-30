@@ -69,6 +69,10 @@ pub enum EventMsg {
     CommandExecutionOutputDelta(CommandExecutionOutputDeltaParams),
     FileChangeOutputDelta(FileChangeOutputDeltaParams),
 
+    /// Resident background task lifecycle (shell background=true): decoupled
+    /// from the turn — may fire after the run that started the task ended.
+    BackgroundTaskUpdated(BackgroundTaskUpdatedParams),
+
     CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams),
     FileChangeRequestApproval(FileChangeRequestApprovalParams),
 

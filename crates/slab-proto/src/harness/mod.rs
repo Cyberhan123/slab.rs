@@ -70,6 +70,9 @@ pub mod method {
     pub const ITEM_COMMAND_EXECUTION_REQUEST_APPROVAL: &str =
         "item/commandExecution/requestApproval";
     pub const ITEM_FILE_CHANGE_REQUEST_APPROVAL: &str = "item/fileChange/requestApproval";
+    // Resident background task lifecycle (shell background=true), emitted from
+    // the background task registry via `EventMsg` (projected like item events).
+    pub const BACKGROUND_TASK_UPDATED: &str = "backgroundTask/updated";
     pub const ERROR: &str = "error";
     pub const ACCOUNT_UPDATED: &str = "account/updated";
     pub const ACCOUNT_LOGIN_COMPLETED: &str = "account/loginCompleted";

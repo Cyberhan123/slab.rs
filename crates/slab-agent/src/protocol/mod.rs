@@ -21,7 +21,7 @@ pub use error::ErrorEvent;
 pub use event::{Event, EventMsg, TurnAbortedParams};
 pub use item::{ReasoningText, TurnItem, UserMessageContent};
 pub use notification::{
-    AgentMessageDeltaParams, CommandExecutionOutputDeltaParams,
+    AgentMessageDeltaParams, BackgroundTaskUpdatedParams, CommandExecutionOutputDeltaParams,
     CommandExecutionRequestApprovalParams, ContextCompactedParams, ContextCompactingParams,
     FileChangeApprovalChange, FileChangeOutputDeltaParams, FileChangeRequestApprovalParams,
     ItemCompletedParams, ItemStartedParams, MessageAppendedParams, ReasoningSummaryTextDeltaParams,

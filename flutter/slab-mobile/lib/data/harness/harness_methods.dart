@@ -44,6 +44,7 @@ final class HarnessNotification {
   static const String itemCommandExecutionRequestApproval =
       'item/commandExecution/requestApproval';
   static const String itemFileChangeRequestApproval = 'item/fileChange/requestApproval';
+  static const String backgroundTaskUpdated = 'backgroundTask/updated';
   static const String error = 'error';
   static const String accountUpdated = 'account/updated';
   static const String accountLoginCompleted = 'account/loginCompleted';

@@ -42,6 +42,7 @@ export const HARNESS_NOTIFICATION = {
   ITEM_FILE_CHANGE_OUTPUT_DELTA: "item/fileChange/outputDelta",
   ITEM_COMMAND_EXECUTION_REQUEST_APPROVAL: "item/commandExecution/requestApproval",
   ITEM_FILE_CHANGE_REQUEST_APPROVAL: "item/fileChange/requestApproval",
+  BACKGROUND_TASK_UPDATED: "backgroundTask/updated",
   ERROR: "error",
   ACCOUNT_UPDATED: "account/updated",
   ACCOUNT_LOGIN_COMPLETED: "account/loginCompleted",

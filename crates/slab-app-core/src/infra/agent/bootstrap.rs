@@ -94,8 +94,12 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     );
     // Shared background-task registry: the tool router registrations (shell +
     // task_* tools, here and in the runtime workspace refresh) and the host
-    // event bridge (wired in the runtime layer) all see the SAME tasks.
-    let background_tasks = Arc::new(slab_agent_tools::BackgroundTaskRegistry::new(None));
+    // event bridge all see the SAME tasks. Lifecycle events bridge into the
+    // harness `EventMsg` stream so the UI (and a reconnecting client) sees
+    // task transitions even after the starting turn ended.
+    let background_tasks = Arc::new(slab_agent_tools::BackgroundTaskRegistry::new(Some(Arc::new(
+        BackgroundEventBridge(Arc::clone(&event_hub)),
+    ))));
     let control = build_agent_control(
         ctx,
         Arc::clone(&store),
@@ -142,6 +146,37 @@ fn schedule_agent_runtime_reload(agent_runtime: AgentRuntimeReloader) {
             tracing::warn!(%error, "failed to reload agent runtime settings at startup");
         }
     });
+}
+
+/// Bridges background-task lifecycle events into the harness `EventMsg`
+/// stream. The registry's sink trait is SYNC (called from detached watcher
+/// tasks and the stop path) while the hub emit is async — spawn the emit;
+/// both call sites run inside the tokio runtime.
+struct BackgroundEventBridge(Arc<AgentEventHub>);
+
+impl slab_agent_tools::BackgroundTaskEventSink for BackgroundEventBridge {
+    fn on_task_event(&self, event: slab_agent_tools::BackgroundTaskEvent) {
+        use slab_agent::AgentNotifyPort as _;
+
+        let msg = slab_agent::protocol::EventMsg::BackgroundTaskUpdated(
+            slab_agent::protocol::BackgroundTaskUpdatedParams {
+                thread_id: event.thread_id.clone(),
+                task_id: event.task_id,
+                status: event.status.as_str().to_owned(),
+                exit_code: event.exit_code,
+                pid: event.pid,
+                command: event.command,
+            },
+        );
+        let hub = Arc::clone(&self.0);
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!("background task event dropped: no tokio runtime");
+            return;
+        };
+        handle.spawn(async move {
+            hub.on_event_msg(&event.thread_id, &msg).await;
+        });
+    }
 }
 
 /// Construct the [`slab_agent::AgentControl`] singleton, wiring up the port
