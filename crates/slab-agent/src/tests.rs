@@ -3925,6 +3925,76 @@ async fn run_teardown_retires_durable_plan() {
     );
 }
 
+/// The post-run → pre-remove window: a message steered into a terminal Live
+/// entry must fall back to NeedsResume (the caller resumes, replacing the
+/// husk) instead of reporting Queued and being silently lost; the resume
+/// itself must replace the husk instead of failing with ThreadBusy.
+#[tokio::test]
+async fn queue_input_on_terminal_entry_falls_back_to_needs_resume() {
+    let llm = Arc::new(TaskCompleteLlm::new());
+    let llm_handle = Arc::clone(&llm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    router.register(Box::new(TaskCompleteMarkerTool::always_succeeds()));
+    let approval = Arc::clone(&Arc::new(NoopNotify));
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
+    let config = AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() };
+    let user_message = |text: &str| ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text(text.into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    };
+    let thread_id = control
+        .spawn("session-terminal-husk".into(), config, vec![user_message("finish")])
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    // Mimic the window: the run finished but the registry entry is still a
+    // terminal Live husk (the task removes it only after `run()` returns).
+    control.install_dead_entry_for_test(&thread_id).await;
+
+    let outcome = control
+        .queue_input(&thread_id, user_message("one more thing"))
+        .await
+        .expect("queue_input on the husk");
+    assert_eq!(
+        outcome,
+        crate::SendOutcome::NeedsResume,
+        "a terminal entry must never answer Queued (the message would be silently lost)"
+    );
+
+    // The resume replaces the husk instead of ThreadBusy, and the new run
+    // executes (the persisted status is already Completed from run 1, so poll
+    // the mock's call counter for the second run's LLM call).
+    control
+        .resume_thread(&thread_id, vec![user_message("one more thing")], 1, Some(1))
+        .await
+        .expect("resume replaces the dead husk");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let calls = loop {
+        let calls = *llm_handle.call_count.lock().unwrap();
+        if calls >= 2 || std::time::Instant::now() > deadline {
+            break calls;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    };
+    assert!(calls >= 2, "the resumed run must have executed (calls: {calls})");
+}
+
 #[tokio::test]
 async fn task_complete_denial_does_not_finalize() {
     let llm = Arc::new(TaskCompleteLlm::new());

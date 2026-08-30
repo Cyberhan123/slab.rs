@@ -653,14 +653,41 @@ impl AgentControl {
         // TOCTOU where two concurrent resumes both passed a read-lock check
         // before either spawned task registered.
         let reserved_state = Arc::clone(&thread.state);
+        let mut previous_join = None;
         {
             let mut guard = self.threads.write().await;
-            if guard.contains_key(thread_id) {
-                return Err(AgentError::ThreadBusy(thread_id.to_owned()));
+            if let Some(entry) = guard.get_mut(thread_id) {
+                if !is_terminal_status(entry.state().status()) {
+                    // A genuinely live/reserved run owns the slot.
+                    return Err(AgentError::ThreadBusy(thread_id.to_owned()));
+                }
+                // A terminal Live entry is a dead husk waiting for task-exit
+                // cleanup: `run()` reached its epilogue and the per-thread
+                // exec-mode/plan teardown already happened before the state
+                // went terminal, so replacing it cannot race a stale clear.
+                // The old task's identity-guarded remove then no-ops on this
+                // new entry.
+                if let ThreadEntry::Live { join, .. } = entry {
+                    previous_join = join.take();
+                }
             }
             guard.insert(
                 thread_id.to_owned(),
                 ThreadEntry::Reserved { state: Arc::clone(&reserved_state) },
+            );
+        }
+        // Join the replaced run's task (bounded): a resume that read the
+        // rollout while the old epilogue was still emitting its final events
+        // would miss the last turn and mis-attribute the new input's turn
+        // index. Waiting for task exit closes that window; a stuck epilogue
+        // must not block resume forever, hence the grace.
+        if let Some(mut join) = previous_join
+            && tokio::time::timeout(SHUTDOWN_GRACE, &mut join).await.is_err()
+        {
+            warn!(
+                thread_id,
+                grace_ms = SHUTDOWN_GRACE.as_millis() as u64,
+                "resume: timed out joining the previous run's epilogue; continuing"
             );
         }
 
@@ -698,7 +725,17 @@ impl AgentControl {
             return Ok(SendOutcome::NeedsResume);
         };
         match entry {
-            ThreadEntry::Live { pending_input, .. } => {
+            ThreadEntry::Live { pending_input, state, .. } => {
+                // A run whose state machine already reached a terminal status
+                // is in its epilogue (the task removes the registry entry only
+                // after `run()` returns). Nothing will ever drain a queue
+                // pushed here — the leftover-input drain already ran — so the
+                // honest answer is NeedsResume: the caller re-runs the resume
+                // flow, which replaces the dead entry. Without this the
+                // message was silently lost in the run-return → remove window.
+                if is_terminal_status(state.status()) {
+                    return Ok(SendOutcome::NeedsResume);
+                }
                 let mut queue =
                     pending_input.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                 if queue.len() >= MAX_QUEUED_INPUT {
@@ -877,6 +914,28 @@ impl AgentControl {
         self.plan_store.clear(thread_id).await;
     }
 
+    /// Test seam: install a terminal Live registry entry that mimics the
+    /// post-run → pre-remove window (the task removes the entry only after
+    /// `run()` returns), so crate tests can exercise the terminal-entry
+    /// branches of `queue_input` / `resume_thread` deterministically.
+    #[cfg(test)]
+    pub(crate) async fn install_dead_entry_for_test(&self, thread_id: &str) {
+        let (state, status_rx) = ThreadStateMachine::new();
+        let _ = state.transition(ThreadStatus::Running);
+        let _ = state.transition(ThreadStatus::Completed);
+        self.threads.write().await.insert(
+            thread_id.to_owned(),
+            ThreadEntry::Live {
+                status_rx,
+                state,
+                join: None,
+                abort: tokio::spawn(async {}).abort_handle(),
+                cancellation: CancellationToken::new(),
+                pending_input: Arc::new(std::sync::Mutex::new(VecDeque::new())),
+            },
+        );
+    }
+
     /// The shared exec-policy handle. Hosts use it to snapshot permission state
     /// for context rendering (e.g. the `<permissions_instructions>` fragment and
     /// progressive tool exposure) without re-deriving the engine.
@@ -968,13 +1027,24 @@ impl AgentControl {
         // The task removes itself from the registry when it finishes so that
         // `active_thread_count` stays accurate. The admission permit is moved
         // into the task and dropped on completion or abort.
+        let run_state = Arc::clone(&state);
         let join_handle = tokio::spawn(async move {
             let _permit = permit;
             let result = thread.run(messages, runtime, starting_turn_index, emit_new).await;
             if let Err(ref e) = result {
                 warn!(thread_id = %id_cleanup, error = %e, "agent thread finished with error");
             }
-            threads_cleanup.write().await.remove(&id_cleanup);
+            // Remove OUR entry only: a resume may legitimately replace a
+            // terminal Live entry while this task is still in its epilogue,
+            // and an unconditional remove could drop the fresh one.
+            {
+                let mut guard = threads_cleanup.write().await;
+                if let Some(entry) = guard.get(&id_cleanup)
+                    && Arc::ptr_eq(entry.state(), &run_state)
+                {
+                    guard.remove(&id_cleanup);
+                }
+            }
             result
         });
 
