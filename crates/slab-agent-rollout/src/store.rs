@@ -607,6 +607,23 @@ pub(crate) fn rewrite_rollout_file(path: &std::path::Path, lines: &[RolloutLine]
     Ok(())
 }
 
+/// The first turn affiliation present in the file (`TurnContext` or
+/// `Compacted`), or 0 when none. Read projections seed their running turn from
+/// this so a `TurnItem` written BEFORE any TurnContext line (write-order fluke
+/// on resumed sessions) attributes to the session's actual first turn instead
+/// of collapsing to turn 0 — on a session whose turns start at N, turn 0
+/// sorted those fragments to the very top of the timeline.
+fn first_turn_affiliation(lines: &[RolloutLine]) -> u32 {
+    lines
+        .iter()
+        .find_map(|line| match &line.item {
+            RolloutItem::TurnContext(tc) => Some(tc.turn_index()),
+            RolloutItem::Compacted(payload) => Some(payload.turn_index),
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
 /// Decide whether a line should survive `truncate_from_turn(from_turn)`.
 ///
 /// `running_turn` is updated in place as `TurnContext` / `Compacted` lines are
@@ -695,7 +712,7 @@ impl RolloutStore for RolloutFileStore {
         let _ = self.flush(thread_id).await;
         let lines = read_rollout_lines(&self.resolve_path(thread_id));
         let mut out = Vec::new();
-        let mut current_turn: u32 = 0;
+        let mut current_turn: u32 = first_turn_affiliation(&lines);
         // `seq` orders items within (thread_id, turn_index) — per-turn, matching
         // the SQL store contract. Reset to 0 whenever a TurnContext line advances
         // `current_turn` so seq restarts at 0 for each turn (F5).
@@ -732,7 +749,7 @@ impl RolloutStore for RolloutFileStore {
         let _ = self.flush(thread_id).await;
         let lines = read_rollout_lines(&self.resolve_path(thread_id));
         let mut out: Vec<TurnTimelineEntry> = Vec::new();
-        let mut current_turn: u32 = 0;
+        let mut current_turn: u32 = first_turn_affiliation(&lines);
         // Item `seq` ordering within a turn (mirrors `read_turn_items`).
         let mut seq = 0u32;
         // Message record counter for synthetic ids (mirrors `replay_messages`).
@@ -2733,6 +2750,40 @@ mod tests {
             id: None,
             created_at: None,
         })
+    }
+
+    #[tokio::test]
+    async fn orphan_turn_item_before_any_turn_context_attributes_to_first_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+        s.create_session(default_meta("t"));
+
+        // A resumed session: the first TurnContext in the file is turn 3, but
+        // a TurnItem line lands before it (write-order fluke). It must
+        // attribute to turn 3, not collapse to turn 0 — on a session whose
+        // turns start at 3, turn 0 sorts the fragment to the very top of the
+        // timeline.
+        s.append(
+            "t",
+            RolloutItem::TurnItem(TurnItem::AgentMessage {
+                id: "orphan".to_owned(),
+                text: "fragment".to_owned(),
+            }),
+        )
+        .await
+        .unwrap();
+        s.append("t", turn_state(3, vec![user_msg("resumed input")])).await.unwrap();
+
+        let items = s.read_turn_items("t").await;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "orphan");
+        assert_eq!(items[0].turn_index, 3, "orphan items join the first real turn, not turn 0");
+
+        let timeline = s.read_turn_timeline("t").await;
+        let TurnTimelineEntry::Item(orphan) = &timeline[0] else {
+            panic!("expected an item entry");
+        };
+        assert_eq!(orphan.turn_index, 3);
     }
 
     #[tokio::test]

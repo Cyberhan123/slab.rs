@@ -702,9 +702,35 @@ pub(crate) fn replay_messages(thread_id: &str, lines: &[RolloutLine]) -> Vec<Thr
                 ..
             }) => {
                 if !input_messages.is_empty() {
+                    // Snapshot semantics: the TurnState carries the FULL
+                    // conversation the model was sent, so it replaces the
+                    // baseline — but a message that is already present in the
+                    // replaced baseline keeps its ORIGINAL
+                    // (turn_index, created_at, id). Restamping everything to
+                    // the current turn collapsed the whole history into the
+                    // newest turn on (turn_index, created_at)-ordered reads
+                    // and dropped the carried ids (the A2 transcript
+                    // scramble). Matching is in order by content (the
+                    // snapshot itself carries no ids) with an advancing
+                    // cursor, so duplicated messages line up with their
+                    // original occurrences and the aligned-prefix case stays
+                    // O(n).
+                    let prior = std::mem::take(&mut baseline);
+                    let mut cursor = 0usize;
                     baseline = input_messages
                         .iter()
-                        .map(|m| (m.clone(), *turn_index, line.timestamp.clone(), None))
+                        .map(|message| {
+                            if let Some(offset) =
+                                prior[cursor..].iter().position(|(prev, ..)| prev == message)
+                            {
+                                let position = cursor + offset;
+                                let (_, kept_turn, kept_stamp, kept_id) = prior[position].clone();
+                                cursor = position + 1;
+                                (message.clone(), kept_turn, kept_stamp, kept_id)
+                            } else {
+                                (message.clone(), *turn_index, line.timestamp.clone(), None)
+                            }
+                        })
                         .collect();
                 }
             }
@@ -935,6 +961,75 @@ mod tests {
             tool_call_id: None,
             tool_calls: vec![],
         }
+    }
+
+    #[test]
+    fn turn_state_snapshot_preserves_prior_message_stamps() {
+        // Two-turn resumed history: turn 0 seeds the conversation, then turn 5
+        // writes a FULL TurnState snapshot (the resume path). Replaying must
+        // keep the original (turn_index, created_at, id) for messages already
+        // present and stamp only the NEW input with turn 5 — the old code
+        // restamped the entire history onto turn 5 and dropped carried ids,
+        // scrambling (turn_index, created_at)-ordered projections.
+        let lines = vec![
+            RolloutLine {
+                timestamp: "2026-01-01T00:00:01Z".to_owned(),
+                item: RolloutItem::TurnContext(TurnContextPayload::TurnState {
+                    turn_index: 0,
+                    status: "completed".to_owned(),
+                    input_messages: vec![user_msg("first")],
+                    tool_specs_json: None,
+                    llm_response_json: None,
+                    error: None,
+                    completed_at: None,
+                    started_at: None,
+                    input_messages_raw: None,
+                }),
+            },
+            RolloutLine {
+                timestamp: "2026-01-01T00:00:02Z".to_owned(),
+                item: RolloutItem::TurnContext(TurnContextPayload::MessageAppend {
+                    turn_index: 0,
+                    message: user_msg("tool result"),
+                    id: Some("m-tool".to_owned()),
+                    created_at: Some("2026-01-01T00:00:02Z".to_owned()),
+                }),
+            },
+            RolloutLine {
+                timestamp: "2026-01-01T00:10:00Z".to_owned(),
+                item: RolloutItem::TurnContext(TurnContextPayload::TurnState {
+                    turn_index: 5,
+                    status: "running".to_owned(),
+                    input_messages: vec![
+                        user_msg("first"),
+                        user_msg("tool result"),
+                        user_msg("second"),
+                    ],
+                    tool_specs_json: None,
+                    llm_response_json: None,
+                    error: None,
+                    completed_at: None,
+                    started_at: None,
+                    input_messages_raw: None,
+                }),
+            },
+        ];
+
+        let records = replay_messages("t-stamps", &lines);
+        assert_eq!(records.len(), 3);
+
+        // Prior messages keep their original turn/stamp (and the carried id).
+        assert_eq!(records[0].message, user_msg("first"));
+        assert_eq!(records[0].turn_index, 0, "original turn must survive the snapshot");
+        assert_eq!(records[0].created_at, "2026-01-01T00:00:01Z");
+        assert_eq!(records[1].id, "m-tool", "carried id must survive the snapshot");
+        assert_eq!(records[1].turn_index, 0);
+        assert_eq!(records[1].created_at, "2026-01-01T00:00:02Z");
+
+        // Only the genuinely new input carries turn 5 + the snapshot's stamp.
+        assert_eq!(records[2].message, user_msg("second"));
+        assert_eq!(records[2].turn_index, 5);
+        assert_eq!(records[2].created_at, "2026-01-01T00:10:00Z");
     }
 
     fn snapshot(id: &str) -> ThreadSnapshot {
