@@ -199,4 +199,146 @@ describe("MessageToolPart", () => {
 
     await expect.element(screen.getByText("search-web")).toBeInTheDocument()
   })
+
+  // ── structured per-tool detail bodies (instead of raw JSON cards) ─────────
+
+  it("renders read_file output as a file view, not the JSON envelope", async () => {
+    const screen = await render(
+      <MessageToolPart
+        {...baseProps({
+          name: "read_file",
+          part: part({
+            type: "tool-read_file",
+            state: "output-available",
+            input: { path: "src/main.rs", start_line: 1 },
+            output: { content: "fn main() {}", total_lines: 1, returned_lines: 1, total_bytes: 13, truncated: false },
+          }),
+        })}
+      />,
+    )
+
+    // The file content renders (via CodeBlock), and the meta line carries the
+    // path — the raw envelope fields never surface.
+    expect(screen.container.textContent).toContain("src/main.rs")
+    expect(screen.container.textContent).toContain("fn main() {}")
+    expect(screen.container.textContent).not.toContain('"total_lines"')
+    expect(screen.container.textContent).not.toContain("Parameters")
+  })
+
+  it("renders list_dir output as an entry listing", async () => {
+    const screen = await render(
+      <MessageToolPart
+        {...baseProps({
+          name: "list_dir",
+          part: part({
+            type: "tool-list_dir",
+            state: "output-available",
+            input: { path: "crates" },
+            output: {
+              entries: [
+                { name: "slab-agent", is_dir: true, size_bytes: 0, modified: 1 },
+                { name: "Cargo.toml", is_dir: false, size_bytes: 2048, modified: 2 },
+              ],
+            },
+          }),
+        })}
+      />,
+    )
+
+    await expect.element(screen.getByTestId("tool-detail-dir")).toBeInTheDocument()
+    expect(screen.container.textContent).toContain("slab-agent")
+    expect(screen.container.textContent).toContain("Cargo.toml")
+    expect(screen.container.textContent).not.toContain('"entries"')
+  })
+
+  it("renders file_glob output as a matched-path list", async () => {
+    const screen = await render(
+      <MessageToolPart
+        {...baseProps({
+          name: "file_glob",
+          part: part({
+            type: "tool-file_glob",
+            state: "output-available",
+            input: { pattern: "**/*.rs" },
+            output: { matches: [{ path: "src/main.rs", kind: "file" }], total: 1, truncated: false },
+          }),
+        })}
+      />,
+    )
+
+    await expect.element(screen.getByTestId("tool-detail-glob")).toBeInTheDocument()
+    expect(screen.container.textContent).toContain("src/main.rs")
+    expect(screen.container.textContent).toContain("1 match")
+    expect(screen.container.textContent).not.toContain('"matches"')
+  })
+
+  it("renders grep output as a match list with context", async () => {
+    const screen = await render(
+      <MessageToolPart
+        {...baseProps({
+          name: "grep",
+          part: part({
+            type: "tool-grep",
+            state: "output-available",
+            input: { pattern: "needle" },
+            output: {
+              matches: [
+                {
+                  file: "src/lib.rs",
+                  line: 3,
+                  text: "let needle = 1;",
+                  before_context: [{ line: 2, text: "fn f() {" }],
+                },
+              ],
+              total: 1,
+              truncated: false,
+            },
+          }),
+        })}
+      />,
+    )
+
+    await expect.element(screen.getByTestId("tool-detail-grep")).toBeInTheDocument()
+    expect(screen.container.textContent).toContain("src/lib.rs:3")
+    expect(screen.container.textContent).toContain("let needle = 1;")
+    expect(screen.container.textContent).toContain("fn f() {")
+  })
+
+  it("falls back to the JSON parameter/result cards for unknown tools", async () => {
+    const screen = await render(
+      <MessageToolPart
+        {...baseProps({
+          name: "some_mcp_tool",
+          part: part({
+            type: "tool-some_mcp_tool",
+            state: "output-available",
+            input: { a: 1 },
+            output: { ok: true },
+          }),
+        })}
+      />,
+    )
+
+    expect(screen.container.textContent).toContain("Parameters")
+    expect(screen.container.textContent).toContain("Result")
+  })
+
+  it("shows the tool error under a structured body when the call failed", async () => {
+    const screen = await render(
+      <MessageToolPart
+        {...baseProps({
+          name: "read_file",
+          part: part({
+            type: "tool-read_file",
+            state: "output-error",
+            input: { path: "missing.txt" },
+            errorText: "tool execution error: [io.not_found] failed to read file",
+          }),
+        })}
+      />,
+    )
+
+    expect(screen.container.textContent).toContain("io.not_found")
+    expect(screen.container.textContent).not.toContain("Parameters")
+  })
 })

@@ -826,6 +826,27 @@ export class ConversationController {
     this.commit()
   }
 
+  /**
+   * Flip still-pending approvals to `denied` when the run terminates.
+   *
+   * The server resolves pending approvals as Rejected BEFORE interrupting or
+   * shutting down a thread (the waiting `request_approval` futures are dropped
+   * by the cancellation), but that resolution is never pushed to the client —
+   * without this, a Stop during a pending approval leaves the banner card
+   * forever "pending", and every later click fails delivery (`delivered:
+   * false`) and reverts to pending: the menu is stuck. Marking them denied
+   * hides the card (only pending entries render) and shows the truthful
+   * Denied symbol on the in-stream tool row.
+   */
+  private denyStalePendingApprovals(): void {
+    if (!Array.from(this.approvals.values()).some((a) => a.status === "pending")) return
+    const next = new Map<string, ApprovalRequest>()
+    for (const [id, req] of this.approvals) {
+      next.set(id, req.status === "pending" ? { ...req, status: "denied" } : req)
+    }
+    this.approvals = next
+  }
+
   /** Rebuild the snapshot (deriving the read-only projections) and notify. */
   private commit(): void {
     const approvals = Array.from(this.approvals.values())
@@ -1053,6 +1074,7 @@ export class ConversationController {
         // The run ended; anything still queued client-side was drained into
         // the run or persisted server-side (steering leftovers land in the
         // rollout history).
+        this.denyStalePendingApprovals()
         this.clearQueuedAndResync()
       }
       this.commit()
@@ -1067,6 +1089,7 @@ export class ConversationController {
       this.turnUsage = params.usage ?? null
       const reason = typeof params.reason === "string" ? params.reason : null
       this.abortReason = reason && reason !== "completed" ? reason : null
+      this.denyStalePendingApprovals()
       this.clearQueuedAndResync()
       this.commit()
       return

@@ -23,6 +23,8 @@ import {
 
 interface TerminalContextValue {
   output: string
+  /** Finalized stderr, rendered (in error color) after the stdout body — a real terminal mixes both into one console, not a side panel. */
+  stderrText: string
   isStreaming: boolean
   autoScroll: boolean
   onClear?: () => void
@@ -32,6 +34,7 @@ const TerminalContext = createContext<TerminalContextValue>({
   autoScroll: true,
   isStreaming: false,
   output: "",
+  stderrText: "",
 })
 
 export type TerminalHeaderProps = HTMLAttributes<HTMLDivElement>
@@ -121,15 +124,15 @@ export const TerminalClearButton = ({ children, className, ...props }: TerminalC
 export type TerminalContentProps = HTMLAttributes<HTMLDivElement>
 
 export const TerminalContent = ({ className, children, ...props }: TerminalContentProps) => {
-  const { output, isStreaming, autoScroll } = useContext(TerminalContext)
+  const { output, stderrText, isStreaming, autoScroll } = useContext(TerminalContext)
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (autoScroll && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight
     }
-  }, [output, autoScroll])
-  
+  }, [output, stderrText, autoScroll])
+
   return (
     <div
       className={cn("max-h-96 overflow-auto p-4 font-mono text-sm leading-relaxed", className)}
@@ -139,6 +142,13 @@ export const TerminalContent = ({ className, children, ...props }: TerminalConte
       {children ?? (
         <pre className="break-words whitespace-pre-wrap">
           <Ansi>{output}</Ansi>
+          {stderrText ? (
+            <span data-testid="terminal-stderr" className="text-red-400">
+              {output && !output.endsWith("\n") ? "\n" : ""}
+              {stderrText}
+              {stderrText.endsWith("\n") ? "" : "\n"}
+            </span>
+          ) : null}
           {isStreaming ? <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-zinc-100" /> : null}
         </pre>
       )}
@@ -148,6 +158,8 @@ export const TerminalContent = ({ className, children, ...props }: TerminalConte
 
 export type TerminalProps = HTMLAttributes<HTMLDivElement> & {
   output: string
+  /** Finalized stderr shown inside the terminal body (error color), after stdout. */
+  stderrText?: string
   isStreaming?: boolean
   autoScroll?: boolean
   onClear?: () => void
@@ -155,6 +167,7 @@ export type TerminalProps = HTMLAttributes<HTMLDivElement> & {
 
 export const Terminal = ({
   output,
+  stderrText = "",
   isStreaming = false,
   autoScroll = true,
   onClear,
@@ -163,8 +176,8 @@ export const Terminal = ({
   ...props
 }: TerminalProps) => {
   const contextValue = useMemo(
-    () => ({ autoScroll, isStreaming, onClear, output }),
-    [autoScroll, isStreaming, onClear, output],
+    () => ({ autoScroll, isStreaming, onClear, output, stderrText }),
+    [autoScroll, isStreaming, onClear, output, stderrText],
   )
 
   return (

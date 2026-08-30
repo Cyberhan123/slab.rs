@@ -163,12 +163,17 @@ fn thread_from_snapshot_with_id(id: &str, snapshot: &ThreadSnapshot) -> Thread {
 /// results → a `CommandExecution` surfacing the rendered output.
 /// `system` / `developer` roles (the injected init-context batch) are
 /// LLM-visible only and NEVER render in the restored UI history — returning
-/// empty keeps them out of the conversation timeline.
+/// empty keeps them out of the conversation timeline. The same holds for the
+/// user-ROLE injected fragments (`slab_agents_md` etc.): they carry a
+/// fragment `name` tag, while real user prompts never do (see
+/// `latest_user_input`), so `name`-tagged user messages are dropped too —
+/// otherwise the workspace `AGENTS.md` body renders as a user bubble.
 fn turn_items_for_message(message: &ThreadMessageRecord) -> Vec<TurnItem> {
     let id = message.id.clone();
     let record = &message.message;
     match record.role.as_str() {
         "system" | "developer" => Vec::new(),
+        "user" if record.name.is_some() => Vec::new(),
         "user" => vec![TurnItem::UserMessage {
             id,
             content: vec![UserMessageContent::Text { text: record.content.rendered_text() }],
@@ -379,9 +384,11 @@ fn thread_from_timeline(
 }
 
 /// Build a `UserMessage` item from a persisted user-role message (the user
-/// prompt prefix for a full-fidelity turn).
+/// prompt prefix for a full-fidelity turn). Fragment-tagged user messages
+/// (`slab_agents_md` and the other injected init-context fragments, which ride
+/// the user role) return `None` — they are LLM-visible context, not user turns.
 fn user_message_item(message: &ThreadMessageRecord) -> Option<TurnItem> {
-    if message.message.role != "user" {
+    if message.message.role != "user" || message.message.name.is_some() {
         return None;
     }
     Some(TurnItem::UserMessage {
@@ -814,6 +821,20 @@ mod tests {
         }
     }
 
+    /// `record` + a fragment `name` tag (the init-context injection identity,
+    /// e.g. `slab_agents_md` for the workspace AGENTS.md body).
+    fn tagged_record(
+        id: &str,
+        turn: u32,
+        role: &str,
+        name: &str,
+        text: &str,
+    ) -> ThreadMessageRecord {
+        let mut record = record(id, turn, role, text, "2024-01-01T00:00:00Z");
+        record.message.name = Some(name.to_owned());
+        record
+    }
+
     fn snapshot() -> ThreadSnapshot {
         ThreadSnapshot {
             id: "t1".to_owned(),
@@ -1073,5 +1094,97 @@ mod tests {
         // system/developer messages are LLM-visible only — never UI items.
         assert!(turn_items_for_message(&record("s1", 0, "system", "persona", "t")).is_empty());
         assert!(turn_items_for_message(&record("d1", 0, "developer", "<skills>", "t")).is_empty());
+    }
+
+    // Regression: the `slab_agents_md` init-context fragment rides the USER
+    // role (with a fragment name tag), so it leaked through the user-message
+    // projection and the workspace AGENTS.md body rendered as a user bubble.
+    #[test]
+    fn tagged_user_fragments_never_render_as_user_messages() {
+        // Snapshot-less turn synthesis path.
+        assert!(
+            turn_items_for_message(&tagged_record(
+                "g1",
+                0,
+                "user",
+                "slab_agents_md",
+                "<INSTRUCTIONS>…AGENTS.md body…</INSTRUCTIONS>"
+            ))
+            .is_empty()
+        );
+        // Full-fidelity turn user-prompt prefix path.
+        assert!(
+            user_message_item(&tagged_record(
+                "g2",
+                0,
+                "user",
+                "slab_agents_md",
+                "<INSTRUCTIONS>…</INSTRUCTIONS>"
+            ))
+            .is_none()
+        );
+        // Untagged user messages still render.
+        assert!(user_message_item(&record("u1", 0, "user", "real prompt", "t")).is_some());
+    }
+
+    #[test]
+    fn thread_from_timeline_drops_tagged_agents_md_from_user_prompts() {
+        // Turn 0 carries the injected init batch (tagged user fragment) ahead
+        // of the real prompt, plus a persisted snapshot so the full-fidelity
+        // path (user_message_item) runs.
+        let mut timeline: Vec<slab_app_core::domain::services::TurnTimelineEntry> = vec![
+            slab_app_core::domain::services::TurnTimelineEntry::Message(tagged_record(
+                "g1",
+                0,
+                "user",
+                "slab_agents_md",
+                "<INSTRUCTIONS># AGENTS.md instructions…</INSTRUCTIONS>",
+            )),
+            slab_app_core::domain::services::TurnTimelineEntry::Message(record(
+                "u1",
+                0,
+                "user",
+                "hello",
+                "2024-01-01T00:00:01Z",
+            )),
+            slab_app_core::domain::services::TurnTimelineEntry::Item(TurnItemRecord {
+                id: "a1".to_owned(),
+                thread_id: "t1".to_owned(),
+                turn_index: 0,
+                seq: 0,
+                item_json: serde_json::to_string(&TurnItem::AgentMessage {
+                    id: "a1".to_owned(),
+                    text: "hi".to_owned(),
+                })
+                .unwrap(),
+                created_at: "2024-01-01T00:00:02Z".to_owned(),
+            }),
+        ];
+        // Snapshot-less turn 1: the tagged fragment must vanish there too.
+        timeline.push(slab_app_core::domain::services::TurnTimelineEntry::Message(tagged_record(
+            "g2",
+            1,
+            "user",
+            "slab_agents_md",
+            "<INSTRUCTIONS>…</INSTRUCTIONS>",
+        )));
+        timeline.push(slab_app_core::domain::services::TurnTimelineEntry::Message(record(
+            "u2",
+            1,
+            "user",
+            "again",
+            "2024-01-01T00:00:03Z",
+        )));
+
+        let thread = thread_from_timeline("hthread-1", &snapshot(), &[], &timeline);
+        assert_eq!(thread.turns.len(), 2);
+        // Turn 0: only the real prompt + the item — no AGENTS.md bubble.
+        assert_eq!(thread.turns[0].items.len(), 2);
+        assert!(matches!(&thread.turns[0].items[0], TurnItem::UserMessage { content, .. }
+            if matches!(&content[0], UserMessageContent::Text { text } if text == "hello")));
+        // Turn 1 (synthesized): same.
+        assert_eq!(thread.turns[1].items.len(), 1);
+        assert!(matches!(&thread.turns[1].items[0], TurnItem::UserMessage { content, .. }
+            if matches!(&content[0], UserMessageContent::Text { text } if text == "again")));
     }
 }

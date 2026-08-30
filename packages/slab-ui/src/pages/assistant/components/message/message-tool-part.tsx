@@ -6,6 +6,7 @@ import { isValidElement, type ComponentProps, type ReactNode } from "react"
 import { CodeBlock } from "./code-block"
 import { useMessageInteraction, type ApprovalStatus } from "../message-interaction-context"
 import { summarizeToolCall } from "../../lib/tool-summaries"
+import { renderToolDetailBody } from "./message-tool-detail"
 import { ToolRow, ToolRowContent, ToolRowTrigger, toolRowIcon } from "./message-tool-row"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
@@ -109,18 +110,30 @@ const ToolOutput = ({
       <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
         {errorText ? "Error" : "Result"}
       </h4>
-      <div
-        className={cn(
-          "overflow-x-auto rounded-md text-xs [&_table]:w-full",
-          errorText ? "bg-destructive/10 text-destructive" : "bg-muted/50 text-foreground",
-        )}
-      >
-        {errorText ? <div className="whitespace-pre-wrap p-3">{errorText}</div> : null}
-        {OutputNode}
-      </div>
+      {errorText ? <ToolErrorText errorText={errorText} /> : null}
+      {hasOutput ? (
+        <div className="overflow-x-auto rounded-md bg-muted/50 text-xs text-foreground [&_table]:w-full">
+          {OutputNode}
+        </div>
+      ) : null}
     </div>
   )
 }
+
+/**
+ * Standalone error block (heading + red card) — the `Error` section of
+ * {@link ToolOutput}, also rendered on its own under a structured per-tool
+ * body or for a failed call (no Parameters card: the collapsed row already
+ * summarizes the arguments).
+ */
+export const ToolErrorText = ({ errorText }: { errorText: string }) => (
+  <div className="space-y-2">
+    <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">Error</h4>
+    <div className="overflow-x-auto rounded-md bg-destructive/10 text-xs text-destructive">
+      <div className="whitespace-pre-wrap p-3">{errorText}</div>
+    </div>
+  </div>
+)
 
 /** Whether a tool row is still in flight (running / awaiting a decision). */
 export function isToolActive(state: ToolState): boolean {
@@ -160,6 +173,9 @@ function MessageToolPart({
   const derivedName = (name ?? p.toolName ?? fromType) || "tool"
 
   const summary = summarizeToolCall(derivedName, p.input)
+  // Structured per-tool body when one exists (read_file / list_dir / glob /
+  // grep …); otherwise the generic Parameters/Result JSON cards.
+  const detail = renderToolDetailBody(derivedName, p.input, p.output)
 
   return (
     <ToolRow defaultOpen={isApprovalPending(state)}>
@@ -171,8 +187,21 @@ function MessageToolPart({
         title={p.errorText}
       />
       <ToolRowContent>
-        <ToolInput input={p.input} />
-        <ToolOutput output={p.output} errorText={p.errorText} />
+        {detail ? (
+          <>
+            {detail}
+            {p.errorText ? <ToolErrorText errorText={p.errorText} /> : null}
+          </>
+        ) : p.errorText ? (
+          // A failed call shows the error, not a Parameters card — the
+          // collapsed trigger line already summarizes the arguments.
+          <ToolErrorText errorText={p.errorText} />
+        ) : (
+          <>
+            <ToolInput input={p.input} />
+            <ToolOutput output={p.output} errorText={p.errorText} />
+          </>
+        )}
       </ToolRowContent>
     </ToolRow>
   )

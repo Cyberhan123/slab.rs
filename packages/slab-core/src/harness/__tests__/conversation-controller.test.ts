@@ -278,6 +278,43 @@ describe("ConversationController", () => {
     expect(controller.getState().approvals).toHaveLength(1)
   })
 
+  // Regression: a Stop during a pending approval used to leave the banner card
+  // stuck — the server resolves pending approvals as Rejected on interrupt but
+  // never pushes that, so the card stayed "pending" and every click failed
+  // delivery forever.
+  it("denies still-pending approvals when the thread reaches a terminal status", async () => {
+    const controller = makeController("s1")
+    controller.start()
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(controller.getState().restoredThreadId).toBe("hthread-1"))
+    FakeWebSocket.last!.simMessage(
+      notification("item/commandExecution/requestApproval", {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "call-1",
+        command: "echo hi",
+        cwd: "/tmp",
+      }),
+    )
+    await flush()
+    await vi.waitFor(() => expect(controller.getState().approvals).toHaveLength(1))
+
+    FakeWebSocket.last!.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "interrupted",
+      }),
+    )
+    await flush()
+    // The banner only renders pending entries → the card is gone; the status
+    // map records the truthful denied outcome for the in-stream tool row.
+    expect(controller.getState().approvals).toHaveLength(0)
+    expect(controller.getState().approvalStatusByItemId.get("call-1")).toBe("denied")
+  })
+
   it("clears plan mode when a plan approval is approved", async () => {
     const controller = makeController("s1")
     controller.start()

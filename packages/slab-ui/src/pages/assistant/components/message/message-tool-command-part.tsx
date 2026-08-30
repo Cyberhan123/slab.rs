@@ -59,7 +59,9 @@ export function parseCommandExecutionOutput(raw: string): CommandExecutionOutput
  *   - `TerminalContent` shows only the command output (live while running, the
  *     finalized aggregated output once complete). A finalized
  *     `SandboxedOutput` JSON result is split into stdout (terminal body) and
- *     stderr (separate block), instead of dumping the raw JSON envelope.
+ *     stderr (rendered in the SAME terminal, in the error color, after
+ *     stdout), instead of dumping the raw JSON envelope or a separate stderr
+ *     block.
  *
  * Registered under `messagePartComponents.tools["commandExecution"]` so the
  * parts engine routes command tools here ahead of the generic `tool` renderer
@@ -103,8 +105,15 @@ function MessageToolCommandPart({
       />
       <ToolRowContent>
         {/* `output` feeds both the TerminalContent body and the copy button, so
-            it carries only the command output — the input lives in the trigger. */}
-        <Terminal output={body} isStreaming={active}>
+            it carries only the command output — the input lives in the trigger.
+            Stderr renders INSIDE the terminal (error color, after stdout): a
+            failed command's diagnostics belong in the console it ran in, not a
+            separate block. */}
+        <Terminal
+          output={body}
+          stderrText={active ? undefined : finalizedStderr || undefined}
+          isStreaming={active}
+        >
           <TerminalHeader>
             <TerminalTitle title={cwd || undefined}>
               {command ? `$ ${command}` : "Terminal"}
@@ -118,14 +127,6 @@ function MessageToolCommandPart({
           </TerminalHeader>
           <TerminalContent />
         </Terminal>
-        {finalizedStderr ? (
-          <pre
-            data-testid="assistant-command-stderr"
-            className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/60 p-2 font-mono text-caption text-destructive"
-          >
-            {finalizedStderr}
-          </pre>
-        ) : null}
       </ToolRowContent>
     </ToolRow>
   )

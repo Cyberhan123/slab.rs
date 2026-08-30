@@ -12,12 +12,26 @@ import MessageToolCommandPart from "../message-tool-command-part"
 // Stub the heavy leaf deps so the real tool-card logic (deriveState/isToolActive)
 // runs without pulling Radix collapsible / ansi-to-react / Mantine into jsdom.
 // The Terminal mock mirrors the composed layout: the parent renders `output`
-// into a content surface, while TerminalHeader/TerminalTitle surface the input.
+// and `stderrText` into a content surface, while TerminalHeader/TerminalTitle
+// surface the input.
 vi.mock("../terminal", () => ({
-  Terminal: ({ output, isStreaming, children }: { output: string; isStreaming?: boolean; children?: ReactNode }) => (
+  Terminal: ({
+    output,
+    stderrText,
+    isStreaming,
+    children,
+  }: {
+    output: string
+    stderrText?: string
+    isStreaming?: boolean
+    children?: ReactNode
+  }) => (
     <div data-testid="terminal" data-streaming={isStreaming ? "true" : "false"}>
       {children}
-      <pre data-testid="terminal-content">{output}</pre>
+      <pre data-testid="terminal-content">
+        {output}
+        {stderrText ? <span data-testid="terminal-stderr">{stderrText}</span> : null}
+      </pre>
     </div>
   ),
   TerminalHeader: ({ children }: { children?: ReactNode }) => (
@@ -156,11 +170,11 @@ describe("MessageToolCommandPart", () => {
     expect(content).toContain("cyberhan")
     expect(content).not.toContain('"stdout"')
     expect(content).not.toContain("exit_code")
-    // Empty stderr renders no stderr block.
-    await expect.element(screen.getByTestId("assistant-command-stderr")).not.toBeInTheDocument()
+    // Empty stderr renders no stderr span.
+    await expect.element(screen.getByTestId("terminal-stderr")).not.toBeInTheDocument()
   })
 
-  it("renders stderr separately and parses the JSON on failed commands", async () => {
+  it("renders failed-command stderr INSIDE the terminal (no separate block)", async () => {
     const screen = await renderPart(
       {
         type: "tool-output-error",
@@ -173,9 +187,12 @@ describe("MessageToolCommandPart", () => {
     const content = screen.getByTestId("terminal-content").element().textContent ?? ""
     expect(content).toContain("compiling")
     expect(content).not.toContain("exit_code")
-    expect(screen.getByTestId("assistant-command-stderr").element().textContent).toContain(
+    // Stderr lives in the same terminal surface as stdout, not a standalone
+    // error card.
+    expect(screen.getByTestId("terminal-stderr").element().textContent).toContain(
       "error[E0308]: mismatch",
     )
+    expect(screen.container.querySelector('[data-testid="assistant-command-stderr"]')).toBeNull()
     expectToolState(screen, "output-error")
   })
 
@@ -190,7 +207,7 @@ describe("MessageToolCommandPart", () => {
       {},
     )
     expect(screen.getByTestId("terminal-content").element().textContent).toContain("plain text result")
-    await expect.element(screen.getByTestId("assistant-command-stderr")).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId("terminal-stderr")).not.toBeInTheDocument()
   })
 
   it("does not crash when toolCallId is empty and renders no approval lookup", async () => {

@@ -56,7 +56,7 @@ export function ToolRow({ className, defaultOpen = false, ...props }: ToolRowPro
     setOpen(true)
   }
   return (
-    <Collapsible className={cn("group not-prose mb-0.5", className)} open={open} onOpenChange={setOpen} {...props} />
+    <Collapsible className={cn("group not-prose mb-1.5", className)} open={open} onOpenChange={setOpen} {...props} />
   )
 }
 
@@ -119,7 +119,10 @@ export const ToolRowTrigger = memo(
   ({ className, icon, label, detail, state, title, ...props }: ToolRowTriggerProps) => {
     // "Thinking"-style shimmer while the call is in flight (running or
     // awaiting a decision) — the same live indicator the reasoning trigger
-    // uses, so an executing tool never reads as a frozen row.
+    // uses, so an executing tool never reads as a frozen row. The shimmer
+    // spans the WHOLE collapsed line (label + detail), not just the label:
+    // a partial sweep reads as if only the tool name is live while the
+    // argument (the part the user watches) looks frozen.
     const active =
       state === "input-available" ||
       state === "input-streaming" ||
@@ -127,28 +130,28 @@ export const ToolRowTrigger = memo(
     return (
       <CollapsibleTrigger
         className={cn(
-          "flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
+          "flex w-full items-center gap-2 py-0.5 text-muted-foreground text-sm transition-colors hover:text-foreground",
           className,
         )}
         title={title}
         {...props}
       >
         {icon ?? <WrenchIcon className="size-4 shrink-0" />}
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="shrink-0 font-medium">
-            {active ? (
-              <Shimmer as="span">{detail ? `${label}:` : label}</Shimmer>
-            ) : (
-              <>
-                {label}
-                {detail ? ":" : ""}
-              </>
-            )}
+        {active ? (
+          <Shimmer as="span" className="min-w-0 flex-1 truncate">
+            {detail ? `${label}: ${detail}` : label}
+          </Shimmer>
+        ) : (
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className="shrink-0 font-medium">
+              {label}
+              {detail ? ":" : ""}
+            </span>
+            {detail ? (
+              <span className="truncate font-mono text-xs leading-5">{detail}</span>
+            ) : null}
           </span>
-          {detail ? (
-            <span className="truncate font-mono text-xs leading-5">{detail}</span>
-          ) : null}
-        </span>
+        )}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <ToolStatusSymbol state={state} />
           <ChevronRightIcon className="size-4 shrink-0 group-data-[state=closed]:block group-data-[state=open]:hidden" />
