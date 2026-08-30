@@ -1,6 +1,6 @@
 "use client"
 
-import { useMessageInteraction } from "../message-interaction-context"
+import { useLiveToolOutput, useMessageInteraction } from "../message-interaction-context"
 import { summarizeToolCall } from "../../lib/tool-summaries"
 import { ToolRow, ToolRowContent, ToolRowTrigger, toolRowIcon } from "./message-tool-row"
 import type { MessagePartRenderProps } from "./message-parts"
@@ -46,7 +46,8 @@ function MessageToolFileChangePart({
   if (kind !== "tool") return null
 
   const p = part as ToolPartLike
-  const { approvalStatusByItemId, livePatchByItemId } = useMessageInteraction()
+  const { approvalStatusByItemId } = useMessageInteraction()
+  const { livePatchByItemId } = useLiveToolOutput()
   const approval = toolCallId ? approvalStatusByItemId.get(toolCallId) : undefined
   const state = deriveState(p, approval)
   const active = isToolActive(state)

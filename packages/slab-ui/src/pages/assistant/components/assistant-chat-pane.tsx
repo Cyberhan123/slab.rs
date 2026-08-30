@@ -22,7 +22,10 @@ import {
 import MessageList from "@slab/ui/pages/assistant/components/message-list"
 import { TokenUsageIndicator } from "@slab/ui/pages/assistant/components/token-usage-indicator"
 import Sender from "@slab/ui/pages/assistant/components/sender.tsx"
-import { MessageInteractionContext } from "@slab/ui/pages/assistant/components/message-interaction-context"
+import {
+    LiveToolOutputContext,
+    MessageInteractionContext,
+} from "@slab/ui/pages/assistant/components/message-interaction-context"
 import { resolveCommandDispatch } from "@slab/ui/pages/assistant/lib/assistant-commands"
 import { useWorkspaceConfirmDialog } from "@slab/ui/pages/workspace/hooks/use-workspace-confirm"
 import { useGreeting } from "../hooks/use-greeting"
@@ -196,21 +199,20 @@ export function AssistantChatPane({
         [confirmRollback, onRollbackFromTurn, userMessageTurnIndex],
     )
 
+    // Slow-changing row-level interaction data (approval badges, rollback) is
+    // kept OUT of the streaming context: an output delta then re-renders only
+    // the active tool card instead of every visible row.
     const interactionValue = useMemo(
         () => ({
             approvalStatusByItemId,
-            liveOutputByItemId,
-            livePatchByItemId,
             userMessageTurnIndex,
             rollbackToMessage: handleRollbackMessage,
         }),
-        [
-            approvalStatusByItemId,
-            liveOutputByItemId,
-            livePatchByItemId,
-            userMessageTurnIndex,
-            handleRollbackMessage,
-        ],
+        [approvalStatusByItemId, userMessageTurnIndex, handleRollbackMessage],
+    )
+    const liveToolOutputValue = useMemo(
+        () => ({ liveOutputByItemId, livePatchByItemId }),
+        [liveOutputByItemId, livePatchByItemId],
     )
 
     useEffect(() => {
@@ -283,19 +285,21 @@ export function AssistantChatPane({
                                     </Empty>
                                 ) : (
                                     <>
-                                        <MessageInteractionContext.Provider value={interactionValue}>
-                                            <MessageList
-                                                messages={messages}
-                                                isBusy={isBusy}
-                                                showHistoryMarker={initialMessages.length > 0}
-                                                historyCount={initialMessages.length}
-                                                historyCreatedAt={historyCreatedAt}
-                                                compactionMarkers={compactionMarkers}
-                                                modelLoad={modelLoad}
-                                                sessionLoading={isHistoryLoading}
-                                                queuedTexts={queuedTexts}
-                                            />
-                                        </MessageInteractionContext.Provider>
+                                        <LiveToolOutputContext.Provider value={liveToolOutputValue}>
+                                            <MessageInteractionContext.Provider value={interactionValue}>
+                                                <MessageList
+                                                    messages={messages}
+                                                    isBusy={isBusy}
+                                                    showHistoryMarker={initialMessages.length > 0}
+                                                    historyCount={initialMessages.length}
+                                                    historyCreatedAt={historyCreatedAt}
+                                                    compactionMarkers={compactionMarkers}
+                                                    modelLoad={modelLoad}
+                                                    sessionLoading={isHistoryLoading}
+                                                    queuedTexts={queuedTexts}
+                                                />
+                                            </MessageInteractionContext.Provider>
+                                        </LiveToolOutputContext.Provider>
                                         {rollbackConfirmDialog}
                                     </>
                                 )}

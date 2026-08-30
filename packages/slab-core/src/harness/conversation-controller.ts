@@ -265,6 +265,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/**
+ * Cache for the derived approval-status projection, keyed by the immutable
+ * `approvals` map instance: unrelated commits (thread status, live output, …)
+ * keep the SAME projection identity so React consumers skip re-rendering.
+ */
+const approvalStatusCache = new WeakMap<
+  Map<string, ApprovalRequest>,
+  Map<string, ApprovalStatus>
+>()
+
 const EMPTY_SNAPSHOT: ConversationState = {
   restoredMessages: [],
   restoredThreadId: null,
@@ -388,6 +398,12 @@ export class ConversationController {
   async reconnect(): Promise<void> {
     const generation = ++this.generation
     const isCurrent = () => this.generation === generation
+    // Structural fingerprint of the restored history before this run — the
+    // remount key (restoreVersion) only bumps when the history actually
+    // changed, so a no-op re-read (e.g. a resync whose rollout append already
+    // matched) keeps the virtual list and skips entrance-animation replays.
+    const prevThreadId = this.restoredThreadId
+    const prevMessageIds = this.restoredMessages.map((message) => message.id)
 
     // No session bound: reset the conversation projection (fresh session) and
     // bump the remount key, mirroring the former hook's no-session branch.
@@ -444,7 +460,14 @@ export class ConversationController {
         this.client.currentThreadId = thread.id
         this.client.lastTurnIndex = computeLastTurnIndex(thread)
         if (!isCurrent()) return
-        this.restoredMessages = messages
+        // An identical re-read (same thread, same message-id sequence) keeps
+        // the PRIOR message objects: downstream memoized rows (keyed on
+        // message identity) skip re-rendering and the remount version stays.
+        const identicalReread =
+          this.restoredThreadId === thread.id &&
+          messages.length === prevMessageIds.length &&
+          messages.every((message, index) => message.id === prevMessageIds[index])
+        if (!identicalReread) this.restoredMessages = messages
         this.userMessageTurnIndex = buildUserMessageTurnIndex(thread)
         this.restoredThreadId = thread.id
         this.historyCreatedAt = thread.createdAt
@@ -472,7 +495,13 @@ export class ConversationController {
     } finally {
       if (isCurrent()) {
         this.isHistoryLoading = false
-        this.restoreVersion += 1
+        // Remount only on a structural change (thread swap or a different
+        // message-id sequence); an identical re-read keeps the version.
+        const structurallyChanged =
+          this.restoredThreadId !== prevThreadId ||
+          this.restoredMessages.length !== prevMessageIds.length ||
+          this.restoredMessages.some((message, index) => message.id !== prevMessageIds[index])
+        if (structurallyChanged) this.restoreVersion += 1
         this.commit()
       }
     }
@@ -780,8 +809,18 @@ export class ConversationController {
   /** Rebuild the snapshot (deriving the read-only projections) and notify. */
   private commit(): void {
     const approvals = Array.from(this.approvals.values())
-    const approvalStatusByItemId = new Map<string, ApprovalStatus>()
-    for (const [id, req] of this.approvals) approvalStatusByItemId.set(id, req.status)
+    // The per-item maps (`liveOutput` / `livePatch` / `userMessageTurnIndex`)
+    // are replaced on mutation, never edited in place, so the snapshot can
+    // carry the references directly: unrelated commits keep the identities
+    // stable and React consumers (memoized rows, context providers) skip
+    // re-rendering. The approval-status projection is cached per `approvals`
+    // instance for the same reason.
+    let approvalStatusByItemId = approvalStatusCache.get(this.approvals)
+    if (!approvalStatusByItemId) {
+      approvalStatusByItemId = new Map<string, ApprovalStatus>()
+      for (const [id, req] of this.approvals) approvalStatusByItemId.set(id, req.status)
+      approvalStatusCache.set(this.approvals, approvalStatusByItemId)
+    }
 
     this.snapshot = {
       restoredMessages: this.restoredMessages,
@@ -793,8 +832,8 @@ export class ConversationController {
       actionError: this.actionError,
       approvals: approvals.filter((a) => a.status === "pending"),
       approvalStatusByItemId,
-      liveOutputByItemId: new Map(this.liveOutput),
-      livePatchByItemId: new Map(this.livePatch),
+      liveOutputByItemId: this.liveOutput,
+      livePatchByItemId: this.livePatch,
       modelLoad: this.modelLoad,
       turnUsage: this.turnUsage,
       historyCreatedAt: this.historyCreatedAt,
@@ -803,7 +842,7 @@ export class ConversationController {
       isCompacting: this.isCompacting,
       isForking: this.isForking,
       isRollingBack: this.isRollingBack,
-      userMessageTurnIndex: new Map(this.userMessageTurnIndex),
+      userMessageTurnIndex: this.userMessageTurnIndex,
       planMode: this.planMode,
       threadStatus: this.threadStatus,
       abortReason: this.abortReason,
@@ -816,6 +855,36 @@ export class ConversationController {
   /** The 8-notification projection previously living in the hook's effect. */
   private readonly handleNotification = (notification: JsonRpcNotification): void => {
     const { method } = notification
+
+    // Item finalization: drop the per-item live accumulations (streamed
+    // output / patch lines). The finalized item carries its own content, and
+    // keeping the streamed copies would grow the maps without bound over a
+    // long session (the C6 memory leak). Resolved approval entries stay —
+    // the in-card Approved/Denied badge renders from them.
+    if (method === HARNESS_NOTIFICATION.ITEM_COMPLETED) {
+      const params = (notification.params ?? {}) as {
+        threadId?: string
+        item?: { id?: string }
+      }
+      if (params.threadId !== undefined && params.threadId !== this.client.currentThreadId) {
+        return
+      }
+      const itemId = params.item?.id
+      if (itemId === undefined) return
+      const hadOutput = this.liveOutput.has(itemId)
+      const hadPatch = this.livePatch.has(itemId)
+      if (!hadOutput && !hadPatch) return
+      if (hadOutput) {
+        this.liveOutput = new Map(this.liveOutput)
+        this.liveOutput.delete(itemId)
+      }
+      if (hadPatch) {
+        this.livePatch = new Map(this.livePatch)
+        this.livePatch.delete(itemId)
+      }
+      this.commit()
+      return
+    }
 
     // Accumulate live command output (stdout/stderr deltas) so the terminal
     // card can render output as it streams, before `item/completed` finalizes.

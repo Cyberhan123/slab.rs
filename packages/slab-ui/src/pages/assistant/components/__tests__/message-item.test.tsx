@@ -140,8 +140,6 @@ describe("MessageItem", () => {
       <MessageInteractionContext.Provider
         value={{
           approvalStatusByItemId: new Map(),
-          liveOutputByItemId: new Map(),
-          livePatchByItemId: new Map(),
           userMessageTurnIndex: new Map([["mu1", 2]]),
           rollbackToMessage,
         }}
@@ -162,8 +160,6 @@ describe("MessageItem", () => {
       <MessageInteractionContext.Provider
         value={{
           approvalStatusByItemId: new Map(),
-          liveOutputByItemId: new Map(),
-          livePatchByItemId: new Map(),
           userMessageTurnIndex: new Map([["mu0", 0]]),
           rollbackToMessage: vi.fn(),
         }}
@@ -182,8 +178,6 @@ describe("MessageItem", () => {
       <MessageInteractionContext.Provider
         value={{
           approvalStatusByItemId: new Map(),
-          liveOutputByItemId: new Map(),
-          livePatchByItemId: new Map(),
           userMessageTurnIndex: new Map([["ma1", 2]]),
           rollbackToMessage: vi.fn(),
         }}

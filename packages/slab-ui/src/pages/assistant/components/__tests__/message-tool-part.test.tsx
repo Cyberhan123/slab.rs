@@ -43,7 +43,12 @@ vi.mock("../message/code-block", () => ({
 vi.mock("../message-interaction-context", () => ({
   useMessageInteraction: () => ({
     approvalStatusByItemId: interactionState.approvalStatusByItemId,
+    userMessageTurnIndex: new Map<string, number>(),
+    rollbackToMessage: undefined,
+  }),
+  useLiveToolOutput: () => ({
     liveOutputByItemId: new Map<string, string>(),
+    livePatchByItemId: new Map<string, string[]>(),
   }),
 }))
 

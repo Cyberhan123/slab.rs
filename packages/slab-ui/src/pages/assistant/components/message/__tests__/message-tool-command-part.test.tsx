@@ -2,7 +2,10 @@ import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { render } from "vitest-browser-react"
 
-import { MessageInteractionContext } from "../../message-interaction-context"
+import {
+  LiveToolOutputContext,
+  MessageInteractionContext,
+} from "../../message-interaction-context"
 import type { ToolPartLike } from "../message-tool-part"
 import MessageToolCommandPart from "../message-tool-command-part"
 
@@ -52,26 +55,31 @@ async function renderPart(
   toolCallId = "call-1",
 ) {
   return render(
-    <MessageInteractionContext.Provider
+    <LiveToolOutputContext.Provider
       value={{
-        approvalStatusByItemId: ctx.approval ? new Map([["call-1", ctx.approval]]) : new Map(),
         liveOutputByItemId: ctx.liveOutput ? new Map([["call-1", ctx.liveOutput]]) : new Map(),
         livePatchByItemId: new Map(),
-        userMessageTurnIndex: new Map(),
-        rollbackToMessage: undefined,
       }}
     >
-      <MessageToolCommandPart
-        // The component only reads `part`/`kind`/`toolCallId`; the rest of the
-        // render-props contract is stubbed to satisfy the type.
-        part={part as ToolPartLike}
-        item={{} as never}
-        message={{} as never}
-        index={0}
-        kind="tool"
-        toolCallId={toolCallId}
-      />
-    </MessageInteractionContext.Provider>,
+      <MessageInteractionContext.Provider
+        value={{
+          approvalStatusByItemId: ctx.approval ? new Map([["call-1", ctx.approval]]) : new Map(),
+          userMessageTurnIndex: new Map(),
+          rollbackToMessage: undefined,
+        }}
+      >
+        <MessageToolCommandPart
+          // The component only reads `part`/`kind`/`toolCallId`; the rest of the
+          // render-props contract is stubbed to satisfy the type.
+          part={part as ToolPartLike}
+          item={{} as never}
+          message={{} as never}
+          index={0}
+          kind="tool"
+          toolCallId={toolCallId}
+        />
+      </MessageInteractionContext.Provider>
+    </LiveToolOutputContext.Provider>,
   )
 }
 

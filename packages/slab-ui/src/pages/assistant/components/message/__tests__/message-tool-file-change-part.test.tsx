@@ -26,8 +26,6 @@ vi.mock("../../patch-diff-view", () => ({
 function emptyInteraction() {
   return {
     approvalStatusByItemId: new Map(),
-    liveOutputByItemId: new Map(),
-    livePatchByItemId: new Map(),
     userMessageTurnIndex: new Map(),
     rollbackToMessage: undefined,
   }

@@ -45,7 +45,12 @@ type TRenderableMessagePart = TMessagePart | UIMessagePart<UIDataTypes, UITools>
 
 const MotionMessageScrollerItem = motion.create(MessageScrollerItem)
 
-function MessageItem({
+/**
+ * Memoized on shallow props (message identity above all): streaming replaces
+ * the streaming message's object, so only that row re-renders per chunk; the
+ * rest of a long conversation skips re-rendering entirely.
+ */
+const MessageItem = React.memo(function MessageItem({
     message,
     animationPreset = MESSAGE_ANIMATIONS["slide-up"],
     scrollAnchor,
@@ -90,7 +95,7 @@ function MessageItem({
             />
         </MotionMessageScrollerItem>
     )
-}
+})
 
 const messagePartComponents: MessagePartComponents<TMessagePart, TMessage> = {
     text: MessageTextPart,
@@ -98,6 +103,24 @@ const messagePartComponents: MessagePartComponents<TMessagePart, TMessage> = {
     tool: MessageToolPart,
     fallback: MessageFallbackPart,
     tools: { commandExecution: MessageToolCommandPart, fileChange: MessageToolFileChangePart, plan: MessageToolPlanPart },
+}
+
+/**
+ * `createMessageParts` cache keyed by message identity: parts are rebuilt on
+ * every MessageRow render otherwise, which re-classifies / re-groups every
+ * part of every visible row on unrelated re-renders. Streaming replaces the
+ * streaming message's object, so its cache entry rebuilds per chunk while
+ * stable messages hit the cache. Entries die with their message objects.
+ */
+const messagePartsCache = new WeakMap<object, unknown>()
+
+function memoizedCreateMessageParts<TMessage extends object>(message: TMessage): unknown {
+    let cached = messagePartsCache.get(message)
+    if (cached === undefined) {
+        cached = createMessageParts<TMessage>(message)
+        messagePartsCache.set(message, cached)
+    }
+    return cached
 }
 
 
@@ -109,7 +132,8 @@ function MessageRow({
     const isUserMessage = message.role === "user"
     // `createMessageParts` defaults to protocol (temporal) order — a tool call
     // renders where it actually occurred relative to the text/reasoning.
-    const parsedParts = createMessageParts<TMessage>(message) as MessagePartsResult<
+    // Memoized by message identity (see `messagePartsCache`).
+    const parsedParts = memoizedCreateMessageParts<TMessage>(message) as MessagePartsResult<
         TRenderableMessagePart,
         TMessage
     > & { all: Array<MessagePartItem<TRenderableMessagePart, TMessage>> }

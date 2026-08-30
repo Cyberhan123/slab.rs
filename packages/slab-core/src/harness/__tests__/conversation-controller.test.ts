@@ -677,6 +677,79 @@ describe("ConversationController", () => {
     controller.dispose()
   })
 
+  it("item/completed drops the per-item live accumulations", async () => {
+    const { controller, socket } = await restoredController()
+
+    socket.simMessage(
+      notification("item/commandExecution/outputDelta", {
+        threadId: "hthread-1",
+        itemId: "cmd-1",
+        delta: "partial output",
+      }),
+    )
+    await flush()
+    expect(controller.getState().liveOutputByItemId.get("cmd-1")).toBe("partial output")
+
+    socket.simMessage(
+      notification("item/completed", {
+        threadId: "hthread-1",
+        turnId: "0",
+        item: { type: "commandExecution", id: "cmd-1", status: "completed" },
+      }),
+    )
+    await flush()
+    expect(controller.getState().liveOutputByItemId.has("cmd-1")).toBe(
+      false,
+      "finalized items must not keep their streamed copies (unbounded growth)",
+    )
+    controller.dispose()
+  })
+
+  it("keeps per-item map identities stable across unrelated commits", async () => {
+    const { controller, socket } = await restoredController()
+    const before = controller.getState()
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "running",
+      }),
+    )
+    await flush()
+    const after = controller.getState()
+
+    expect(after).not.toBe(before, "the snapshot itself changed")
+    expect(after.liveOutputByItemId).toBe(before.liveOutputByItemId)
+    expect(after.livePatchByItemId).toBe(before.livePatchByItemId)
+    expect(after.userMessageTurnIndex).toBe(before.userMessageTurnIndex)
+    expect(after.approvalStatusByItemId).toBe(before.approvalStatusByItemId)
+    controller.dispose()
+  })
+
+  it("an identical history re-read keeps the messages and the remount version", async () => {
+    const { controller, socket } = await restoredController()
+    const before = controller.getState()
+    const version = before.restoreVersion
+    const messages = before.restoredMessages
+
+    // A resync whose rollout re-read matches (same thread, same message ids):
+    // no remount bump and the prior message objects are kept so memoized
+    // rows skip re-rendering.
+    void controller.reconnect()
+    await flush()
+    const resumeReq = socket.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((m) => m.method === "thread/resume")
+      .at(-1)!
+    socket.simMessage(rpcResponse(resumeReq.id, { thread: THREAD }))
+    await vi.waitFor(() => expect(controller.getState().isHistoryLoading).toBe(false))
+
+    const after = controller.getState()
+    expect(after.restoreVersion).toBe(version, "identical re-read must not remount the pane")
+    expect(after.restoredMessages).toBe(messages, "identical re-read keeps the prior objects")
+    controller.dispose()
+  })
+
   it("an interrupt with queued input resyncs on the terminal status event", async () => {
     const { controller, socket } = await restoredController()
 

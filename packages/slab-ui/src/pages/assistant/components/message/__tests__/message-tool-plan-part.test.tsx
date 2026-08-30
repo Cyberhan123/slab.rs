@@ -19,8 +19,6 @@ async function renderPart(part: Partial<ToolPartLike>, toolCallId = "call-1") {
     <MessageInteractionContext.Provider
       value={{
         approvalStatusByItemId: new Map(),
-        liveOutputByItemId: new Map(),
-        livePatchByItemId: new Map(),
         userMessageTurnIndex: new Map(),
         rollbackToMessage: undefined,
       }}

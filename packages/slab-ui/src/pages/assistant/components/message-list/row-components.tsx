@@ -1,3 +1,4 @@
+import { memo } from "react"
 import type { ComponentType, ReactElement } from "react"
 import { useTranslation } from "@slab/i18n"
 import { Marker, MarkerContent } from "@slab/components/marker"
@@ -66,13 +67,22 @@ export function CompactMarkerRow({
     )
 }
 
-export function MessageRow({
-    row,
-}: ScrollerRowComponentProps<ScrollerRowOf<"message">>): ReactElement {
-    return (
-        <MessageItem message={row.message} scrollAnchor={row.message.role === "user"} />
-    )
-}
+/**
+ * Memoized on the row's MESSAGE identity: the scroller rebuilds its row
+ * objects on every list change (queued chip, marker, model-load state), but
+ * an unchanged message must not re-render — long conversations otherwise
+ * re-render every visible row per unrelated state change. Streaming updates
+ * replace the streaming message's object (AI-SDK immutable state), so only
+ * the actively-streaming row re-renders per chunk.
+ */
+export const MessageRow = memo(
+    function MessageRow({
+        row,
+    }: ScrollerRowComponentProps<ScrollerRowOf<"message">>): ReactElement {
+        return <MessageItem message={row.message} scrollAnchor={row.message.role === "user"} />
+    },
+    (prev, next) => prev.row.message === next.row.message,
+)
 
 /** "Loading this session…" separator shown while restoring, before any messages exist. */
 export function SessionLoadMarkerRow(
