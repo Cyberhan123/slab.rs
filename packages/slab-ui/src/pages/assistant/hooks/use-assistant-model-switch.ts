@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react"
 import { toast } from "sonner"
+import { useNavigate } from "react-router-dom"
 
 import { useTranslation } from "@slab/i18n"
 
@@ -29,6 +30,7 @@ export function useAssistantModelSwitch({
   isCreatingSession,
 }: UseAssistantModelSwitchOptions) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const [pendingModelSwitchId, setPendingModelSwitchId] = useState<string | null>(null)
 
   const pendingModelSwitch = useMemo(
@@ -96,7 +98,11 @@ export function useAssistantModelSwitch({
 
     setSelectedModelId(nextModelId)
     setPendingModelSwitchId(null)
-  }, [createSession, pendingModelSwitchId, setSelectedModelId])
+    // The conversation detail is URL-driven (`?session=`), and the store
+    // selection is a no-op under that deep link — navigate so the page actually
+    // shows the freshly created (empty) conversation.
+    navigate(`/?session=${encodeURIComponent(session.id)}`)
+  }, [createSession, navigate, pendingModelSwitchId, setSelectedModelId])
 
   return {
     pendingModelSwitchId,

@@ -230,7 +230,7 @@ describe('AssistantPage browser visual regression', () => {
     document.getElementById('visual-test-freeze-animations')?.remove();
   });
 
-  it('captures the assistant page empty state', async () => {
+  it('captures the assistant new-chat landing (homepage)', async () => {
     mockUseAssistantSessions.mockReturnValue(
       createAssistantSessionsViewModel({
         conversationList: [
@@ -247,6 +247,7 @@ describe('AssistantPage browser visual regression', () => {
 
     await expectDesktopSceneAccessible();
     await expectDesktopSceneKeyboardReachable();
+    await expect.element(page.getByTestId('assistant-new-chat-landing')).toBeVisible();
     await expect.element(page.getByRole('button', { name: /send/i })).toBeVisible();
     await expect.element(page.getByTestId('desktop-browser-scene')).toBeVisible();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('assistant-page-empty.png');
@@ -263,6 +264,7 @@ describe('AssistantPage browser visual regression', () => {
 
     await renderDesktopScene(<AssistantPage />, { route: '/' });
 
+    await expect.element(page.getByTestId('assistant-new-chat-landing')).toBeVisible();
     await expect.element(page.getByTestId('desktop-browser-scene')).toBeVisible();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('assistant-page-loading.png');
   });
@@ -292,7 +294,7 @@ describe('AssistantPage browser visual regression', () => {
       }),
     );
 
-    await renderDesktopScene(<AssistantPage />, { route: '/' });
+    await renderDesktopScene(<AssistantPage />, { route: '/?session=session-1' });
 
     await expect.element(page.getByText('What is the capital of France?')).toBeVisible();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('assistant-page-with-messages.png');
@@ -337,7 +339,7 @@ describe('AssistantPage browser visual regression', () => {
       }),
     );
 
-    await renderDesktopScene(<AssistantPage />, { route: '/' });
+    await renderDesktopScene(<AssistantPage />, { route: '/?session=session-1' });
 
     await expect.element(page.getByText('Inspect the repository status')).toBeVisible();
     // Completed rows sit collapsed by design — the compact `Bash: <command>`

@@ -19,6 +19,11 @@ type UseAssistantConversationListOptions = {
   isSessionBusy: boolean
   isSessionBootstrapping: boolean
   setIsSessionSheetOpen: (open: boolean) => void
+  /**
+   * Invoked after the CURRENT conversation was deleted (the page navigates —
+   * e.g. back to the new-chat landing when the detail's session is gone).
+   */
+  onCurrentConversationDeleted?: () => void
 }
 
 export function useAssistantConversationList({
@@ -30,6 +35,7 @@ export function useAssistantConversationList({
   isSessionBusy,
   isSessionBootstrapping,
   setIsSessionSheetOpen,
+  onCurrentConversationDeleted,
 }: UseAssistantConversationListOptions) {
   const { t } = useTranslation()
 
@@ -79,9 +85,12 @@ export function useAssistantConversationList({
         return
       }
 
-      await deleteSession(conversationKey)
+      const deleted = await deleteSession(conversationKey)
+      if (deleted && conversationKey === curConversation) {
+        onCurrentConversationDeleted?.()
+      }
     },
-    [deleteSession, isSessionBusy, t]
+    [curConversation, deleteSession, isSessionBusy, onCurrentConversationDeleted, t]
   )
 
   const handleSelectConversation = useCallback(

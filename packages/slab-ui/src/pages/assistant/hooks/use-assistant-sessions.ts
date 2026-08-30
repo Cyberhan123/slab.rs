@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import { toast } from "sonner"
 
 import type { components } from "@slab/api/v1"
@@ -70,7 +70,6 @@ export function useAssistantSessions({ lockedSessionId }: { lockedSessionId?: st
   const sessionLabels = useAssistantUiStore((state) => state.sessionLabels)
   const setSessionLabel = useAssistantUiStore((state) => state.setSessionLabel)
   const removeSessionLabel = useAssistantUiStore((state) => state.removeSessionLabel)
-  const hasBootstrappedSessions = useRef(false)
 
   const { data: sessionData, isLoading: isSessionsLoading, refetch: refetchSessions } = api.useQuery(
     "get",
@@ -162,10 +161,10 @@ export function useAssistantSessions({ lockedSessionId }: { lockedSessionId?: st
       const refreshed = await refetchSessions()
       const nextSessions = toSessionRecords(refreshed.data)
 
-      if (nextSessions.length === 0) {
-        return Boolean(await createSession({ quiet: true, select: true }))
-      }
-
+      // An empty list is fine — the new-chat landing (the assistant homepage)
+      // needs no session. When the deleted session was the current one, fall
+      // back to the first remaining conversation (the page additionally
+      // navigates: back to the landing when nothing remains).
       if (sessionId === currentSessionId) {
         setCurrentSessionId(nextSessions[0]?.id ?? "")
       }
@@ -174,7 +173,6 @@ export function useAssistantSessions({ lockedSessionId }: { lockedSessionId?: st
     },
     [
       assistantErrorEnvelopeRenderingEnabled,
-      createSession,
       currentSessionId,
       deleteSessionMutation,
       refetchSessions,
@@ -224,28 +222,9 @@ export function useAssistantSessions({ lockedSessionId }: { lockedSessionId?: st
     ]
   )
 
-  useEffect(() => {
-    if (trimmedLock) {
-      return
-    }
-
-    if (isSessionsLoading) {
-      return
-    }
-
-    if (sessionRecords.length > 0) {
-      hasBootstrappedSessions.current = false
-      return
-    }
-
-    if (hasBootstrappedSessions.current) {
-      return
-    }
-
-    hasBootstrappedSessions.current = true
-    void createSession({ quiet: true, select: true })
-  }, [createSession, isSessionsLoading, sessionRecords.length, trimmedLock])
-
+  // Keep the shared "current session" pointing at an existing conversation
+  // (only reachable when unlocked — i.e. on the new-chat landing). No empty
+  // session is auto-created anymore: the landing starts one on first submit.
   useEffect(() => {
     if (trimmedLock) {
       return

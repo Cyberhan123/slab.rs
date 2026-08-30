@@ -143,6 +143,11 @@ type SenderProps = {
    * toggle — the assistant page passes the live workspace selector here.
    */
   workspaceSlot?: ReactNode
+  /**
+   * Seed text for the composer (claimed once on mount, never re-synced). The
+   * new-chat landing uses it to prefill from a staged workspace handoff draft.
+   */
+  initialValue?: string
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -165,11 +170,12 @@ function Sender({
   planMode,
   onPlanModeChange,
   workspaceSlot,
+  initialValue,
 }: SenderProps) {
   const { t } = useTranslation()
   const { ports } = useSlab()
   const isTauri = ports.platformInfo.desktop
-  const [value, setValue] = useState("")
+  const [value, setValue] = useState(initialValue ?? "")
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
   const [effortLevel, setEffortLevel] = useState<EffortLevel>("high")

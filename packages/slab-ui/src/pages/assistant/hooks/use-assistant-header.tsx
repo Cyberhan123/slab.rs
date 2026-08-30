@@ -17,8 +17,13 @@ type UseAssistantHeaderOptions = {
   pendingModelSwitchId: string | null
   onModelPickerChange: (nextModelId: string) => void
   onOpenSessionSheet: () => void
-  /** Create a fresh assistant session (the header "new session" button). */
+  /** Leave the assistant homepage (the conversation detail "new chat" button). */
   onNewSession: () => void
+  /**
+   * Whether the header "new chat" button shows. Hidden on the new-chat landing
+   * (the homepage IS a fresh chat — the button would navigate nowhere).
+   */
+  showNewSessionControl?: boolean
 }
 
 export function useAssistantHeader({
@@ -31,6 +36,7 @@ export function useAssistantHeader({
   onModelPickerChange,
   onOpenSessionSheet,
   onNewSession,
+  showNewSessionControl = true,
 }: UseAssistantHeaderOptions) {
   const { t } = useTranslation()
 
@@ -134,6 +140,6 @@ export function useAssistantHeader({
   useHeader({
     history: headerHistoryButton,
     select: headerModelPicker,
-    right: headerNewSessionButton,
+    right: showNewSessionControl ? headerNewSessionButton : null,
   })
 }

@@ -43,9 +43,10 @@ export async function openAssistant(
     await waitForComposerReady(page)
     return
   }
-  // No override: rely on the shared global "current session". WorkspaceModeSync
+  // No override: `/` is the new-chat landing (the assistant homepage) — its
+  // composer sends into a freshly created conversation. WorkspaceModeSync
   // (App.tsx) redirects a *fresh full load* at `/` to `/workspace` once when a
-  // workspace is active, so reach the Assistant with a client-side SPA nav
+  // workspace is active, so reach the landing with a client-side SPA nav
   // instead: full-load at `/workspace` (no `/`-redirect), then click the sidebar
   // Assistant link (a react-router <Link/>) which navigates to `/` without
   // remounting, so the one-time redirect guard does not re-fire.

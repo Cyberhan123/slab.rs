@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { useTranslation } from "@slab/i18n"
@@ -25,15 +25,19 @@ import { useWorkspaceUiStore } from "@slab/ui/store/useWorkspaceUiStore"
 
 function Assistant() {
     const { t } = useTranslation()
+    const navigate = useNavigate()
     const [isSessionSheetOpen, setIsSessionSheetOpen] = useState(false)
     const [isChatBusy, setIsChatBusy] = useState(false)
     const [messageCount, setMessageCount] = useState(0)
-    // `?session=<id>` deep link pins this page to a specific session, bypassing
-    // the shared `zustand:assistant-ui` "current session" (which is global per
-    // server and would race across concurrent e2e browsers). Absent the param,
-    // behavior is unchanged.
+    // URL-driven two-view page: `/` is the new-chat landing (the homepage),
+    // `/?session=<id>` is the conversation detail. The deep link pins the page
+    // to that session, bypassing the shared `zustand:assistant-ui` "current
+    // session" (which is global per server and would race across concurrent
+    // e2e browsers). Absent the param, the landing shows.
     const [searchParams] = useSearchParams()
     const sessionOverride = searchParams.get("session")
+    const trimmedSessionOverride = sessionOverride?.trim() || undefined
+    const isDetailView = Boolean(trimmedSessionOverride)
 
     const {
         conversationList,
@@ -44,9 +48,8 @@ function Assistant() {
         isDeletingSession,
         isSessionMutating,
         isSessionsLoading: sessionsLoading,
-        setCurrentSessionId: setCurConversation,
         updateSessionLabel,
-    } = useAssistantSessions({ lockedSessionId: sessionOverride ?? undefined })
+    } = useAssistantSessions({ lockedSessionId: trimmedSessionOverride })
 
     const {
         modelOptions,
@@ -101,6 +104,16 @@ function Assistant() {
     const isSessionBootstrapping = (sessionsLoading || isCreatingSession) && conversationList.length === 0
     const isSessionBusy = isChatBusy || isPreparingModel || isHistoryLoading || isSessionMutating
 
+    // Entering the landing resets the departed conversation's busy/message
+    // counters: the pane (their only writer) is gone, and a stale message count
+    // would misroute the model-switch negotiation on the next new chat.
+    useEffect(() => {
+        if (!isDetailView) {
+            setIsChatBusy(false)
+            setMessageCount(0)
+        }
+    }, [isDetailView])
+
     const {
         pendingModelSwitchId,
         pendingModelSwitch,
@@ -120,6 +133,23 @@ function Assistant() {
         isCreatingSession,
     })
 
+    // Session navigation: the detail view is `?session=`-driven, so "switch
+    // conversation" is a navigation (the store selection is a no-op under the
+    // deep link). Leaving every conversation goes back to the landing.
+    const navigateToSession = useCallback(
+        (sessionId: string) => {
+            navigate(`/?session=${encodeURIComponent(sessionId)}`)
+        },
+        [navigate],
+    )
+    const navigateToLanding = useCallback(() => {
+        // Already home — skip (a same-location navigate would push a
+        // redundant history entry, e.g. deleting the current session from
+        // the sheet opened on the landing).
+        if (!isDetailView) return
+        navigate("/")
+    }, [isDetailView, navigate])
+
     const {
         sortedConversations,
         currentConversationLabel,
@@ -129,12 +159,13 @@ function Assistant() {
     } = useAssistantConversationList({
         conversationList,
         curConversation,
-        setCurConversation,
+        setCurConversation: navigateToSession,
         deleteSession: deleteConversationSession,
         updateSessionLabel,
         isSessionBusy,
         isSessionBootstrapping,
         setIsSessionSheetOpen,
+        onCurrentConversationDeleted: navigateToLanding,
     })
 
     const { statusLabel: selectedModelStatusLabel } = useAssistantModelStatusLabel({
@@ -150,23 +181,27 @@ function Assistant() {
         loadedModelStatus,
     })
 
-    const openSessionSheet = useCallback(() => setIsSessionSheetOpen(true), [])
-    const handleNewSession = useCallback(() => {
-        void createEmptySession()
-    }, [createEmptySession])
+    // New-chat landing (the homepage): pick a workspace (or global), compose
+    // the first message, then hand off into the detail page — the created
+    // session becomes the deep link and the staged draft auto-sends once the
+    // pane is ready.
+    const { landing, pendingWorkspaceSwitch, currentWorkspace: activeWorkspace } =
+        useAssistantNewChat({
+            createSession: createEmptySession,
+            commands,
+            active: !isDetailView,
+            conversations: sortedConversations,
+            onSelectConversation: navigateToSession,
+            conversationsBusy: isSessionBusy || isSessionBootstrapping,
+        })
 
-    // New-chat dialog (empty-state CTA): pick a workspace (or global), compose
-    // the first message, then hand off into this page — the created session
-    // becomes current and the staged draft auto-sends once the pane is ready.
-    const { dialog: newChatDialog, openDialog: openNewChatDialog, pendingWorkspaceSwitch, currentWorkspace: activeWorkspace } =
-        useAssistantNewChat({ createSession: createEmptySession, commands })
-
-    // Live workspace selector in the Sender toolbar: switching here applies
-    // immediately (shared open/close path with the dialog's submit). Disabled
-    // while a turn runs — a switch would interrupt the running agent threads.
-    // Opening a root PINS it against the WorkspaceModeSync redirect, so the
-    // switch never bounces the user off the running conversation; switching to
-    // 全局 (no workspace) needs no pin — the redirect only fires on open.
+    // Live workspace selector in the detail Sender toolbar: switching here
+    // applies immediately (shared open/close path with the landing's submit).
+    // Disabled while a turn runs — a switch would interrupt the running agent
+    // threads. Opening a root PINS it against the WorkspaceModeSync redirect,
+    // so the switch never bounces the user off the running conversation;
+    // switching to 全局 (no workspace) needs no pin — the redirect only fires
+    // on open.
     const { applyWorkspace, switching: isWorkspaceSwitching } = useWorkspaceSwitch()
     const setAssistantPinnedWorkspaceRoot = useWorkspaceUiStore(
         (state) => state.setAssistantPinnedWorkspaceRoot,
@@ -202,6 +237,8 @@ function Assistant() {
               }
             : null
 
+    const openSessionSheet = useCallback(() => setIsSessionSheetOpen(true), [])
+
     useAssistantHeader({
         modelOptions,
         selectedModelId,
@@ -211,7 +248,8 @@ function Assistant() {
         pendingModelSwitchId,
         onModelPickerChange: handleModelPickerChange,
         onOpenSessionSheet: openSessionSheet,
-        onNewSession: handleNewSession,
+        onNewSession: navigateToLanding,
+        showNewSessionControl: isDetailView,
     })
 
     // Toast a restore failure once per distinct error. `t` is read for the label
@@ -286,73 +324,75 @@ function Assistant() {
 
     return (
         <>
-            <AssistantChatPane
-                key={`${curConversation ?? "none"}:${restoreVersion}`}
-                disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || !curConversation}
-                initialMessages={restoredMessages}
-                isHistoryLoading={isHistoryLoading}
-                modelStatusLabel={selectedModelStatusLabel}
-                onBeforeSubmit={handleBeforeSubmit}
-                onBusyChange={setIsChatBusy}
-                onMessageCountChange={setMessageCount}
-                transport={transport}
-                approvals={approvals}
-                approvalStatusByItemId={approvalStatusByItemId}
-                liveOutputByItemId={liveOutputByItemId}
-                livePatchByItemId={livePatchByItemId}
-                modelLoad={modelLoad}
-                turnUsage={turnUsage}
-                contextWindow={usageContextWindow}
-                resolveApproval={resolveApproval}
-                onCompact={() => compactThread()}
-                onFork={() => forkThread()}
-                historyCreatedAt={historyCreatedAt}
-                commands={commands}
-                compactionMarkers={compactionMarkers}
-                isCompacting={isCompacting}
-                isForking={isForking}
-                userMessageTurnIndex={userMessageTurnIndex}
-                onRollbackFromTurn={rollbackFromTurn}
-                planMode={planMode}
-                onPlanModeChange={setPlanMode}
-                threadStatus={threadStatus}
-                abortReason={abortReason}
-                queuedTexts={queuedTexts}
-                backgroundTasks={backgroundTasks}
-                onSteerSubmit={async (text, options) => {
-                    const result = (await sendSteering(
-                        {
-                            id: `steer-${Date.now()}`,
-                            role: "user",
-                            parts: [{ type: "text", text }],
-                        },
-                        options,
-                    )) as { queued?: boolean } | undefined
-                    // Lost the idle-window race: the message started a NEW run
-                    // whose live stream this pane isn't subscribed to. The
-                    // controller refreshes on its terminal event; surface the
-                    // fallback so the resync doesn't look like a silent stall.
-                    if (!result || result.queued !== true) {
-                        toast.info(t("pages.assistant.toast.steeringResync"))
+            {isDetailView ? (
+                <AssistantChatPane
+                    key={`${curConversation ?? "none"}:${restoreVersion}`}
+                    disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || !curConversation}
+                    initialMessages={restoredMessages}
+                    isHistoryLoading={isHistoryLoading}
+                    modelStatusLabel={selectedModelStatusLabel}
+                    onBeforeSubmit={handleBeforeSubmit}
+                    onBusyChange={setIsChatBusy}
+                    onMessageCountChange={setMessageCount}
+                    transport={transport}
+                    approvals={approvals}
+                    approvalStatusByItemId={approvalStatusByItemId}
+                    liveOutputByItemId={liveOutputByItemId}
+                    livePatchByItemId={livePatchByItemId}
+                    modelLoad={modelLoad}
+                    turnUsage={turnUsage}
+                    contextWindow={usageContextWindow}
+                    resolveApproval={resolveApproval}
+                    onCompact={() => compactThread()}
+                    onFork={() => forkThread()}
+                    historyCreatedAt={historyCreatedAt}
+                    commands={commands}
+                    compactionMarkers={compactionMarkers}
+                    isCompacting={isCompacting}
+                    isForking={isForking}
+                    userMessageTurnIndex={userMessageTurnIndex}
+                    onRollbackFromTurn={rollbackFromTurn}
+                    planMode={planMode}
+                    onPlanModeChange={setPlanMode}
+                    threadStatus={threadStatus}
+                    abortReason={abortReason}
+                    queuedTexts={queuedTexts}
+                    backgroundTasks={backgroundTasks}
+                    onSteerSubmit={async (text, options) => {
+                        const result = (await sendSteering(
+                            {
+                                id: `steer-${Date.now()}`,
+                                role: "user",
+                                parts: [{ type: "text", text }],
+                            },
+                            options,
+                        )) as { queued?: boolean } | undefined
+                        // Lost the idle-window race: the message started a NEW run
+                        // whose live stream this pane isn't subscribed to. The
+                        // controller refreshes on its terminal event; surface the
+                        // fallback so the resync doesn't look like a silent stall.
+                        if (!result || result.queued !== true) {
+                            toast.info(t("pages.assistant.toast.steeringResync"))
+                        }
+                    }}
+                    onInterrupt={() => {
+                        void interrupt().catch(() => {})
+                    }}
+                    onStartNewChat={navigateToLanding}
+                    autoSend={autoSend}
+                    onAutoSendConsumed={consumeDraft}
+                    workspaceSlot={
+                        <WorkspaceSelector
+                            value={liveWorkspaceSelection}
+                            onValueChange={handleLiveWorkspaceChange}
+                            currentWorkspace={activeWorkspace}
+                            busy={isWorkspaceSwitching || isChatBusy}
+                        />
                     }
-                }}
-                onInterrupt={() => {
-                    void interrupt().catch(() => {})
-                }}
-                onStartNewChat={openNewChatDialog}
-                autoSend={autoSend}
-                onAutoSendConsumed={consumeDraft}
-                workspaceSlot={
-                    <WorkspaceSelector
-                        value={liveWorkspaceSelection}
-                        onValueChange={handleLiveWorkspaceChange}
-                        currentWorkspace={activeWorkspace}
-                        busy={isWorkspaceSwitching || isChatBusy}
-                    />
-                }
-            />
-
-            {newChatDialog}
+                />
+            ) : (
+                landing
+            )}
 
             <AssistantSessionSheet
                 open={isSessionSheetOpen}

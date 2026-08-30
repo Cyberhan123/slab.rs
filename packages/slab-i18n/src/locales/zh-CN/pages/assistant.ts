@@ -42,6 +42,7 @@ export const assistant = {
     description: '选择聊天运行的工作区，然后发送第一条消息。',
     cta: '选择工作区新建聊天…',
     workspaceSection: '工作区',
+    recentSection: '最近的会话',
     currentLabel: '当前工作区',
     recentLabel: '最近',
     chooseFolder: '选择文件夹…',

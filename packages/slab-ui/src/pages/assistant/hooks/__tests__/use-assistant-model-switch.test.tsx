@@ -1,11 +1,15 @@
 import { renderHook } from "vitest-browser-react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { toastMock } = vi.hoisted(() => ({
+const { toastMock, navigateMock } = vi.hoisted(() => ({
   toastMock: { info: vi.fn<(message: string) => void>() },
+  navigateMock: vi.fn<(to: string) => void>(),
 }))
 
 vi.mock("sonner", () => ({ toast: toastMock }))
+vi.mock("react-router-dom", () => ({
+  useNavigate: () => navigateMock,
+}))
 vi.mock("@slab/i18n", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }))
@@ -127,6 +131,8 @@ describe("useAssistantModelSwitch", () => {
 
     expect(opts.createSession).toHaveBeenCalledWith({ select: true })
     expect(opts.setSelectedModelId).toHaveBeenCalledWith("model-b")
+    // The new empty conversation is entered via its `?session=` deep link.
+    expect(navigateMock).toHaveBeenCalledWith("/?session=session-2")
     expect(result.current.pendingModelSwitchId).toBeNull()
   })
 

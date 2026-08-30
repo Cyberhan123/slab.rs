@@ -192,7 +192,8 @@ describe('assistant core flow (harness) browser smoke', () => {
   });
 
   it('mounts the composer and renders restored messages', async () => {
-    await renderDesktopScene(<AssistantPage />, { route: '/' });
+    // The conversation view is the `?session=` detail; `/` is the new-chat landing.
+    await renderDesktopScene(<AssistantPage />, { route: '/?session=session-a' });
 
     // The composer + send button expose stable test ids used by the e2e suite.
     await expect.element(page.getByTestId('assistant-composer-input')).toBeVisible();
@@ -214,7 +215,7 @@ describe('assistant core flow (harness) browser smoke', () => {
     ];
     mocks.harnessConversation.approvalStatusByItemId = new Map([['call-1', 'pending']]);
 
-    await renderDesktopScene(<AssistantPage />, { route: '/' });
+    await renderDesktopScene(<AssistantPage />, { route: '/?session=session-a' });
 
     // The ApprovalCard renders the command text above the composer and exposes
     // a per-scope test id; clicking run_once resolves the approval.

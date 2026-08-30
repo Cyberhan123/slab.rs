@@ -1,10 +1,10 @@
 import type { UIMessage } from "ai"
-import type { ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
 import { render } from "vitest-browser-react"
 import { userEvent } from "vitest/browser"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, useLocation } from "react-router-dom"
 
 import { HeaderProvider } from "@slab/ui/layouts/header-provider"
 import Header from "@slab/ui/layouts/header"
@@ -310,11 +310,24 @@ function restoredMessages(): UIMessage[] {
   ]
 }
 
-async function renderAssistant() {
+// Live route probe: the page is URL-driven (`/` landing vs `/?session=` detail),
+// so session navigation is asserted through the router location.
+const routeLog: { current: string } = { current: "" }
+
+function RouteLocationProbe() {
+  const location = useLocation()
+  useEffect(() => {
+    routeLog.current = `${location.pathname}${location.search}`
+  })
+  return null
+}
+
+async function renderAssistant(initialEntry = "/") {
   return render(
     <SlabProvider deps={{ ports: createTestSlabPorts() }}>
       <HeaderProvider>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <RouteLocationProbe />
           <Header />
           <Assistant />
         </MemoryRouter>
@@ -342,17 +355,69 @@ describe("Assistant page session and model lifecycle", () => {
     mocks.toastInfo.mockClear()
     mocks.toastError.mockClear()
     mocks.updateSessionLabel.mockResolvedValue(true)
+    routeLog.current = ""
+  })
+
+  it("renders the new-chat landing as the homepage (no session deep link)", async () => {
+    const screen = await renderAssistant("/")
+
+    await expect.element(screen.getByTestId("assistant-new-chat-landing")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-composer-input")).toBeVisible()
+    // Recent conversations are offered as jump-back-in entries, and the
+    // restored history of the store's current session is NOT rendered.
+    await expect.element(screen.getByTestId("assistant-landing-session-session-a")).toBeInTheDocument()
+    await expect.element(screen.getByTestId("assistant-landing-session-session-b")).toBeInTheDocument()
+    expect(screen.getByTestId("assistant-message-list").query()).toBeNull()
+    // The landing IS a fresh chat — the header new-chat control is detail-only.
+    expect(screen.getByTestId("header-new-session-control").query()).toBeNull()
+  })
+
+  it("submits from the landing: creates the session and navigates into the detail", async () => {
+    const screen = await renderAssistant("/")
+
+    await userEvent.type(screen.getByLabelText("Message"), "first message")
+    await userEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await vi.waitFor(() => {
+      expect(mocks.createSession).toHaveBeenCalledWith({ quiet: false, select: true })
+    })
+    await vi.waitFor(() => {
+      expect(routeLog.current).toBe("/?session=session-new")
+    })
+  })
+
+  it("navigates from a recent conversation into its detail", async () => {
+    const screen = await renderAssistant("/")
+
+    await screen.getByTestId("assistant-landing-session-session-b").click()
+
+    await vi.waitFor(() => {
+      expect(routeLog.current).toBe("/?session=session-b")
+    })
   })
 
   it("restores the current session and renders restored messages", async () => {
-    const screen = await renderAssistant()
+    const screen = await renderAssistant("/?session=session-a")
 
     await expect.element(screen.getByText("previous prompt")).toBeInTheDocument()
     await expect.element(screen.getByText("previous answer")).toBeInTheDocument()
   })
 
-  it("opens the session sheet from the header history button and selects sessions", async () => {
-    const screen = await renderAssistant()
+  it("leaves to the landing from the header new-chat control", async () => {
+    const screen = await renderAssistant("/?session=session-a")
+
+    await expect.element(screen.getByText("previous answer")).toBeInTheDocument()
+    await screen.getByTestId("header-new-session-control").click()
+
+    await vi.waitFor(() => {
+      expect(routeLog.current).toBe("/")
+    })
+    await expect.element(screen.getByTestId("assistant-new-chat-landing")).toBeInTheDocument()
+    expect(screen.getByTestId("assistant-message-list").query()).toBeNull()
+  })
+
+  it("opens the session sheet from the header history button and navigates to the selection", async () => {
+    const screen = await renderAssistant("/?session=session-a")
 
     await expect.element(screen.getByText("previous answer")).toBeInTheDocument()
 
@@ -361,11 +426,16 @@ describe("Assistant page session and model lifecycle", () => {
     await expect.element(screen.getByTestId("assistant-session-sheet")).toBeInTheDocument()
     await screen.getByTestId("assistant-session-select-session-b").click()
 
-    expect(mocks.setCurrentSessionId).toHaveBeenCalledWith("session-b")
+    // Session switching is navigation now (the store selection is a no-op
+    // under the `?session=` deep link).
+    await vi.waitFor(() => {
+      expect(routeLog.current).toBe("/?session=session-b")
+    })
+    expect(mocks.setCurrentSessionId).not.toHaveBeenCalled()
   })
 
   it("prepares the model before sending in a restored session", async () => {
-    const screen = await renderAssistant()
+    const screen = await renderAssistant("/?session=session-a")
 
     await expect.element(screen.getByText("previous answer")).toBeInTheDocument()
     await userEvent.type(screen.getByLabelText("Message"), "continue restored")
@@ -382,7 +452,7 @@ describe("Assistant page session and model lifecycle", () => {
   it("switches models immediately when the current session has no messages", async () => {
     mocks.harnessConversation.restoredMessages = []
 
-    const screen = await renderAssistant()
+    const screen = await renderAssistant("/?session=session-a")
 
     await screen.getByText("Model B").click()
 
@@ -391,7 +461,7 @@ describe("Assistant page session and model lifecycle", () => {
   })
 
   it("asks how to switch models when the current session has messages", async () => {
-    const screen = await renderAssistant()
+    const screen = await renderAssistant("/?session=session-a")
 
     await expect.element(screen.getByText("previous answer")).toBeInTheDocument()
     await screen.getByText("Model B").click()
@@ -403,7 +473,7 @@ describe("Assistant page session and model lifecycle", () => {
   })
 
   it("creates a new session before switching models from a populated session", async () => {
-    const screen = await renderAssistant()
+    const screen = await renderAssistant("/?session=session-a")
 
     await expect.element(screen.getByText("previous answer")).toBeInTheDocument()
     await screen.getByText("Model B").click()
@@ -416,7 +486,7 @@ describe("Assistant page session and model lifecycle", () => {
   it("blocks model switching while session restore is still busy", async () => {
     mocks.harnessConversation.isHistoryLoading = true
 
-    const screen = await renderAssistant()
+    const screen = await renderAssistant("/?session=session-a")
 
     // While history is loading the model picker is disabled, so its options
     // (e.g. "Model B") stay hidden. Browser mode's actionability checks reject

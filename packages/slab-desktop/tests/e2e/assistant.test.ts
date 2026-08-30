@@ -6,7 +6,6 @@ import {
   createSession,
   listSessions,
   restoreSession,
-  selectAssistantSession,
   type AgentThreadMessageResponse,
   type SessionResponse,
 } from "./support/e2e-runtime"
@@ -30,7 +29,6 @@ describe("assistant e2e", () => {
   beforeAll(async () => {
     env = inject("e2e-runtime")
     session = await createSession(env.serverBaseUrl, `assistant-e2e-${Date.now()}`)
-    await selectAssistantSession(env.serverBaseUrl, session.id, session.name)
 
     browser = await chromium.launch({ headless: true })
     context = await browser.newContext({
@@ -40,7 +38,8 @@ describe("assistant e2e", () => {
       window.localStorage.setItem("slab.ui.language", "en-US")
     })
     page = await context.newPage()
-    await openAssistant(page, env.uiBaseUrl)
+    // Deep-link the conversation detail — `/` is the new-chat landing now.
+    await openAssistant(page, env.uiBaseUrl, session.id)
   })
 
   afterAll(async () => {
@@ -69,24 +68,30 @@ describe("assistant e2e", () => {
     expect(restored.messages.some((message: AgentThreadMessageResponse) => message.role === "user" && message.content === prompt)).toBe(true)
     expect(restored.messages.some((message: AgentThreadMessageResponse) => message.role === "assistant" && message.content.trim().length > 0)).toBe(true)
 
+    // The header control leaves for the new-chat landing — the homepage —
+    // without creating a session (composing from it does).
     await page.getByTestId("header-new-session-control").click()
+    await page.getByTestId("assistant-new-chat-landing").waitFor({ state: "visible", timeout: 90_000 })
+
+    const secondRunId = `assistant-second-${Date.now()}`
+    await sendAssistantMessage(page, `Assistant E2E ${secondRunId}. Reply with one short sentence.`)
+    // Submitting from the landing creates + selects a NEW conversation and
+    // navigates into its detail; the landing is gone.
     const secondSessionId = await waitForCurrentAssistantSession(
       testEnv.serverBaseUrl,
       (sessionId) => sessionId !== session.id
     )
-    await page.getByTestId("assistant-empty-state").waitFor({ state: "visible", timeout: 90_000 })
+    await page.getByTestId("assistant-new-chat-landing").waitFor({ state: "detached", timeout: 90_000 })
+    await expectAssistantPageText(page, secondRunId)
 
+    // A full reload of the `?session=` deep link re-mounts the SAME detail
+    // (WorkspaceModeSync skips its `/`→`/workspace` redirect for deep links).
     await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 })
-    // A full reload re-mounts the app, which re-fires the WorkspaceModeSync
-    // `/`→`/workspace` redirect. Re-enter the Assistant route via the sidebar
-    // link (client-side nav) so the composer renders. See openAssistant().
-    await page.getByTestId("sidebar-link-assistant").click()
     await waitForComposerReady(page)
     await waitForCurrentAssistantSession(
       testEnv.serverBaseUrl,
       (sessionId) => sessionId === secondSessionId
     )
-    await page.getByTestId("assistant-empty-state").waitFor({ state: "visible", timeout: 90_000 })
 
     const sessions = await listSessions(testEnv.serverBaseUrl)
     expect(sessions.some((item) => item.id === session.id)).toBe(true)

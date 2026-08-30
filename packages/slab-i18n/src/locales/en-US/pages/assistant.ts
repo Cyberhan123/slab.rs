@@ -42,6 +42,7 @@ export const assistant = {
     description: 'Choose where this chat runs, then send your first message.',
     cta: 'New chat with workspace…',
     workspaceSection: 'Workspace',
+    recentSection: 'Recent chats',
     currentLabel: 'Current workspace',
     recentLabel: 'Recent',
     chooseFolder: 'Choose folder…',

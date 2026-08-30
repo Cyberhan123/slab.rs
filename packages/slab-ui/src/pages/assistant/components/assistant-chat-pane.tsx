@@ -110,7 +110,7 @@ export type AssistantChatPaneProps = {
      * immediately while the server terminates the run authoritatively.
      */
     onInterrupt: () => void
-    /** Open the new-chat dialog (empty-state CTA). */
+    /** Leave for the new-chat landing (empty-state CTA; homepage navigation). */
     onStartNewChat?: () => void
     /**
      * A staged first message (new-chat dialog handoff): sent through the exact
