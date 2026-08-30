@@ -13,7 +13,7 @@ use slab_sandboxing::{
 use crate::context::AppContext;
 use crate::domain::services::agent::AgentCore;
 use crate::domain::services::{
-    HarnessService, ImageService, PluginService, ResponseService, WorkspaceLspService,
+    HarnessService, ImageService, ModelService, PluginService, ResponseService, WorkspaceLspService,
 };
 use crate::infra::db::AnyStore;
 
@@ -242,9 +242,13 @@ fn build_agent_control(
             PluginService::new((*ctx.model_state).clone()),
         ),
     )));
-    tool_router.register(Box::new(super::image_tool::GenerateImageTool::new(ImageService::new(
-        (*ctx.worker_state).clone(),
-    ))));
+    tool_router.register(Box::new(
+        super::image_tool::GenerateImageTool::new(ImageService::new((*ctx.worker_state).clone()))
+            .with_model_service(ModelService::new(
+                (*ctx.model_state).clone(),
+                (*ctx.worker_state).clone(),
+            )),
+    ));
 
     let tool_router = Arc::new(tool_router);
     let approval_port: Arc<dyn slab_agent::ApprovalPort> = event_hub;

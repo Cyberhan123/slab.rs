@@ -17,10 +17,12 @@ use slab_agent::{
 };
 
 use crate::domain::models::{
-    ImageGenerationCommand, ImageGenerationMode, ImageGenerationTaskView, TaskStatus,
+    ImageGenerationCommand, ImageGenerationMode, ImageGenerationTaskView, ListModelsFilter,
+    ModelLoadCommand, TaskStatus, UnifiedModelKind,
 };
-use crate::domain::services::ImageService;
+use crate::domain::services::{ImageService, ModelService};
 use crate::error::AppCoreError;
+use slab_types::Capability;
 
 /// Poll cadence / ceiling for the fire-and-forget `ImageService` task.
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -28,11 +30,63 @@ const MAX_POLL_ATTEMPTS: u32 = 240; // 240 × 500 ms = 120 s
 
 pub(crate) struct GenerateImageTool {
     image_service: ImageService,
+    /// Lazy-load seam: when present, the first image-generation call ensures
+    /// the local diffusion model is downloaded + loaded BEFORE dispatching to
+    /// the runtime (the old flow sent `model_id: None`, skipped the
+    /// resident-model check, and failed with `runtime_model_not_loaded`).
+    model_service: Option<ModelService>,
 }
 
 impl GenerateImageTool {
     pub(crate) fn new(image_service: ImageService) -> Self {
-        Self { image_service }
+        Self { image_service, model_service: None }
+    }
+
+    pub(crate) fn with_model_service(mut self, model_service: ModelService) -> Self {
+        self.model_service = Some(model_service);
+        self
+    }
+
+    /// Ensure a local image-generation model is loaded (idempotent fast path
+    /// when it already is). Best-effort: when no local image model exists in
+    /// the catalog the generation proceeds and surfaces the runtime's own
+    /// not-loaded error (its message quality is part of the contract).
+    async fn ensure_image_model_loaded(&self) -> Result<(), AgentError> {
+        let Some(model_service) = &self.model_service else {
+            return Ok(());
+        };
+        let models = model_service
+            .list_models(ListModelsFilter { capability: Some(Capability::ImageGeneration) })
+            .await
+            .map_err(to_tool_execution_error)?;
+        let Some(model) = models.into_iter().find(|model| model.kind == UnifiedModelKind::Local)
+        else {
+            return Ok(());
+        };
+
+        // Drain the progress channel in the background — the tool surfaces no
+        // load indicator (the turn-level marker is driven elsewhere); the
+        // sends must simply never block.
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(16);
+        tokio::spawn(async move { while progress_rx.recv().await.is_some() {} });
+        match model_service
+            .ensure_model_loaded_with_progress(
+                ModelLoadCommand {
+                    model_id: Some(model.id.clone()),
+                    backend_id: None,
+                    model_path: None,
+                    num_workers: None,
+                },
+                progress_tx,
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(error) => Err(AgentError::ToolExecution(format!(
+                "failed to prepare the image model {}: {error}",
+                model.display_name
+            ))),
+        }
     }
 }
 
@@ -63,9 +117,10 @@ impl ToolHandler for GenerateImageTool {
 
     fn description(&self) -> &str {
         "Generate one or more images from a text prompt using the local diffusion \
-         model and render them inline in the chat. Requires an image-generation \
-         (diffusion) model to be loaded. Returns the artifact URL(s); the image \
-         appears inline automatically — do not describe it as text."
+         model and render them inline in the chat. The image model is loaded \
+         automatically on first use (downloads when the weights are not local \
+         yet). Returns the artifact URL(s); the image appears inline \
+         automatically — do not describe it as text."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -97,6 +152,10 @@ impl ToolHandler for GenerateImageTool {
             serde_json::from_value(arguments.clone()).map_err(|error| {
                 AgentError::ToolExecution(format!("invalid generate_image args: {error}"))
             })?;
+
+        // Lazy-load: prepare the diffusion model BEFORE dispatching the
+        // generation (no-op fast path when it is already resident).
+        self.ensure_image_model_loaded().await?;
 
         // `model_id` left to the default loaded diffusion backend; `model` is the
         // informational model path (empty = use the pre-loaded default).
