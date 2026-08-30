@@ -462,12 +462,21 @@ impl AgentThread {
             .as_ref()
             .map(|workspace| workspace.root.to_string_lossy().into_owned());
 
-        'turns: for turn_offset in 0..self.config.max_turns {
+        // Steering extension budget: queued input drained after a Final (or at
+        // a tool-batch boundary) may land on the last allowed offset; each
+        // such drain may extend the budget (bounded) so the input gets a real
+        // turn instead of the loop expiring mid-extension and reporting the
+        // run as max-turns-interrupted with the input never reaching the model.
+        const MAX_STEERING_EXTENSIONS: u32 = 4;
+        let mut steering_extensions = 0u32;
+        let mut turn_offset = 0u32;
+        'turns: while turn_offset < self.config.max_turns.saturating_add(steering_extensions) {
             if interrupted || cancellation.is_cancelled() {
                 interrupted = true;
                 break 'turns;
             }
             let turn_index = starting_turn_index + turn_offset;
+            turn_offset = turn_offset.saturating_add(1);
             last_turn_index = turn_index;
             lifecycle.begin_iteration(turn_index);
             debug!(thread_id, turn_index, "starting turn");
@@ -564,6 +573,15 @@ impl AgentThread {
                                 &mut messages,
                             )
                             .await;
+                            // Steering that arrives on the final allowed offset
+                            // still deserves its turn: extend the budget
+                            // (bounded) so the loop does not expire with the
+                            // injected input never reaching the model.
+                            if turn_offset >= self.config.max_turns + steering_extensions
+                                && steering_extensions < MAX_STEERING_EXTENSIONS
+                            {
+                                steering_extensions += 1;
+                            }
                             debug!(thread_id, turn_index, "steering input extends the run");
                         } else {
                             break 'turns;
@@ -617,6 +635,13 @@ impl AgentThread {
                                 &mut messages,
                             )
                             .await;
+                            // Same last-offset hazard as the Final drain: the
+                            // injected input needs a next iteration to be seen.
+                            if turn_offset >= self.config.max_turns + steering_extensions
+                                && steering_extensions < MAX_STEERING_EXTENSIONS
+                            {
+                                steering_extensions += 1;
+                            }
                             debug!(
                                 thread_id,
                                 turn_index, "steering input queued for next iteration"

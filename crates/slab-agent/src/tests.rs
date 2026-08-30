@@ -5492,6 +5492,64 @@ async fn queued_input_extends_the_run_at_the_iteration_boundary() {
     assert!(emitted.iter().any(|m| m.rendered_text().contains("first request")));
 }
 
+/// Steering queued during the LAST allowed turn still gets consumed: the
+/// bounded budget extension keeps the loop alive past max_turns instead of
+/// expiring mid-extension (input injected into messages but never reaching
+/// the model, run reported as max-turns-interrupted).
+#[tokio::test]
+async fn queued_input_on_the_last_allowed_turn_still_gets_consumed() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(SteeringCaptureLlm { calls: calls.clone() });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    router.register(Box::new(DelayEchoTool));
+
+    let approval: Arc<dyn ApprovalPort> = notify.clone();
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
+
+    let thread_id = control
+        .spawn(
+            "session-steering-last-turn".into(),
+            AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() },
+            vec![user_text_message("first request")],
+        )
+        .await
+        .expect("spawn");
+
+    // Hold until the (only allowed) turn's tool is in flight, then steer.
+    wait_for_item_started(&notify, "call-1").await;
+    let outcome = control
+        .queue_input(&thread_id, user_text_message("steered on the last turn"))
+        .await
+        .expect("queue input on a live thread");
+    assert!(matches!(outcome, crate::SendOutcome::Queued { .. }));
+
+    let status = run_to_terminal(&control, &store, &thread_id).await;
+    assert_eq!(
+        status,
+        ThreadStatus::Completed,
+        "the extended run must complete, not expire as max-turns-interrupted"
+    );
+
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "the steered input must reach a second LLM call");
+    let second = message_texts(&calls[1]);
+    assert!(
+        second.iter().any(|text| text.contains("steered on the last turn")),
+        "second LLM call must carry the steered input: {second:?}"
+    );
+}
+
 #[tokio::test]
 async fn queued_input_on_idle_thread_signals_needs_resume() {
     let llm = Arc::new(MockLlm::new());
