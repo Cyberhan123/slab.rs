@@ -33,6 +33,7 @@ import type {
     ApprovalRequest,
     ApprovalScope,
     ApprovalStatus,
+    BackgroundTaskInfo,
     CommandInfo,
     CompactionMarker,
     HarnessChatTransport,
@@ -99,6 +100,8 @@ export type AssistantChatPaneProps = {
     abortReason: string | null
     /** Steering inputs queued on the running turn; ghost bubbles at the stream tail. */
     queuedTexts: readonly string[]
+    /** Resident background tasks; RUNNING ones render a status Marker at the tail. */
+    backgroundTasks: readonly BackgroundTaskInfo[]
     /** Steering send — submits while the turn runs queue at the iteration boundary. */
     onSteerSubmit: (text: string, options?: TurnSendOptions) => Promise<unknown>
     /**
@@ -157,6 +160,7 @@ export function AssistantChatPane({
     threadStatus,
     abortReason,
     queuedTexts,
+    backgroundTasks,
     onSteerSubmit,
     onInterrupt,
     onStartNewChat,
@@ -297,6 +301,7 @@ export function AssistantChatPane({
                                                     modelLoad={modelLoad}
                                                     sessionLoading={isHistoryLoading}
                                                     queuedTexts={queuedTexts}
+                                                    backgroundTasks={backgroundTasks}
                                                 />
                                             </MessageInteractionContext.Provider>
                                         </LiveToolOutputContext.Provider>

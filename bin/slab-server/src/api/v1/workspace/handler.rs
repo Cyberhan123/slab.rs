@@ -202,6 +202,15 @@ async fn open_workspace(
                 .harness
                 .prepare_workspace_migration(&old_root, &snapshot_dir)
                 .await?;
+            // Resident background tasks of the OLD workspace die with it —
+            // no "ghost" dev servers carrying into the new workspace.
+            let stopped_tasks = state.services.workspace_agent.stop_background_tasks_for(&old_root);
+            if !stopped_tasks.is_empty() {
+                tracing::info!(
+                    tasks = stopped_tasks.join(", "),
+                    "stopped background tasks of the previous workspace"
+                );
+            }
             Some(WorkspaceMigrationSummary {
                 project_id: outcome.project_id,
                 suspended_count: outcome.suspended_count as u32,

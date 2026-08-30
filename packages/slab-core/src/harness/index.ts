@@ -28,6 +28,7 @@ export type {
   ActionError,
   ApprovalRequest,
   ApprovalStatus,
+  BackgroundTaskInfo,
   CompactionMarker,
   CompactionMode,
   CompactionPhase,

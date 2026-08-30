@@ -91,6 +91,19 @@ export type ModelLoadState = {
 
 /** Whether a compaction marker represents an automatic or manual (`/compact`) run. */
 export type CompactionMode = "auto" | "manual"
+
+/**
+ * A resident background task started via `shell background=true`, tracked from
+ * `backgroundTask/updated` notifications. Terminal states stay listed (the
+ * registry bounds how many exist) so the timeline shows how tasks ended.
+ */
+export interface BackgroundTaskInfo {
+    taskId: string
+    status: "running" | "exited" | "stopped" | "failed"
+    exitCode?: number | null
+    pid?: number | null
+    command?: string | null
+}
 /** `compacting` = in-progress (rendered as a Shimmer); `compacted` = done. */
 export type CompactionPhase = "compacting" | "compacted"
 
@@ -194,6 +207,8 @@ export interface ConversationState {
   queuedCount: number
   /** Texts of the queued steering inputs, in send order (drives queued chips). */
   queuedTexts: readonly string[]
+  /** Resident background tasks (shell background=true), latest last. */
+  backgroundTasks: readonly BackgroundTaskInfo[]
 }
 
 /** Options accepted by the {@link ConversationController} constructor. */
@@ -301,6 +316,7 @@ const EMPTY_SNAPSHOT: ConversationState = {
   abortReason: null,
   queuedCount: 0,
   queuedTexts: [],
+  backgroundTasks: [],
 }
 
 // ── Controller ──────────────────────────────────────────────────────────────
@@ -343,6 +359,7 @@ export class ConversationController {
   private threadStatus: ThreadStatusString | null = null
   private abortReason: string | null = null
   private queuedTexts: string[] = []
+  private backgroundTasks: BackgroundTaskInfo[] = []
   /**
    * The live AI-SDK stream never replays user messages (the wire has no
    * `message/appended` notification), so when queued steering is drained or
@@ -416,6 +433,7 @@ export class ConversationController {
       this.userMessageTurnIndex = new Map()
       this.error = null
       this.isHistoryLoading = false
+      this.backgroundTasks = []
       this.restoreVersion += 1
       this.commit()
       return
@@ -468,6 +486,8 @@ export class ConversationController {
           messages.length === prevMessageIds.length &&
           messages.every((message, index) => message.id === prevMessageIds[index])
         if (!identicalReread) this.restoredMessages = messages
+        // Background tasks are thread-scoped; a thread switch drops the list.
+        if (this.restoredThreadId !== thread.id) this.backgroundTasks = []
         this.userMessageTurnIndex = buildUserMessageTurnIndex(thread)
         this.restoredThreadId = thread.id
         this.historyCreatedAt = thread.createdAt
@@ -848,6 +868,7 @@ export class ConversationController {
       abortReason: this.abortReason,
       queuedCount: this.queuedTexts.length,
       queuedTexts: [...this.queuedTexts],
+      backgroundTasks: this.backgroundTasks,
     }
     for (const listener of this.listeners) listener()
   }
@@ -979,6 +1000,42 @@ export class ConversationController {
             ? { ...m, phase: "compacted" }
             : m,
         )
+      }
+      this.commit()
+      return
+    }
+
+    // Resident background task lifecycle (shell background=true): track the
+    // latest state per task. Terminal states stay listed — the timeline shows
+    // how tasks ended and the count is bounded by the registry.
+    if (method === HARNESS_NOTIFICATION.BACKGROUND_TASK_UPDATED) {
+      const params = (notification.params ?? {}) as {
+        threadId?: string
+        taskId?: string
+        status?: string
+        exitCode?: number | null
+        pid?: number | null
+        command?: string | null
+      }
+      if (params.threadId !== undefined && params.threadId !== this.client.currentThreadId) {
+        return
+      }
+      const taskId = params.taskId
+      if (taskId === undefined) return
+      const info: BackgroundTaskInfo = {
+        taskId,
+        status: (params.status ?? "running") as BackgroundTaskInfo["status"],
+        exitCode: params.exitCode ?? null,
+        pid: params.pid ?? null,
+        command: params.command ?? null,
+      }
+      const existing = this.backgroundTasks.findIndex((task) => task.taskId === taskId)
+      if (existing >= 0) {
+        const next = [...this.backgroundTasks]
+        next[existing] = info
+        this.backgroundTasks = next
+      } else {
+        this.backgroundTasks = [...this.backgroundTasks, info]
       }
       this.commit()
       return

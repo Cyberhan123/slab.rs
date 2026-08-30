@@ -703,6 +703,49 @@ describe("ConversationController", () => {
     controller.dispose()
   })
 
+  it("tracks background task lifecycle notifications", async () => {
+    const { controller, socket } = await restoredController()
+
+    socket.simMessage(
+      notification("backgroundTask/updated", {
+        threadId: "hthread-1",
+        taskId: "bg-1",
+        status: "running",
+        pid: 4242,
+        command: "npm run dev",
+      }),
+    )
+    await flush()
+    expect(controller.getState().backgroundTasks).toEqual([
+      { taskId: "bg-1", status: "running", exitCode: null, pid: 4242, command: "npm run dev" },
+    ])
+
+    // Update replaces in place (no duplicate rows).
+    socket.simMessage(
+      notification("backgroundTask/updated", {
+        threadId: "hthread-1",
+        taskId: "bg-1",
+        status: "exited",
+        exitCode: 0,
+      }),
+    )
+    await flush()
+    expect(controller.getState().backgroundTasks).toHaveLength(1)
+    expect(controller.getState().backgroundTasks[0]).toMatchObject({ status: "exited", exitCode: 0 })
+
+    // Other threads' tasks are ignored.
+    socket.simMessage(
+      notification("backgroundTask/updated", {
+        threadId: "other-thread",
+        taskId: "bg-9",
+        status: "running",
+      }),
+    )
+    await flush()
+    expect(controller.getState().backgroundTasks).toHaveLength(1)
+    controller.dispose()
+  })
+
   it("keeps per-item map identities stable across unrelated commits", async () => {
     const { controller, socket } = await restoredController()
     const before = controller.getState()

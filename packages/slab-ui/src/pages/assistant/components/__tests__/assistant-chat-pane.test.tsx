@@ -124,6 +124,7 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     threadStatus: null,
     abortReason: null,
     queuedTexts: [],
+    backgroundTasks: [],
     onSteerSubmit: vi.fn(),
     onInterrupt: vi.fn(),
     ...overrides,

@@ -152,6 +152,32 @@ export function QueuedInputRow({
 }
 
 /**
+ * Status Marker for a RUNNING resident background task (shell
+ * background=true). Non-localized by convention (the compact tool-row labels
+ * `Read:`/`Bash:` are too) — no i18n key surface for v1.
+ */
+export function BackgroundTaskRow({
+    row,
+}: ScrollerRowComponentProps<ScrollerRowOf<"backgroundTask">>): ReactElement {
+    const { task } = row
+    const label = task.command?.trim() || task.taskId
+    return (
+        <Marker variant="separator" data-testid={`assistant-background-task-${task.taskId}`}>
+            <MarkerContent>
+                <span className="inline-flex items-center gap-1.5">
+                    <span aria-hidden className="text-primary">▶</span>
+                    <span className="font-mono text-xs">{label}</span>
+                    <span className="text-muted-foreground text-xs">
+                        (background · {task.taskId}
+                        {task.pid != null ? ` · pid ${task.pid}` : ""})
+                    </span>
+                </span>
+            </MarkerContent>
+        </Marker>
+    )
+}
+
+/**
  * Row-level component registry, mirroring the MessageParts dispatch pattern.
  * Replaces the former `row.kind === ...` ternary chain in the list. Meta-rows
  * (history/compact markers) live in the SAME positioned container as messages
@@ -170,6 +196,7 @@ export const rowComponents: {
     compactMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"compactMarker">>>
     modelLoadMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"modelLoadMarker">>>
     queuedInput: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"queuedInput">>>
+    backgroundTask: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"backgroundTask">>>
     message: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"message">>>
 } = {
     sessionLoadMarker: SessionLoadMarkerRow,
@@ -177,5 +204,6 @@ export const rowComponents: {
     compactMarker: CompactMarkerRow,
     modelLoadMarker: ModelLoadMarkerRow,
     queuedInput: QueuedInputRow,
+    backgroundTask: BackgroundTaskRow,
     message: MessageRow,
 }

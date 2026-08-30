@@ -44,6 +44,13 @@ impl AgentRuntimeReloader {
         Self { state, runtime, tool_router, rollout, rollout_store, background }
     }
 
+    /// Stop every background task rooted under `old_root` — the workspace
+    /// migration path sheds resident tasks so they do not carry into the new
+    /// workspace.
+    pub(crate) fn stop_background_tasks_for(&self, old_root: &Path) -> Vec<String> {
+        self.background.stop_all_for_workspace(old_root)
+    }
+
     pub(crate) async fn reload(&self) -> Result<(), AppCoreError> {
         let settings = self.state.pmid().config();
         let memory_config = settings.agent.memories.clone();

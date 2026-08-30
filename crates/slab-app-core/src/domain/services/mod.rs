@@ -65,6 +65,13 @@ impl WorkspaceAgentRuntime {
     pub fn refresh_workspace(&self, root: Option<std::path::PathBuf>) {
         self.reloader.refresh_workspace_tools(root);
     }
+
+    /// Stop every background task whose output lives under `root` (workspace
+    /// migration: no "ghost" dev servers carry into the new workspace).
+    /// Returns the stopped task ids.
+    pub fn stop_background_tasks_for(&self, root: &std::path::Path) -> Vec<String> {
+        self.reloader.stop_background_tasks_for(root)
+    }
 }
 
 #[derive(Clone)]
