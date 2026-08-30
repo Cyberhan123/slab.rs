@@ -651,6 +651,17 @@ impl AgentThread {
                 .await;
         }
 
+        // Run-scope per-thread state teardown: drop the exec-policy permission
+        // mode and the durable plan BEFORE any terminal-status transition, so
+        // "the state machine is terminal" also implies "this cleanup is done"
+        // — a resume observing a terminal registry entry can then replace it
+        // without racing a stale clear against the new run's writes (both are
+        // keyed by thread_id on process-wide singletons). Nothing reads either
+        // after the turns loop; the next turn/start re-asserts the permission
+        // mode and a fresh run re-plans via `update_plan` before completing.
+        exec_policy.clear_thread(&thread_id).await;
+        plan_store.clear(&thread_id).await;
+
         if interrupted {
             // Protocol completeness FIRST: synthesize failed tool results for
             // the trailing assistant tool-request (interrupted mid-batch) so

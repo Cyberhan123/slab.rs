@@ -137,7 +137,7 @@ impl ToolHandler for TaskCompleteTool {
 
     async fn execute(
         &self,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
         let args: TaskCompleteArgs =
@@ -155,6 +155,19 @@ impl ToolHandler for TaskCompleteTool {
         if args.plan.is_empty() {
             return Err(AgentError::ToolExecution(
                 "task.complete denied: plan must contain at least one item".to_owned(),
+            ));
+        }
+
+        // Replay guard: a completed run retires its durable plan (at the Final
+        // transition and at run teardown), so an active plan in the store is
+        // the deterministic proof that THIS task was planned through
+        // `update_plan`. A completion arriving with no active plan is a replay
+        // of a previous iteration's completion (or a completion that skipped
+        // planning entirely) — deny with the recovery path instead of
+        // finalizing on stale context.
+        if ctx.plan_store.current_plan(&ctx.thread_id).await.is_none() {
+            return Err(AgentError::ToolExecution(
+                "task.complete denied: no active plan on this thread (a completed run retires its plan); call update_plan with the plan for the current task, then complete".to_owned(),
             ));
         }
 
@@ -242,13 +255,58 @@ fn is_absolute_or_drive_path(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use serde_json::{Value, json};
-    use slab_agent::{AgentError, ToolContext, ToolHandler};
+    use slab_agent::{
+        AgentError, Plan, PlanCounts, PlanItem, PlanStatus, PlanStorePort, ToolContext, ToolHandler,
+    };
 
     use super::*;
 
+    /// Plan store double pre-seeded with an active plan — the deterministic
+    /// proof `task.complete` requires (mirrors the app-core in-memory impl).
+    #[derive(Default)]
+    struct SeededPlanStore {
+        plan: Mutex<Option<Plan>>,
+    }
+
+    #[async_trait::async_trait]
+    impl PlanStorePort for SeededPlanStore {
+        async fn replace_plan(&self, _thread_id: &str, plan: Plan) -> Result<(), AgentError> {
+            *self.plan.lock().unwrap() = Some(plan);
+            Ok(())
+        }
+        async fn current_plan(&self, _thread_id: &str) -> Option<Plan> {
+            self.plan.lock().unwrap().clone()
+        }
+        async fn clear(&self, _thread_id: &str) {
+            *self.plan.lock().unwrap() = None;
+        }
+    }
+
+    fn active_plan() -> Plan {
+        Plan {
+            plan_id: "plan-1".to_owned(),
+            summary: Some("active task".to_owned()),
+            items: vec![PlanItem {
+                step: "work".to_owned(),
+                status: PlanStatus::Completed,
+                depends_on: None,
+                result_ref: None,
+            }],
+            counts: PlanCounts { pending: 0, in_progress: 0, completed: 1, blocked: 0 },
+            current_step: None,
+        }
+    }
+
     fn ctx() -> ToolContext {
-        ToolContext::for_thread("thread").build()
+        let store = SeededPlanStore { plan: Mutex::new(Some(active_plan())) };
+        ToolContext::for_thread("thread").plan_store(Arc::new(store)).build()
+    }
+
+    fn empty_store_ctx() -> ToolContext {
+        ToolContext::for_thread("thread").plan_store(Arc::new(SeededPlanStore::default())).build()
     }
 
     fn completed_plan() -> Value {
@@ -350,5 +408,22 @@ mod tests {
         let required = schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "summary"));
         assert!(required.iter().any(|v| v == "plan"));
+    }
+
+    #[tokio::test]
+    async fn task_complete_denied_when_no_active_plan_in_store() {
+        // A completed run retires its plan; replaying the same completion (a
+        // resumed run finalizing on stale context) must be denied with the
+        // recovery path instead of silently finalizing.
+        let tool = TaskCompleteTool::new();
+        let error = tool
+            .execute(&empty_store_ctx(), &completed_plan())
+            .await
+            .expect_err("replay without an active plan denied");
+
+        assert!(matches!(error, AgentError::ToolExecution(_)));
+        let message = error.to_string();
+        assert!(message.contains("no active plan"), "{message}");
+        assert!(message.contains("update_plan"), "{message}");
     }
 }

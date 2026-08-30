@@ -490,6 +490,12 @@ pub(crate) async fn execute_turn(
             // 双轨 2: the deterministic `task.complete` gate passed; emit the
             // summary as the final answer and end the run (alongside the
             // existing `tool_calls.is_empty()` Final path).
+            //
+            // Retire the durable plan with the completion itself: a steering
+            // continuation that replays `task.complete` without fresh planning
+            // must hit the tool's no-active-plan denial instead of silently
+            // finalizing again on the already-completed plan.
+            context.plan_store.clear(context.thread_id).await;
             persist_final_answer(&context, messages, completion.summary).await;
             transition_turn(&context, TurnPhase::Completed).await;
             emit_turn_state_changed(

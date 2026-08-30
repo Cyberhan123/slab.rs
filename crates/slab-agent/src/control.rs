@@ -785,6 +785,10 @@ impl AgentControl {
                 abort.abort();
             }
         }
+        // The entry is gone from the registry and the task (if any) was joined
+        // or aborted: drop its per-thread mode + durable plan here too — the
+        // spawn-path cleanup never runs for an aborted task.
+        self.clear_thread_mode(thread_id).await;
         Ok(())
     }
 

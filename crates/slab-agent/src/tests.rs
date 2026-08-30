@@ -9,7 +9,10 @@
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use crate::{
@@ -3775,6 +3778,151 @@ async fn task_complete_finalizes_run_on_success() {
             _ => None,
         });
     assert_eq!(final_text.as_deref(), Some("shipped it"));
+}
+
+/// Tool double that seeds the durable plan store (stands in for `update_plan`)
+/// and flags that it ran, so the teardown test can distinguish "cleared after
+/// seeding" from "never seeded".
+struct SeedPlanTool {
+    ran: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl ToolHandler for SeedPlanTool {
+    fn name(&self) -> &str {
+        "seed_plan"
+    }
+
+    fn description(&self) -> &str {
+        "Test double that writes a plan into the durable plan store."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolContext,
+        _arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        ctx.plan_store
+            .replace_plan(
+                &ctx.thread_id,
+                crate::Plan {
+                    plan_id: "plan-teardown".to_owned(),
+                    summary: Some("teardown probe".to_owned()),
+                    items: vec![crate::PlanItem {
+                        step: "work".to_owned(),
+                        status: crate::PlanStatus::Completed,
+                        depends_on: None,
+                        result_ref: None,
+                    }],
+                    counts: crate::PlanCounts {
+                        pending: 0,
+                        in_progress: 0,
+                        completed: 1,
+                        blocked: 0,
+                    },
+                    current_step: None,
+                },
+            )
+            .await?;
+        self.ran.store(true, Ordering::SeqCst);
+        Ok(ToolOutput { content: "seeded".to_owned(), metadata: None })
+    }
+}
+
+/// Mock LLM: first call seeds the plan store, second call completes the task.
+struct PlanThenCompleteLlm {
+    call_count: Mutex<u32>,
+}
+
+impl PlanThenCompleteLlm {
+    fn new() -> Self {
+        Self { call_count: Mutex::new(0) }
+    }
+}
+
+#[async_trait]
+impl LlmPort for PlanThenCompleteLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut count = self.call_count.lock().unwrap();
+        *count += 1;
+        let call = if *count == 1 {
+            ParsedToolCall {
+                id: "call-seed".into(),
+                name: "seed_plan".into(),
+                arguments: "{}".into(),
+            }
+        } else {
+            ParsedToolCall {
+                id: "call-complete".into(),
+                name: "task.complete".into(),
+                arguments: r#"{"summary":"shipped it","plan":[{"step":"x","status":"completed"}]}"#
+                    .into(),
+            }
+        };
+        Ok(LlmResponse {
+            content: None,
+            content_already_streamed: false,
+            tool_calls: vec![call],
+            finish_reason: Some("tool_calls".into()),
+            usage: None,
+        })
+    }
+}
+
+/// A finished run must retire its per-thread residue (durable plan, exec
+/// mode): without the teardown clear, a resumed run saw the stale
+/// all-completed plan in its init context and re-finalized on the first tool
+/// batch — the A2 silent-termination loop.
+#[tokio::test]
+async fn run_teardown_retires_durable_plan() {
+    let llm = Arc::new(PlanThenCompleteLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TaskCompleteMarkerTool::always_succeeds()));
+    let seed_ran = Arc::new(AtomicBool::new(false));
+    router.register(Box::new(SeedPlanTool { ran: Arc::clone(&seed_ran) }));
+    let plan_store: Arc<dyn crate::PlanStorePort> = Arc::new(InMemoryPlanStore::default());
+    let approval = Arc::clone(&Arc::new(NoopNotify));
+    let control = Arc::new(
+        AgentControl::new(llm, store_port, notify.clone(), approval, Arc::new(router), 8, 4)
+            .with_plan_store(plan_store.clone()),
+    );
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-teardown-clear".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("plan then finish".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    assert!(seed_ran.load(Ordering::SeqCst), "seed_plan must have run mid-run");
+    assert!(
+        plan_store.current_plan(&thread_id).await.is_none(),
+        "run teardown must retire the durable plan (stale plans made resumed runs re-finalize)"
+    );
 }
 
 #[tokio::test]
