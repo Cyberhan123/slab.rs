@@ -142,4 +142,57 @@ describe("useHarnessConversation", () => {
     })
     await unmount()
   })
+
+  it("steers and interrupts through the detached action references the page destructures", async () => {
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const resumeReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(resumeReq.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+
+    // The server owns the busy state: mark the thread running so steering is
+    // the valid path (the queued chip renders from this).
+    FakeWebSocket.last!.simMessage(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "thread/statusChanged",
+        params: { threadId: "hthread-1", status: "running" },
+      }),
+    )
+    await flush()
+
+    // Exactly what the assistant page does: destructure the action off the
+    // hook's return value and call it later as a bare reference. A prototype
+    // method would lose `this` and reject with a TypeError.
+    const steer = result.current.sendSteering
+    const pending = steer({
+      id: "steer-1",
+      role: "user",
+      parts: [{ type: "text", text: "focus on the parser" }],
+    })
+    await flush()
+    const turnReq = FakeWebSocket.last!.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((m: { method?: string }) => m.method === "turn/start")
+      .at(-1)!
+    FakeWebSocket.last!.simMessage(
+      rpcResponse(turnReq.id, { turn: { id: "0", status: "queued" }, queued: true }),
+    )
+    await expect(pending).resolves.toMatchObject({ queued: true })
+    await vi.waitFor(() => expect(result.current.queuedTexts).toEqual(["focus on the parser"]))
+
+    // The Stop control: the detached interrupt must reach the wire.
+    const stop = result.current.interrupt
+    const stopping = stop()
+    await flush()
+    const interruptReq = FakeWebSocket.last!.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((m: { method?: string }) => m.method === "turn/interrupt")
+      .at(-1)!
+    expect(interruptReq.params).toMatchObject({ threadId: "hthread-1", turnId: "0" })
+    FakeWebSocket.last!.simMessage(rpcResponse(interruptReq.id, {}))
+    await expect(stopping).resolves.toBeUndefined()
+    await unmount()
+  })
 })

@@ -609,6 +609,74 @@ describe("ConversationController", () => {
     controller.dispose()
   })
 
+  it("send/sendSteering/interrupt stay callable through destructured references", async () => {
+    const { controller, socket } = await restoredController()
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "running",
+      }),
+    )
+    await flush()
+
+    // The React hook destructures these as bare references; calling them
+    // detached must not lose `this` (a prototype method would throw
+    // "Cannot read properties of undefined (reading 'send')" here).
+    const { sendSteering, interrupt } = controller
+    const sendPromise = sendSteering({
+      id: "steer-detached",
+      role: "user",
+      parts: [{ type: "text", text: "detached steering" }],
+    })
+    await flush()
+    const turnReq = findRequest(socket, "turn/start")
+    socket.simMessage(
+      rpcResponse(turnReq.id, { turn: { id: "0", status: "queued" }, queued: true }),
+    )
+    await expect(sendPromise).resolves.toMatchObject({ queued: true })
+    expect(controller.getState().queuedTexts).toEqual(["detached steering"])
+
+    const stopPromise = interrupt()
+    await flush()
+    const interruptReq = socket.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((m) => m.method === "turn/interrupt")
+      .at(-1)
+    expect(interruptReq.params).toMatchObject({ threadId: "hthread-1", turnId: "0" })
+    socket.simMessage(rpcResponse(interruptReq.id, {}))
+    await expect(stopPromise).resolves.toBeUndefined()
+    controller.dispose()
+  })
+
+  it("interrupt tolerates a thread that already vanished server-side", async () => {
+    const { controller, socket } = await restoredController()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+    const stopPromise = controller.interrupt()
+    await flush()
+    const firstReq = socket.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((m) => m.method === "turn/interrupt")
+      .at(-1)!
+    socket.simMessage(rpcError(firstReq.id, "thread not found: hthread-1"))
+    await expect(stopPromise).resolves.toBeUndefined()
+    expect(warn).not.toHaveBeenCalled()
+
+    // A different failure stays observable instead of being swallowed.
+    const second = controller.interrupt()
+    await flush()
+    const secondReq = socket.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((m) => m.method === "turn/interrupt")
+      .at(-1)!
+    socket.simMessage(rpcError(secondReq.id, "internal boom"))
+    await expect(second).resolves.toBeUndefined()
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+    controller.dispose()
+  })
+
   it("an interrupt with queued input resyncs on the terminal status event", async () => {
     const { controller, socket } = await restoredController()
 

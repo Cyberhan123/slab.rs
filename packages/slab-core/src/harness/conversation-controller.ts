@@ -484,8 +484,14 @@ export class ConversationController {
    * and fires `turn/start` with the shared turn-input mapping. The interactive
    * send path stays with `useChat` + `HarnessChatTransport` (chunk streaming);
    * this is the non-AI-SDK equivalent.
+   *
+   * Arrow-bound (detachable): safe to destructure and call as a bare
+   * reference — `sendSteering` and the React hook rely on that.
    */
-  async send(message: UIMessage, options?: TurnSendOptions): Promise<TurnStartResult> {
+  readonly send = async (
+    message: UIMessage,
+    options?: TurnSendOptions,
+  ): Promise<TurnStartResult> => {
     const model = options?.model ?? this.model
     await this.client.open()
 
@@ -521,7 +527,10 @@ export class ConversationController {
    * run ended in the race window (server answered `queued: false`), refresh
    * the restored history so the pane converges on the new run's rollout.
    */
-  async sendSteering(message: UIMessage, options?: TurnSendOptions): Promise<TurnStartResult> {
+  readonly sendSteering = async (
+    message: UIMessage,
+    options?: TurnSendOptions,
+  ): Promise<TurnStartResult> => {
     const text =
       message.parts
         ?.filter((part): part is { type: "text"; text: string } => part.type === "text")
@@ -561,8 +570,11 @@ export class ConversationController {
     if (shouldResync) void this.reconnect()
   }
 
-  /** Interrupt the live turn on the bound thread (best-effort). */
-  async interrupt(): Promise<void> {
+  /**
+   * Interrupt the live turn on the bound thread (best-effort). Arrow-bound
+   * (detachable): the React hook destructures this as the Stop control.
+   */
+  readonly interrupt = async (): Promise<void> => {
     const threadId = this.client.currentThreadId
     if (!threadId) return
     // Teardown persists any undelivered queued inputs into the rollout; flag a
@@ -570,7 +582,18 @@ export class ConversationController {
     if (this.queuedTexts.length > 0) this.pendingResync = true
     this.queuedTexts = []
     this.commit()
-    await this.client.turnInterrupt({ threadId, turnId: "0" })
+    try {
+      await this.client.turnInterrupt({ threadId, turnId: "0" })
+    } catch (interruptError) {
+      // Best-effort control: a thread that already terminated server-side
+      // ("thread not found") is not actionable; anything else stays
+      // observable instead of being silently swallowed by the caller.
+      const message =
+        interruptError instanceof Error ? interruptError.message : String(interruptError)
+      if (!/thread not found/i.test(message)) {
+        console.warn("[harness] turn/interrupt failed:", message)
+      }
+    }
   }
 
   /** Toggle plan mode. Resolving a plan approval clears it atomically. */
