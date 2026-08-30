@@ -31,6 +31,21 @@ pub trait WindowsSandboxExecutor: Send + Sync {
     /// return it with a tree-kill closure. The shim feeds both into the shared `wait_for_child`.
     fn spawn_job_only(&self, req: &SpawnRequest) -> Result<SpawnedChild, WindowsSandboxError>;
 
+    /// Background variant of [`WindowsSandboxExecutor::spawn_job_only`]: stdout/stderr append
+    /// to caller-provided FILES (no pipes to drain — a backgrounded grandchild cannot hang a
+    /// reader) and the tree stays RESIDENT until the kill-tree closure fires or the process
+    /// exits. Default: unsupported (the elevated daemon path does not implement it).
+    fn spawn_job_only_background(
+        &self,
+        _req: &SpawnRequest,
+        _stdout: std::fs::File,
+        _stderr: std::fs::File,
+    ) -> Result<SpawnedChild, WindowsSandboxError> {
+        Err(WindowsSandboxError::SetupFailed(
+            "background spawn not supported by this executor".into(),
+        ))
+    }
+
     /// Drive elevation to completion + apply integrity-label ACLs (idempotent). After Ok,
     /// `capabilities().provisioned` flips true and `spawn_elevated` is usable. Default: not
     /// supported (non-elevated executors).
@@ -103,6 +118,51 @@ impl WindowsSandboxExecutor for JobOnlyExecutor {
         tracing::debug!(pid = spawned.id(), "spawned process in Windows Job Object");
         // Dropping `job` fires KILL_ON_JOB_CLOSE → tree dies → pipes released. The shim's
         // `wait_for_child` invokes this closure right after the direct child exits.
+        let kill_tree: Box<dyn FnOnce() + Send + 'static> = Box::new(move || drop(job));
+        Ok(SpawnedChild { child: spawned, kill_tree: Some(kill_tree) })
+    }
+
+    fn spawn_job_only_background(
+        &self,
+        req: &SpawnRequest,
+        stdout: std::fs::File,
+        stderr: std::fs::File,
+    ) -> Result<SpawnedChild, WindowsSandboxError> {
+        let program = req.argv.first().ok_or(WindowsSandboxError::EmptyCommand)?;
+        let mut command = tokio::process::Command::new(program);
+        command.args(&req.argv[1..]);
+        for (key, value) in &req.env {
+            command.env(key, value);
+        }
+        if let Some(ref cwd) = req.cwd {
+            command.current_dir(cwd);
+        }
+        // Resident semantics: no kill_on_drop — the job handle (inside the
+        // kill-tree closure) owns teardown, so the tree survives the caller
+        // dropping the wait future.
+        command.kill_on_drop(false);
+        command.stdin(Stdio::null());
+        // File-redirected stdio: no pipes to drain, so a backgrounded
+        // grandchild cannot hold a reader open (the reason the FOREGROUND
+        // path tree-kills on return does not apply).
+        command.stdout(Stdio::from(stdout));
+        command.stderr(Stdio::from(stderr));
+
+        let spawned =
+            command.spawn().map_err(|e| WindowsSandboxError::SpawnFailed(e.to_string()))?;
+        let job = JobHandle::new()?;
+        job.configure_kill_on_close()?;
+        let process_handle = spawned.raw_handle().ok_or_else(|| {
+            WindowsSandboxError::SetupFailed("spawned child has no process handle".into())
+        })?;
+        // SAFETY: `process_handle` is the just-spawned child's valid, open
+        // process handle from `raw_handle()`.
+        unsafe { job.assign_process(process_handle as windows_sys::Win32::Foundation::HANDLE) }?;
+
+        tracing::debug!(pid = spawned.id(), "spawned background process in Windows Job Object");
+        // Closing the job handle fires KILL_ON_JOB_CLOSE → tree dies. Held by
+        // the caller until the background task is stopped (or forgotten on
+        // process exit, when the OS closes all handles anyway).
         let kill_tree: Box<dyn FnOnce() + Send + 'static> = Box::new(move || drop(job));
         Ok(SpawnedChild { child: spawned, kill_tree: Some(kill_tree) })
     }

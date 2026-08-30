@@ -125,6 +125,47 @@ impl SandboxDriver for WindowsSandboxDriver {
         }
     }
 
+    async fn spawn_background(
+        &self,
+        cmd: SandboxedCommand,
+        stdout: std::fs::File,
+        stderr: std::fs::File,
+    ) -> Result<crate::driver::BackgroundChild, SandboxError> {
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (cmd, stdout, stderr);
+            return Err(SandboxError::UnsupportedPlatform);
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // Same lexical guard as the foreground path (defense-in-depth).
+            validate_command(&self.env, &cmd)?;
+            let req = build_spawn_request(&self.env, &cmd);
+            let snap = self.executor.capabilities();
+            if self.executor.is_elevated_capable() && snap.provisioned {
+                // The elevated daemon path relays pipes and does not support
+                // file-redirected resident execution yet — fail explicitly
+                // instead of degrading to a hang or a broken tree kill.
+                return Err(SandboxError::SetupFailed(
+                    "background execution is unavailable under the elevated Windows sandbox \
+                     (windows_setup_required); run the command in the foreground or disable \
+                     elevation"
+                        .into(),
+                ));
+            }
+            let mut spawned = self
+                .executor
+                .spawn_job_only_background(&req, stdout, stderr)
+                .map_err(map_win_err)?;
+            let pid = spawned.child.id();
+            let wait = Box::pin(async move {
+                spawned.child.wait().await.map(|status| status.code().unwrap_or(-1))
+            });
+            Ok(crate::driver::BackgroundChild { pid, wait, kill_tree: spawned.kill_tree })
+        }
+    }
+
     fn setup_status(&self) -> SandboxSetupStatus {
         #[cfg(target_os = "windows")]
         {

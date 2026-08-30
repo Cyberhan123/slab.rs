@@ -193,10 +193,43 @@ impl SandboxedOutput {
     }
 }
 
+/// A detached background process spawned via [`SandboxDriver::spawn_background`].
+///
+/// stdout/stderr were redirected to caller-provided FILES at spawn — no pipes
+/// to drain, so a backgrounded grandchild inheriting the handles cannot keep
+/// any reader alive (the exact hang that makes the FOREGROUND path kill the
+/// tree on return). `wait` resolves with the exit code when the process ends;
+/// `kill_tree` tears the whole tree down (Windows: closing the
+/// KILL_ON_JOB_CLOSE job handle; Unix: killing the process group). The tree
+/// stays resident until the process exits or `kill_tree` fires — the CALLER
+/// owns the lifetime.
+pub struct BackgroundChild {
+    pub pid: Option<u32>,
+    pub wait: std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<i32>> + Send>>,
+    pub kill_tree: Option<Box<dyn FnOnce() + Send + 'static>>,
+}
+
 #[async_trait]
 pub trait SandboxDriver: Send + Sync {
     async fn run(&self, cmd: SandboxedCommand) -> Result<SandboxedOutput, SandboxError>;
     fn name(&self) -> &str;
+
+    /// Spawn a DETACHED background process whose stdout/stderr append to the
+    /// given files. Unlike [`SandboxDriver::run`], the tree survives the call:
+    /// there is no timeout, no output capture, and no teardown-on-return —
+    /// the caller drives the lifetime through [`BackgroundChild`].
+    /// Default: unsupported (drivers that cannot keep a resident tree reject
+    /// it; the tool layer surfaces the error).
+    async fn spawn_background(
+        &self,
+        _cmd: SandboxedCommand,
+        _stdout: std::fs::File,
+        _stderr: std::fs::File,
+    ) -> Result<BackgroundChild, SandboxError> {
+        Err(SandboxError::SetupFailed(
+            "background execution is not supported by this sandbox driver".to_owned(),
+        ))
+    }
 
     async fn prepare(&self) -> Result<SandboxSetupStatus, SandboxError> {
         Ok(self.setup_status())
@@ -258,6 +291,50 @@ impl SandboxDriver for PassThroughDriver {
         #[cfg(not(any(unix, windows)))]
         let kill_tree: Option<Box<dyn FnOnce() + Send + 'static>> = None;
         wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone(), kill_tree).await
+    }
+
+    async fn spawn_background(
+        &self,
+        cmd: SandboxedCommand,
+        stdout: std::fs::File,
+        stderr: std::fs::File,
+    ) -> Result<BackgroundChild, SandboxError> {
+        use tokio::process::Command;
+        let program = cmd.argv.first().ok_or(SandboxError::EmptyCommand)?;
+        let mut child = Command::new(program);
+        child.args(&cmd.argv[1..]);
+        for (k, v) in &cmd.env {
+            child.env(k, v);
+        }
+        if let Some(ref cwd) = cmd.cwd {
+            child.current_dir(cwd);
+        }
+        // Resident semantics — the OPPOSITE of the foreground path: dropping
+        // the wait future must NOT kill the tree; teardown is explicit via
+        // `kill_tree` (or natural process exit).
+        child.kill_on_drop(false);
+        child.stdin(std::process::Stdio::null());
+        // File-redirected stdio: no pipes, so a backgrounded grandchild has
+        // nothing to hold open and nothing to drain — the whole reason the
+        // foreground path must tree-kill on return does not apply here.
+        child.stdout(std::process::Stdio::from(stdout));
+        child.stderr(std::process::Stdio::from(stderr));
+        #[cfg(unix)]
+        {
+            child.process_group(0);
+        }
+
+        let mut spawned = child.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
+        let pid = spawned.id();
+        #[cfg(unix)]
+        let kill_tree = unix_kill_tree(pid);
+        #[cfg(windows)]
+        let kill_tree = windows_job_kill_tree(&mut spawned);
+        #[cfg(not(any(unix, windows)))]
+        let kill_tree: Option<Box<dyn FnOnce() + Send + 'static>> = None;
+        let wait =
+            Box::pin(async move { spawned.wait().await.map(|status| status.code().unwrap_or(-1)) });
+        Ok(BackgroundChild { pid, wait, kill_tree })
     }
 
     fn capabilities(&self) -> SandboxCapabilities {
@@ -742,6 +819,111 @@ mod tests {
     fn tree_kill_guard_without_closure_is_noop() {
         let mut guard = TreeKillGuard::new(None);
         assert!(!guard.fire());
+    }
+
+    /// Background spawn contract: the process writes to the redirected FILES,
+    /// `wait` resolves with the real exit code, and `kill_tree` terminates a
+    /// still-running tree.
+    #[tokio::test]
+    async fn spawn_background_writes_files_and_wait_reports_exit_code() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let stdout_path = dir.path().join("out.log");
+        let stderr_path = dir.path().join("err.log");
+        let stdout = std::fs::File::create(&stdout_path).expect("stdout file");
+        let stderr = std::fs::File::create(&stderr_path).expect("stderr file");
+
+        #[cfg(windows)]
+        let argv = vec![
+            "powershell.exe".to_owned(),
+            "-NoLogo".to_owned(),
+            "-NoProfile".to_owned(),
+            "-NonInteractive".to_owned(),
+            "-Command".to_owned(),
+            "Write-Output 'bg-done'".to_owned(),
+        ];
+        #[cfg(not(windows))]
+        let argv = vec!["sh".to_owned(), "-c".to_owned(), "echo bg-done".to_owned()];
+
+        let driver = PassThroughDriver;
+        let child = driver
+            .spawn_background(
+                SandboxedCommand {
+                    argv,
+                    env: Default::default(),
+                    cwd: None,
+                    timeout: None,
+                    output_sink: None,
+                },
+                stdout,
+                stderr,
+            )
+            .await
+            .expect("background spawn");
+
+        let exit = tokio::time::timeout(Duration::from_secs(20), child.wait)
+            .await
+            .expect("wait resolves")
+            .expect("exit status");
+        assert_eq!(exit, 0);
+
+        let stdout_text = std::fs::read_to_string(&stdout_path).expect("stdout content");
+        assert!(
+            stdout_text.contains("bg-done"),
+            "stdout file must carry the output: {stdout_text}"
+        );
+        // kill_tree on an exited process is a no-op at worst — firing it must
+        // not panic.
+        if let Some(kill) = child.kill_tree {
+            kill();
+        }
+    }
+
+    /// `kill_tree` on a RUNNING background tree must terminate it: after the
+    /// kill, the wait resolves well before the command's natural runtime.
+    #[tokio::test]
+    async fn spawn_background_kill_tree_terminates_running_process() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let stdout = std::fs::File::create(dir.path().join("out.log")).expect("stdout file");
+        let stderr = std::fs::File::create(dir.path().join("err.log")).expect("stderr file");
+
+        #[cfg(windows)]
+        let argv = vec![
+            "powershell.exe".to_owned(),
+            "-NoLogo".to_owned(),
+            "-NoProfile".to_owned(),
+            "-NonInteractive".to_owned(),
+            "-Command".to_owned(),
+            "Start-Sleep -Seconds 30".to_owned(),
+        ];
+        #[cfg(not(windows))]
+        let argv = vec!["sleep".to_owned(), "30".to_owned()];
+
+        let driver = PassThroughDriver;
+        let mut child = driver
+            .spawn_background(
+                SandboxedCommand {
+                    argv,
+                    env: Default::default(),
+                    cwd: None,
+                    timeout: None,
+                    output_sink: None,
+                },
+                stdout,
+                stderr,
+            )
+            .await
+            .expect("background spawn");
+
+        let kill_tree = child.kill_tree.take();
+        if let Some(kill) = kill_tree {
+            kill();
+        }
+        let started = std::time::Instant::now();
+        let _ = tokio::time::timeout(Duration::from_secs(20), child.wait).await;
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "killed tree must not run its full 30s"
+        );
     }
 
     /// The P4 fix: a timeout must actually terminate the child (instead of

@@ -6,9 +6,9 @@ pub mod policy;
 pub mod spawn;
 
 pub use driver::{
-    IsolationStrength, OutputSink, OutputStream, PassThroughDriver, SandboxCapabilities,
-    SandboxDriver, SandboxIsolation, SandboxPlatform, SandboxSetupStatus, SandboxedCommand,
-    SandboxedOutput, SetupKind,
+    BackgroundChild, IsolationStrength, OutputSink, OutputStream, PassThroughDriver,
+    SandboxCapabilities, SandboxDriver, SandboxIsolation, SandboxPlatform, SandboxSetupStatus,
+    SandboxedCommand, SandboxedOutput, SetupKind,
 };
 pub use error::SandboxError;
 pub use guard::validate_command;
