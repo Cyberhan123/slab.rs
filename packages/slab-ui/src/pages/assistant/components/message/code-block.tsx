@@ -16,10 +16,10 @@ import type { ComponentProps, CSSProperties, HTMLAttributes } from "react"
 import {
   createContext,
   memo,
+  useRef,
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react"
 import type { BundledLanguage, BundledTheme, HighlighterGeneric, ThemedToken } from "shiki"
@@ -234,10 +234,12 @@ const CodeBlockContent = ({
   const rawTokens = useMemo(() => createRawTokens(code), [code])
   const syncTokens = useMemo(() => highlightCode(code, language) ?? rawTokens, [code, language, rawTokens])
   const [asyncTokens, setAsyncTokens] = useState<TokenizedCode | null>(null)
-  const asyncKeyRef = useRef({ code, language })
-
-  if (asyncKeyRef.current.code !== code || asyncKeyRef.current.language !== language) {
-    asyncKeyRef.current = { code, language }
+  // Reset the async result when the input changes (the React-docs "adjust state
+  // during render" pattern — previous key kept in state, not a ref, so no ref
+  // is touched during render).
+  const [asyncKey, setAsyncKey] = useState({ code, language })
+  if (asyncKey.code !== code || asyncKey.language !== language) {
+    setAsyncKey({ code, language })
     setAsyncTokens(null)
   }
 

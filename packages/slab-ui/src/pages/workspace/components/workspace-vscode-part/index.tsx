@@ -48,6 +48,9 @@ export function WorkspaceVscodePart({
     let timedOut = false
     let timeoutId: number | null = null
 
+    // Reset of the async VS Code mount lifecycle for the new inputs; the
+    // synchronous reset flags below are part of that external-system sync.
+    // oxlint-disable-next-line
     setMountState("pending")
     setMountStage(stage)
     setMountError(null)

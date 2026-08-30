@@ -60,7 +60,8 @@ export type ToolItemFields = {
 
 /**
  * Extract the tool fields from a finalized tool-like item (`commandExecution`,
- * `mcpToolCall`, `fileChange`, `webSearch`). Returns `null` for non-tool items.
+ * `mcpToolCall`, `fileChange`, `toolCall`, `webSearch`). Returns `null` for
+ * non-tool items.
  *
  * Shared by the history part-builder and the live chunk-emitter so both agree
  * on input/output/error derivation (e.g. `exitCode !== 0` ⇒ failed).
@@ -95,6 +96,20 @@ export function toolItemFields(item: TurnItem): ToolItemFields | null {
         output: { status: item.status },
         failed: false,
       }
+    case "toolCall": {
+      // Generic built-in tool call (read_file / grep / git_* / …) — the
+      // server-default render. Mirrors mcpToolCall: failed calls carry `error`,
+      // successful ones carry `result`.
+      const failed = item.error !== undefined && item.error !== null
+      return {
+        toolName: item.tool,
+        input: item.arguments,
+        output:
+          !failed && item.result !== undefined && item.result !== null ? item.result : undefined,
+        errorText: failed ? stringifyToolValue(item.error) : undefined,
+        failed,
+      }
+    }
     case "webSearch":
       return { toolName: "webSearch", input: { query: item.query }, failed: false }
     case "plan":

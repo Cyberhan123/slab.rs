@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentProps } from 'react';
+import { useState, type ComponentProps } from 'react';
 
 import { Badge } from '@slab/components/badge';
 import api from '@slab/api';
@@ -77,29 +77,19 @@ export function BackendStatus() {
     },
   );
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);
-  const lastObservedUpdateRef = useRef(0);
+  // Count each react-query transition exactly once, deriving during render
+  // (the React-docs adjust-state pattern) instead of a setState-in-effect.
+  const [lastObservedUpdate, setLastObservedUpdate] = useState(0);
+  if (!isLoading) {
+    const updatedAt = Math.max(dataUpdatedAt, errorUpdatedAt);
+    if (updatedAt !== 0 && updatedAt !== lastObservedUpdate) {
+      setLastObservedUpdate(updatedAt);
+      setConsecutiveFailures(error || !data ? consecutiveFailures + 1 : 0);
+    }
+  }
   const isChecking = isLoading;
   const isOffline = !isChecking && consecutiveFailures >= OFFLINE_FAILURE_THRESHOLD;
   const isOnline = !isChecking && Boolean(data) && !isOffline;
-
-  useEffect(() => {
-    if (isLoading) {
-      return;
-    }
-
-    const updatedAt = Math.max(dataUpdatedAt, errorUpdatedAt);
-    if (updatedAt === 0 || updatedAt === lastObservedUpdateRef.current) {
-      return;
-    }
-
-    lastObservedUpdateRef.current = updatedAt;
-    if (error || !data) {
-      setConsecutiveFailures((current) => current + 1);
-      return;
-    }
-
-    setConsecutiveFailures(0);
-  }, [data, dataUpdatedAt, error, errorUpdatedAt, isLoading]);
 
   if (isChecking) {
     return statusBadge({

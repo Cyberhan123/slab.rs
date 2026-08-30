@@ -153,6 +153,77 @@ describe("harness stream convertNotification", () => {
     ])
   })
 
+  it("opens and closes a generic toolCall card keyed by the tool name", () => {
+    const state = createStreamState()
+    const started: TurnItem = {
+      type: "toolCall",
+      id: "tc1",
+      tool: "read_file",
+      arguments: { path: "src/main.rs" },
+      status: "running",
+    }
+    const open = convertNotification(
+      { method: "item/started", params: { item: started, threadId: THREAD, turnId: TURN } },
+      state,
+    )
+    expect(open).toEqual([
+      {
+        input: { path: "src/main.rs" },
+        toolCallId: "tc1",
+        toolName: "read_file",
+        type: "tool-input-available",
+      },
+    ])
+
+    const completed: TurnItem = {
+      ...started,
+      status: "completed",
+      result: "fn main() {}",
+      durationMs: 4,
+    }
+    const close = convertNotification(
+      { method: "item/completed", params: { item: completed, threadId: THREAD, turnId: TURN } },
+      state,
+    )
+    expect(close).toEqual([
+      {
+        input: { path: "src/main.rs" },
+        toolCallId: "tc1",
+        toolName: "read_file",
+        type: "tool-input-available",
+      },
+      {
+        output: "fn main() {}",
+        toolCallId: "tc1",
+        type: "tool-output-available",
+      },
+    ])
+    expect(state.openTools.size).toBe(0)
+
+    // A failed completion lands as output-error with the payload as errorText.
+    const state2 = createStreamState()
+    const failing: TurnItem = {
+      ...started,
+      id: "tc2",
+      status: "failed",
+      error: "no such file",
+    }
+    convertNotification(
+      { method: "item/started", params: { item: failing, threadId: THREAD, turnId: TURN } },
+      state2,
+    )
+    expect(
+      convertNotification(
+        { method: "item/completed", params: { item: failing, threadId: THREAD, turnId: TURN } },
+        state2,
+      ),
+    ).toContainEqual({
+      toolCallId: "tc2",
+      type: "tool-output-error",
+      errorText: "no such file",
+    })
+  })
+
   it("closes an unclosed tool card at turn end with a terminal error (interrupt safety net)", () => {
     // Client-side fallback for servers whose interrupt path leaves
     // item/started dangling: finish must emit tool-output-error so the card

@@ -37,6 +37,17 @@ export const assistant = {
   hero: {
     description: '今天想让助手如何协助你的工作流？',
   },
+  newChat: {
+    title: '新建聊天',
+    description: '选择聊天运行的工作区，然后发送第一条消息。',
+    cta: '选择工作区新建聊天…',
+    workspaceSection: '工作区',
+    currentLabel: '当前工作区',
+    recentLabel: '最近',
+    chooseFolder: '选择文件夹…',
+    global: '全局聊天（无工作区）',
+    switchedGlobal: '已切换为全局聊天',
+  },
   loading: {
     title: '正在加载此会话...',
     description: '继续之前，正在恢复已保存的对话历史。',

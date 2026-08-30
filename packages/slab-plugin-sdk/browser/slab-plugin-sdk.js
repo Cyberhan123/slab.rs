@@ -20,12 +20,14 @@
     }
     target = mod != null ? __create(__getProtoOf(mod)) : {};
     const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
-    for (let key of __getOwnPropNames(mod))
-      if (!__hasOwnProp.call(to, key))
-        __defProp(to, key, {
-          get: __accessProp.bind(mod, key),
-          enumerable: true
-        });
+    if (mod && typeof mod === "object" || typeof mod === "function") {
+      for (let key of __getOwnPropNames(mod))
+        if (!__hasOwnProp.call(to, key))
+          __defProp(to, key, {
+            get: __accessProp.bind(mod, key),
+            enumerable: true
+          });
+    }
     if (canCache)
       cache.set(mod, to);
     return to;
@@ -69,8 +71,8 @@
     throw Error('Dynamic require of "' + x + '" is not supported');
   });
 
-  // ../../node_modules/.bun/react@19.2.7/node_modules/react/cjs/react.development.js
-  var require_react_development = __commonJS((exports, module) => {
+  // ../../node_modules/.bun/react@19.2.8/node_modules/react/cjs/react.development.js
+  var require_react_development = __commonJS(function(exports, module) {
     (function() {
       function defineDeprecationWarning(methodName, info) {
         Object.defineProperty(Component.prototype, methodName, {
@@ -103,7 +105,7 @@
         this.refs = emptyObject;
         this.updater = updater || ReactNoopUpdateQueue;
       }
-      function noop2() {}
+      function noop() {}
       function testStringCoercion(value) {
         return "" + value;
       }
@@ -278,7 +280,7 @@
           case "rejected":
             throw thenable.reason;
           default:
-            switch (typeof thenable.status === "string" ? thenable.then(noop2, noop2) : (thenable.status = "pending", thenable.then(function(fulfilledValue) {
+            switch (typeof thenable.status === "string" ? thenable.then(noop, noop) : (thenable.status = "pending", thenable.then(function(fulfilledValue) {
               thenable.status === "pending" && (thenable.status = "fulfilled", thenable.value = fulfilledValue);
             }, function(error) {
               thenable.status === "pending" && (thenable.status = "rejected", thenable.reason = error);
@@ -815,7 +817,7 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
         try {
           var returnValue = scope(), onStartTransitionFinish = ReactSharedInternals.S;
           onStartTransitionFinish !== null && onStartTransitionFinish(currentTransition, returnValue);
-          typeof returnValue === "object" && returnValue !== null && typeof returnValue.then === "function" && (ReactSharedInternals.asyncTransitions++, returnValue.then(releaseAsyncTransition, releaseAsyncTransition), returnValue.then(noop2, reportGlobalError));
+          typeof returnValue === "object" && returnValue !== null && typeof returnValue.then === "function" && (ReactSharedInternals.asyncTransitions++, returnValue.then(releaseAsyncTransition, releaseAsyncTransition), returnValue.then(noop, reportGlobalError));
         } catch (error) {
           reportGlobalError(error);
         } finally {
@@ -887,20 +889,20 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
       exports.useTransition = function() {
         return resolveDispatcher().useTransition();
       };
-      exports.version = "19.2.7";
+      exports.version = "19.2.8";
       typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ !== "undefined" && typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop === "function" && __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop(Error());
     })();
   });
 
-  // ../../node_modules/.bun/react@19.2.7/node_modules/react/index.js
-  var require_react = __commonJS((exports, module) => {
+  // ../../node_modules/.bun/react@19.2.8/node_modules/react/index.js
+  var require_react = __commonJS(function(exports, module) {
     if (false) {} else {
       module.exports = require_react_development();
     }
   });
 
-  // ../../node_modules/.bun/react@19.2.7/node_modules/react/cjs/react-jsx-runtime.development.js
-  var require_react_jsx_runtime_development = __commonJS((exports) => {
+  // ../../node_modules/.bun/react@19.2.8/node_modules/react/cjs/react-jsx-runtime.development.js
+  var require_react_jsx_runtime_development = __commonJS(function(exports) {
     (function() {
       function getComponentNameFromType(type) {
         if (type == null)
@@ -1117,8 +1119,8 @@ React keys must be passed directly to JSX without using spread:
     })();
   });
 
-  // ../../node_modules/.bun/react@19.2.7/node_modules/react/jsx-runtime.js
-  var require_jsx_runtime = __commonJS((exports, module) => {
+  // ../../node_modules/.bun/react@19.2.8/node_modules/react/jsx-runtime.js
+  var require_jsx_runtime = __commonJS(function(exports, module) {
     if (false) {} else {
       module.exports = require_react_jsx_runtime_development();
     }
@@ -1127,18 +1129,18 @@ React keys must be passed directly to JSX without using spread:
   // src/index.ts
   var exports_src = {};
   __export(exports_src, {
-    unmountPluginUI: () => unmountPluginUI,
-    requiredSlabApiPermission: () => requiredSlabApiPermission,
-    mountPluginUI: () => mountPluginUI,
-    isKnownSlabApiPermission: () => isKnownSlabApiPermission,
-    getSlabPluginSdk: () => getSlabPluginSdk,
-    describeSlabApiPermission: () => describeSlabApiPermission,
-    createSlabPluginSdk: () => createSlabPluginSdk,
-    applySlabThemeToDocument: () => applySlabThemeToDocument,
-    SlabPluginApiError: () => SlabPluginApiError,
-    SLAB_THEME_TOKENS: () => SLAB_THEME_TOKENS,
+    SLAB_API_PERMISSIONS: () => SLAB_API_PERMISSIONS,
     SLAB_API_PERMISSION_LABELS: () => SLAB_API_PERMISSION_LABELS,
-    SLAB_API_PERMISSIONS: () => SLAB_API_PERMISSIONS
+    SLAB_THEME_TOKENS: () => SLAB_THEME_TOKENS,
+    SlabPluginApiError: () => SlabPluginApiError,
+    applySlabThemeToDocument: () => applySlabThemeToDocument,
+    createSlabPluginSdk: () => createSlabPluginSdk,
+    describeSlabApiPermission: () => describeSlabApiPermission,
+    getSlabPluginSdk: () => getSlabPluginSdk,
+    isKnownSlabApiPermission: () => isKnownSlabApiPermission,
+    mountPluginUI: () => mountPluginUI,
+    requiredSlabApiPermission: () => requiredSlabApiPermission,
+    unmountPluginUI: () => unmountPluginUI
   });
 
   // ../../node_modules/.bun/openapi-fetch@0.17.0/node_modules/openapi-fetch/dist/index.mjs
@@ -1579,91 +1581,52 @@ React keys must be passed directly to JSX without using spread:
     }
     return url;
   }
-
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/subscribable.js
-  var Subscribable = class {
-    constructor() {
-      this.listeners = /* @__PURE__ */ new Set;
-      this.subscribe = this.subscribe.bind(this);
-    }
-    subscribe(listener) {
-      this.listeners.add(listener);
-      this.onSubscribe();
-      return () => {
-        this.listeners.delete(listener);
-        this.onUnsubscribe();
-      };
-    }
-    hasListeners() {
-      return this.listeners.size > 0;
-    }
-    onSubscribe() {}
-    onUnsubscribe() {}
+  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js
+  var React = __toESM(require_react(), 1);
+  var import_jsx_runtime = __toESM(require_jsx_runtime(), 1);
+  "use client";
+  var QueryClientContext = React.createContext(undefined);
+  var useQueryClient = (queryClient) => {
+    const client = React.useContext(QueryClientContext);
+    if (queryClient)
+      return queryClient;
+    if (!client)
+      throw new Error("No QueryClient set, use QueryClientProvider to set one");
+    return client;
   };
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/focusManager.js
-  var FocusManager = class extends Subscribable {
-    #focused;
-    #cleanup;
-    #setup;
-    constructor() {
-      super();
-      this.#setup = (onFocus) => {
-        if (typeof window !== "undefined" && window.addEventListener) {
-          const listener = () => onFocus();
-          window.addEventListener("visibilitychange", listener, false);
-          return () => {
-            window.removeEventListener("visibilitychange", listener);
-          };
-        }
-        return;
-      };
-    }
-    onSubscribe() {
-      if (!this.#cleanup) {
-        this.setEventListener(this.#setup);
-      }
-    }
-    onUnsubscribe() {
-      if (!this.hasListeners()) {
-        this.#cleanup?.();
-        this.#cleanup = undefined;
-      }
-    }
-    setEventListener(setup) {
-      this.#setup = setup;
-      this.#cleanup?.();
-      this.#cleanup = setup((focused) => {
-        if (typeof focused === "boolean") {
-          this.setFocused(focused);
-        } else {
-          this.onFocus();
-        }
-      });
-    }
-    setFocused(focused) {
-      const changed = this.#focused !== focused;
-      if (changed) {
-        this.#focused = focused;
-        this.onFocus();
-      }
-    }
-    onFocus() {
-      const isFocused = this.isFocused();
-      this.listeners.forEach((listener) => {
-        listener(isFocused);
-      });
-    }
-    isFocused() {
-      if (typeof this.#focused === "boolean") {
-        return this.#focused;
-      }
-      return globalThis.document?.visibilityState !== "hidden";
-    }
-  };
-  var focusManager = new FocusManager;
+  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/IsRestoringProvider.js
+  var React2 = __toESM(require_react(), 1);
+  "use client";
+  var IsRestoringContext = React2.createContext(false);
+  var useIsRestoring = () => React2.useContext(IsRestoringContext);
+  var IsRestoringProvider = IsRestoringContext.Provider;
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/timeoutManager.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/QueryErrorResetBoundary.js
+  var React3 = __toESM(require_react(), 1);
+  var import_jsx_runtime2 = __toESM(require_jsx_runtime(), 1);
+  "use client";
+  function createValue() {
+    let isReset = false;
+    return {
+      clearReset: () => {
+        isReset = false;
+      },
+      reset: () => {
+        isReset = true;
+      },
+      isReset: () => {
+        return isReset;
+      }
+    };
+  }
+  var QueryErrorResetBoundaryContext = React3.createContext(createValue());
+  var useQueryErrorResetBoundary = () => React3.useContext(QueryErrorResetBoundaryContext);
+
+  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/errorBoundaryUtils.js
+  var React4 = __toESM(require_react(), 1);
+
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/timeoutManager.js
   var defaultTimeoutProvider = {
     setTimeout: (callback, delay) => setTimeout(callback, delay),
     clearTimeout: (timeoutId) => clearTimeout(timeoutId),
@@ -1675,28 +1638,27 @@ React keys must be passed directly to JSX without using spread:
     #providerCalled = false;
     setTimeoutProvider(provider) {
       if (true) {
-        if (this.#providerCalled && provider !== this.#provider) {
-          console.error(`[timeoutManager]: Switching provider after calls to previous provider might result in unexpected behavior.`, { previous: this.#provider, provider });
-        }
+        if (this.#providerCalled && provider !== this.#provider)
+          console.error(`[timeoutManager]: Switching provider after calls to previous provider might result in unexpected behavior.`, {
+            previous: this.#provider,
+            provider
+          });
       }
       this.#provider = provider;
-      if (true) {
+      if (true)
         this.#providerCalled = false;
-      }
     }
     setTimeout(callback, delay) {
-      if (true) {
+      if (true)
         this.#providerCalled = true;
-      }
       return this.#provider.setTimeout(callback, delay);
     }
     clearTimeout(timeoutId) {
       this.#provider.clearTimeout(timeoutId);
     }
     setInterval(callback, delay) {
-      if (true) {
+      if (true)
         this.#providerCalled = true;
-      }
       return this.#provider.setInterval(callback, delay);
     }
     clearInterval(intervalId) {
@@ -1708,7 +1670,7 @@ React keys must be passed directly to JSX without using spread:
     setTimeout(callback, 0);
   }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/utils.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/utils.js
   var isServer = typeof window === "undefined" || "Deno" in globalThis;
   function noop() {}
   function isValidTimeout(value) {
@@ -1731,16 +1693,14 @@ React keys must be passed directly to JSX without using spread:
   }
   var hasOwn = Object.prototype.hasOwnProperty;
   function replaceEqualDeep(a, b, depth = 0) {
-    if (a === b) {
+    if (a === b)
       return a;
-    }
     if (depth > 500)
       return b;
     const array = isPlainArray(a) && isPlainArray(b);
     if (!array && !(isPlainObject(a) && isPlainObject(b)))
       return b;
-    const aItems = array ? a : Object.keys(a);
-    const aSize = aItems.length;
+    const aSize = (array ? a : Object.keys(a)).length;
     const bItems = array ? b : Object.keys(b);
     const bSize = bItems.length;
     const copy = array ? new Array(bSize) : {};
@@ -1767,116 +1727,58 @@ React keys must be passed directly to JSX without using spread:
     return aSize === bSize && equalItems === aSize ? a : copy;
   }
   function shallowEqualObjects(a, b) {
-    if (!b || Object.keys(a).length !== Object.keys(b).length) {
+    if (!b || Object.keys(a).length !== Object.keys(b).length)
       return false;
-    }
-    for (const key in a) {
-      if (a[key] !== b[key]) {
+    for (const key in a)
+      if (a[key] !== b[key])
         return false;
-      }
-    }
     return true;
   }
   function isPlainArray(value) {
     return Array.isArray(value) && value.length === Object.keys(value).length;
   }
   function isPlainObject(o) {
-    if (!hasObjectPrototype(o)) {
+    if (!hasObjectPrototype(o))
       return false;
-    }
     const ctor = o.constructor;
-    if (ctor === undefined) {
+    if (ctor === undefined)
       return true;
-    }
     const prot = ctor.prototype;
-    if (!hasObjectPrototype(prot)) {
+    if (!hasObjectPrototype(prot))
       return false;
-    }
-    if (!prot.hasOwnProperty("isPrototypeOf")) {
+    if (!prot.hasOwnProperty("isPrototypeOf"))
       return false;
-    }
-    if (Object.getPrototypeOf(o) !== Object.prototype) {
+    if (Object.getPrototypeOf(o) !== Object.prototype)
       return false;
-    }
     return true;
   }
   function hasObjectPrototype(o) {
     return Object.prototype.toString.call(o) === "[object Object]";
   }
-  function sleep(timeout) {
-    return new Promise((resolve) => {
-      timeoutManager.setTimeout(resolve, timeout);
-    });
-  }
   function replaceData(prevData, data, options) {
-    if (typeof options.structuralSharing === "function") {
+    if (typeof options.structuralSharing === "function")
       return options.structuralSharing(prevData, data);
-    } else if (options.structuralSharing !== false) {
-      if (true) {
+    else if (options.structuralSharing !== false) {
+      if (true)
         try {
           return replaceEqualDeep(prevData, data);
         } catch (error) {
           console.error(`Structural sharing requires data to be JSON serializable. To fix this, turn off structuralSharing or return JSON-serializable data from your queryFn. [${options.queryHash}]: ${error}`);
           throw error;
         }
-      }
       return replaceEqualDeep(prevData, data);
     }
     return data;
   }
-  function addToEnd(items, item, max = 0) {
-    const newItems = [...items, item];
-    return max && newItems.length > max ? newItems.slice(1) : newItems;
-  }
-  function addToStart(items, item, max = 0) {
-    const newItems = [item, ...items];
-    return max && newItems.length > max ? newItems.slice(0, -1) : newItems;
-  }
-  var skipToken = /* @__PURE__ */ Symbol();
-  function ensureQueryFn(options, fetchOptions) {
-    if (true) {
-      if (options.queryFn === skipToken) {
-        console.error(`Attempted to invoke queryFn when set to skipToken. This is likely a configuration error. Query hash: '${options.queryHash}'`);
-      }
-    }
-    if (!options.queryFn && fetchOptions?.initialPromise) {
-      return () => fetchOptions.initialPromise;
-    }
-    if (!options.queryFn || options.queryFn === skipToken) {
-      return () => Promise.reject(new Error(`Missing queryFn: '${options.queryHash}'`));
-    }
-    return options.queryFn;
-  }
+  var skipToken = Symbol();
   function shouldThrowError(throwOnError, params) {
-    if (typeof throwOnError === "function") {
+    if (typeof throwOnError === "function")
       return throwOnError(...params);
-    }
     return !!throwOnError;
   }
-  function addConsumeAwareSignal(object, getSignal, onCancelled) {
-    let consumed = false;
-    let signal;
-    Object.defineProperty(object, "signal", {
-      enumerable: true,
-      get: () => {
-        signal ??= getSignal();
-        if (consumed) {
-          return signal;
-        }
-        consumed = true;
-        if (signal.aborted) {
-          onCancelled();
-        } else {
-          signal.addEventListener("abort", onCancelled, { once: true });
-        }
-        return signal;
-      }
-    });
-    return object;
-  }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/environmentManager.js
-  var environmentManager = /* @__PURE__ */ (() => {
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/environmentManager.js
+  var environmentManager = (() => {
     let isServerFn = () => isServer;
     return {
       isServer() {
@@ -1888,39 +1790,85 @@ React keys must be passed directly to JSX without using spread:
     };
   })();
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/thenable.js
-  function pendingThenable() {
-    let resolve;
-    let reject;
-    const thenable = new Promise((_resolve, _reject) => {
-      resolve = _resolve;
-      reject = _reject;
-    });
-    thenable.status = "pending";
-    thenable.catch(() => {});
-    function finalize(data) {
-      Object.assign(thenable, data);
-      delete thenable.resolve;
-      delete thenable.reject;
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/subscribable.js
+  var Subscribable = class {
+    constructor() {
+      this.listeners = /* @__PURE__ */ new Set;
+      this.subscribe = this.subscribe.bind(this);
     }
-    thenable.resolve = (value) => {
-      finalize({
-        status: "fulfilled",
-        value
-      });
-      resolve(value);
-    };
-    thenable.reject = (reason) => {
-      finalize({
-        status: "rejected",
-        reason
-      });
-      reject(reason);
-    };
-    return thenable;
-  }
+    subscribe(listener) {
+      this.listeners.add(listener);
+      this.onSubscribe();
+      return () => {
+        this.listeners.delete(listener);
+        this.onUnsubscribe();
+      };
+    }
+    hasListeners() {
+      return this.listeners.size > 0;
+    }
+    onSubscribe() {}
+    onUnsubscribe() {}
+  };
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/notifyManager.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/focusManager.js
+  var FocusManager = class extends Subscribable {
+    #focused;
+    #cleanup;
+    #setup;
+    constructor() {
+      super();
+      this.#setup = (onFocus) => {
+        if (typeof window !== "undefined" && window.addEventListener) {
+          const listener = () => onFocus();
+          window.addEventListener("visibilitychange", listener, false);
+          return () => {
+            window.removeEventListener("visibilitychange", listener);
+          };
+        }
+      };
+    }
+    onSubscribe() {
+      if (!this.#cleanup)
+        this.setEventListener(this.#setup);
+    }
+    onUnsubscribe() {
+      if (!this.hasListeners()) {
+        this.#cleanup?.();
+        this.#cleanup = undefined;
+      }
+    }
+    setEventListener(setup) {
+      this.#setup = setup;
+      this.#cleanup?.();
+      this.#cleanup = setup((focused) => {
+        if (typeof focused === "boolean")
+          this.setFocused(focused);
+        else
+          this.onFocus();
+      });
+    }
+    setFocused(focused) {
+      if (this.#focused !== focused) {
+        this.#focused = focused;
+        this.onFocus();
+      }
+    }
+    onFocus() {
+      const isFocused = this.isFocused();
+      this.listeners.forEach((listener) => {
+        listener(isFocused);
+      });
+    }
+    isFocused() {
+      if (typeof this.#focused === "boolean")
+        return this.#focused;
+      return globalThis.document?.visibilityState !== "hidden";
+    }
+  };
+  var focusManager = new FocusManager;
+
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/notifyManager.js
   var defaultScheduler = systemSetTimeoutZero;
   function createNotifyManager() {
     let queue = [];
@@ -1933,18 +1881,17 @@ React keys must be passed directly to JSX without using spread:
     };
     let scheduleFn = defaultScheduler;
     const schedule = (callback) => {
-      if (transactions) {
+      if (transactions)
         queue.push(callback);
-      } else {
+      else
         scheduleFn(() => {
           notifyFn(callback);
         });
-      }
     };
     const flush = () => {
       const originalQueue = queue;
       queue = [];
-      if (originalQueue.length) {
+      if (originalQueue.length)
         scheduleFn(() => {
           batchNotifyFn(() => {
             originalQueue.forEach((callback) => {
@@ -1952,7 +1899,6 @@ React keys must be passed directly to JSX without using spread:
             });
           });
         });
-      }
     };
     return {
       batch: (callback) => {
@@ -1962,9 +1908,8 @@ React keys must be passed directly to JSX without using spread:
           result = callback();
         } finally {
           transactions--;
-          if (!transactions) {
+          if (!transactions)
             flush();
-          }
         }
         return result;
       },
@@ -1989,7 +1934,7 @@ React keys must be passed directly to JSX without using spread:
   }
   var notifyManager = createNotifyManager();
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/onlineManager.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/onlineManager.js
   var OnlineManager = class extends Subscribable {
     #online = true;
     #cleanup;
@@ -2007,13 +1952,11 @@ React keys must be passed directly to JSX without using spread:
             window.removeEventListener("offline", offlineListener);
           };
         }
-        return;
       };
     }
     onSubscribe() {
-      if (!this.#cleanup) {
+      if (!this.#cleanup)
         this.setEventListener(this.#setup);
-      }
     }
     onUnsubscribe() {
       if (!this.hasListeners()) {
@@ -2027,8 +1970,7 @@ React keys must be passed directly to JSX without using spread:
       this.#cleanup = setup(this.setOnline.bind(this));
     }
     setOnline(online) {
-      const changed = this.#online !== online;
-      if (changed) {
+      if (this.#online !== online) {
         this.#online = online;
         this.listeners.forEach((listener) => {
           listener(online);
@@ -2041,231 +1983,12 @@ React keys must be passed directly to JSX without using spread:
   };
   var onlineManager = new OnlineManager;
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/retryer.js
-  function defaultRetryDelay(failureCount) {
-    return Math.min(1000 * 2 ** failureCount, 30000);
-  }
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/retryer.js
   function canFetch(networkMode) {
     return (networkMode ?? "online") === "online" ? onlineManager.isOnline() : true;
   }
-  var CancelledError = class extends Error {
-    constructor(options) {
-      super("CancelledError");
-      this.revert = options?.revert;
-      this.silent = options?.silent;
-    }
-  };
-  function createRetryer(config) {
-    let isRetryCancelled = false;
-    let failureCount = 0;
-    let continueFn;
-    const thenable = pendingThenable();
-    const isResolved = () => thenable.status !== "pending";
-    const cancel = (cancelOptions) => {
-      if (!isResolved()) {
-        const error = new CancelledError(cancelOptions);
-        reject(error);
-        config.onCancel?.(error);
-      }
-    };
-    const cancelRetry = () => {
-      isRetryCancelled = true;
-    };
-    const continueRetry = () => {
-      isRetryCancelled = false;
-    };
-    const canContinue = () => focusManager.isFocused() && (config.networkMode === "always" || onlineManager.isOnline()) && config.canRun();
-    const canStart = () => canFetch(config.networkMode) && config.canRun();
-    const resolve = (value) => {
-      if (!isResolved()) {
-        continueFn?.();
-        thenable.resolve(value);
-      }
-    };
-    const reject = (value) => {
-      if (!isResolved()) {
-        continueFn?.();
-        thenable.reject(value);
-      }
-    };
-    const pause = () => {
-      return new Promise((continueResolve) => {
-        continueFn = (value) => {
-          if (isResolved() || canContinue()) {
-            continueResolve(value);
-          }
-        };
-        config.onPause?.();
-      }).then(() => {
-        continueFn = undefined;
-        if (!isResolved()) {
-          config.onContinue?.();
-        }
-      });
-    };
-    const run = () => {
-      if (isResolved()) {
-        return;
-      }
-      let promiseOrValue;
-      const initialPromise = failureCount === 0 ? config.initialPromise : undefined;
-      try {
-        promiseOrValue = initialPromise ?? config.fn();
-      } catch (error) {
-        promiseOrValue = Promise.reject(error);
-      }
-      Promise.resolve(promiseOrValue).then(resolve).catch((error) => {
-        if (isResolved()) {
-          return;
-        }
-        const retry = config.retry ?? (environmentManager.isServer() ? 0 : 3);
-        const retryDelay = config.retryDelay ?? defaultRetryDelay;
-        const delay = typeof retryDelay === "function" ? retryDelay(failureCount, error) : retryDelay;
-        const shouldRetry = retry === true || typeof retry === "number" && failureCount < retry || typeof retry === "function" && retry(failureCount, error);
-        if (isRetryCancelled || !shouldRetry) {
-          reject(error);
-          return;
-        }
-        failureCount++;
-        config.onFail?.(failureCount, error);
-        sleep(delay).then(() => {
-          return canContinue() ? undefined : pause();
-        }).then(() => {
-          if (isRetryCancelled) {
-            reject(error);
-          } else {
-            run();
-          }
-        });
-      });
-    };
-    return {
-      promise: thenable,
-      status: () => thenable.status,
-      cancel,
-      continue: () => {
-        continueFn?.();
-        return thenable;
-      },
-      cancelRetry,
-      continueRetry,
-      canStart,
-      start: () => {
-        if (canStart()) {
-          run();
-        } else {
-          pause().then(run);
-        }
-        return thenable;
-      }
-    };
-  }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/removable.js
-  var Removable = class {
-    #gcTimeout;
-    destroy() {
-      this.clearGcTimeout();
-    }
-    scheduleGc() {
-      this.clearGcTimeout();
-      if (isValidTimeout(this.gcTime)) {
-        this.#gcTimeout = timeoutManager.setTimeout(() => {
-          this.optionalRemove();
-        }, this.gcTime);
-      }
-    }
-    updateGcTime(newGcTime) {
-      this.gcTime = Math.max(this.gcTime || 0, newGcTime ?? (environmentManager.isServer() ? Infinity : 5 * 60 * 1000));
-    }
-    clearGcTimeout() {
-      if (this.#gcTimeout !== undefined) {
-        timeoutManager.clearTimeout(this.#gcTimeout);
-        this.#gcTimeout = undefined;
-      }
-    }
-  };
-
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/infiniteQueryBehavior.js
-  function infiniteQueryBehavior(pages) {
-    return {
-      onFetch: (context, query) => {
-        const options = context.options;
-        const direction = context.fetchOptions?.meta?.fetchMore?.direction;
-        const oldPages = context.state.data?.pages || [];
-        const oldPageParams = context.state.data?.pageParams || [];
-        let result = { pages: [], pageParams: [] };
-        let currentPage = 0;
-        const fetchFn = async () => {
-          let cancelled = false;
-          const addSignalProperty = (object) => {
-            addConsumeAwareSignal(object, () => context.signal, () => cancelled = true);
-          };
-          const queryFn = ensureQueryFn(context.options, context.fetchOptions);
-          const fetchPage = async (data, param, previous) => {
-            if (cancelled) {
-              return Promise.reject(context.signal.reason);
-            }
-            if (param == null && data.pages.length) {
-              return Promise.resolve(data);
-            }
-            const createQueryFnContext = () => {
-              const queryFnContext2 = {
-                client: context.client,
-                queryKey: context.queryKey,
-                pageParam: param,
-                direction: previous ? "backward" : "forward",
-                meta: context.options.meta
-              };
-              addSignalProperty(queryFnContext2);
-              return queryFnContext2;
-            };
-            const queryFnContext = createQueryFnContext();
-            const page = await queryFn(queryFnContext);
-            const { maxPages } = context.options;
-            const addTo = previous ? addToStart : addToEnd;
-            return {
-              pages: addTo(data.pages, page, maxPages),
-              pageParams: addTo(data.pageParams, param, maxPages)
-            };
-          };
-          if (direction && oldPages.length) {
-            const previous = direction === "backward";
-            const pageParamFn = previous ? getPreviousPageParam : getNextPageParam;
-            const oldData = {
-              pages: oldPages,
-              pageParams: oldPageParams
-            };
-            const param = pageParamFn(options, oldData);
-            result = await fetchPage(oldData, param, previous);
-          } else {
-            const remainingPages = pages ?? oldPages.length;
-            do {
-              const param = currentPage === 0 ? oldPageParams[0] ?? options.initialPageParam : getNextPageParam(options, result);
-              if (currentPage > 0 && param == null) {
-                break;
-              }
-              result = await fetchPage(result, param);
-              currentPage++;
-            } while (currentPage < remainingPages);
-          }
-          return result;
-        };
-        if (context.options.persister) {
-          context.fetchFn = () => {
-            return context.options.persister?.(fetchFn, {
-              client: context.client,
-              queryKey: context.queryKey,
-              meta: context.options.meta,
-              signal: context.signal
-            }, query);
-          };
-        } else {
-          context.fetchFn = fetchFn;
-        }
-      }
-    };
-  }
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/infiniteQueryBehavior.js
   function getNextPageParam(options, { pages, pageParams }) {
     const lastIndex = pages.length - 1;
     return pages.length > 0 ? options.getNextPageParam(pages[lastIndex], pages, pageParams[lastIndex], pageParams) : undefined;
@@ -2284,369 +2007,7 @@ React keys must be passed directly to JSX without using spread:
     return getPreviousPageParam(options, data) != null;
   }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/query.js
-  var Query = class extends Removable {
-    #queryType;
-    #initialState;
-    #revertState;
-    #cache;
-    #client;
-    #retryer;
-    #defaultOptions;
-    #abortSignalConsumed;
-    constructor(config) {
-      super();
-      this.#abortSignalConsumed = false;
-      this.#defaultOptions = config.defaultOptions;
-      this.setOptions(config.options);
-      this.observers = [];
-      this.#client = config.client;
-      this.#cache = this.#client.getQueryCache();
-      this.queryKey = config.queryKey;
-      this.queryHash = config.queryHash;
-      this.#initialState = getDefaultState(this.options);
-      this.state = config.state ?? this.#initialState;
-      this.scheduleGc();
-    }
-    get meta() {
-      return this.options.meta;
-    }
-    get queryType() {
-      return this.#queryType;
-    }
-    get promise() {
-      return this.#retryer?.promise;
-    }
-    setOptions(options) {
-      this.options = { ...this.#defaultOptions, ...options };
-      if (options?._type) {
-        this.#queryType = options._type;
-      }
-      this.updateGcTime(this.options.gcTime);
-      if (this.state && this.state.data === undefined) {
-        const defaultState = getDefaultState(this.options);
-        if (defaultState.data !== undefined) {
-          this.setState(successState(defaultState.data, defaultState.dataUpdatedAt));
-          this.#initialState = defaultState;
-        }
-      }
-    }
-    optionalRemove() {
-      if (!this.observers.length && this.state.fetchStatus === "idle") {
-        this.#cache.remove(this);
-      }
-    }
-    setData(newData, options) {
-      const data = replaceData(this.state.data, newData, this.options);
-      this.#dispatch({
-        data,
-        type: "success",
-        dataUpdatedAt: options?.updatedAt,
-        manual: options?.manual
-      });
-      return data;
-    }
-    setState(state) {
-      this.#dispatch({ type: "setState", state });
-    }
-    cancel(options) {
-      const promise = this.#retryer?.promise;
-      this.#retryer?.cancel(options);
-      return promise ? promise.then(noop).catch(noop) : Promise.resolve();
-    }
-    destroy() {
-      super.destroy();
-      this.cancel({ silent: true });
-    }
-    get resetState() {
-      return this.#initialState;
-    }
-    reset() {
-      this.destroy();
-      this.setState(this.resetState);
-    }
-    isActive() {
-      return this.observers.some((observer) => resolveQueryBoolean(observer.options.enabled, this) !== false);
-    }
-    isDisabled() {
-      if (this.getObserversCount() > 0) {
-        return !this.isActive();
-      }
-      return this.options.queryFn === skipToken || !this.isFetched();
-    }
-    isFetched() {
-      return this.state.dataUpdateCount + this.state.errorUpdateCount > 0;
-    }
-    isStatic() {
-      if (this.getObserversCount() > 0) {
-        return this.observers.some((observer) => resolveStaleTime(observer.options.staleTime, this) === "static");
-      }
-      return false;
-    }
-    isStale() {
-      if (this.getObserversCount() > 0) {
-        return this.observers.some((observer) => observer.getCurrentResult().isStale);
-      }
-      return this.state.data === undefined || this.state.isInvalidated;
-    }
-    isStaleByTime(staleTime = 0) {
-      if (this.state.data === undefined) {
-        return true;
-      }
-      if (staleTime === "static") {
-        return false;
-      }
-      if (this.state.isInvalidated) {
-        return true;
-      }
-      return !timeUntilStale(this.state.dataUpdatedAt, staleTime);
-    }
-    onFocus() {
-      const observer = this.observers.find((x) => x.shouldFetchOnWindowFocus());
-      observer?.refetch({ cancelRefetch: false });
-      this.#retryer?.continue();
-    }
-    onOnline() {
-      const observer = this.observers.find((x) => x.shouldFetchOnReconnect());
-      observer?.refetch({ cancelRefetch: false });
-      this.#retryer?.continue();
-    }
-    addObserver(observer) {
-      if (!this.observers.includes(observer)) {
-        this.observers.push(observer);
-        this.clearGcTimeout();
-        this.#cache.notify({ type: "observerAdded", query: this, observer });
-      }
-    }
-    removeObserver(observer) {
-      if (this.observers.includes(observer)) {
-        this.observers = this.observers.filter((x) => x !== observer);
-        if (!this.observers.length) {
-          if (this.#retryer) {
-            if (this.#abortSignalConsumed || this.#isInitialPausedFetch()) {
-              this.#retryer.cancel({ revert: true });
-            } else {
-              this.#retryer.cancelRetry();
-            }
-          }
-          this.scheduleGc();
-        }
-        this.#cache.notify({ type: "observerRemoved", query: this, observer });
-      }
-    }
-    getObserversCount() {
-      return this.observers.length;
-    }
-    #isInitialPausedFetch() {
-      return this.state.fetchStatus === "paused" && this.state.status === "pending";
-    }
-    invalidate() {
-      if (!this.state.isInvalidated) {
-        this.#dispatch({ type: "invalidate" });
-      }
-    }
-    async fetch(options, fetchOptions) {
-      if (this.state.fetchStatus !== "idle" && this.#retryer?.status() !== "rejected") {
-        if (this.state.data !== undefined && fetchOptions?.cancelRefetch) {
-          this.cancel({ silent: true });
-        } else if (this.#retryer) {
-          this.#retryer.continueRetry();
-          return this.#retryer.promise;
-        }
-      }
-      if (options) {
-        this.setOptions(options);
-      }
-      if (!this.options.queryFn) {
-        const observer = this.observers.find((x) => x.options.queryFn);
-        if (observer) {
-          this.setOptions(observer.options);
-        }
-      }
-      if (true) {
-        if (!Array.isArray(this.options.queryKey)) {
-          console.error(`As of v4, queryKey needs to be an Array. If you are using a string like 'repoData', please change it to an Array, e.g. ['repoData']`);
-        }
-      }
-      const abortController = new AbortController;
-      const addSignalProperty = (object) => {
-        Object.defineProperty(object, "signal", {
-          enumerable: true,
-          get: () => {
-            this.#abortSignalConsumed = true;
-            return abortController.signal;
-          }
-        });
-      };
-      const fetchFn = () => {
-        const queryFn = ensureQueryFn(this.options, fetchOptions);
-        const createQueryFnContext = () => {
-          const queryFnContext2 = {
-            client: this.#client,
-            queryKey: this.queryKey,
-            meta: this.meta
-          };
-          addSignalProperty(queryFnContext2);
-          return queryFnContext2;
-        };
-        const queryFnContext = createQueryFnContext();
-        this.#abortSignalConsumed = false;
-        if (this.options.persister) {
-          return this.options.persister(queryFn, queryFnContext, this);
-        }
-        return queryFn(queryFnContext);
-      };
-      const createFetchContext = () => {
-        const context2 = {
-          fetchOptions,
-          options: this.options,
-          queryKey: this.queryKey,
-          client: this.#client,
-          state: this.state,
-          fetchFn
-        };
-        addSignalProperty(context2);
-        return context2;
-      };
-      const context = createFetchContext();
-      const behavior = this.#queryType === "infinite" ? infiniteQueryBehavior(this.options.pages) : this.options.behavior;
-      behavior?.onFetch(context, this);
-      this.#revertState = this.state;
-      if (this.state.fetchStatus === "idle" || this.state.fetchMeta !== context.fetchOptions?.meta) {
-        this.#dispatch({ type: "fetch", meta: context.fetchOptions?.meta });
-      }
-      this.#retryer = createRetryer({
-        initialPromise: fetchOptions?.initialPromise,
-        fn: context.fetchFn,
-        onCancel: (error) => {
-          if (error instanceof CancelledError && error.revert) {
-            this.setState({
-              ...this.#revertState,
-              fetchStatus: "idle"
-            });
-          }
-          abortController.abort();
-        },
-        onFail: (failureCount, error) => {
-          this.#dispatch({ type: "failed", failureCount, error });
-        },
-        onPause: () => {
-          this.#dispatch({ type: "pause" });
-        },
-        onContinue: () => {
-          this.#dispatch({ type: "continue" });
-        },
-        retry: context.options.retry,
-        retryDelay: context.options.retryDelay,
-        networkMode: context.options.networkMode,
-        canRun: () => true
-      });
-      try {
-        const data = await this.#retryer.start();
-        if (data === undefined) {
-          if (true) {
-            console.error(`Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ${this.queryHash}`);
-          }
-          throw new Error(`${this.queryHash} data is undefined`);
-        }
-        this.setData(data);
-        this.#cache.config.onSuccess?.(data, this);
-        this.#cache.config.onSettled?.(data, this.state.error, this);
-        return data;
-      } catch (error) {
-        if (error instanceof CancelledError) {
-          if (error.silent) {
-            return this.#retryer.promise;
-          } else if (error.revert) {
-            if (this.state.data === undefined) {
-              throw error;
-            }
-            return this.state.data;
-          }
-        }
-        this.#dispatch({
-          type: "error",
-          error
-        });
-        this.#cache.config.onError?.(error, this);
-        this.#cache.config.onSettled?.(this.state.data, error, this);
-        throw error;
-      } finally {
-        this.scheduleGc();
-      }
-    }
-    #dispatch(action) {
-      const reducer = (state) => {
-        switch (action.type) {
-          case "failed":
-            return {
-              ...state,
-              fetchFailureCount: action.failureCount,
-              fetchFailureReason: action.error
-            };
-          case "pause":
-            return {
-              ...state,
-              fetchStatus: "paused"
-            };
-          case "continue":
-            return {
-              ...state,
-              fetchStatus: "fetching"
-            };
-          case "fetch":
-            return {
-              ...state,
-              ...fetchState(state.data, this.options),
-              fetchMeta: action.meta ?? null
-            };
-          case "success":
-            const newState = {
-              ...state,
-              ...successState(action.data, action.dataUpdatedAt),
-              dataUpdateCount: state.dataUpdateCount + 1,
-              ...!action.manual && {
-                fetchStatus: "idle",
-                fetchFailureCount: 0,
-                fetchFailureReason: null
-              }
-            };
-            this.#revertState = action.manual ? newState : undefined;
-            return newState;
-          case "error":
-            const error = action.error;
-            return {
-              ...state,
-              error,
-              errorUpdateCount: state.errorUpdateCount + 1,
-              errorUpdatedAt: Date.now(),
-              fetchFailureCount: state.fetchFailureCount + 1,
-              fetchFailureReason: error,
-              fetchStatus: "idle",
-              status: "error",
-              isInvalidated: true
-            };
-          case "invalidate":
-            return {
-              ...state,
-              isInvalidated: true
-            };
-          case "setState":
-            return {
-              ...state,
-              ...action.state
-            };
-        }
-      };
-      this.state = reducer(this.state);
-      notifyManager.batch(() => {
-        this.observers.forEach((observer) => {
-          observer.onQueryUpdate();
-        });
-        this.#cache.notify({ query: this, type: "updated", action });
-      });
-    }
-  };
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/query.js
   function fetchState(data, options) {
     return {
       fetchFailureCount: 0,
@@ -2658,53 +2019,15 @@ React keys must be passed directly to JSX without using spread:
       }
     };
   }
-  function successState(data, dataUpdatedAt) {
-    return {
-      data,
-      dataUpdatedAt: dataUpdatedAt ?? Date.now(),
-      error: null,
-      isInvalidated: false,
-      status: "success"
-    };
-  }
-  function getDefaultState(options) {
-    const data = typeof options.initialData === "function" ? options.initialData() : options.initialData;
-    const hasData = data !== undefined;
-    const initialDataUpdatedAt = hasData ? typeof options.initialDataUpdatedAt === "function" ? options.initialDataUpdatedAt() : options.initialDataUpdatedAt : 0;
-    return {
-      data,
-      dataUpdateCount: 0,
-      dataUpdatedAt: hasData ? initialDataUpdatedAt ?? Date.now() : 0,
-      error: null,
-      errorUpdateCount: 0,
-      errorUpdatedAt: 0,
-      fetchFailureCount: 0,
-      fetchFailureReason: null,
-      fetchMeta: null,
-      isInvalidated: false,
-      status: hasData ? "success" : "pending",
-      fetchStatus: "idle"
-    };
-  }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/queryObserver.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/queryObserver.js
   var QueryObserver = class extends Subscribable {
-    constructor(client, options) {
-      super();
-      this.options = options;
-      this.#client = client;
-      this.#selectError = null;
-      this.#currentThenable = pendingThenable();
-      this.bindMethods();
-      this.setOptions(options);
-    }
     #client;
     #currentQuery = undefined;
     #currentQueryInitialState = undefined;
     #currentResult = undefined;
     #currentResultState;
     #currentResultOptions;
-    #currentThenable;
     #selectError;
     #selectFn;
     #selectResult;
@@ -2713,24 +2036,30 @@ React keys must be passed directly to JSX without using spread:
     #refetchIntervalId;
     #currentRefetchInterval;
     #trackedProps = /* @__PURE__ */ new Set;
+    constructor(client, options) {
+      super();
+      this.options = options;
+      this.#client = client;
+      this.#selectError = null;
+      this.bindMethods();
+      this.setOptions(options);
+    }
     bindMethods() {
       this.refetch = this.refetch.bind(this);
     }
     onSubscribe() {
       if (this.listeners.size === 1) {
         this.#currentQuery.addObserver(this);
-        if (shouldFetchOnMount(this.#currentQuery, this.options)) {
+        if (shouldFetchOnMount(this.#currentQuery, this.options))
           this.#executeFetch();
-        } else {
+        else
           this.updateResult();
-        }
         this.#updateTimers();
       }
     }
     onUnsubscribe() {
-      if (!this.hasListeners()) {
+      if (!this.hasListeners())
         this.destroy();
-      }
     }
     shouldFetchOnReconnect() {
       return shouldFetchOn(this.#currentQuery, this.options, this.options.refetchOnReconnect);
@@ -2748,30 +2077,25 @@ React keys must be passed directly to JSX without using spread:
       const prevOptions = this.options;
       const prevQuery = this.#currentQuery;
       this.options = this.#client.defaultQueryOptions(options);
-      if (this.options.enabled !== undefined && typeof this.options.enabled !== "boolean" && typeof this.options.enabled !== "function" && typeof resolveQueryBoolean(this.options.enabled, this.#currentQuery) !== "boolean") {
+      if (this.options.enabled !== undefined && typeof this.options.enabled !== "boolean" && typeof this.options.enabled !== "function" && typeof resolveQueryBoolean(this.options.enabled, this.#currentQuery) !== "boolean")
         throw new Error("Expected enabled to be a boolean or a callback that returns a boolean");
-      }
       this.#updateQuery();
       this.#currentQuery.setOptions(this.options);
-      if (prevOptions._defaulted && !shallowEqualObjects(this.options, prevOptions)) {
+      if (prevOptions._defaulted && !shallowEqualObjects(this.options, prevOptions))
         this.#client.getQueryCache().notify({
           type: "observerOptionsUpdated",
           query: this.#currentQuery,
           observer: this
         });
-      }
       const mounted = this.hasListeners();
-      if (mounted && shouldFetchOptionally(this.#currentQuery, prevQuery, this.options, prevOptions)) {
+      if (mounted && shouldFetchOptionally(this.#currentQuery, prevQuery, this.options, prevOptions))
         this.#executeFetch();
-      }
       this.updateResult();
-      if (mounted && (this.#currentQuery !== prevQuery || resolveQueryBoolean(this.options.enabled, this.#currentQuery) !== resolveQueryBoolean(prevOptions.enabled, this.#currentQuery) || resolveStaleTime(this.options.staleTime, this.#currentQuery) !== resolveStaleTime(prevOptions.staleTime, this.#currentQuery))) {
+      if (mounted && (this.#currentQuery !== prevQuery || resolveQueryBoolean(this.options.enabled, this.#currentQuery) !== resolveQueryBoolean(prevOptions.enabled, this.#currentQuery) || resolveStaleTime(this.options.staleTime, this.#currentQuery) !== resolveStaleTime(prevOptions.staleTime, this.#currentQuery)))
         this.#updateStaleTimeout();
-      }
       const nextRefetchInterval = this.#computeRefetchInterval();
-      if (mounted && (this.#currentQuery !== prevQuery || resolveQueryBoolean(this.options.enabled, this.#currentQuery) !== resolveQueryBoolean(prevOptions.enabled, this.#currentQuery) || nextRefetchInterval !== this.#currentRefetchInterval)) {
+      if (mounted && (this.#currentQuery !== prevQuery || resolveQueryBoolean(this.options.enabled, this.#currentQuery) !== resolveQueryBoolean(prevOptions.enabled, this.#currentQuery) || nextRefetchInterval !== this.#currentRefetchInterval))
         this.#updateRefetchInterval(nextRefetchInterval);
-      }
     }
     getOptimisticResult(options) {
       const query = this.#client.getQueryCache().build(this.#client, options);
@@ -2787,19 +2111,11 @@ React keys must be passed directly to JSX without using spread:
       return this.#currentResult;
     }
     trackResult(result, onPropTracked) {
-      return new Proxy(result, {
-        get: (target, key) => {
-          this.trackProp(key);
-          onPropTracked?.(key);
-          if (key === "promise") {
-            this.trackProp("data");
-            if (!this.options.experimental_prefetchInRender && this.#currentThenable.status === "pending") {
-              this.#currentThenable.reject(new Error("experimental_prefetchInRender feature flag is not enabled"));
-            }
-          }
-          return Reflect.get(target, key);
-        }
-      });
+      return new Proxy(result, { get: (target, key) => {
+        this.trackProp(key);
+        onPropTracked?.(key);
+        return Reflect.get(target, key);
+      } });
     }
     trackProp(key) {
       this.#trackedProps.add(key);
@@ -2808,14 +2124,29 @@ React keys must be passed directly to JSX without using spread:
       return this.#currentQuery;
     }
     refetch({ ...options } = {}) {
-      return this.fetch({
-        ...options
-      });
+      return this.fetch({ ...options });
     }
     fetchOptimistic(options) {
       const defaultedOptions = this.#client.defaultQueryOptions(options);
       const query = this.#client.getQueryCache().build(this.#client, defaultedOptions);
-      return query.fetch().then(() => this.createResult(query, defaultedOptions));
+      let unsubscribe = () => {};
+      let resolveEarly;
+      const cachePromise = new Promise((resolve) => {
+        resolveEarly = resolve;
+        unsubscribe = this.#client.getQueryCache().subscribe((event) => {
+          if (event.type === "updated" && event.query.queryHash === query.queryHash && query.state.data !== undefined) {
+            unsubscribe();
+            resolve(this.createResult(query, defaultedOptions));
+          }
+        });
+      });
+      return Promise.race([query.fetch().then(() => {
+        const result = this.createResult(query, defaultedOptions);
+        resolveEarly?.(result);
+        return result;
+      }).finally(() => {
+        unsubscribe();
+      }), cachePromise]);
     }
     fetch(fetchOptions) {
       return this.#executeFetch({
@@ -2829,23 +2160,19 @@ React keys must be passed directly to JSX without using spread:
     #executeFetch(fetchOptions) {
       this.#updateQuery();
       let promise = this.#currentQuery.fetch(this.options, fetchOptions);
-      if (!fetchOptions?.throwOnError) {
+      if (!fetchOptions?.throwOnError)
         promise = promise.catch(noop);
-      }
       return promise;
     }
     #updateStaleTimeout() {
       this.#clearStaleTimeout();
       const staleTime = resolveStaleTime(this.options.staleTime, this.#currentQuery);
-      if (environmentManager.isServer() || this.#currentResult.isStale || !isValidTimeout(staleTime)) {
+      if (environmentManager.isServer() || this.#currentResult.isStale || !isValidTimeout(staleTime))
         return;
-      }
-      const time = timeUntilStale(this.#currentResult.dataUpdatedAt, staleTime);
-      const timeout = time + 1;
+      const timeout = timeUntilStale(this.#currentResult.dataUpdatedAt, staleTime) + 1;
       this.#staleTimeoutId = timeoutManager.setTimeout(() => {
-        if (!this.#currentResult.isStale) {
+        if (!this.#currentResult.isStale)
           this.updateResult();
-        }
       }, timeout);
     }
     #computeRefetchInterval() {
@@ -2854,13 +2181,11 @@ React keys must be passed directly to JSX without using spread:
     #updateRefetchInterval(nextInterval) {
       this.#clearRefetchInterval();
       this.#currentRefetchInterval = nextInterval;
-      if (environmentManager.isServer() || resolveQueryBoolean(this.options.enabled, this.#currentQuery) === false || !isValidTimeout(this.#currentRefetchInterval) || this.#currentRefetchInterval === 0) {
+      if (environmentManager.isServer() || resolveQueryBoolean(this.options.enabled, this.#currentQuery) === false || !isValidTimeout(this.#currentRefetchInterval) || this.#currentRefetchInterval === 0)
         return;
-      }
       this.#refetchIntervalId = timeoutManager.setInterval(() => {
-        if (this.options.refetchIntervalInBackground || focusManager.isFocused()) {
+        if (this.options.refetchIntervalInBackground || focusManager.isFocused())
           this.#executeFetch();
-        }
       }, this.#currentRefetchInterval);
     }
     #updateTimers() {
@@ -2885,8 +2210,7 @@ React keys must be passed directly to JSX without using spread:
       const prevResult = this.#currentResult;
       const prevResultState = this.#currentResultState;
       const prevResultOptions = this.#currentResultOptions;
-      const queryChange = query !== prevQuery;
-      const queryInitialState = queryChange ? query.state : this.#currentQueryInitialState;
+      const queryInitialState = query !== prevQuery ? query.state : this.#currentQueryInitialState;
       const { state } = query;
       let newState = { ...state };
       let isPlaceholderData = false;
@@ -2895,15 +2219,13 @@ React keys must be passed directly to JSX without using spread:
         const mounted = this.hasListeners();
         const fetchOnMount = !mounted && shouldFetchOnMount(query, options);
         const fetchOptionally = mounted && shouldFetchOptionally(query, prevQuery, options, prevOptions);
-        if (fetchOnMount || fetchOptionally) {
+        if (fetchOnMount || fetchOptionally)
           newState = {
             ...newState,
             ...fetchState(state.data, query.options)
           };
-        }
-        if (options._optimisticResults === "isRestoring") {
+        if (options._optimisticResults === "isRestoring")
           newState.fetchStatus = "idle";
-        }
       }
       let { error, errorUpdatedAt, status } = newState;
       data = newState.data;
@@ -2913,9 +2235,8 @@ React keys must be passed directly to JSX without using spread:
         if (prevResult?.isPlaceholderData && options.placeholderData === prevResultOptions?.placeholderData) {
           placeholderData = prevResult.data;
           skipSelect = true;
-        } else {
+        } else
           placeholderData = typeof options.placeholderData === "function" ? options.placeholderData(this.#lastQueryWithDefinedData?.state.data, this.#lastQueryWithDefinedData) : options.placeholderData;
-        }
         if (placeholderData !== undefined) {
           status = "success";
           data = replaceData(prevResult?.data, placeholderData, options);
@@ -2923,9 +2244,9 @@ React keys must be passed directly to JSX without using spread:
         }
       }
       if (options.select && data !== undefined && !skipSelect) {
-        if (prevResult && data === prevResultState?.data && options.select === this.#selectFn) {
+        if (prevResult && data === prevResultState?.data && options.select === this.#selectFn)
           data = this.#selectResult;
-        } else {
+        else
           try {
             this.#selectFn = options.select;
             data = options.select(data);
@@ -2935,20 +2256,21 @@ React keys must be passed directly to JSX without using spread:
           } catch (selectError) {
             this.#selectError = selectError;
           }
-        }
-      }
+      } else if (data === undefined)
+        this.#selectError = null;
       if (this.#selectError) {
         error = this.#selectError;
         data = this.#selectResult;
         errorUpdatedAt = Date.now();
         status = "error";
+        isPlaceholderData = false;
       }
       const isFetching = newState.fetchStatus === "fetching";
       const isPending = status === "pending";
       const isError = status === "error";
       const isLoading = isPending && isFetching;
       const hasData = data !== undefined;
-      const result = {
+      return {
         status,
         fetchStatus: newState.fetchStatus,
         isPending,
@@ -2973,83 +2295,40 @@ React keys must be passed directly to JSX without using spread:
         isRefetchError: isError && hasData,
         isStale: isStale(query, options),
         refetch: this.refetch,
-        promise: this.#currentThenable,
         isEnabled: resolveQueryBoolean(options.enabled, query) !== false
       };
-      const nextResult = result;
-      if (this.options.experimental_prefetchInRender) {
-        const hasResultData = nextResult.data !== undefined;
-        const isErrorWithoutData = nextResult.status === "error" && !hasResultData;
-        const finalizeThenableIfPossible = (thenable) => {
-          if (isErrorWithoutData) {
-            thenable.reject(nextResult.error);
-          } else if (hasResultData) {
-            thenable.resolve(nextResult.data);
-          }
-        };
-        const recreateThenable = () => {
-          const pending = this.#currentThenable = nextResult.promise = pendingThenable();
-          finalizeThenableIfPossible(pending);
-        };
-        const prevThenable = this.#currentThenable;
-        switch (prevThenable.status) {
-          case "pending":
-            if (query.queryHash === prevQuery.queryHash) {
-              finalizeThenableIfPossible(prevThenable);
-            }
-            break;
-          case "fulfilled":
-            if (isErrorWithoutData || nextResult.data !== prevThenable.value) {
-              recreateThenable();
-            }
-            break;
-          case "rejected":
-            if (!isErrorWithoutData || nextResult.error !== prevThenable.reason) {
-              recreateThenable();
-            }
-            break;
-        }
-      }
-      return nextResult;
     }
     updateResult() {
       const prevResult = this.#currentResult;
       const nextResult = this.createResult(this.#currentQuery, this.options);
       this.#currentResultState = this.#currentQuery.state;
       this.#currentResultOptions = this.options;
-      if (this.#currentResultState.data !== undefined) {
+      if (this.#currentResultState.data !== undefined)
         this.#lastQueryWithDefinedData = this.#currentQuery;
-      }
-      if (shallowEqualObjects(nextResult, prevResult)) {
+      if (shallowEqualObjects(nextResult, prevResult))
         return;
-      }
       this.#currentResult = nextResult;
       const shouldNotifyListeners = () => {
-        if (!prevResult) {
+        if (!prevResult)
           return true;
-        }
         const { notifyOnChangeProps } = this.options;
         const notifyOnChangePropsValue = typeof notifyOnChangeProps === "function" ? notifyOnChangeProps() : notifyOnChangeProps;
-        if (notifyOnChangePropsValue === "all" || !notifyOnChangePropsValue && !this.#trackedProps.size) {
+        if (notifyOnChangePropsValue === "all" || !notifyOnChangePropsValue && !this.#trackedProps.size)
           return true;
-        }
         const includedProps = new Set(notifyOnChangePropsValue ?? this.#trackedProps);
-        if (this.options.throwOnError) {
+        if (this.options.throwOnError)
           includedProps.add("error");
-        }
         return Object.keys(this.#currentResult).some((key) => {
           const typedKey = key;
-          const changed = this.#currentResult[typedKey] !== prevResult[typedKey];
-          return changed && includedProps.has(typedKey);
+          return this.#currentResult[typedKey] !== prevResult[typedKey] && includedProps.has(typedKey);
         });
       };
       this.#notify({ listeners: shouldNotifyListeners() });
     }
     #updateQuery() {
       const query = this.#client.getQueryCache().build(this.#client, this.options);
-      if (query === this.#currentQuery) {
+      if (query === this.#currentQuery)
         return;
-      }
       const prevQuery = this.#currentQuery;
       this.#currentQuery = query;
       this.#currentQueryInitialState = query.state;
@@ -3060,17 +2339,15 @@ React keys must be passed directly to JSX without using spread:
     }
     onQueryUpdate() {
       this.updateResult();
-      if (this.hasListeners()) {
+      if (this.hasListeners())
         this.#updateTimers();
-      }
     }
     #notify(notifyOptions) {
       notifyManager.batch(() => {
-        if (notifyOptions.listeners) {
+        if (notifyOptions.listeners)
           this.listeners.forEach((listener) => {
             listener(this.#currentResult);
           });
-        }
         this.#client.getQueryCache().notify({
           query: this.#currentQuery,
           type: "observerResultsUpdated"
@@ -3098,13 +2375,12 @@ React keys must be passed directly to JSX without using spread:
     return resolveQueryBoolean(options.enabled, query) !== false && query.isStaleByTime(resolveStaleTime(options.staleTime, query));
   }
   function shouldAssignObserverCurrentProperties(observer, optimisticResult) {
-    if (!shallowEqualObjects(observer.getCurrentResult(), optimisticResult)) {
+    if (!shallowEqualObjects(observer.getCurrentResult(), optimisticResult))
       return true;
-    }
     return false;
   }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/infiniteQueryObserver.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/infiniteQueryObserver.js
   var InfiniteQueryObserver = class extends QueryObserver {
     constructor(client, options) {
       super(client, options);
@@ -3125,17 +2401,13 @@ React keys must be passed directly to JSX without using spread:
     fetchNextPage(options) {
       return this.fetch({
         ...options,
-        meta: {
-          fetchMore: { direction: "forward" }
-        }
+        meta: { fetchMore: { direction: "forward" } }
       });
     }
     fetchPreviousPage(options) {
       return this.fetch({
         ...options,
-        meta: {
-          fetchMore: { direction: "backward" }
-        }
+        meta: { fetchMore: { direction: "backward" } }
       });
     }
     createResult(query, options) {
@@ -3147,7 +2419,7 @@ React keys must be passed directly to JSX without using spread:
       const isFetchingNextPage = isFetching && fetchDirection === "forward";
       const isFetchPreviousPageError = isError && fetchDirection === "backward";
       const isFetchingPreviousPage = isFetching && fetchDirection === "backward";
-      const result = {
+      return {
         ...parentResult,
         fetchNextPage: this.fetchNextPage,
         fetchPreviousPage: this.fetchPreviousPage,
@@ -3160,215 +2432,11 @@ React keys must be passed directly to JSX without using spread:
         isRefetchError: isRefetchError && !isFetchNextPageError && !isFetchPreviousPageError,
         isRefetching: isRefetching && !isFetchingNextPage && !isFetchingPreviousPage
       };
-      return result;
     }
   };
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/mutation.js
-  var Mutation = class extends Removable {
-    #client;
-    #observers;
-    #mutationCache;
-    #retryer;
-    constructor(config) {
-      super();
-      this.#client = config.client;
-      this.mutationId = config.mutationId;
-      this.#mutationCache = config.mutationCache;
-      this.#observers = [];
-      this.state = config.state || getDefaultState2();
-      this.setOptions(config.options);
-      this.scheduleGc();
-    }
-    setOptions(options) {
-      this.options = options;
-      this.updateGcTime(this.options.gcTime);
-    }
-    get meta() {
-      return this.options.meta;
-    }
-    addObserver(observer) {
-      if (!this.#observers.includes(observer)) {
-        this.#observers.push(observer);
-        this.clearGcTimeout();
-        this.#mutationCache.notify({
-          type: "observerAdded",
-          mutation: this,
-          observer
-        });
-      }
-    }
-    removeObserver(observer) {
-      this.#observers = this.#observers.filter((x) => x !== observer);
-      this.scheduleGc();
-      this.#mutationCache.notify({
-        type: "observerRemoved",
-        mutation: this,
-        observer
-      });
-    }
-    optionalRemove() {
-      if (!this.#observers.length) {
-        if (this.state.status === "pending") {
-          this.scheduleGc();
-        } else {
-          this.#mutationCache.remove(this);
-        }
-      }
-    }
-    continue() {
-      return this.#retryer?.continue() ?? this.execute(this.state.variables);
-    }
-    async execute(variables) {
-      const onContinue = () => {
-        this.#dispatch({ type: "continue" });
-      };
-      const mutationFnContext = {
-        client: this.#client,
-        meta: this.options.meta,
-        mutationKey: this.options.mutationKey
-      };
-      this.#retryer = createRetryer({
-        fn: () => {
-          if (!this.options.mutationFn) {
-            return Promise.reject(new Error("No mutationFn found"));
-          }
-          return this.options.mutationFn(variables, mutationFnContext);
-        },
-        onFail: (failureCount, error) => {
-          this.#dispatch({ type: "failed", failureCount, error });
-        },
-        onPause: () => {
-          this.#dispatch({ type: "pause" });
-        },
-        onContinue,
-        retry: this.options.retry ?? 0,
-        retryDelay: this.options.retryDelay,
-        networkMode: this.options.networkMode,
-        canRun: () => this.#mutationCache.canRun(this)
-      });
-      const restored = this.state.status === "pending";
-      const isPaused = !this.#retryer.canStart();
-      try {
-        if (restored) {
-          onContinue();
-        } else {
-          this.#dispatch({ type: "pending", variables, isPaused });
-          if (this.#mutationCache.config.onMutate) {
-            await this.#mutationCache.config.onMutate(variables, this, mutationFnContext);
-          }
-          const context = await this.options.onMutate?.(variables, mutationFnContext);
-          if (context !== this.state.context) {
-            this.#dispatch({
-              type: "pending",
-              context,
-              variables,
-              isPaused
-            });
-          }
-        }
-        const data = await this.#retryer.start();
-        await this.#mutationCache.config.onSuccess?.(data, variables, this.state.context, this, mutationFnContext);
-        await this.options.onSuccess?.(data, variables, this.state.context, mutationFnContext);
-        await this.#mutationCache.config.onSettled?.(data, null, this.state.variables, this.state.context, this, mutationFnContext);
-        await this.options.onSettled?.(data, null, variables, this.state.context, mutationFnContext);
-        this.#dispatch({ type: "success", data });
-        return data;
-      } catch (error) {
-        try {
-          await this.#mutationCache.config.onError?.(error, variables, this.state.context, this, mutationFnContext);
-        } catch (e) {
-          Promise.reject(e);
-        }
-        try {
-          await this.options.onError?.(error, variables, this.state.context, mutationFnContext);
-        } catch (e) {
-          Promise.reject(e);
-        }
-        try {
-          await this.#mutationCache.config.onSettled?.(undefined, error, this.state.variables, this.state.context, this, mutationFnContext);
-        } catch (e) {
-          Promise.reject(e);
-        }
-        try {
-          await this.options.onSettled?.(undefined, error, variables, this.state.context, mutationFnContext);
-        } catch (e) {
-          Promise.reject(e);
-        }
-        this.#dispatch({ type: "error", error });
-        throw error;
-      } finally {
-        this.#mutationCache.runNext(this);
-      }
-    }
-    #dispatch(action) {
-      const reducer = (state) => {
-        switch (action.type) {
-          case "failed":
-            return {
-              ...state,
-              failureCount: action.failureCount,
-              failureReason: action.error
-            };
-          case "pause":
-            return {
-              ...state,
-              isPaused: true
-            };
-          case "continue":
-            return {
-              ...state,
-              isPaused: false
-            };
-          case "pending":
-            return {
-              ...state,
-              context: action.context,
-              data: undefined,
-              failureCount: 0,
-              failureReason: null,
-              error: null,
-              isPaused: action.isPaused,
-              status: "pending",
-              variables: action.variables,
-              submittedAt: Date.now()
-            };
-          case "success":
-            return {
-              ...state,
-              data: action.data,
-              failureCount: 0,
-              failureReason: null,
-              error: null,
-              status: "success",
-              isPaused: false
-            };
-          case "error":
-            return {
-              ...state,
-              data: undefined,
-              error: action.error,
-              failureCount: state.failureCount + 1,
-              failureReason: action.error,
-              isPaused: false,
-              status: "error"
-            };
-        }
-      };
-      this.state = reducer(this.state);
-      notifyManager.batch(() => {
-        this.#observers.forEach((observer) => {
-          observer.onMutationUpdate(action);
-        });
-        this.#mutationCache.notify({
-          mutation: this,
-          type: "updated",
-          action
-        });
-      });
-    }
-  };
-  function getDefaultState2() {
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/mutation.js
+  function getDefaultState() {
     return {
       context: undefined,
       data: undefined,
@@ -3382,7 +2450,7 @@ React keys must be passed directly to JSX without using spread:
     };
   }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/build/modern/mutationObserver.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/mutationObserver.js
   var MutationObserver = class extends Subscribable {
     #client;
     #currentResult = undefined;
@@ -3402,23 +2470,26 @@ React keys must be passed directly to JSX without using spread:
     setOptions(options) {
       const prevOptions = this.options;
       this.options = this.#client.defaultMutationOptions(options);
-      if (!shallowEqualObjects(this.options, prevOptions)) {
+      if (!shallowEqualObjects(this.options, prevOptions))
         this.#client.getMutationCache().notify({
           type: "observerOptionsUpdated",
           mutation: this.#currentMutation,
           observer: this
         });
-      }
-      if (prevOptions?.mutationKey && this.options.mutationKey && hashKey(prevOptions.mutationKey) !== hashKey(this.options.mutationKey)) {
+      if (prevOptions?.mutationKey && this.options.mutationKey && hashKey(prevOptions.mutationKey) !== hashKey(this.options.mutationKey))
         this.reset();
-      } else if (this.#currentMutation?.state.status === "pending") {
+      else if (this.#currentMutation?.state.status === "pending")
         this.#currentMutation.setOptions(this.options);
+    }
+    onSubscribe() {
+      if (this.listeners.size === 1 && this.#currentMutation) {
+        this.#currentMutation.addObserver(this);
+        this.#updateResult();
       }
     }
     onUnsubscribe() {
-      if (!this.hasListeners()) {
+      if (!this.hasListeners())
         this.#currentMutation?.removeObserver(this);
-      }
     }
     onMutationUpdate(action) {
       this.#updateResult();
@@ -3441,7 +2512,7 @@ React keys must be passed directly to JSX without using spread:
       return this.#currentMutation.execute(variables);
     }
     #updateResult() {
-      const state = this.#currentMutation?.state ?? getDefaultState2();
+      const state = this.#currentMutation?.state ?? getDefaultState();
       this.#currentResult = {
         ...state,
         isPending: state.status === "pending",
@@ -3492,80 +2563,26 @@ React keys must be passed directly to JSX without using spread:
       });
     }
   };
-  // ../../node_modules/.bun/@tanstack+react-query@5.101.0+e14d3f224186685e/node_modules/@tanstack/react-query/build/modern/useBaseQuery.js
-  var React5 = __toESM(require_react(), 1);
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.101.0+e14d3f224186685e/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js
-  var React = __toESM(require_react(), 1);
-  var import_jsx_runtime = __toESM(require_jsx_runtime(), 1);
-  "use client";
-  var QueryClientContext = React.createContext(undefined);
-  var useQueryClient = (queryClient) => {
-    const client = React.useContext(QueryClientContext);
-    if (queryClient) {
-      return queryClient;
-    }
-    if (!client) {
-      throw new Error("No QueryClient set, use QueryClientProvider to set one");
-    }
-    return client;
-  };
-
-  // ../../node_modules/.bun/@tanstack+react-query@5.101.0+e14d3f224186685e/node_modules/@tanstack/react-query/build/modern/QueryErrorResetBoundary.js
-  var React2 = __toESM(require_react(), 1);
-  var import_jsx_runtime2 = __toESM(require_jsx_runtime(), 1);
-  "use client";
-  function createValue() {
-    let isReset = false;
-    return {
-      clearReset: () => {
-        isReset = false;
-      },
-      reset: () => {
-        isReset = true;
-      },
-      isReset: () => {
-        return isReset;
-      }
-    };
-  }
-  var QueryErrorResetBoundaryContext = React2.createContext(createValue());
-  var useQueryErrorResetBoundary = () => React2.useContext(QueryErrorResetBoundaryContext);
-
-  // ../../node_modules/.bun/@tanstack+react-query@5.101.0+e14d3f224186685e/node_modules/@tanstack/react-query/build/modern/errorBoundaryUtils.js
-  var React3 = __toESM(require_react(), 1);
+  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/errorBoundaryUtils.js
   "use client";
   var ensurePreventErrorBoundaryRetry = (options, errorResetBoundary, query) => {
     const throwOnError = query?.state.error && typeof options.throwOnError === "function" ? shouldThrowError(options.throwOnError, [query.state.error, query]) : options.throwOnError;
-    if (options.suspense || options.experimental_prefetchInRender || throwOnError) {
-      if (!errorResetBoundary.isReset()) {
+    if (options.suspense || throwOnError) {
+      if (!errorResetBoundary.isReset())
         options.retryOnMount = false;
-      }
     }
   };
   var useClearResetErrorBoundary = (errorResetBoundary) => {
-    React3.useEffect(() => {
+    React4.useEffect(() => {
       errorResetBoundary.clearReset();
     }, [errorResetBoundary]);
   };
-  var getHasError = ({
-    result,
-    errorResetBoundary,
-    throwOnError,
-    query,
-    suspense
-  }) => {
+  var getHasError = ({ result, errorResetBoundary, throwOnError, query, suspense }) => {
     return result.isError && !errorResetBoundary.isReset() && !result.isFetching && query && (suspense && result.data === undefined || shouldThrowError(throwOnError, [result.error, query]));
   };
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.101.0+e14d3f224186685e/node_modules/@tanstack/react-query/build/modern/IsRestoringProvider.js
-  var React4 = __toESM(require_react(), 1);
-  "use client";
-  var IsRestoringContext = React4.createContext(false);
-  var useIsRestoring = () => React4.useContext(IsRestoringContext);
-  var IsRestoringProvider = IsRestoringContext.Provider;
-
-  // ../../node_modules/.bun/@tanstack+react-query@5.101.0+e14d3f224186685e/node_modules/@tanstack/react-query/build/modern/suspense.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/suspense.js
   var defaultThrowOnError = (_error, query) => query.state.data === undefined;
   var ensureSuspenseTimers = (defaultedOptions) => {
     if (defaultedOptions.suspense) {
@@ -3573,42 +2590,37 @@ React keys must be passed directly to JSX without using spread:
       const clamp = (value) => value === "static" ? value : Math.max(value ?? MIN_SUSPENSE_TIME_MS, MIN_SUSPENSE_TIME_MS);
       const originalStaleTime = defaultedOptions.staleTime;
       defaultedOptions.staleTime = typeof originalStaleTime === "function" ? (...args) => clamp(originalStaleTime(...args)) : clamp(originalStaleTime);
-      if (typeof defaultedOptions.gcTime === "number") {
+      if (typeof defaultedOptions.gcTime === "number")
         defaultedOptions.gcTime = Math.max(defaultedOptions.gcTime, MIN_SUSPENSE_TIME_MS);
-      }
     }
   };
-  var willFetch = (result, isRestoring) => result.isLoading && result.isFetching && !isRestoring;
   var shouldSuspend = (defaultedOptions, result) => defaultedOptions?.suspense && result.isPending;
   var fetchOptimistic = (defaultedOptions, observer, errorResetBoundary) => observer.fetchOptimistic(defaultedOptions).catch(() => {
     errorResetBoundary.clearReset();
   });
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.101.0+e14d3f224186685e/node_modules/@tanstack/react-query/build/modern/useBaseQuery.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/useBaseQuery.js
+  var React5 = __toESM(require_react(), 1);
   "use client";
   function useBaseQuery(options, Observer, queryClient) {
     if (true) {
-      if (typeof options !== "object" || Array.isArray(options)) {
+      if (typeof options !== "object" || Array.isArray(options))
         throw new Error('Bad argument type. Starting with v5, only the "Object" form is allowed when calling query related functions. Please use the error stack to find the culprit call. More info here: https://tanstack.com/query/latest/docs/react/guides/migrating-to-v5#supports-a-single-signature-one-object');
-      }
     }
     const isRestoring = useIsRestoring();
     const errorResetBoundary = useQueryErrorResetBoundary();
     const client = useQueryClient(queryClient);
     const defaultedOptions = client.defaultQueryOptions(options);
-    client.getDefaultOptions().queries?._experimental_beforeQuery?.(defaultedOptions);
     const query = client.getQueryCache().get(defaultedOptions.queryHash);
     if (true) {
-      if (!defaultedOptions.queryFn) {
+      if (!defaultedOptions.queryFn)
         console.error(`[${defaultedOptions.queryHash}]: No queryFn was passed as an option, and no default queryFn was found. The queryFn parameter is only optional when using a default queryFn. More info here: https://tanstack.com/query/latest/docs/framework/react/guides/default-query-function`);
-      }
     }
     const subscribed = options.subscribed !== false;
     defaultedOptions._optimisticResults = isRestoring ? "isRestoring" : subscribed ? "optimistic" : undefined;
     ensureSuspenseTimers(defaultedOptions);
     ensurePreventErrorBoundaryRetry(defaultedOptions, errorResetBoundary, query);
     useClearResetErrorBoundary(errorResetBoundary);
-    const isNewCacheEntry = !client.getQueryCache().get(defaultedOptions.queryHash);
     const [observer] = React5.useState(() => new Observer(client, defaultedOptions));
     const result = observer.getOptimisticResult(defaultedOptions);
     const shouldSubscribe = !isRestoring && subscribed;
@@ -3620,41 +2632,31 @@ React keys must be passed directly to JSX without using spread:
     React5.useEffect(() => {
       observer.setOptions(defaultedOptions);
     }, [defaultedOptions, observer]);
-    if (shouldSuspend(defaultedOptions, result)) {
+    if (shouldSuspend(defaultedOptions, result))
       throw fetchOptimistic(defaultedOptions, observer, errorResetBoundary);
-    }
     if (getHasError({
       result,
       errorResetBoundary,
       throwOnError: defaultedOptions.throwOnError,
       query,
       suspense: defaultedOptions.suspense
-    })) {
+    }))
       throw result.error;
-    }
-    client.getDefaultOptions().queries?._experimental_afterQuery?.(defaultedOptions, result);
-    if (defaultedOptions.experimental_prefetchInRender && !environmentManager.isServer() && willFetch(result, isRestoring)) {
-      const promise = isNewCacheEntry ? fetchOptimistic(defaultedOptions, observer, errorResetBoundary) : query?.promise;
-      promise?.catch(noop).finally(() => {
-        observer.updateResult();
-      });
-    }
     return !defaultedOptions.notifyOnChangeProps ? observer.trackResult(result) : result;
   }
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.101.0+e14d3f224186685e/node_modules/@tanstack/react-query/build/modern/useQuery.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/useQuery.js
   "use client";
   function useQuery(options, queryClient) {
     return useBaseQuery(options, QueryObserver, queryClient);
   }
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.101.0+e14d3f224186685e/node_modules/@tanstack/react-query/build/modern/useSuspenseQuery.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/useSuspenseQuery.js
   "use client";
   function useSuspenseQuery(options, queryClient) {
     if (true) {
-      if (options.queryFn === skipToken) {
+      if (options.queryFn === skipToken)
         console.error("skipToken is not allowed for useSuspenseQuery");
-      }
     }
     return useBaseQuery({
       ...options,
@@ -3664,7 +2666,7 @@ React keys must be passed directly to JSX without using spread:
       placeholderData: undefined
     }, QueryObserver, queryClient);
   }
-  // ../../node_modules/.bun/@tanstack+react-query@5.101.0+e14d3f224186685e/node_modules/@tanstack/react-query/build/modern/useMutation.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/useMutation.js
   var React6 = __toESM(require_react(), 1);
   "use client";
   function useMutation(options, queryClient) {
@@ -3674,20 +2676,23 @@ React keys must be passed directly to JSX without using spread:
       observer.setOptions(options);
     }, [observer, options]);
     const result = React6.useSyncExternalStore(React6.useCallback((onStoreChange) => observer.subscribe(notifyManager.batchCalls(onStoreChange)), [observer]), () => observer.getCurrentResult(), () => observer.getCurrentResult());
-    const mutate = React6.useCallback((variables, mutateOptions) => {
-      observer.mutate(variables, mutateOptions).catch(noop);
+    const mutate = React6.useCallback((...args) => {
+      observer.mutate(args[0], args[1]).catch(noop);
     }, [observer]);
-    if (result.error && shouldThrowError(observer.options.throwOnError, [result.error])) {
+    if (result.error && shouldThrowError(observer.options.throwOnError, [result.error]))
       throw result.error;
-    }
-    return { ...result, mutate, mutateAsync: result.mutate };
+    return {
+      ...result,
+      mutate,
+      mutateAsync: result.mutate
+    };
   }
-  // ../../node_modules/.bun/@tanstack+react-query@5.101.0+e14d3f224186685e/node_modules/@tanstack/react-query/build/modern/useInfiniteQuery.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/useInfiniteQuery.js
   "use client";
   function useInfiniteQuery(options, queryClient) {
     return useBaseQuery(options, InfiniteQueryObserver, queryClient);
   }
-  // ../../node_modules/.bun/openapi-react-query@0.5.4+74bf208874e03033/node_modules/openapi-react-query/dist/index.mjs
+  // ../../node_modules/.bun/openapi-react-query@0.5.4+22a9d9701d41cf3c/node_modules/openapi-react-query/dist/index.mjs
   function createClient2(client) {
     const queryFn = async ({
       queryKey: [method, path, init],

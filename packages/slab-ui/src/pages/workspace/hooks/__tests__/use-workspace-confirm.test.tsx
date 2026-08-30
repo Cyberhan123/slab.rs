@@ -1,5 +1,6 @@
 import { userEvent } from "vitest/browser"
 import { render } from "vitest-browser-react"
+import { useEffect } from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { useWorkspaceConfirmDialog } from "../use-workspace-confirm"
@@ -22,7 +23,11 @@ async function setupConfirm() {
   let confirmRef: ((options: ConfirmOptions) => Promise<boolean>) | null = null
   function Harness() {
     const { confirm, dialog } = useWorkspaceConfirmDialog()
-    confirmRef = confirm
+    // Publish the live confirm fn via an effect (assigning during render
+    // trips the react-compiler immutability lint).
+    useEffect(() => {
+      confirmRef = confirm
+    })
     return <>{dialog}</>
   }
 

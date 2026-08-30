@@ -15,8 +15,12 @@ import { useAssistantHeader } from "./hooks/use-assistant-header"
 import { useAssistantModel } from "./hooks/use-assistant-model"
 import { useAssistantModelStatusLabel } from "./hooks/use-assistant-model-status-label"
 import { useAssistantModelSwitch } from "./hooks/use-assistant-model-switch"
+import { useAssistantNewChat } from "./hooks/use-assistant-new-chat"
 import { useAssistantSessions } from "./hooks/use-assistant-sessions"
 import { useHarnessConversation } from "./hooks/use-harness-conversation"
+import { useWorkspaceSwitch, type WorkspaceSelection } from "./hooks/use-workspace-switch"
+import { useWorkspaceHandoffStore } from "@slab/ui/store/useWorkspaceHandoffStore"
+import { WorkspaceSelector } from "@slab/ui/components/workspace-selector"
 
 function Assistant() {
     const { t } = useTranslation()
@@ -148,6 +152,44 @@ function Assistant() {
     const handleNewSession = useCallback(() => {
         void createEmptySession()
     }, [createEmptySession])
+
+    // New-chat dialog (empty-state CTA): pick a workspace (or global), compose
+    // the first message, then hand off into this page — the created session
+    // becomes current and the staged draft auto-sends once the pane is ready.
+    const { dialog: newChatDialog, openDialog: openNewChatDialog, pendingWorkspaceSwitch, currentWorkspace: activeWorkspace } =
+        useAssistantNewChat({ createSession: createEmptySession, commands })
+
+    // Live workspace selector in the Sender toolbar: switching here applies
+    // immediately (shared open/close path with the dialog's submit). Disabled
+    // while a turn runs — a switch would interrupt the running agent threads.
+    const { applyWorkspace, switching: isWorkspaceSwitching } = useWorkspaceSwitch()
+    const liveWorkspaceSelection = activeWorkspace
+        ? { kind: "root" as const, rootPath: activeWorkspace.rootPath, name: activeWorkspace.name }
+        : { kind: "global" as const }
+    const handleLiveWorkspaceChange = useCallback(
+        (selection: WorkspaceSelection) => {
+            void applyWorkspace(selection, activeWorkspace?.rootPath ?? null).catch(() => {})
+        },
+        [activeWorkspace?.rootPath, applyWorkspace],
+    )
+
+    // Draft handoff into the pane (consumed before sending — see the pane).
+    const assistantDraft = useWorkspaceHandoffStore((state) => state.draft)
+    const consumeDraft = useWorkspaceHandoffStore((state) => state.consumeDraft)
+    const autoSend =
+        assistantDraft &&
+        (!assistantDraft.sessionId || assistantDraft.sessionId === curConversation) &&
+        !pendingWorkspaceSwitch
+            ? {
+                  text: assistantDraft.prompt,
+                  files: assistantDraft.files ?? [],
+                  metadata: {
+                      effort: assistantDraft.effort,
+                      permissionMode: assistantDraft.permissionMode,
+                      agentType: assistantDraft.agentType,
+                  },
+              }
+            : null
 
     useAssistantHeader({
         modelOptions,
@@ -285,7 +327,20 @@ function Assistant() {
                 onInterrupt={() => {
                     void interrupt().catch(() => {})
                 }}
+                onStartNewChat={openNewChatDialog}
+                autoSend={autoSend}
+                onAutoSendConsumed={consumeDraft}
+                workspaceSlot={
+                    <WorkspaceSelector
+                        value={liveWorkspaceSelection}
+                        onValueChange={handleLiveWorkspaceChange}
+                        currentWorkspace={activeWorkspace}
+                        busy={isWorkspaceSwitching || isChatBusy}
+                    />
+                }
             />
+
+            {newChatDialog}
 
             <AssistantSessionSheet
                 open={isSessionSheetOpen}

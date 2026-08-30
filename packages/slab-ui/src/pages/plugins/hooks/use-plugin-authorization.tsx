@@ -45,8 +45,13 @@ export function usePluginAuthorization(pluginId: string, pluginName: string) {
 
   const queueRef = useRef<PendingRequest[]>([]);
   const [current, setCurrent] = useState<PendingRequest | null>(null);
+  // Mirror of `current` read from event-time callbacks (`settle`). Synced in an
+  // effect — writing it during render trips the react-compiler refs lint; the
+  // only synchronous writer is `showNext`, which sets it ahead of the commit.
   const currentRef = useRef<PendingRequest | null>(null);
-  currentRef.current = current;
+  useEffect(() => {
+    currentRef.current = current;
+  });
 
   const showNext = useCallback(() => {
     const next = queueRef.current.shift() ?? null;

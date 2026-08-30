@@ -131,6 +131,22 @@ vi.mock("sonner", () => ({
   },
 }))
 
+// The page's workspace switcher + new-chat dialog query the workspace state
+// through React Query; the page test has no QueryClientProvider, so provide
+// the two hooks the page uses with inert stand-ins (keeping the real module's
+// other exports — e.g. MutationCache used by the provider — intact).
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-query")>()
+  return {
+    ...actual,
+    useQuery: () => ({ data: { current: null } }),
+    useQueryClient: () => ({
+      setQueryData: vi.fn(),
+      invalidateQueries: async () => undefined,
+    }),
+  }
+})
+
 vi.mock("@slab/components/select", () => {
   let selectValueChange: ((value: string) => void) | undefined
 

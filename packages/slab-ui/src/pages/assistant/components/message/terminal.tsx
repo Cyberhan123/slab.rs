@@ -170,6 +170,7 @@ export const Terminal = ({
   return (
     <TerminalContext.Provider value={contextValue}>
       <div
+        data-testid="assistant-tool-terminal"
         className={cn(
           "flex flex-col overflow-hidden rounded-lg border bg-zinc-950 text-zinc-100",
           className,

@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { MessageCirclePlus } from "lucide-react"
 
 import { useTranslation } from "@slab/i18n"
@@ -106,8 +106,12 @@ export function useAssistantHeader({
   // `onNewSession` can change identity when its upstream callback does, so route
   // it through a ref: the element's onClick closure is created once and is
   // stable; only primitive deps (`disabled`, label) can recreate it (legitimately).
+  // The ref is refreshed in an effect (after commit, before any click can fire)
+  // — writing it during render trips the react-compiler refs lint.
   const onNewSessionRef = useRef(onNewSession)
-  onNewSessionRef.current = onNewSession
+  useEffect(() => {
+    onNewSessionRef.current = onNewSession
+  })
   const headerNewSessionButton = useMemo(
     () => (
       <Button

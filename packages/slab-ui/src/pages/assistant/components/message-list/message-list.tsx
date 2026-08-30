@@ -56,6 +56,9 @@ function MessageList({
         [messages, showHistoryMarker, historyCount, compactionMarkers, modelLoad, sessionLoading, queuedTexts],
     )
 
+    // @tanstack/react-virtual returns mutable instance functions; the compiler
+    // skipping this hook is expected and harmless here.
+    // oxlint-disable-next-line
     const virtualizer = useVirtualizer({
         count: rows.length,
         getScrollElement: () => viewportRef.current,

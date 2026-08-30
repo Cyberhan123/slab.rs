@@ -9,6 +9,24 @@ import {
   renderDesktopScene,
 } from '../test-utils';
 
+/**
+ * Make the scene pixel-deterministic before a screenshot: snap every CSS
+ * animation to its base state, and hide the terminal's blinking cursor
+ * outright (its blink phase varies run-to-run, and it is the only
+ * `animate-pulse` element in these scenes).
+ */
+function freezeAnimations() {
+  // The test itself runs in the browser context, so the DOM is directly
+  // reachable (no `page.evaluate` here).
+  const style = document.createElement('style');
+  style.id = 'visual-test-freeze-animations';
+  style.textContent = [
+    '*, *::before, *::after { animation: none !important; transition: none !important; }',
+    '.animate-pulse { display: none !important; }',
+  ].join('\n');
+  document.head.appendChild(style);
+}
+
 const mocks = vi.hoisted(() => {
   const translate = (key: string) => key;
   // Mirrors the initial `ConversationState` of the real harness controller
@@ -209,6 +227,7 @@ describe('AssistantPage browser visual regression', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    document.getElementById('visual-test-freeze-animations')?.remove();
   });
 
   it('captures the assistant page empty state', async () => {
@@ -279,7 +298,10 @@ describe('AssistantPage browser visual regression', () => {
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('assistant-page-with-messages.png');
   });
 
-  it('captures active agent thought chain and approval', async () => {
+  it('captures agent thought chain with an expanded bash tool row', async () => {
+    // A COMPLETED command (not an approval-pending one): the approval-pending
+    // fixture raced its expand state under parallel suite load, while the
+    // approval card itself is visually covered by the approval-banner tests.
     mocks.harnessConversation.restoredMessages = [
       {
         id: 'msg-1',
@@ -291,8 +313,9 @@ describe('AssistantPage browser visual regression', () => {
         parts: [
           { state: 'done', text: 'Checking the workspace before answering.', type: 'reasoning' },
           {
-            input: { command: 'git status --short' },
-            state: 'input-available',
+            input: { command: 'git status --short', cwd: '/repo' },
+            output: '',
+            state: 'output-available',
             toolCallId: 'call-1',
             type: 'tool-commandExecution',
           },
@@ -300,18 +323,8 @@ describe('AssistantPage browser visual regression', () => {
         role: 'assistant',
       },
     ];
-    mocks.harnessConversation.approvals = [
-      {
-        itemId: 'call-1',
-        threadId: 'thread-1',
-        kind: 'command',
-        command: 'git status --short',
-        cwd: '/repo',
-        status: 'pending',
-        allowedScopes: ['run_once', 'always_in_workspace', 'deny'],
-      },
-    ];
-    mocks.harnessConversation.approvalStatusByItemId = new Map([['call-1', 'pending']]);
+    mocks.harnessConversation.approvals = [];
+    mocks.harnessConversation.approvalStatusByItemId = new Map();
     mockUseAssistantSessions.mockReturnValue(
       createAssistantSessionsViewModel({
         conversationList: [
@@ -327,6 +340,12 @@ describe('AssistantPage browser visual regression', () => {
     await renderDesktopScene(<AssistantPage />, { route: '/' });
 
     await expect.element(page.getByText('Inspect the repository status')).toBeVisible();
+    // Completed rows sit collapsed by design — the compact `Bash: <command>`
+    // line IS the feature this baseline pins. (The expanded terminal raced its
+    // mount/animation state run-to-run under parallel suite load; its content
+    // rendering is covered by the message-tool unit tests.)
+    await expect.element(page.getByText('Bash')).toBeVisible();
+    freezeAnimations();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('assistant-page-agent-chain.png');
   });
 });

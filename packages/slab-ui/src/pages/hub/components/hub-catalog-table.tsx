@@ -122,7 +122,6 @@ function HubModelCard({
   onUseClick: (model: ModelItem, route: string) => void;
 }) {
   const { t, i18n } = useTranslation();
-  const Icon = getModelIcon(model);
   const backendLabel = model.backend_ids[0]
     ? formatBackend(model.backend_ids[0], t)
     : t('pages.hub.catalog.runtime');
@@ -157,7 +156,7 @@ function HubModelCard({
       <div className="relative flex h-full flex-col gap-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex size-14 items-center justify-center rounded-[18px] bg-secondary text-primary">
-            <Icon className="size-6" />
+            {renderModelIcon(model, 'size-6')}
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -469,7 +468,7 @@ function shortFileName(filename: string) {
   return filename.split('/').at(-1) ?? filename;
 }
 
-function getModelIcon(model: ModelItem) {
+function renderModelIcon(model: ModelItem, className: string) {
   const haystack = `${model.display_name} ${model.repo_id} ${model.filename}`.toLowerCase();
 
   if (
@@ -478,7 +477,7 @@ function getModelIcon(model: ModelItem) {
     haystack.includes('image') ||
     haystack.includes('diffusion')
   ) {
-    return ImageIcon;
+    return <ImageIcon className={className} />;
   }
 
   if (
@@ -487,14 +486,14 @@ function getModelIcon(model: ModelItem) {
     haystack.includes('audio') ||
     haystack.includes('whisper')
   ) {
-    return Mic;
+    return <Mic className={className} />;
   }
 
   if (haystack.includes('coder') || haystack.includes('code')) {
-    return Code2;
+    return <Code2 className={className} />;
   }
 
-  return Bot;
+  return <Bot className={className} />;
 }
 
 function formatDateTime(

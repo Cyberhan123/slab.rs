@@ -1,15 +1,14 @@
 "use client"
 
 import { useMessageInteraction } from "../message-interaction-context"
+import { summarizeToolCall } from "../../lib/tool-summaries"
+import { ToolRow, ToolRowContent, ToolRowTrigger, toolRowIcon } from "./message-tool-row"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
 import {
   isApprovalPending,
   deriveState,
   isToolActive,
-  Tool,
-  ToolContent,
-  ToolHeader,
   type ToolPartLike,
 } from "./message-tool-part"
 import { PatchDiffView } from "../patch-diff-view"
@@ -28,9 +27,10 @@ interface PatchProgressLine {
 }
 
 /**
- * Renders a `fileChange` (apply_patch) tool call as a readable diff card instead
- * of the generic JSON parameter/result cards used by `MessageToolPart`. The
- * intended diff is always shown; while the patch is still applying, the live
+ * Renders a `fileChange` (apply_patch / write_file) tool call as a compact
+ * `Write: <path>` / `Patch: n files` row (thinking-style, collapsed by default)
+ * whose expanded body keeps the readable diff list. The intended diff is always
+ * shown once expanded; while the patch is still applying, the live
  * committed-file list (from `item/fileChange/outputDelta`) is shown above it so
  * the user can watch files apply as the patch runs.
  *
@@ -54,11 +54,17 @@ function MessageToolFileChangePart({
   const input = (p.input ?? {}) as { changes?: FileChangeEntry[] }
   const changes = input.changes ?? []
   const liveLines = toolCallId ? livePatchByItemId.get(toolCallId) : undefined
+  const summary = summarizeToolCall("fileChange", input)
 
   return (
-    <Tool defaultOpen={isApprovalPending(state)}>
-      <ToolHeader title="apply_patch" state={state} />
-      <ToolContent>
+    <ToolRow defaultOpen={isApprovalPending(state)}>
+      <ToolRowTrigger
+        icon={toolRowIcon("fileChange")}
+        label={summary.label}
+        detail={summary.detail}
+        state={state}
+      />
+      <ToolRowContent>
         {active && liveLines && liveLines.length > 0 ? (
           <ul className="space-y-1">
             {liveLines.map((line) => {
@@ -96,8 +102,8 @@ function MessageToolFileChangePart({
             </li>
           ))}
         </ul>
-      </ToolContent>
-    </Tool>
+      </ToolRowContent>
+    </ToolRow>
   )
 }
 

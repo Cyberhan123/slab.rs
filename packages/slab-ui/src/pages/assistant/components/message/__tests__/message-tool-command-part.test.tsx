@@ -41,9 +41,10 @@ vi.mock("@slab/components/collapsible", () => ({
   CollapsibleTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 
-vi.mock("@slab/components/badge", () => ({
-  Badge: ({ children }: { children: ReactNode }) => <span data-testid="badge">{children}</span>,
-}))
+/** Assert the compact row's status symbol reflects the given tool state. */
+function expectToolState(screen: { container: HTMLElement }, state: string) {
+  expect(screen.container.querySelector(`[data-tool-state="${state}"]`)).not.toBeNull()
+}
 
 async function renderPart(
   part: Partial<ToolPartLike>,
@@ -87,8 +88,11 @@ describe("MessageToolCommandPart", () => {
     expect(screen.getByTestId("terminal-title").element().getAttribute("title")).toBe("/repo")
     // Output (live while active) lives in the content surface, not the header.
     expect(screen.getByTestId("terminal-content").element().textContent).toContain("streaming-bytes")
-    // Badge reflects the approval-requested state.
-    expect(screen.getByTestId("badge").element().textContent).toContain("Awaiting Approval")
+    // The collapsed row summarizes the call as `Bash: echo hi`.
+    expect(screen.getByTestId("collapsible").element().textContent).toContain("Bash")
+    expect(screen.getByTestId("collapsible").element().textContent).toContain("echo hi")
+    // Status symbol reflects the approval-requested state.
+    expectToolState(screen, "approval-requested")
   })
 
   it("renders finalized output once the command completes", async () => {
@@ -105,7 +109,7 @@ describe("MessageToolCommandPart", () => {
     expect(terminal.element().getAttribute("data-streaming")).toBe("false")
     expect(screen.getByTestId("terminal-header").element().textContent).toContain("$ echo hi")
     expect(screen.getByTestId("terminal-content").element().textContent).toContain("final-result")
-    expect(screen.getByTestId("badge").element().textContent).toContain("Completed")
+    expectToolState(screen, "output-available")
   })
 
   it("renders the error text and Error badge when the command failed", async () => {
@@ -119,15 +123,15 @@ describe("MessageToolCommandPart", () => {
       {},
     )
     expect(screen.getByTestId("terminal-content").element().textContent).toContain("boom: command not found")
-    expect(screen.getByTestId("badge").element().textContent).toContain("Error")
+    expectToolState(screen, "output-error")
   })
 
-  it("renders the Denied badge when the approval was denied", async () => {
+  it("renders the denied status symbol when the approval was denied", async () => {
     const screen = await renderPart(
       { type: "tool-input-available", input: { command: "echo hi", cwd: "/repo" } },
       { approval: "denied" },
     )
-    expect(screen.getByTestId("badge").element().textContent).toContain("Denied")
+    expect(screen.container.querySelector('[data-tool-state="output-denied"]')).not.toBeNull()
   })
 
   it("splits a finalized SandboxedOutput JSON into stdout + stderr instead of raw JSON", async () => {
@@ -164,7 +168,7 @@ describe("MessageToolCommandPart", () => {
     expect(screen.getByTestId("assistant-command-stderr").element().textContent).toContain(
       "error[E0308]: mismatch",
     )
-    expect(screen.getByTestId("badge").element().textContent).toContain("Error")
+    expectToolState(screen, "output-error")
   })
 
   it("keeps plain-text output rendering unchanged (unparseable JSON)", async () => {

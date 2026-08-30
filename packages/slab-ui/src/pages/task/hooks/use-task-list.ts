@@ -181,11 +181,11 @@ export function useTaskList() {
     }
   };
 
-  useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
-  }, [page, totalPages]);
+  // Clamp the page number when the total shrinks (React-docs adjust-state
+  // pattern instead of a setState-in-effect).
+  if (page > totalPages) {
+    setPage(totalPages);
+  }
 
   const hasRunningTasks = allTasks.some((task) => task.status === 'running');
   const { start: startTaskPoll, stop: stopTaskPoll } = useInterval(() => {

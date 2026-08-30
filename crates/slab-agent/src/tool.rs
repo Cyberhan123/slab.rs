@@ -412,18 +412,20 @@ pub struct ToolCallRender<'a> {
     pub duration_ms: Option<u64>,
 }
 
-/// The default [`TurnItem`] for a tool call: a `CommandExecution` whose
-/// `command` is the tool name. Every tool call is visible on the harness
-/// timeline this way — tools with a richer render override [`ToolHandler::render_turn_item`].
+/// The default [`TurnItem`] for a tool call: a `ToolCall` carrying the tool
+/// name, its parsed arguments, and the completion output (as `error` when the
+/// call failed). Every tool call is visible on the harness timeline this way —
+/// tools with a richer render override [`ToolHandler::render_turn_item`].
 pub fn default_tool_turn_item(r: &ToolCallRender<'_>) -> TurnItem {
-    TurnItem::CommandExecution {
+    let failed = r.status == "failed";
+    let outcome = r.output.map(|output| serde_json::Value::String(output.to_owned()));
+    TurnItem::ToolCall {
         id: r.call.id.clone(),
-        command: r.call.name.clone(),
-        cwd: String::new(),
-        process_id: None,
+        tool: r.call.name.clone(),
+        arguments: r.args.clone(),
         status: r.status.to_owned(),
-        aggregated_output: r.output.map(str::to_owned),
-        exit_code: r.exit_code,
+        result: if failed { None } else { outcome.clone() },
+        error: if failed { outcome } else { None },
         duration_ms: r.duration_ms,
     }
 }
@@ -502,7 +504,7 @@ pub trait ToolHandler: Send + Sync {
     }
 
     /// Build the harness [`TurnItem`] for a call to this tool. The default
-    /// renders a generic [`TurnItem::CommandExecution`] (via
+    /// renders a generic [`TurnItem::ToolCall`] (via
     /// [`default_tool_turn_item`]) so every tool is visible on the timeline;
     /// tools with a richer representation (shell command, file change, web
     /// search, MCP call, …) override this. Render is purely a view over the

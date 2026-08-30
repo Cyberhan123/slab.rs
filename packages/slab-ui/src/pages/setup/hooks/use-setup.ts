@@ -220,6 +220,9 @@ export function useSetup(): SetupViewModel {
       return undefined;
     }
 
+    // Kick off the provision-task poll when its id appears (external-system
+    // sync); the synchronous state flag inside pollProvisionTask is intentional.
+    // oxlint-disable-next-line
     void pollProvisionTask();
     startProvisionPoll();
     return stopProvisionPoll;

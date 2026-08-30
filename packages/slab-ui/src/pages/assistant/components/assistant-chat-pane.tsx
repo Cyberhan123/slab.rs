@@ -1,11 +1,12 @@
 "use client"
 
 import { useChat } from "@ai-sdk/react"
-import type { UIMessage } from "ai"
-import { MessageCircleDashedIcon } from "lucide-react"
-import { useCallback, useEffect, useMemo } from "react"
+import type { FileUIPart, UIMessage } from "ai"
+import { MessageCircleDashedIcon, SquarePenIcon } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react"
 
 import { useTranslation } from "@slab/i18n"
+import { Button } from "@slab/components/button"
 import { Card, CardContent, CardFooter } from "@slab/components/card"
 import {
     Empty,
@@ -103,6 +104,23 @@ export type AssistantChatPaneProps = {
      * immediately while the server terminates the run authoritatively.
      */
     onInterrupt: () => void
+    /** Open the new-chat dialog (empty-state CTA). */
+    onStartNewChat?: () => void
+    /**
+     * A staged first message (new-chat dialog handoff): sent through the exact
+     * manual-submit path once the conversation controller is ready. Consumed
+     * via {@link onAutoSendConsumed} *before* sending so a pane remount cannot
+     * double-deliver it.
+     */
+    autoSend?: {
+        text: string
+        files: FileUIPart[]
+        metadata: { effort?: unknown; permissionMode?: unknown; agentType?: unknown }
+    } | null
+    /** Called exactly once when {@link autoSend} is taken (clears the draft). */
+    onAutoSendConsumed?: () => void
+    /** Live workspace selector rendered inside the Sender toolbar. */
+    workspaceSlot?: ReactNode
 }
 
 export function AssistantChatPane({
@@ -138,6 +156,10 @@ export function AssistantChatPane({
     queuedTexts,
     onSteerSubmit,
     onInterrupt,
+    onStartNewChat,
+    autoSend,
+    onAutoSendConsumed,
+    workspaceSlot,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
     const { messages, sendMessage, status, stop } = useChat({
@@ -199,6 +221,34 @@ export function AssistantChatPane({
         onMessageCountChange(messages.length)
     }, [messages.length, onMessageCountChange])
 
+    // New-chat dialog handoff: deliver the staged draft through the exact
+    // manual-submit path once the controller is ready. The claim happens
+    // BEFORE sending, so the `${conversation}:${restoreVersion}` pane remount
+    // (and React StrictMode double-invocation) can never double-deliver; the
+    // claim key guards against effect re-runs for the same staged message.
+    const claimedAutoSendRef = useRef<string | null>(null)
+    const readyForAutoSend =
+        !!autoSend && !!onAutoSendConsumed && !disabled && !isHistoryLoading && !isBusy && !steerable
+    useEffect(() => {
+        if (!readyForAutoSend || !autoSend || !onAutoSendConsumed) return
+        const claimKey = `${autoSend.text}:${autoSend.metadata?.effort ?? ""}`
+        if (claimedAutoSendRef.current === claimKey) return
+        claimedAutoSendRef.current = claimKey
+        onAutoSendConsumed()
+        void (async () => {
+            try {
+                await onBeforeSubmit(autoSend.text)
+            } catch {
+                return // the gate already toasted why the session isn't ready
+            }
+            sendMessage({
+                text: autoSend.text,
+                files: autoSend.files,
+                metadata: autoSend.metadata,
+            })
+        })()
+    }, [readyForAutoSend, autoSend, onAutoSendConsumed, onBeforeSubmit, sendMessage])
+
     return (
         <MessageScrollerProvider defaultScrollPosition="last-anchor">
             <div className="relative flex min-h-0 flex-1 flex-col bg-card">
@@ -217,6 +267,19 @@ export function AssistantChatPane({
                                                 {t("pages.assistant.hero.description")}
                                             </EmptyDescription>
                                         </EmptyHeader>
+                                        {onStartNewChat ? (
+                                            <EmptyDescription>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    data-testid="assistant-new-chat-cta"
+                                                    onClick={onStartNewChat}
+                                                >
+                                                    <SquarePenIcon className="size-4" />
+                                                    {t("pages.assistant.newChat.cta")}
+                                                </Button>
+                                            </EmptyDescription>
+                                        ) : null}
                                     </Empty>
                                 ) : (
                                     <>
@@ -297,6 +360,7 @@ export function AssistantChatPane({
                             commands={commands}
                             planMode={planMode}
                             onPlanModeChange={onPlanModeChange}
+                            workspaceSlot={workspaceSlot}
                         />
                         <p
                             className="w-full truncate text-xs text-muted-foreground"

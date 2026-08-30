@@ -57,6 +57,7 @@ pub fn turn_item_to_conversation_message(item: &TurnItem) -> Option<Conversation
         | TurnItem::CommandExecution { .. }
         | TurnItem::FileChange { .. }
         | TurnItem::McpToolCall { .. }
+        | TurnItem::ToolCall { .. }
         | TurnItem::WebSearch { .. }
         | TurnItem::ImageView { .. }
         | TurnItem::Plan { .. } => None,

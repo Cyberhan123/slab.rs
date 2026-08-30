@@ -91,19 +91,19 @@ export default function SettingsPage() {
     ? translateServerField(activeSection.i18n, 'description_md', activeSection.description_md, t)
     : '';
 
-  useEffect(() => {
-    if (visibleSections.length === 0) {
+  // Keep the selected section valid against the (search-filtered) visible
+  // sections — healed during render (React-docs adjust-state pattern) instead
+  // of a setState-in-effect.
+  if (visibleSections.length === 0) {
+    if (activeSectionId !== null) {
       setActiveSectionId(null);
-      return;
     }
-
-    if (activeSectionId && visibleSections.some((section) => section.id === activeSectionId)) {
-      return;
-    }
-
-    const nextSectionId = visibleSections[0].id;
-    setActiveSectionId(nextSectionId);
-  }, [activeSectionId, visibleSections]);
+  } else if (
+    !activeSectionId ||
+    !visibleSections.some((section) => section.id === activeSectionId)
+  ) {
+    setActiveSectionId(visibleSections[0].id);
+  }
 
   useHeader({
     search: {

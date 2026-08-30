@@ -66,6 +66,24 @@ pub enum TurnItem {
         #[ts(type = "number")]
         duration_ms: Option<u64>,
     },
+    /// A generic built-in tool call (everything without a dedicated variant:
+    /// `read_file`, `grep`, `file_glob`, `git_*`, `verify`, …). Unlike the
+    /// legacy default (a `CommandExecution` carrying only the tool name), this
+    /// keeps the arguments on the wire so the UI can summarize the call.
+    #[serde(alias = "ToolCall")]
+    ToolCall {
+        id: String,
+        tool: String,
+        arguments: Value,
+        status: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        result: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<Value>,
+        #[serde(default, rename = "durationMs", skip_serializing_if = "Option::is_none")]
+        #[ts(type = "number")]
+        duration_ms: Option<u64>,
+    },
     #[serde(alias = "WebSearch")]
     WebSearch {
         id: String,
@@ -97,6 +115,7 @@ impl TurnItem {
             | Self::CommandExecution { id, .. }
             | Self::FileChange { id, .. }
             | Self::McpToolCall { id, .. }
+            | Self::ToolCall { id, .. }
             | Self::WebSearch { id, .. }
             | Self::ImageView { id, .. }
             | Self::Plan { id, .. } => id,
@@ -178,6 +197,36 @@ mod tests {
         assert_eq!(json["type"], "commandExecution");
         assert_eq!(json["cwd"], "/tmp");
         assert_eq!(json["durationMs"], 12);
+    }
+
+    #[test]
+    fn tool_call_round_trips() {
+        let item = TurnItem::ToolCall {
+            id: "t1".to_owned(),
+            tool: "read_file".to_owned(),
+            arguments: serde_json::json!({ "path": "src/main.rs" }),
+            status: "completed".to_owned(),
+            result: Some(serde_json::json!("fn main() {}")),
+            error: None,
+            duration_ms: Some(4),
+        };
+        let json = serde_json::to_value(&item).unwrap();
+        assert_eq!(json["type"], "toolCall");
+        assert_eq!(json["tool"], "read_file");
+        assert_eq!(json["arguments"]["path"], "src/main.rs");
+        assert_eq!(json["durationMs"], 4);
+        // Optional `None` fields stay off the wire.
+        assert!(json.get("error").is_none());
+        // Round-trips and accepts the PascalCase spelling (mirrors other variants).
+        let s = serde_json::to_string(&item).unwrap();
+        let back: TurnItem = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, item);
+        let pascal: TurnItem = serde_json::from_str(
+            r#"{"type":"ToolCall","id":"t1","tool":"grep","arguments":{},"status":"running"}"#,
+        )
+        .unwrap();
+        assert!(matches!(pascal, TurnItem::ToolCall { ref tool, .. } if tool == "grep"));
+        assert_eq!(pascal.id(), "t1");
     }
 
     #[test]

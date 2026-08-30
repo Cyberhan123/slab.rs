@@ -52,6 +52,10 @@ export function useWorkspaceLsp({
     }
   }, [workspaceRoot])
 
+  // LSP services lifecycle keyed on the workspace root: reads the external
+  // service registry and kicks off async initialization — a genuine
+  // external-system sync, so the synchronous state flags below are intentional.
+  // oxlint-disable
   useEffect(() => {
     let cancelled = false
 
@@ -83,6 +87,7 @@ export function useWorkspaceLsp({
       cancelled = true
     }
   }, [language, shouldInitializeServices, workspaceRoot])
+  // oxlint-enable
 
   const openFileInEditor = useCallback(
     async (nextRelativePath: string, options?: WorkspaceLspOpenFileOptions) => {

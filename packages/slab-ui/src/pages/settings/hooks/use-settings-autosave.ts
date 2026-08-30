@@ -33,9 +33,13 @@ export function useSettingsAutosave({
   // the PUT resolves — whether a newer edit landed during the await. Replaces a
   // side-effect-inside-a-setState-updater pattern whose synchronous read raced
   // with React's (sometimes deferred) updater execution and stuck the field on
-  // "new edits waiting" even though the save had succeeded.
+  // "new edits waiting" even though the save had succeeded. Synced in an effect
+  // (writing during render trips the react-compiler refs lint; all reads are
+  // event-time, after commit).
   const draftsRef = useRef(drafts);
-  draftsRef.current = drafts;
+  useEffect(() => {
+    draftsRef.current = drafts;
+  });
   const [fieldErrors, setFieldErrors] = useState<Record<string, FieldErrorState>>({});
   const [fieldStatuses, setFieldStatuses] = useState<Record<string, FieldStatusState>>({});
   const [resettingPmid, setResettingPmid] = useState<string | null>(null);

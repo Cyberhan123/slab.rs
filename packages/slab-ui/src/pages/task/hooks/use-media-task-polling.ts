@@ -58,6 +58,10 @@ export function useMediaTaskPolling({
     errorUpdatedAt: number;
   };
 
+  // Polling backoff machine: reacts to react-query transitions (success /
+  // error timestamps) with dedupe refs and exponential backoff — a genuine
+  // external-system sync, so the setState calls in these effects are intentional.
+  // oxlint-disable
   useEffect(() => {
     setPollIntervalMs(intervalMs);
     setConsecutiveErrors(0);
@@ -100,6 +104,7 @@ export function useMediaTaskPolling({
     queryEnabled,
     toPollingErrorMessage,
   ]);
+  // oxlint-enable
 
   return {
     consecutiveErrors,

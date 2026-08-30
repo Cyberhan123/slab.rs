@@ -1,6 +1,5 @@
 import {
   useCallback,
-  useEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -116,11 +115,11 @@ export function WorkspaceWorkbench({
     setCommandPaletteOpen(true)
   })
 
-  useEffect(() => {
-    if (!workspace) {
-      setCommandPaletteOpen(false)
-    }
-  }, [workspace])
+  // Close the palette when the workspace goes away (React-docs adjust-state
+  // pattern instead of a setState-in-effect).
+  if (!workspace && commandPaletteOpen) {
+    setCommandPaletteOpen(false)
+  }
 
   const explorerResize = useDrag<HTMLButtonElement>((state) => {
     state.event.preventDefault()
@@ -384,6 +383,9 @@ export function WorkspaceWorkbench({
             type="button"
             aria-label="Resize file explorer"
             className="focus-ring absolute bottom-3 right-[-10px] top-3 z-10 hidden w-5 cursor-col-resize items-center justify-center rounded-full text-muted-foreground/70 transition duration-180 ease-out-expo hover:bg-muted/70 hover:text-foreground lg:flex"
+            // @mantine/hooks useDrag hands out its drag ref as `.ref`;
+            // forwarding it here is the hook's designed API.
+            // oxlint-disable-next-line
             ref={explorerResize.ref}
           >
             <span className="h-12 w-1 rounded-full bg-current" />

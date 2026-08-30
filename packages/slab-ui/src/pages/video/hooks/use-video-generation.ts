@@ -187,6 +187,9 @@ export function useVideoGeneration() {
   }, [mergeHistoryTask, t]);
 
   useEffect(() => {
+    // Initial history fetch on mount (external-system sync); the synchronous
+    // loading flag set inside refreshHistory is intentional.
+    // oxlint-disable-next-line
     void refreshHistory();
   }, [refreshHistory]);
 

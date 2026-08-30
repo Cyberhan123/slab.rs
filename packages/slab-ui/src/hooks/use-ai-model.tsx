@@ -244,6 +244,10 @@ export function useAiModel({
     [setSelection, storageKey],
   );
 
+  // Reconcile the persisted/local selection against the asynchronously loaded
+  // model list (and, with a storage key, the persisted store) — a genuine
+  // external-system sync, so the setState calls below are intentional.
+  // oxlint-disable
   useEffect(() => {
     if (storageKey && !hasHydrated) {
       return;
@@ -299,6 +303,7 @@ export function useAiModel({
     setSelection,
     storageKey,
   ]);
+  // oxlint-enable
 
   const refetch = useCallback(() => refetchModels(), [refetchModels]);
 

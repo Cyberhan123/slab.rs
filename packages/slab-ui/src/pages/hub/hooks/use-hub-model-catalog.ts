@@ -153,9 +153,13 @@ export function useHubModelCatalog() {
     modelCatalog.status.unloading ||
     modelCatalog.status.switching;
 
-  useEffect(() => {
+  // Reset pagination when the filters change (React-docs adjust-state pattern
+  // instead of a setState-in-effect).
+  const [prevFilters, setPrevFilters] = useState({ category, status });
+  if (category !== prevFilters.category || status !== prevFilters.status) {
+    setPrevFilters({ category, status });
     setVisibleCount(DEFAULT_VISIBLE_COUNT);
-  }, [category, status]);
+  }
 
   const hasPendingModels = models.some((model) => model.pending);
   const { start: startCatalogPoll, stop: stopCatalogPoll } = useInterval(() => {

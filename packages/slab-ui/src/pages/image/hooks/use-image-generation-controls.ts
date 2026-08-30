@@ -35,6 +35,12 @@ export function useImageGenerationControls(selectedModelId: string) {
       resolvedModelId !== selectedModelId,
   });
 
+  // Resolve + persist pipeline: the controls are resolved against the
+  // persisted store (hydration), the fetched model-config document, and a
+  // defaults fallback, then persisted back — genuine external-system syncs
+  // keyed on the `resolvedModelId` state machine, so the setState calls in
+  // these effects are intentional.
+  // oxlint-disable
   useEffect(() => {
     if (!hasHydrated) {
       return;
@@ -96,6 +102,7 @@ export function useImageGenerationControls(selectedModelId: string) {
     selectedModelId,
     setModelControls,
   ]);
+  // oxlint-enable
 
   const updateControls = useCallback((patch: Partial<ImageGenerationControls>) => {
     setControls((current) => ({ ...current, ...patch }));

@@ -374,6 +374,11 @@ export function useWorkspacePage() {
     [handleOpenFile],
   )
 
+  // Workspace-open restore pipeline: resets the selection state and kicks off
+  // the async editor restore (dynamic import + Monaco) exactly once per
+  // workspace root — a genuine external-system sync, so the setState calls in
+  // this effect are intentional.
+  // oxlint-disable
   useEffect(() => {
     if (!workspace) {
       setSelectedFile(null)
@@ -426,6 +431,7 @@ export function useWorkspacePage() {
     workspace,
     workspaceUiHasHydrated,
   ])
+  // oxlint-enable
 
   useEffect(() => {
     if (!workspace) {
@@ -838,8 +844,8 @@ export function useWorkspacePage() {
       applyGitStatus,
       gitDiscardMutation,
       openFileContent,
-      selectedFile?.relativePath,
-      selectedGitDiffEntry?.path,
+      selectedFile,
+      selectedGitDiffEntry,
       t,
     ],
   )

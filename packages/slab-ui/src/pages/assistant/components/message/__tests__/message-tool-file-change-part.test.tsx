@@ -6,18 +6,15 @@ import { MessageInteractionContext } from "../../message-interaction-context"
 import type { ToolPartLike } from "../message-tool-part"
 import MessageToolFileChangePart from "../message-tool-file-change-part"
 
-// Mirror the command-part test's leaf stubs so the real tool-card logic
-// (deriveState/isToolActive) runs without Radix collapsible in jsdom.
-vi.mock("../message-tool-part", async () => {
-  const actual =
-    await vi.importActual<typeof import("../message-tool-part")>("../message-tool-part")
-  return {
-    ...actual,
-    Tool: ({ children }: { children?: ReactNode }) => <div data-testid="tool">{children}</div>,
-    ToolHeader: () => null,
-    ToolContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  }
-})
+// Stub the compact-row shell so the real tool logic (deriveState/isToolActive)
+// runs without Radix collapsible in jsdom; the diff body assertions target the
+// content children the row renders.
+vi.mock("../message-tool-row", () => ({
+  ToolRow: ({ children }: { children?: ReactNode }) => <div data-testid="tool-row">{children}</div>,
+  ToolRowTrigger: () => null,
+  ToolRowContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  toolRowIcon: () => null,
+}))
 
 vi.mock("../../patch-diff-view", () => ({
   PatchDiffView: ({ diff }: { diff: string }) => (

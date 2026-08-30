@@ -12,14 +12,12 @@ import type { ReactNode } from "react"
 
 import type { Plan, PlanStatus } from "@slab/core/harness/types"
 import { useMessageInteraction } from "../message-interaction-context"
+import { ToolRow, ToolRowContent, ToolRowTrigger, toolRowIcon } from "./message-tool-row"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
 import {
   isApprovalPending,
   deriveState,
-  Tool,
-  ToolContent,
-  ToolHeader,
   type ToolPartLike,
 } from "./message-tool-part"
 
@@ -85,8 +83,9 @@ export function PlanCardBody({ plan }: { plan: Plan }) {
 }
 
 /**
- * Renders a `plan` / `update_plan` / `present_plan` tool call as a structured
- * plan card (summary / counts / step list) instead of the generic JSON cards.
+ * Renders a `plan` / `update_plan` / `present_plan` tool call as a compact
+ * `Plan: <summary>` row (thinking-style, collapsed by default) whose expanded
+ * body keeps the structured plan view (summary / counts / step list).
  *
  * Registered under `messagePartComponents.tools["plan"]` so the parts engine
  * routes plan tools here ahead of the generic `tool` renderer (see
@@ -108,9 +107,14 @@ function MessageToolPlanPart({
   const title = plan.summary ?? "plan"
 
   return (
-    <Tool defaultOpen={isApprovalPending(state)}>
-      <ToolHeader title={title} state={state} />
-      <ToolContent>
+    <ToolRow defaultOpen={isApprovalPending(state)}>
+      <ToolRowTrigger
+        icon={toolRowIcon("plan")}
+        label="Plan"
+        detail={title}
+        state={state}
+      />
+      <ToolRowContent>
         <div data-testid="assistant-tool-plan" className="space-y-3">
           <div className="flex items-center gap-2 text-muted-foreground text-xs">
             <ListChecksIcon className="size-4" />
@@ -118,8 +122,8 @@ function MessageToolPlanPart({
           </div>
           <PlanCardBody plan={plan} />
         </div>
-      </ToolContent>
-    </Tool>
+      </ToolRowContent>
+    </ToolRow>
   )
 }
 

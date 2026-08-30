@@ -23,12 +23,12 @@ vi.mock("@slab/components/badge", () => ({
 vi.mock("@slab/components/collapsible", () => ({
   Collapsible: ({
     children,
-    defaultOpen,
+    open,
   }: {
     children: ReactNode
-    defaultOpen?: boolean
+    open?: boolean
   }) => (
-    <div data-testid="collapsible" data-default-open={defaultOpen ? "true" : "false"}>
+    <div data-testid="collapsible" data-open={open ? "true" : "false"}>
       {children}
     </div>
   ),
@@ -146,25 +146,43 @@ describe("MessageToolPart", () => {
     expect(screen.getByTestId("collapsible").query()).toBeNull()
   })
 
-  it("shows the awaiting-approval badge and opens by default while pending", async () => {
+  it("shows the awaiting-approval status and opens by default while pending", async () => {
     interactionState.approvalStatusByItemId = new Map([["tc1", "pending"]])
     const screen = await render(<MessageToolPart {...baseProps()} />)
 
-    await expect.element(screen.getByText("Awaiting Approval")).toBeInTheDocument()
-    await expect.element(screen.getByTestId("collapsible")).toHaveAttribute("data-default-open", "true")
+    expect(screen.container.querySelector('[data-tool-state="approval-requested"]')).not.toBeNull()
+    await expect.element(screen.getByTestId("collapsible")).toHaveAttribute("data-open", "true")
   })
 
   it("stays collapsed by default while merely running (no approval pending)", async () => {
     const screen = await render(<MessageToolPart {...baseProps()} />)
 
-    await expect.element(screen.getByTestId("collapsible")).toHaveAttribute("data-default-open", "false")
+    await expect.element(screen.getByTestId("collapsible")).toHaveAttribute("data-open", "false")
   })
 
-  it("shows the completed badge and stays closed once output is available", async () => {
-    const screen = await render(<MessageToolPart {...baseProps({ part: part({ state: "output-available", output: "ok" }) })} />)
+  it("shows the completed status and stays closed once output is available", async () => {
+    const screen = await render(
+      <MessageToolPart {...baseProps({ part: part({ state: "output-available", output: "ok" }) })} />,
+    )
 
-    await expect.element(screen.getByText("Completed")).toBeInTheDocument()
-    await expect.element(screen.getByTestId("collapsible")).toHaveAttribute("data-default-open", "false")
+    expect(screen.container.querySelector('[data-tool-state="output-available"]')).not.toBeNull()
+    await expect.element(screen.getByTestId("collapsible")).toHaveAttribute("data-open", "false")
+  })
+
+  it("summarizes a built-in tool call in the collapsed trigger line", async () => {
+    const screen = await render(
+      <MessageToolPart
+        {...baseProps({
+          name: "read_file",
+          part: part({ type: "tool-read_file", state: "output-available", output: "ok", input: { path: "src/main.rs" } }),
+        })}
+      />,
+    )
+
+    await expect.element(screen.getByText("Read")).toBeInTheDocument()
+    // Substring queries would double-match the expanded JSON body, so assert
+    // on the collapsed trigger line directly.
+    expect(screen.container.textContent).toContain("src/main.rs")
   })
 
   it("derives the tool name from the part type when no name is supplied", async () => {

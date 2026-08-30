@@ -164,6 +164,50 @@ describe("harness turnItemToUiParts / toolItemFields (ex-lossy cases)", () => {
     )?.toMatchObject({ toolName: "fileChange", output: { status: "completed" } })
   })
 
+  it("maps a generic toolCall to a tool-<name> part with its arguments", () => {
+    const parts = turnItemToUiParts({
+      type: "toolCall",
+      id: "t1",
+      tool: "read_file",
+      arguments: { path: "src/main.rs" },
+      status: "completed",
+      result: "fn main() {}",
+      durationMs: 4,
+    })
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({
+      type: "tool-read_file",
+      toolCallId: "t1",
+      toolName: "read_file",
+      input: { path: "src/main.rs" },
+      state: "output-available",
+      output: "fn main() {}",
+    })
+
+    // Failed calls route the payload into errorText and mark output-error.
+    expect(
+      turnItemToUiParts({
+        type: "toolCall",
+        id: "t2",
+        tool: "grep",
+        arguments: { pattern: "todo" },
+        status: "failed",
+        error: "no such file",
+      })[0],
+    ).toMatchObject({ type: "tool-grep", state: "output-error", errorText: "no such file" })
+
+    // Running calls (no result yet) stay input-shaped without failing.
+    expect(
+      toolItemFields({
+        type: "toolCall",
+        id: "t3",
+        tool: "git_status",
+        arguments: {},
+        status: "running",
+      }),
+    ).toMatchObject({ toolName: "git_status", input: {}, failed: false })
+  })
+
   it("maps a plan item to a tool-plan part carrying the full plan", () => {
     const plan = {
       plan_id: "plan-0",

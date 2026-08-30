@@ -84,6 +84,8 @@ vi.mock('@slab/api', async () => {
 vi.mock('@slab/core/workspace/bridge', () => ({
   WORKSPACE_STATE_QUERY_KEY: ['workspace-state'],
   workspaceState: () => Promise.resolve({ config: null, current: null, recent: [] }),
+  workspaceOpen: () => Promise.resolve({ config: null, current: null, recent: [] }),
+  workspaceClose: () => Promise.resolve({ config: null, current: null, recent: [] }),
 }));
 
 describe('settings router integration', () => {

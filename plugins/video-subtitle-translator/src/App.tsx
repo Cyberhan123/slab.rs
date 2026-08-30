@@ -707,6 +707,9 @@ export function App() {
 
   useEffect(() => {
     if (!sdk.host.isAvailable()) {
+      // One-shot host-bridge availability report (external-system sync); the
+      // synchronous log write here is intentional.
+      // oxlint-disable-next-line
       addLog("Slab plugin host bridge is not available in this webview.", "error");
       return undefined;
     }
@@ -741,12 +744,16 @@ export function App() {
     };
   });
 
-  useEffect(() => {
+  // Track the VAD model's local path (React-docs adjust-state pattern instead
+  // of a setState-in-effect).
+  const [prevVadModel, setPrevVadModel] = useState(vadModel);
+  if (prevVadModel !== vadModel) {
+    setPrevVadModel(vadModel);
     const nextPath = localModelPath(selectedValue(vadModel) ?? "");
     if (nextPath) {
       setVadModelPath(nextPath);
     }
-  }, [localModelPath, vadModel]);
+  }
 
   return (
     <main className="plugin-shell">

@@ -1,4 +1,7 @@
 import { create } from "zustand"
+import type { FileUIPart } from "ai"
+
+import type { PermissionMode, ReasoningEffort } from "@slab/core/harness"
 
 type AssistantDraftSource = {
   label: string
@@ -9,6 +12,17 @@ type AssistantDraft = {
   autoSubmit: boolean
   prompt: string
   source?: AssistantDraftSource
+  /**
+   * When set, the draft only auto-sends once the assistant is showing this
+   * session (the new-chat dialog creates the session before stashing the
+   * draft). Absent = send into whatever session is current.
+   */
+  sessionId?: string
+  /** Attachment parts for the first message (data URLs — memory-only store). */
+  files?: FileUIPart[]
+  effort?: ReasoningEffort
+  permissionMode?: PermissionMode
+  agentType?: "plan"
 }
 
 type WorkspaceRevealPayload = {

@@ -1484,14 +1484,14 @@ mod tests {
         )
     }
 
-    // Unknown tool (no handler registered) → default CommandExecution, so every
-    // tool call is visible on the harness timeline.
+    // Unknown tool (no handler registered) → default ToolCall, so every tool
+    // call is visible on the harness timeline — with its arguments.
     #[test]
-    fn render_no_handler_falls_back_to_command_execution() {
+    fn render_no_handler_falls_back_to_tool_call() {
         let item = render_of(
             None,
             "read_file",
-            &serde_json::json!({}),
+            &serde_json::json!({ "path": "src/main.rs" }),
             "completed",
             Some("file contents"),
             None,
@@ -1499,10 +1499,38 @@ mod tests {
             None,
         );
         match item {
-            TurnItem::CommandExecution { command, aggregated_output, status, .. } => {
-                assert_eq!(command, "read_file");
+            TurnItem::ToolCall { tool, arguments, status, result, error, .. } => {
+                assert_eq!(tool, "read_file");
+                assert_eq!(arguments["path"], "src/main.rs");
                 assert_eq!(status, "completed");
-                assert_eq!(aggregated_output.as_deref(), Some("file contents"));
+                assert_eq!(result, Some(serde_json::json!("file contents")));
+                assert!(error.is_none());
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    // A failed default render routes the output text into `error` and leaves
+    // `result` empty, so the UI can mark the row as failed.
+    #[test]
+    fn render_no_handler_failed_call_carries_error() {
+        let item = render_of(
+            None,
+            "grep",
+            &serde_json::json!({ "pattern": "todo" }),
+            "failed",
+            Some("no such file"),
+            None,
+            None,
+            Some(12),
+        );
+        match item {
+            TurnItem::ToolCall { tool, status, result, error, duration_ms, .. } => {
+                assert_eq!(tool, "grep");
+                assert_eq!(status, "failed");
+                assert!(result.is_none());
+                assert_eq!(error, Some(serde_json::json!("no such file")));
+                assert_eq!(duration_ms, Some(12));
             }
             other => panic!("unexpected item: {other:?}"),
         }
@@ -1532,7 +1560,7 @@ mod tests {
     }
 
     #[test]
-    fn render_turn_item_default_is_command_execution() {
+    fn render_turn_item_default_is_tool_call() {
         let tool = DefaultRenderTool;
         let item = render_of(
             Some(&tool),
@@ -1545,11 +1573,12 @@ mod tests {
             None,
         );
         match item {
-            TurnItem::CommandExecution { command, cwd, status, aggregated_output, .. } => {
-                assert_eq!(command, "default_render");
-                assert_eq!(cwd, "");
+            TurnItem::ToolCall { tool, arguments, status, result, error, .. } => {
+                assert_eq!(tool, "default_render");
+                assert_eq!(arguments, serde_json::json!({}));
                 assert_eq!(status, "running");
-                assert!(aggregated_output.is_none());
+                assert!(result.is_none());
+                assert!(error.is_none());
             }
             other => panic!("unexpected item: {other:?}"),
         }

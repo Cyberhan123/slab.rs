@@ -6,16 +6,12 @@ import { MessageInteractionContext } from "../../message-interaction-context"
 import type { ToolPartLike } from "../message-tool-part"
 import MessageToolPlanPart from "../message-tool-plan-part"
 
-// Stub the heavy leaf deps so the real tool-card logic (deriveState/isToolActive)
-// runs without pulling Radix collapsible into jsdom.
+// Stub the heavy leaf deps so the real tool-row logic (deriveState) runs
+// without pulling Radix collapsible into jsdom.
 vi.mock("@slab/components/collapsible", () => ({
   Collapsible: ({ children }: { children: ReactNode }) => <div data-testid="collapsible">{children}</div>,
   CollapsibleContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CollapsibleTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-}))
-
-vi.mock("@slab/components/badge", () => ({
-  Badge: ({ children }: { children: ReactNode }) => <span data-testid="badge">{children}</span>,
 }))
 
 async function renderPart(part: Partial<ToolPartLike>, toolCallId = "call-1") {
@@ -67,18 +63,20 @@ describe("MessageToolPlanPart", () => {
     expect(body).toContain("verify")
   })
 
-  it("shows the Completed badge for a finalized plan", async () => {
+  it("shows the completed status symbol for a finalized plan", async () => {
     const screen = await renderPart({ type: "tool-plan", input: PLAN, state: "output-available" })
-    expect(screen.getByTestId("badge").element().textContent).toContain("Completed")
+    expect(
+      screen.container.querySelector('[data-tool-state="output-available"]'),
+    ).not.toBeNull()
   })
 
-  it("falls back to a 'plan' title when the summary is absent", async () => {
+  it("falls back to a 'plan' detail when the summary is absent", async () => {
     const screen = await renderPart({
       type: "tool-plan",
       input: { ...PLAN, summary: undefined },
       state: "output-available",
     })
-    // The ToolHeader title is the summary or "plan"; the header renders the title text.
+    // The collapsed row shows `Plan: <summary or "plan">`.
     expect(screen.getByTestId("collapsible").element().textContent).toContain("plan")
   })
 })

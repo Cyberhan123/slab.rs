@@ -7,27 +7,19 @@
  */
 
 import { cn } from "@slab/ui/lib/utils"
-import type { MotionProps } from "motion/react"
 import { motion } from "motion/react"
-import type { CSSProperties, ElementType, JSX } from "react"
+import type { CSSProperties, ElementType } from "react"
 import { memo, useMemo } from "react"
 
-type MotionHTMLProps = MotionProps & Record<string, unknown>
+// Motion components are created at module scope — creating them during render
+// would remount the animation on every render (react-compiler lint).
+const MOTION_ELEMENTS = {
+  p: motion.create("p"),
+  span: motion.create("span"),
+  div: motion.create("div"),
+} as const
 
-// Cache motion components at module level to avoid creating during render.
-const motionComponentCache = new Map<
-  keyof JSX.IntrinsicElements,
-  React.ComponentType<MotionHTMLProps>
->()
-
-const getMotionComponent = (element: keyof JSX.IntrinsicElements) => {
-  let component = motionComponentCache.get(element)
-  if (!component) {
-    component = motion.create(element)
-    motionComponentCache.set(element, component)
-  }
-  return component
-}
+type MotionElement = keyof typeof MOTION_ELEMENTS
 
 export interface TextShimmerProps {
   children: string
@@ -39,12 +31,15 @@ export interface TextShimmerProps {
 
 const ShimmerComponent = ({
   children,
-  as: Component = "p",
+  as = "p",
   className,
   duration = 2,
   spread = 2,
 }: TextShimmerProps) => {
-  const MotionComponent = getMotionComponent(Component as keyof JSX.IntrinsicElements)
+  const MotionComponent =
+    (typeof as === "string" && as in MOTION_ELEMENTS
+      ? MOTION_ELEMENTS[as as MotionElement]
+      : MOTION_ELEMENTS.p)
   const dynamicSpread = useMemo(() => (children?.length ?? 0) * spread, [children, spread])
 
   return (

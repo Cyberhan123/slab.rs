@@ -46,8 +46,12 @@ const INITIAL_STATE: ConfirmState = {
 export function useWorkspaceConfirmDialog() {
   const { t } = useTranslation()
   const [state, setState] = useState<ConfirmState>(INITIAL_STATE)
+  // Mirror read at event time (`settle`); synced in an effect rather than
+  // during render (react-compiler refs lint).
   const stateRef = useRef(state)
-  stateRef.current = state
+  useEffect(() => {
+    stateRef.current = state
+  })
 
   const confirm = useCallback((options: ConfirmOptions) => {
     return new Promise<boolean>((resolve) => {

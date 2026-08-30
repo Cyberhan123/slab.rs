@@ -56,10 +56,15 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
     void syncBounds();
   });
 
-  useEffect(() => {
+  // Reset the mount/error state when the plugin identity changes (the
+  // React-docs adjust-state pattern instead of a setState-in-effect).
+  const pluginIdentity = `${isDesktopTauri}:${plugin.id}:${plugin.uiUrl}`;
+  const [prevPluginIdentity, setPrevPluginIdentity] = useState(pluginIdentity);
+  if (pluginIdentity !== prevPluginIdentity) {
+    setPrevPluginIdentity(pluginIdentity);
     setMounted(false);
     setError(null);
-  }, [isDesktopTauri, plugin.id, plugin.uiUrl]);
+  }
 
   useEffect(() => {
     if (!isDesktopTauri) return undefined;

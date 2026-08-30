@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "@slab/i18n"
 import {
@@ -113,11 +113,11 @@ export function WorkspaceCommandPalette({
 
   const fileSearchEntries = useMemo(() => fileSearchResult?.entries ?? [], [fileSearchResult])
 
-  useEffect(() => {
-    if (!open) {
-      setQuery("")
-    }
-  }, [open])
+  // Clear the search when the palette closes (React-docs adjust-state pattern
+  // instead of a setState-in-effect).
+  if (!open && query !== "") {
+    setQuery("")
+  }
 
   if (!open) {
     return null

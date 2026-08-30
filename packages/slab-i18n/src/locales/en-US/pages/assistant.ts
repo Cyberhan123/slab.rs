@@ -37,6 +37,17 @@ export const assistant = {
   hero: {
     description: 'How can I assist your creative workflow today?',
   },
+  newChat: {
+    title: 'New chat',
+    description: 'Choose where this chat runs, then send your first message.',
+    cta: 'New chat with workspace…',
+    workspaceSection: 'Workspace',
+    currentLabel: 'Current workspace',
+    recentLabel: 'Recent',
+    chooseFolder: 'Choose folder…',
+    global: 'Global chat (no workspace)',
+    switchedGlobal: 'Switched to global chat',
+  },
   loading: {
     title: 'Loading this session...',
     description: 'Restoring the saved conversation history before you continue.',

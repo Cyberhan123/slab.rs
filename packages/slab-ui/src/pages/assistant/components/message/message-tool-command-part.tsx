@@ -1,6 +1,8 @@
 "use client"
 
 import { useMessageInteraction } from "../message-interaction-context"
+import { summarizeToolCall } from "../../lib/tool-summaries"
+import { ToolRow, ToolRowContent, ToolRowTrigger, toolRowIcon } from "./message-tool-row"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
 import {
@@ -16,9 +18,6 @@ import {
   isApprovalPending,
   deriveState,
   isToolActive,
-  Tool,
-  ToolContent,
-  ToolHeader,
   type ToolPartLike,
 } from "./message-tool-part"
 
@@ -50,11 +49,12 @@ export function parseCommandExecutionOutput(raw: string): CommandExecutionOutput
 }
 
 /**
- * Renders a `commandExecution` tool call as an interactive terminal (ANSI
- * output + streaming cursor) instead of the JSON parameter/result cards used by
- * generic tools. It reuses the shared tool-card chrome (`Tool`/`ToolHeader`/
- * `ToolContent`) from {@link message-tool-part} and swaps the body for a
- * composed `<Terminal>`:
+ * Renders a `commandExecution` tool call as a compact `Bash: <command>` row
+ * (thinking-style, collapsed by default) whose expanded body is an interactive
+ * terminal (ANSI output + streaming cursor) instead of the JSON cards used by
+ * generic tools:
+ *   - The collapsed trigger shows the one-line command summary; the cwd rides
+ *     along as the row tooltip.
  *   - `TerminalHeader` shows the agent's input (the command), via `TerminalTitle`.
  *   - `TerminalContent` shows only the command output (live while running, the
  *     finalized aggregated output once complete). A finalized
@@ -81,6 +81,7 @@ function MessageToolCommandPart({
   const input = (p.input ?? {}) as { command?: string; cwd?: string }
   const command = input.command?.trim() ?? ""
   const cwd = input.cwd?.trim() ?? ""
+  const summary = summarizeToolCall("commandExecution", input)
   const finalizedRaw = typeof p.output === "string" ? p.output : p.errorText ?? ""
   const parsed = finalizedRaw ? parseCommandExecutionOutput(finalizedRaw) : null
   const finalizedStdout = parsed ? parsed.stdout ?? "" : finalizedRaw
@@ -91,11 +92,17 @@ function MessageToolCommandPart({
   const body = active && liveOutput !== undefined ? liveOutput : finalizedStdout
 
   return (
-    <Tool defaultOpen={isApprovalPending(state)}>
-      <ToolHeader title="commandExecution" state={state} />
-      <ToolContent>
+    <ToolRow defaultOpen={isApprovalPending(state)}>
+      <ToolRowTrigger
+        icon={toolRowIcon("commandExecution")}
+        label={summary.label}
+        detail={command || summary.detail}
+        state={state}
+        title={cwd || undefined}
+      />
+      <ToolRowContent>
         {/* `output` feeds both the TerminalContent body and the copy button, so
-            it carries only the command output — the input lives in the header. */}
+            it carries only the command output — the input lives in the trigger. */}
         <Terminal output={body} isStreaming={active}>
           <TerminalHeader>
             <TerminalTitle title={cwd || undefined}>
@@ -118,8 +125,8 @@ function MessageToolCommandPart({
             {finalizedStderr}
           </pre>
         ) : null}
-      </ToolContent>
-    </Tool>
+      </ToolRowContent>
+    </ToolRow>
   )
 }
 

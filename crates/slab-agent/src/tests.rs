@@ -2979,7 +2979,7 @@ async fn approval_notification_shares_item_id_with_lifecycle_events() {
         .iter()
         .filter_map(|event| match event {
             EventMsg::ItemStarted(p) if p.thread_id == thread_id => match &p.item {
-                TurnItem::CommandExecution { id, .. } => Some(id.clone()),
+                TurnItem::ToolCall { id, .. } => Some(id.clone()),
                 _ => None,
             },
             _ => None,
@@ -3010,7 +3010,7 @@ async fn approval_notification_shares_item_id_with_lifecycle_events() {
         .iter()
         .filter_map(|event| match event {
             EventMsg::ItemCompleted(p) if p.thread_id == thread_id => match &p.item {
-                TurnItem::CommandExecution { id, .. } => Some(id.clone()),
+                TurnItem::ToolCall { id, .. } => Some(id.clone()),
                 _ => None,
             },
             _ => None,

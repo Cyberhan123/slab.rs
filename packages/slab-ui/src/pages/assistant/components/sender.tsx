@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, type SubmitEvent } from "react"
+import { useRef, useState, type ReactNode, type SubmitEvent } from "react"
 import type { FileUIPart } from "ai"
 import {
   InputGroup,
@@ -138,6 +138,11 @@ type SenderProps = {
   planMode: boolean
   /** Toggle plan mode on/off; `/plan` and the plan chip's X use this. */
   onPlanModeChange: (enabled: boolean) => void
+  /**
+   * Extra control rendered in the bottom toolbar next to the permission-mode
+   * toggle — the assistant page passes the live workspace selector here.
+   */
+  workspaceSlot?: ReactNode
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -159,6 +164,7 @@ function Sender({
   commands,
   planMode,
   onPlanModeChange,
+  workspaceSlot,
 }: SenderProps) {
   const { t } = useTranslation()
   const { ports } = useSlab()
@@ -576,6 +582,7 @@ function Sender({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+          {workspaceSlot}
           <div className="ml-auto flex items-center gap-1">
             <InputGroupButton
               aria-label={stopMode ? t("pages.assistant.composer.stopGeneratingResponse") : "Send"}

@@ -11,12 +11,13 @@ import type { ApprovalStatus } from "@slab/core/harness"
 const chatState = vi.hoisted(() => ({
   messages: [] as UIMessage[],
   status: "ready" as string,
+  sendMessage: () => undefined,
 }))
 
 vi.mock("@ai-sdk/react", () => ({
   useChat: () => ({
     messages: chatState.messages,
-    sendMessage: vi.fn(),
+    sendMessage: chatState.sendMessage,
     status: chatState.status,
     stop: vi.fn(),
   }),
@@ -48,9 +49,11 @@ vi.mock("@slab/ui/pages/assistant/components/sender.tsx", () => ({
   default: ({
     approvals,
     loading,
+    workspaceSlot,
   }: {
     approvals: unknown[]
     loading: boolean
+    workspaceSlot?: ReactNode
   }) => (
     <div
       data-testid="sender"
@@ -58,6 +61,7 @@ vi.mock("@slab/ui/pages/assistant/components/sender.tsx", () => ({
       data-loading={loading ? "true" : "false"}
     >
       sender
+      {workspaceSlot ? <div data-testid="sender-workspace-slot">{workspaceSlot}</div> : null}
     </div>
   ),
 }))
@@ -130,12 +134,78 @@ describe("AssistantChatPane", () => {
   beforeEach(() => {
     chatState.messages = []
     chatState.status = "ready"
+    chatState.sendMessage = vi.fn()
   })
 
   it("shows the greeting empty state when there are no messages and not loading", async () => {
     const screen = await render(<AssistantChatPane {...baseProps()} />)
     expect(screen.getByTestId("assistant-empty-state").element().textContent).toContain("Hello-test")
     expect(screen.getByTestId("message-list").query()).toBeNull()
+  })
+
+  it("renders the new-chat CTA on the empty state when the handler is provided", async () => {
+    const onStartNewChat = vi.fn()
+    const screen = await render(<AssistantChatPane {...baseProps({ onStartNewChat })} />)
+    await expect.element(screen.getByTestId("assistant-new-chat-cta")).toBeInTheDocument()
+  })
+
+  it("omits the new-chat CTA when no handler is provided", async () => {
+    const screen = await render(<AssistantChatPane {...baseProps()} />)
+    expect(screen.getByTestId("assistant-new-chat-cta").query()).toBeNull()
+  })
+
+  it("forwards the workspace slot into the Sender toolbar", async () => {
+    const screen = await render(
+      <AssistantChatPane
+        {...baseProps({
+          workspaceSlot: <div data-testid="live-workspace-selector" />,
+        })}
+      />,
+    )
+    await expect.element(screen.getByTestId("sender-workspace-slot")).toBeInTheDocument()
+    expect(screen.getByTestId("live-workspace-selector").query()).not.toBeNull()
+  })
+
+  it("auto-sends a staged draft exactly once once the controller is ready", async () => {
+    const onBeforeSubmit = vi.fn()
+    const onAutoSendConsumed = vi.fn()
+    const autoSend = {
+      text: "kick off the build",
+      files: [],
+      metadata: { effort: "high", permissionMode: "default", agentType: undefined },
+    }
+    await render(
+      <AssistantChatPane {...baseProps({ onBeforeSubmit, onAutoSendConsumed, autoSend })} />,
+    )
+    // Consumed BEFORE sending (claim-then-send), then through the manual path.
+    expect(onAutoSendConsumed).toHaveBeenCalledTimes(1)
+    expect(onBeforeSubmit).toHaveBeenCalledWith("kick off the build")
+    expect(chatState.sendMessage).toHaveBeenCalledWith({
+      text: "kick off the build",
+      files: [],
+      metadata: autoSend.metadata,
+    })
+  })
+
+  it("does not auto-send while the session is loading or busy", async () => {
+    const onAutoSendConsumed = vi.fn()
+    const autoSend = { text: "hold", files: [], metadata: {} }
+    await render(
+      <AssistantChatPane
+        {...baseProps({ isHistoryLoading: true, onAutoSendConsumed, autoSend })}
+      />,
+    )
+    expect(onAutoSendConsumed).not.toHaveBeenCalled()
+    expect(chatState.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it("does not auto-send a busy (streaming) pane", async () => {
+    chatState.status = "streaming"
+    const onAutoSendConsumed = vi.fn()
+    const autoSend = { text: "hold", files: [], metadata: {} }
+    await render(<AssistantChatPane {...baseProps({ onAutoSendConsumed, autoSend })} />)
+    expect(onAutoSendConsumed).not.toHaveBeenCalled()
+    expect(chatState.sendMessage).not.toHaveBeenCalled()
   })
 
   it("renders the message list (session-load marker) while history is loading with no messages", async () => {

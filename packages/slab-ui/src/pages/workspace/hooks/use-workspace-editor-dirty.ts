@@ -20,9 +20,15 @@ export function useWorkspaceEditorDirty({
 }: UseWorkspaceEditorDirtyOptions) {
   const [monacoDirty, setMonacoDirty] = useState(false)
 
+  // Reset the dirty flag while there is no workspace / no active file so a
+  // stale signal cannot leak into the next file's guard (React-docs
+  // adjust-state pattern instead of setState-in-effects).
+  if ((!workspaceRoot || !selectedFile) && monacoDirty) {
+    setMonacoDirty(false)
+  }
+
   useEffect(() => {
     if (!workspaceRoot) {
-      setMonacoDirty(false)
       return
     }
 
@@ -53,14 +59,6 @@ export function useWorkspaceEditorDirty({
       disposable?.dispose()
     }
   }, [workspaceRoot])
-
-  // Reset Monaco dirty when there is no active file so a stale signal cannot leak
-  // into the next file's guard.
-  useEffect(() => {
-    if (!selectedFile) {
-      setMonacoDirty(false)
-    }
-  }, [selectedFile])
 
   return monacoDirty
 }

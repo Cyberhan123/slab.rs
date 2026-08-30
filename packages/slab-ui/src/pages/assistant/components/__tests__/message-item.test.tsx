@@ -83,10 +83,8 @@ vi.mock("../message/message-tool-part", () => ({
   // Real consumers (e.g. message-tool-file-change-part, message-tool-plan-part)
   // import these named exports; browser native ESM throws if a mock omits a
   // consumed named export, so expose stubs alongside the default.
-  Tool: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  ToolHeader: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  ToolContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   deriveState: () => "output-available",
+  isApprovalPending: () => false,
   isToolActive: () => false,
 }))
 vi.mock("../message/message-tool-command-part", () => ({

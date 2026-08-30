@@ -645,9 +645,11 @@ async function readWorkspaceLspSessionDebug(page: Page): Promise<unknown> {
 
 async function runWorkspaceVscodeCommand(page: Page, commandId: string) {
   await page.evaluate(async (nextCommandId) => {
-    const workspaceEditor = await (0, eval)(
-      'import("/src/pages/workspace/lib/workspace-editor.ts")',
-    ) as typeof import("@slab/ui/pages/workspace/lib/workspace-editor")
+    // `new Function` (rather than a direct dynamic import) keeps the bundler
+    // from rewriting the browser-context specifier below.
+    const workspaceEditor = (await new Function(
+      'return import("/src/pages/workspace/lib/workspace-editor.ts")',
+    )()) as typeof import("@slab/ui/pages/workspace/lib/workspace-editor")
     const lspState = (window as typeof window & {
       __SLAB_WORKSPACE_LSP_SESSION__?: { workspaceRoot?: string }
     })["__SLAB_WORKSPACE_LSP_SESSION__"]

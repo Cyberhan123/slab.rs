@@ -1,5 +1,5 @@
 import { Loader2, LockKeyhole, RotateCw, Save, Settings2, TriangleAlert } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { translateServerField, useTranslation } from '@slab/i18n';
 import { getErrorMessage } from '@slab/api';
@@ -98,34 +98,37 @@ export function HubModelEnhancementSheet({
   const loadError = error ? getErrorMessage(error) : null;
   const isSaving = updateModelConfigSelectionMutation.isPending;
 
-  useEffect(() => {
-    if (!open || !model || !data) {
-      return;
-    }
-
-    setSelectedPresetId(
-      data.selection.effective_preset_id ??
-        data.selection.selected_preset_id ??
-        data.selection.default_preset_id ??
-        '',
-    );
-    setSelectedVariantId(
-      data.selection.effective_variant_id ??
-        data.selection.selected_variant_id ??
-        data.selection.default_variant_id ??
-        '',
-    );
-  }, [data, model, open]);
-
-  useEffect(() => {
-    if (!open || !model) {
+  // Draft-state resets derived during render (the React-docs adjust-state
+  // pattern) instead of setState-in-effects: initialize the selections from
+  // freshly loaded data while the sheet is open, and clear every draft when
+  // it closes.
+  const sheetActive = Boolean(open && model);
+  const [prevSheetActive, setPrevSheetActive] = useState(sheetActive);
+  const [prevData, setPrevData] = useState(data);
+  if (sheetActive !== prevSheetActive || data !== prevData) {
+    setPrevSheetActive(sheetActive);
+    setPrevData(data);
+    if (!sheetActive) {
       setSelectedPresetId('');
       setSelectedVariantId('');
       setLoadOverrides({});
       setInferenceOverrides({});
       setReloadConfirmOpen(false);
+    } else if (data) {
+      setSelectedPresetId(
+        data.selection.effective_preset_id ??
+          data.selection.selected_preset_id ??
+          data.selection.default_preset_id ??
+          '',
+      );
+      setSelectedVariantId(
+        data.selection.effective_variant_id ??
+          data.selection.selected_variant_id ??
+          data.selection.default_variant_id ??
+          '',
+      );
     }
-  }, [model, open]);
+  }
 
   const dirtyLoadScope = useMemo(
     () =>

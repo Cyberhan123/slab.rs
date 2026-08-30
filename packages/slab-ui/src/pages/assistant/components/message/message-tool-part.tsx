@@ -1,29 +1,16 @@
 "use client"
 
-import { Badge } from "@slab/components/badge"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@slab/components/collapsible"
 import { cn } from "@slab/ui/lib/utils"
-import {
-  CheckCircleIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CircleIcon,
-  ClockIcon,
-  WrenchIcon,
-  XCircleIcon,
-} from "lucide-react"
 import { isValidElement, type ComponentProps, type ReactNode } from "react"
 
 import { CodeBlock } from "./code-block"
 import { useMessageInteraction, type ApprovalStatus } from "../message-interaction-context"
+import { summarizeToolCall } from "../../lib/tool-summaries"
+import { ToolRow, ToolRowContent, ToolRowTrigger, toolRowIcon } from "./message-tool-row"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
 
-/** Display states for a tool card (mirrors the AI-SDK + approval vocabulary). */
+/** Display states for a tool row (mirrors the AI-SDK + approval vocabulary). */
 export type ToolState =
   | "approval-requested"
   | "approval-responded"
@@ -32,33 +19,6 @@ export type ToolState =
   | "output-available"
   | "output-denied"
   | "output-error"
-
-const statusLabels: Record<ToolState, string> = {
-  "approval-requested": "Awaiting Approval",
-  "approval-responded": "Responded",
-  "input-available": "Running",
-  "input-streaming": "Pending",
-  "output-available": "Completed",
-  "output-denied": "Denied",
-  "output-error": "Error",
-}
-
-const statusIcons: Record<ToolState, ReactNode> = {
-  "approval-requested": <ClockIcon className="size-4 text-yellow-600" />,
-  "approval-responded": <CheckCircleIcon className="size-4 text-blue-600" />,
-  "input-available": <ClockIcon className="size-4 animate-pulse" />,
-  "input-streaming": <CircleIcon className="size-4" />,
-  "output-available": <CheckCircleIcon className="size-4 text-green-600" />,
-  "output-denied": <XCircleIcon className="size-4 text-orange-600" />,
-  "output-error": <XCircleIcon className="size-4 text-red-600" />,
-}
-
-const getStatusBadge = (state: ToolState) => (
-  <Badge className="gap-1.5 rounded-full text-xs" variant="secondary">
-    {statusIcons[state]}
-    {statusLabels[state]}
-  </Badge>
-)
 
 export type ToolPartLike = TMessagePart & {
   toolName?: string
@@ -85,52 +45,16 @@ export function deriveState(part: ToolPartLike, approval: ApprovalStatus | undef
   return "input-available"
 }
 
-export const Tool = ({ className, ...props }: ComponentProps<typeof Collapsible>) => (
-  <Collapsible className={cn("group not-prose mb-2 w-full rounded-md border", className)} {...props} />
-)
-
-export const ToolHeader = ({
-  className,
-  title,
-  state,
-  ...props
-}: ComponentProps<typeof CollapsibleTrigger> & { title?: string; state: ToolState }) => (
-  <CollapsibleTrigger
-    className={cn("flex w-full items-center justify-between gap-4 p-3", className)}
-    {...props}
-  >
-    <div className="flex min-w-0 items-center gap-2">
-      <WrenchIcon className="size-4 shrink-0 text-muted-foreground" />
-      <span className="truncate font-medium text-sm">{title}</span>
-      {getStatusBadge(state)}
-    </div>
-    <span className="flex shrink-0 items-center text-muted-foreground">
-      <ChevronRightIcon className="size-4 group-data-[state=closed]:block group-data-[state=open]:hidden" />
-      <ChevronDownIcon className="size-4 group-data-[state=closed]:hidden group-data-[state=open]:block" />
-    </span>
-  </CollapsibleTrigger>
-)
-
-export const ToolContent = ({ className, ...props }: ComponentProps<typeof CollapsibleContent>) => (
-  <CollapsibleContent
-    className={cn(
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 space-y-4 p-4 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
-      className,
-    )}
-    {...props}
-  />
-)
-
 /** Max characters shown for a tool parameter/result before truncating with an ellipsis. */
 const TOOL_PREVIEW_LIMIT = 240
 
 /**
  * Compact, length-capped preview of a tool parameter/result value. Strings are
  * returned as-is; objects/arrays are serialized to a single-line JSON (no
- * indentation) so the card never shows a wall of pretty-printed JSON. Values
- * longer than {@link TOOL_PREVIEW_LIMIT} are truncated with "…".
+ * indentation) so the expanded row never shows a wall of pretty-printed JSON.
+ * Values longer than {@link TOOL_PREVIEW_LIMIT} are truncated with "…".
  */
-function compactToolValue(value: unknown): string {
+export function compactToolValue(value: unknown): string {
   if (value === undefined || value === null) return ""
   let compact: string
   if (typeof value === "string") {
@@ -198,7 +122,7 @@ const ToolOutput = ({
   )
 }
 
-/** Whether a tool card should be expanded by default (still running / awaiting a decision). */
+/** Whether a tool row is still in flight (running / awaiting a decision). */
 export function isToolActive(state: ToolState): boolean {
   return (
     state === "input-available" ||
@@ -208,8 +132,8 @@ export function isToolActive(state: ToolState): boolean {
 }
 
 /**
- * Whether a tool card must start expanded because it awaits an interactive
- * decision — the only default-open case. Cards that merely run stay collapsed
+ * Whether a tool row must start expanded because it awaits an interactive
+ * decision — the only default-open case. Rows that merely run stay collapsed
  * (during generation and after); the user expands them via the trigger.
  */
 export function isApprovalPending(state: ToolState): boolean {
@@ -235,14 +159,22 @@ function MessageToolPart({
     : partType
   const derivedName = (name ?? p.toolName ?? fromType) || "tool"
 
+  const summary = summarizeToolCall(derivedName, p.input)
+
   return (
-    <Tool defaultOpen={isApprovalPending(state)}>
-      <ToolHeader title={derivedName} state={state} />
-      <ToolContent>
+    <ToolRow defaultOpen={isApprovalPending(state)}>
+      <ToolRowTrigger
+        icon={toolRowIcon(derivedName)}
+        label={summary.label}
+        detail={summary.detail}
+        state={state}
+        title={p.errorText}
+      />
+      <ToolRowContent>
         <ToolInput input={p.input} />
         <ToolOutput output={p.output} errorText={p.errorText} />
-      </ToolContent>
-    </Tool>
+      </ToolRowContent>
+    </ToolRow>
   )
 }
 
