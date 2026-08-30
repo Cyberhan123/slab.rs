@@ -15,9 +15,13 @@ use ts_rs::TS;
 #[ts(export)]
 pub enum PlanStatus {
     #[default]
+    #[serde(alias = "Pending")]
     Pending,
+    #[serde(alias = "InProgress")]
     InProgress,
+    #[serde(alias = "Completed")]
     Completed,
+    #[serde(alias = "Blocked")]
     Blocked,
 }
 

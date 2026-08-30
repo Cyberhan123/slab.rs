@@ -12,10 +12,16 @@ use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 use slab_file::watcher::{FileWatcher, WatchPath};
 
+/// Upper bound on the blocking wait. The model controls `timeout_ms`; without
+/// a cap a single 60s watch serialized its whole tool batch (the tool used to
+/// be concurrency-unsafe, so it ran ALONE in a serial batch).
+const FS_WATCH_MAX_TIMEOUT_MS: u64 = 30_000;
+
 /// Watch a path for file-system changes and return the list of changed paths.
 ///
 /// The tool subscribes to the watcher, waits up to `timeout_ms` milliseconds
-/// for the first batch of events, then returns.
+/// (capped at [`FS_WATCH_MAX_TIMEOUT_MS`]) for the first batch of events,
+/// then returns.
 ///
 /// # JSON schema
 ///
@@ -23,7 +29,7 @@ use slab_file::watcher::{FileWatcher, WatchPath};
 /// {
 ///   "path": "/absolute/or/relative/path",
 ///   "recursive": true,         // default true
-///   "timeout_ms": 2000         // default 2000
+///   "timeout_ms": 2000         // default 2000, max 30000
 /// }
 /// ```
 pub struct FsWatchTool {
@@ -50,9 +56,19 @@ impl ToolHandler for FsWatchTool {
     }
 
     fn description(&self) -> &str {
-        "Watch a file-system path for changes.  Returns the list of changed \
-         paths after the first change event arrives, or an empty list if the \
-         timeout is reached."
+        "Watch a file-system path for changes. BLOCKS until the first change \
+         event arrives or timeout_ms elapses (capped at 30s), then returns the \
+         list of changed paths (empty + timed_out=true when no event landed). \
+         The path resolves against the active workspace when relative. Use \
+         this for short waits on a specific file/dir, not as a long-running \
+         monitor."
+    }
+
+    /// Pure observation — safe to run concurrently with other read-only calls
+    /// (and NOT serialized behind write tools, which used to stall a whole
+    /// tool batch for the full watch timeout).
+    fn is_concurrency_safe(&self, _arguments: &Value) -> bool {
+        true
     }
 
     fn parameters_schema(&self) -> Value {
@@ -61,7 +77,7 @@ impl ToolHandler for FsWatchTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to watch."
+                    "description": "Path to watch (workspace-relative paths resolve against the workspace root)."
                 },
                 "recursive": {
                     "type": "boolean",
@@ -70,8 +86,9 @@ impl ToolHandler for FsWatchTool {
                 },
                 "timeout_ms": {
                     "type": "integer",
-                    "description": "How long to wait for an event (milliseconds).",
-                    "default": 2000
+                    "description": "How long to wait for an event (milliseconds); clamped to at most 30000.",
+                    "default": 2000,
+                    "maximum": 30000
                 }
             },
             "required": ["path"]
@@ -80,7 +97,7 @@ impl ToolHandler for FsWatchTool {
 
     async fn execute(
         &self,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
         let path_str = arguments
@@ -89,9 +106,19 @@ impl ToolHandler for FsWatchTool {
             .ok_or_else(|| AgentError::ToolExecution("missing 'path' argument".into()))?;
 
         let recursive = arguments.get("recursive").and_then(Value::as_bool).unwrap_or(true);
-        let timeout_ms = arguments.get("timeout_ms").and_then(Value::as_u64).unwrap_or(2000);
+        let timeout_ms = arguments
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(2000)
+            .min(FS_WATCH_MAX_TIMEOUT_MS);
 
-        let watch_path = WatchPath { path: PathBuf::from(path_str), recursive };
+        // Resolve against the active workspace so a relative path does not
+        // silently land in the server process's CWD.
+        let path = match ctx.workspace.as_ref() {
+            Some(workspace) => workspace.root.join(path_str),
+            None => PathBuf::from(path_str),
+        };
+        let watch_path = WatchPath { path, recursive };
 
         let (subscriber, mut rx) = self.watcher.add_subscriber();
         subscriber.register_paths(vec![watch_path]);

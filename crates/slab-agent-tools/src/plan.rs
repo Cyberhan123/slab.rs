@@ -73,7 +73,22 @@ where
         Value::String(raw) => serde_json::from_str::<Vec<PlanItemInput>>(&raw).map_err(|error| {
             D::Error::custom(format!("items string is not a JSON array: {error}"))
         }),
-        other => serde_json::from_value::<Vec<PlanItemInput>>(other).map_err(D::Error::custom),
+        // Parse element-wise so a bad item reports its POSITION: a bare
+        // "missing field `status`" (serde names the first missing declared
+        // field) gave no hint of WHICH item failed and read as nonsense when
+        // the real problem was a typo three items down.
+        other => {
+            let raw_items = serde_json::from_value::<Vec<Value>>(other).map_err(|error| {
+                D::Error::custom(format!("items must be a JSON array of plan items: {error}"))
+            })?;
+            let mut items = Vec::with_capacity(raw_items.len());
+            for (index, raw_item) in raw_items.into_iter().enumerate() {
+                items.push(serde_json::from_value::<PlanItemInput>(raw_item).map_err(|error| {
+                    D::Error::custom(format!("items[{index}] is not a valid plan item: {error}"))
+                })?);
+            }
+            Ok(items)
+        }
     }
 }
 
@@ -380,6 +395,29 @@ mod tests {
 
     fn noop_ctx() -> ToolContext {
         ToolContext::for_thread("thread").build()
+    }
+
+    #[test]
+    fn plan_items_error_reports_the_failing_index() {
+        let error = serde_json::from_value::<PlanArgs>(json!({
+            "items": [
+                { "step": "ok", "status": "completed", "result_ref": "", "depends_on": [] },
+                { "step": "bad" }
+            ]
+        }))
+        .expect_err("second item is missing its status");
+        // The bare "missing field `status`" gave no hint of WHICH item failed;
+        // the position must be in the message.
+        assert!(error.to_string().contains("items[1]"), "{}", error);
+    }
+
+    #[test]
+    fn plan_status_accepts_pascal_case_aliases() {
+        let args: PlanArgs = serde_json::from_value(json!({
+            "items": [{ "step": "s", "status": "Completed" }]
+        }))
+        .expect("PascalCase status accepted");
+        assert_eq!(args.items[0].status, PlanStatus::Completed);
     }
 
     fn sample_args() -> Value {

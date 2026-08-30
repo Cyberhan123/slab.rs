@@ -28,6 +28,7 @@ import {
 } from "lucide-react"
 import { memo, useState, type ComponentProps, type ReactNode } from "react"
 
+import { Shimmer } from "./shimmer"
 import type { ToolState } from "./message-tool-part"
 
 /**
@@ -116,6 +117,13 @@ type ToolRowTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
 
 export const ToolRowTrigger = memo(
   ({ className, icon, label, detail, state, title, ...props }: ToolRowTriggerProps) => {
+    // "Thinking"-style shimmer while the call is in flight (running or
+    // awaiting a decision) — the same live indicator the reasoning trigger
+    // uses, so an executing tool never reads as a frozen row.
+    const active =
+      state === "input-available" ||
+      state === "input-streaming" ||
+      state === "approval-requested"
     return (
       <CollapsibleTrigger
         className={cn(
@@ -128,8 +136,14 @@ export const ToolRowTrigger = memo(
         {icon ?? <WrenchIcon className="size-4 shrink-0" />}
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 font-medium">
-            {label}
-            {detail ? ":" : ""}
+            {active ? (
+              <Shimmer as="span">{detail ? `${label}:` : label}</Shimmer>
+            ) : (
+              <>
+                {label}
+                {detail ? ":" : ""}
+              </>
+            )}
           </span>
           {detail ? (
             <span className="truncate font-mono text-xs leading-5">{detail}</span>
