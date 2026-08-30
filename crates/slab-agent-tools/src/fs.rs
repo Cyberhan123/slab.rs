@@ -48,10 +48,14 @@ impl ToolHandler for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "Read a file, optionally restricted to a 1-based inclusive line range. \
-         Returns at most 1000 lines and 48KB of content (head+tail kept, \
-         middle omitted with a marker) — narrow with start_line/end_line when \
-         the file is larger."
+        "Read a UTF-8 text file byte-faithfully (line endings and trailing \
+         newline preserved), optionally restricted to a 1-based inclusive line \
+         range. Returns at most 1000 lines per call (head kept, an omission \
+         marker inserted when more lines remain — page with \
+         start_line/end_line); content is additionally bounded to 48KB \
+         (head+tail kept, middle omitted with a marker) and the full selected \
+         range is spilled to an artifact. start_line past the end of the file \
+         is an error, not an empty result."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -83,19 +87,46 @@ impl ToolHandler for ReadFileTool {
         let start_line = arguments.get("start_line").and_then(Value::as_u64).unwrap_or(1) as usize;
         let end_line = arguments.get("end_line").and_then(Value::as_u64).map(|v| v as usize);
         let path = resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
-        let raw = tokio::fs::read_to_string(&path)
+        // Read raw BYTES: content must be byte-faithful. Normalizing through
+        // `read_to_string` + `lines()` used to strip every `\r` (a CRLF file
+        // re-read short) and report the NORMALIZED length as `total_bytes`
+        // instead of the on-disk size. `split_inclusive('\n')` keeps each
+        // line's terminator (and the `\r` before it) verbatim, including a
+        // trailing newline.
+        let bytes = tokio::fs::read(&path)
             .await
             .map_err(|error| crate::error::io_tool_error("read file", &path, &error))?;
+        let total_bytes = bytes.len();
+        let raw = String::from_utf8_lossy(&bytes);
+        let lines: Vec<&str> = raw.split_inclusive('\n').collect();
+        let total = lines.len();
 
         let start_idx = start_line.saturating_sub(1);
-        let lines: Vec<&str> = raw.lines().collect();
-        let total = lines.len();
+        if start_idx >= total {
+            // Paging past EOF is a client error, not an empty result: the old
+            // silent-empty behavior read as "file is empty" and misdirected
+            // the model.
+            return Err(AgentError::ToolExecution(format!(
+                "read_file: start_line {start_line} is past the end of the file ({total} lines); \
+                 request an existing line range"
+            )));
+        }
+
         let requested_end = end_line.map(|end| end.min(total)).unwrap_or(total);
         let capped_end = requested_end.min(start_idx + MAX_LINES);
-        let selected = lines.get(start_idx..capped_end).unwrap_or(&[]).to_vec();
+        let line_cap_truncated = capped_end < requested_end;
+        let selected = lines.get(start_idx..capped_end).unwrap_or(&[]);
 
-        let joined = selected.join("\n");
-        let total_bytes = joined.len();
+        let selected_content = selected.concat();
+        let mut joined = selected_content.clone();
+        if line_cap_truncated {
+            // Match the byte-cap contract: an explicit omission signal with a
+            // narrowing hint, never a silent head-only cut.
+            joined.push_str(&format!(
+                "\n[... {} of {total} lines omitted — narrow the range with start_line/end_line ...]\n",
+                total - capped_end
+            ));
+        }
         let (bounded, omitted_bytes) =
             truncate_middle_bytes(&joined, MAX_CONTENT_BYTES, CONTENT_HEAD_RATIO);
 
@@ -110,7 +141,7 @@ impl ToolHandler for ReadFileTool {
                 ctx.workspace.as_ref().map(|workspace| workspace.root.as_path()),
                 &ctx.thread_id,
                 &format!("read-{nonce}-t{}.txt", ctx.turn_index),
-                joined.as_bytes(),
+                selected_content.as_bytes(),
             )
             .await
         } else {
@@ -123,7 +154,7 @@ impl ToolHandler for ReadFileTool {
             "returned_lines": selected.len(),
             "total_bytes": total_bytes,
             "omitted_bytes": omitted_bytes,
-            "truncated": capped_end < requested_end || omitted_bytes > 0
+            "truncated": line_cap_truncated || omitted_bytes > 0
         });
         if let Some(reference) = full_content_artifact {
             envelope["full_content_artifact"] = serde_json::json!(reference);
@@ -358,18 +389,59 @@ mod tests {
             .await
             .expect("read file");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
-        assert_eq!(value["content"], "two\nthree");
+        // Byte-faithful: the selected lines keep their terminators, including
+        // the file's trailing newline.
+        assert_eq!(value["content"], "two\nthree\n");
         assert_eq!(value["total_lines"], 3);
         assert_eq!(value["returned_lines"], 2);
         assert_eq!(value["truncated"], false);
 
-        let output = tool
+        // Out-of-range start is a client error, not a silent empty read (the
+        // old empty-string behavior read as "file is empty").
+        let error = tool
             .execute(&ctx(), &json!({"path": "notes.txt", "start_line": 2_000}))
             .await
-            .expect("out of range read");
+            .expect_err("out of range read");
+        assert!(error.to_string().contains("past the end of the file"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Byte fidelity: CRLF line endings and the trailing newline survive a
+    /// round trip; `total_bytes` reports the on-disk size, not the normalized
+    /// length.
+    #[tokio::test]
+    async fn read_file_preserves_crlf_and_trailing_newline() {
+        let root = temp_root("read_crlf");
+        fs::write(root.join("crlf.txt"), b"AB\r\nCD\n").expect("seed file");
+        let tool = ReadFileTool::new(Some(root.clone()));
+
+        let output = tool.execute(&ctx(), &json!({"path": "crlf.txt"})).await.expect("read file");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
-        assert_eq!(value["content"], "");
-        assert_eq!(value["returned_lines"], 0);
+        assert_eq!(value["content"], "AB\r\nCD\n");
+        assert_eq!(value["total_bytes"], 7);
+        assert_eq!(value["total_lines"], 2);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// The 1000-line cap leaves an explicit omission marker with a narrowing
+    /// hint instead of a silent head-only cut.
+    #[tokio::test]
+    async fn read_file_line_cap_inserts_omission_marker() {
+        let root = temp_root("read_linecap");
+        let content = (1..=1_500).map(|idx| format!("l{idx:04}")).collect::<Vec<_>>().join("\n");
+        fs::write(root.join("long.txt"), &content).expect("seed file");
+        let tool = ReadFileTool::new(Some(root.clone()));
+
+        let output = tool.execute(&ctx(), &json!({"path": "long.txt"})).await.expect("read file");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        let returned = value["content"].as_str().expect("content");
+        assert_eq!(value["returned_lines"], 1000);
+        assert_eq!(value["truncated"], true);
+        assert!(returned.contains("lines omitted"), "marker missing: {returned}");
+        assert!(returned.contains("l1000\n"), "head must reach the cap");
+        assert!(!returned.contains("\nl1001\n"), "lines past the cap must be omitted");
 
         let _ = fs::remove_dir_all(root);
     }
