@@ -10,7 +10,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run dev:desktop",
-    "check:frontend": "bun run lint && bun run check:design-system && bun run --cwd packages/api build && bun run --cwd packages/slab-plugin-sdk build && bun run --cwd packages/slab-plugin-cli build && bun run --cwd packages/slab-plugin-ui build && bun run --cwd packages/slab-core build && bun run --cwd packages/slab-ui build && bun run --cwd packages/slab-desktop build",
+    "check:frontend": "bun run lint && bun run check:design-system && bun run --cwd packages/api build && bun run --cwd packages/slab-plugin-sdk build && bun run --cwd packages/slab-plugin-cli build && bun run --cwd packages/slab-plugin-ui build && bun run --cwd packages/slab-core build && bun run --cwd packages/slab-ui build && bun run --cwd packages/slab-desktop build && bun run --cwd packages/slab-web build",
     "check:bundle-budget": "bun ./scripts/build/check-desktop-bundle-budget.ts",
     "check:rust": "bun ./scripts/cargo/validate.ts check",
     "check:doc": "bun ./scripts/cargo/validate.ts doc",

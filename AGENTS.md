@@ -24,6 +24,7 @@ Use this as the repo-wide AI reference for architecture boundaries, workflow, an
 - The desktop host starts `slab-server`; product API traffic stays on HTTP; Tauri commands stay host-only.
 - Extend the existing `/v1/*` API surface instead of adding a parallel API tree.
 - `flutter/slab-mobile` (Flutter) is a pure network client over the existing `/v1` + harness WS surface; mobile work must not add a parallel API tree. Design tokens flow one-way from `packages/slab-components/src/styles/globals.css` via `bun run gen:mobile`; never hand-edit generated mobile files (`slab_tokens.g.dart`, `design/tokens.json`, `assets/theme/tdesign-theme.json`, `lib/core/l10n/arb/*`, `lib/core/l10n/catalog_entries.g.dart`).
+- Desktop and web frontends share one core/ui/shell DDD layout: feature pages/components/layouts live in `packages/slab-ui`; cross-shell logic, ports/seams, and the harness client live in `packages/slab-core`; `packages/slab-desktop` (Tauri) and `packages/slab-web` (browser) stay thin shells; fullstack e2e suites live under `packages/slab-desktop/tests/e2e`.
 - Backend API shape changes require `bun run gen:api` to refresh `packages/api/src/v1.d.ts`.
 - Prefer `crates/slab-types` and `crates/slab-proto` for contracts that cross crate boundaries.
 - Keep `crates/slab-app-core` HTTP-free. Keep `bin/slab-runtime` as the runtime composition root. Keep `crates/slab-runtime-core` limited to scheduler and backend protocol concerns.
@@ -41,7 +42,7 @@ Use this as the repo-wide AI reference for architecture boundaries, workflow, an
 - JS plugin runtime calls follow JSON-RPC 2.0 conventions.
 - Frontend-only plugins are UI-focused and non-callable; complex plugin logic belongs in JS runtime, Python runtime, or WASM backends.
 - Plugin WebView commands must derive the caller plugin id from the WebView label, not plugin-supplied payload fields.
-- Workspace LSP traffic stays behind `packages/slab-desktop -> bin/slab-server /v1/workspace/lsp/* -> crates/slab-app-core`.
+- Workspace LSP traffic stays behind `packages/slab-ui -> bin/slab-server /v1/workspace/lsp/* -> crates/slab-app-core`.
 - `crates/slab-app-core` owns LSP provider resolution and process spawning. The desktop host must not add a second LSP bridge.
 - `plugins/web-language-servers` is a build-only package that emits `resources/libs/language-servers/web/*.mjs`; it is not a user-installable plugin.
 - Native workspace LSP providers resolve tools such as `rust-analyzer`, `gopls`, and `pyright-langserver` from existing search paths or `PATH`; do not bundle those binaries unless the task explicitly changes this.
@@ -124,6 +125,6 @@ Start with the nearest local README for the code you are changing.
 - Linux OS-enforced sandbox (seccomp + landlock + bwrap beneath `slab-sandboxing`): `crates/slab-linux-sandbox/README.md`
 - Elevated Windows sandbox helper binary: `bin/slab-sandbox-helper/README.md`
 - Plugin model and packaging: `plugins/README.md`, `crates/slab-plugin/README.md`, `packages/slab-plugin-sdk/README.md`, `packages/slab-plugin-cli/README.md`, `packages/slab-plugin-ui/README.md`
-- Desktop frontend and UI packages: `packages/slab-desktop/README.md`, `packages/slab-components/README.md`, `packages/slab-i18n/README.md`
+- Frontend packages (core/ui/shell DDD split): `packages/slab-core/README.md`, `packages/slab-ui/README.md`, `packages/slab-web/README.md`, `packages/slab-desktop/README.md`, `packages/slab-components/README.md`, `packages/slab-i18n/README.md`
 - Mobile Flutter client (thin network client): `flutter/slab-mobile/README.md`
 - Shared contracts and generated clients: `crates/slab-types/README.md`, `crates/slab-proto/README.md`, `packages/api/README.md`
