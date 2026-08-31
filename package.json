@@ -205,7 +205,7 @@
     "jsdom": "^30.0.1",
     "jszip": "~3.10.1",
     "katex": "^0.18.4",
-    "lint-staged": "^17.3.0",
+    "lint-staged": "^17.4.1",
     "lucide-react": "^1.33.0",
     "markdown-it": "^15.0.0",
     "markdown-it-emoji": "^3.1.0",
