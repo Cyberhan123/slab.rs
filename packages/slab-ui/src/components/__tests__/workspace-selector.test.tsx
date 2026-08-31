@@ -17,7 +17,7 @@ const storeState = vi.hoisted(() => ({
 vi.mock("@slab/ui/provider/slab-provider", () => ({
     useSlab: () => ({
         ports: {
-            platformInfo: { desktop: platform.desktop, mobile: false },
+            platformInfo: { desktop: platform.desktop, mobile: false, os: "unknown" },
             fileDialog: { pickFolder: platform.pickFolder },
         },
     }),

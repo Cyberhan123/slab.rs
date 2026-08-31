@@ -120,7 +120,7 @@ describe('SetupPage browser visual regression', () => {
     );
 
     await renderDesktopScene(<SetupPage />, {
-      portsOverrides: { platformInfo: { desktop: true, mobile: false } },
+      portsOverrides: { platformInfo: { desktop: true, mobile: false, os: "windows" } },
     });
 
     await expect.element(page.getByTestId('setup-sidebar')).toBeVisible();
@@ -140,7 +140,7 @@ describe('SetupPage browser visual regression', () => {
     mockUseSetup.mockReturnValue(createViewModel());
 
     await renderDesktopScene(<SetupPage />, {
-      portsOverrides: { platformInfo: { desktop: true, mobile: false } },
+      portsOverrides: { platformInfo: { desktop: true, mobile: false, os: "windows" } },
     });
 
     await expect.element(

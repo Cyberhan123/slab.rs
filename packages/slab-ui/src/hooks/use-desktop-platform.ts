@@ -1,34 +1,14 @@
 import { useMemo } from "react"
 
-export type DesktopPlatform = "macos" | "windows" | "linux" | "unknown"
+import { detectPlatformOs, type SlabPlatformOs } from "@slab/core/platform/detect"
 
-function detectDesktopPlatform(): DesktopPlatform {
-  if (typeof navigator === "undefined") {
-    return "unknown"
-  }
+export type DesktopPlatform = SlabPlatformOs
 
-  const platform = navigator.platform.toLowerCase()
-  const userAgent = navigator.userAgent.toLowerCase()
-
-  if (platform.includes("mac") || userAgent.includes("mac os")) {
-    return "macos"
-  }
-
-  if (platform.includes("win") || userAgent.includes("windows")) {
-    return "windows"
-  }
-
-  if (platform.includes("linux") || userAgent.includes("linux")) {
-    return "linux"
-  }
-
-  return "unknown"
-}
-
+/** Delegates to the @slab/core detection seam (single source for the OS). */
 export function getDesktopPlatform(): DesktopPlatform {
-  return detectDesktopPlatform()
+  return detectPlatformOs()
 }
 
 export default function useDesktopPlatform() {
-  return useMemo(() => detectDesktopPlatform(), [])
+  return useMemo(() => detectPlatformOs(), [])
 }

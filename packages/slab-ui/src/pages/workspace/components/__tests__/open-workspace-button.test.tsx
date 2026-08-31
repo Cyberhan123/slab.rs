@@ -20,7 +20,7 @@ vi.mock("@slab/ui/provider/slab-provider", () => ({
 
 function setPlatformDesktop(desktop: boolean) {
   useSlabMock.mockReturnValue({
-    ports: { platformInfo: { desktop, mobile: false } },
+    ports: { platformInfo: { desktop, mobile: false, os: "unknown" } },
   })
 }
 

@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
-import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 
 import type { CommandInfo } from "@slab/api/harness"
-import { WORKSPACE_STATE_QUERY_KEY, workspaceState } from "@slab/core/workspace/bridge"
 import { useWorkspaceHandoffStore } from "@slab/ui/store/useWorkspaceHandoffStore"
 
 import { AssistantNewChatLanding } from "../components/assistant-new-chat-landing"
 import type { AssistantConversationItem } from "./use-assistant-sessions"
 import type { SenderSubmitOptions } from "../components/sender"
 import { isSameRoot, useWorkspaceSwitch, type WorkspaceSelection } from "./use-workspace-switch"
+import { useWorkspaceState } from "@slab/ui/pages/workspace/hooks/use-workspace-state"
 
 type CreateSessionFn = (options?: { quiet?: boolean; select?: boolean }) => Promise<
     { id: string } | null
@@ -67,13 +66,7 @@ export function useAssistantNewChat({
     const handoffDraft = useWorkspaceHandoffStore((state) => state.draft)
     const { applyWorkspace, switching } = useWorkspaceSwitch()
 
-    const workspaceQuery = useQuery({
-        queryKey: WORKSPACE_STATE_QUERY_KEY,
-        queryFn: workspaceState,
-        // Workspace state is fetched over the /v1/workspace HTTP API. The bridge has
-        // its own recovery path, so React Query retry would duplicate local probes.
-        retry: false,
-    })
+    const workspaceQuery = useWorkspaceState()
     const currentWorkspace = workspaceQuery.data?.current ?? null
     const currentRoot = currentWorkspace?.rootPath ?? null
 

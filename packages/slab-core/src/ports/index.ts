@@ -8,12 +8,17 @@
  * domain/application/UI code.
  */
 
+/** Coarse desktop OS family (best-effort; "unknown" when undetectable). */
+export type SlabPlatformOs = "windows" | "macos" | "linux" | "unknown"
+
 /** Coarse runtime capabilities of the current shell. */
 export interface SlabPlatformInfo {
   /** Running inside the Tauri desktop shell (native IPC available). */
   readonly desktop: boolean
   /** Running inside the mobile H5 shell. */
   readonly mobile: boolean
+  /** Desktop OS family, used by platform-aware UI (window chrome, setup). */
+  readonly os: SlabPlatformOs
 }
 
 export interface FileDialogFilter {

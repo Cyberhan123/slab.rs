@@ -2,8 +2,8 @@
 
 /**
  * Terminal surface for command-execution output, re-implemented (trimmed) from
- * the `example-full-message/terminal.tsx` reference — that directory must not be
- * imported. Renders ANSI-colored output with auto-scroll, a streaming cursor,
+ * the `docs/development/references/assistant-message-reference/terminal.tsx`
+ * reference (archived; must not be imported). Renders ANSI-colored output with auto-scroll, a streaming cursor,
  * and a copy button (Mantine `useClipboard`, no hand-rolled clipboard).
  */
 

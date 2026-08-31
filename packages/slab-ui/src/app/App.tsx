@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
+import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { useMutationObserverTarget } from "@mantine/hooks";
 import { sortBy } from "lodash-es";
 
@@ -14,10 +14,7 @@ import {
   getPluginHost,
   readPluginThemeSnapshot,
 } from "@slab/core/platform/plugin-host";
-import {
-  WORKSPACE_STATE_QUERY_KEY,
-  workspaceState,
-} from "@slab/core/workspace/bridge";
+import { useWorkspaceState } from "@slab/ui/pages/workspace/hooks/use-workspace-state";
 import { RUNTIME_PLUGINS_QUERY_KEY } from "@slab/ui/pages/plugins/hooks/use-runtime-plugins";
 import { isPluginRunning } from "@slab/ui/pages/plugins/utils";
 import { useWorkspaceUiStore } from "@slab/ui/store/useWorkspaceUiStore";
@@ -69,13 +66,7 @@ function WorkspaceModeSync() {
   const redirectedWorkspaceRootRef = useRef<string | null>(null);
   const appliedPluginConfigSignatureRef = useRef<string | null>(null);
 
-  const workspaceQuery = useQuery({
-    queryKey: WORKSPACE_STATE_QUERY_KEY,
-    queryFn: workspaceState,
-    // Workspace state is fetched over the /v1/workspace HTTP API. The bridge has
-    // its own recovery path, so React Query retry would duplicate local probes.
-    retry: false,
-  });
+  const workspaceQuery = useWorkspaceState();
   const workspace = workspaceQuery.data?.current ?? null;
   const workspaceConfig = workspaceQuery.data?.config ?? null;
   // A workspace opened FROM the assistant page's Sender dropdown must not fire

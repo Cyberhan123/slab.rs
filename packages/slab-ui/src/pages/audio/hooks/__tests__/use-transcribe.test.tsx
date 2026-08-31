@@ -13,7 +13,7 @@ vi.mock('@slab/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key 
 
 function setPlatformDesktop(desktop: boolean) {
   useSlabMock.mockReturnValue({
-    ports: { platformInfo: { desktop, mobile: false } },
+    ports: { platformInfo: { desktop, mobile: false, os: "unknown" } },
   });
 }
 

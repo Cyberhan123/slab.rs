@@ -62,3 +62,6 @@ vcpkg_installed/
 llama-cpp-rs-main/
 # ts-rs per-type bindings (intermediate artifacts of bun run gen:harness)
 crates/*/bindings/
+
+# tsc incremental build cache (generated, never commit)
+tsconfig.tsbuildinfo

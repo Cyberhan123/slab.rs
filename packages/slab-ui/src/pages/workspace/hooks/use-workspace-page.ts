@@ -16,7 +16,6 @@ import {
   workspaceReadFile,
   workspaceSearchFiles,
   workspaceSearchText,
-  workspaceState,
   workspaceStatPath,
   WORKSPACE_STATE_QUERY_KEY,
   type WorkspaceFileContent,
@@ -49,6 +48,7 @@ import {
 import type { WorkspaceLspOpenFileOptions } from "../lib/workspace-uri"
 import { useWorkspaceEditorDirty } from "./use-workspace-editor-dirty"
 import { useWorkspaceConfirmDialog } from "./use-workspace-confirm"
+import { useWorkspaceState } from "./use-workspace-state"
 
 type WorkspaceOpenFileOptions = WorkspaceLspOpenFileOptions & {
   revealInTree?: boolean
@@ -69,13 +69,7 @@ export function useWorkspacePage() {
   const restoredWorkspaceRootRef = useRef<string | null>(null)
   const activeVscodeFileGenerationRef = useRef(0)
 
-  const workspaceQuery = useQuery({
-    queryKey: WORKSPACE_STATE_QUERY_KEY,
-    queryFn: workspaceState,
-    // Workspace state is fetched over the /v1/workspace HTTP API. The bridge has
-    // its own recovery path, so React Query retry would duplicate local probes.
-    retry: false,
-  })
+  const workspaceQuery = useWorkspaceState()
   const workspace = workspaceQuery.data?.current ?? null
   const persistedRecentWorkspaces = useWorkspaceUiStore((state) => state.recentWorkspaces)
   const recentWorkspaces = persistedRecentWorkspaces.length > 0

@@ -3,39 +3,57 @@ import { renderHook } from 'vitest-browser-react';
 
 import useDesktopPlatform, { getDesktopPlatform, type DesktopPlatform } from '../use-desktop-platform';
 
-function mockNavigatorPlatform({
-  platform,
+type NavigatorWithUserAgentData = Navigator & {
+  userAgentData?: { platform?: string };
+};
+
+const originalUserAgentData =
+  Object.getOwnPropertyDescriptor(window.navigator, 'userAgentData') ??
+  Object.getOwnPropertyDescriptor(Navigator.prototype, 'userAgentData');
+
+function mockPlatformHints({
+  userAgentDataPlatform,
   userAgent,
 }: {
-  platform: string;
+  userAgentDataPlatform?: string;
   userAgent: string;
 }) {
-  vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue(platform);
   vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(userAgent);
+  // `userAgentData` is a prototype getter in Chromium — shadow it with a plain
+  // value so the low-entropy hint (or its absence) is fully controlled.
+  Object.defineProperty(window.navigator, 'userAgentData', {
+    configurable: true,
+    value: userAgentDataPlatform == null ? undefined : { platform: userAgentDataPlatform },
+  });
 }
 
 describe('desktop platform hooks', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    if (originalUserAgentData) {
+      Object.defineProperty(window.navigator, 'userAgentData', originalUserAgentData);
+    } else {
+      delete (window.navigator as NavigatorWithUserAgentData).userAgentData;
+    }
   });
 
   it.each([
-    ['MacIntel', 'Mozilla/5.0', 'macos'],
-    ['x86_64', 'Mozilla/5.0 (Mac OS X)', 'macos'],
-    ['Win32', 'Mozilla/5.0', 'windows'],
-    ['x86_64', 'Mozilla/5.0 (Windows NT 10.0)', 'windows'],
+    ['macOS', 'Mozilla/5.0', 'macos'],
+    [undefined, 'Mozilla/5.0 (Mac OS X)', 'macos'],
+    ['Windows', 'Mozilla/5.0', 'windows'],
+    [undefined, 'Mozilla/5.0 (Windows NT 10.0)', 'windows'],
     ['Linux x86_64', 'Mozilla/5.0', 'linux'],
-    ['x86_64', 'Mozilla/5.0 (X11; Linux x86_64)', 'linux'],
+    [undefined, 'Mozilla/5.0 (X11; Linux x86_64)', 'linux'],
     ['FreeBSD amd64', 'Mozilla/5.0', 'unknown'],
-  ])('detects %s / %s as %s', (platform, userAgent, expected) => {
-    mockNavigatorPlatform({ platform, userAgent });
+  ])('detects hint %p / UA %p as %s', (userAgentDataPlatform, userAgent, expected) => {
+    mockPlatformHints({ userAgentDataPlatform, userAgent });
 
     expect(getDesktopPlatform()).toBe(expected);
   });
 
   it('exposes the detected platform through the React hook', async () => {
-    mockNavigatorPlatform({
-      platform: 'Win32',
+    mockPlatformHints({
+      userAgentDataPlatform: 'Windows',
       userAgent: 'Mozilla/5.0',
     });
 

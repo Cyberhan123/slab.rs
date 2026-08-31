@@ -52,7 +52,7 @@ function createWrapper(overrides: TestSlabPortsOverrides = {}) {
 }
 
 const desktopWrapper = createWrapper({
-  platformInfo: { desktop: true, mobile: false },
+  platformInfo: { desktop: true, mobile: false, os: "unknown" },
 });
 
 describe('useFile', () => {

@@ -1,14 +1,6 @@
-import { clsx, type ClassValue } from "clsx"
-import { extendTailwindMerge } from "tailwind-merge"
-
-const twMerge = extendTailwindMerge({
-  extend: {
-    theme: {
-      text: ["micro", "caption", "label", "body", "display"],
-    },
-  },
-});
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
-}
+/**
+ * `cn` is single-sourced in @slab/components (text-scale tailwind-merge
+ * extension); this module only re-exports it for the legacy `@slab/ui/lib/utils`
+ * and `@/lib/utils` import paths.
+ */
+export { cn } from "@slab/components/lib/utils"

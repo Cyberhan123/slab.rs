@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import {
   ClipboardList,
   Info,
@@ -6,12 +7,35 @@ import {
   Settings,
 } from "lucide-react";
 
-import { ThemePreview } from "@slab/ui/components/theme-preview";
 import About from "@slab/ui/pages/about";
 import Hub from "@slab/ui/pages/hub";
 import SettingsPage from "@slab/ui/pages/settings";
 import Task from "@slab/ui/pages/task";
 import type { SlabRouteObject } from "../route-meta";
+
+// Lazy AND dev-guarded: the top-level `lazy()` call would otherwise survive
+// tree-shaking as a side-effect statement and drag the preview chunk into
+// production builds. With the `import.meta.env.DEV` ternary the dynamic import
+// sits in a dead branch and the chunk is never emitted.
+const ThemePreview = import.meta.env.DEV
+  ? lazy(() =>
+      import("@slab/ui/components/theme-preview").then((m) => ({
+        default: m.ThemePreview,
+      })),
+    )
+  : null;
+
+function ThemePreviewRouteElement() {
+  if (ThemePreview === null) {
+    return null;
+  }
+
+  return (
+    <Suspense fallback={null}>
+      <ThemePreview />
+    </Suspense>
+  );
+}
 
 export const hubRoute = {
   path: "hub",
@@ -72,5 +96,5 @@ export const themePreviewRoute = {
     subtitle: "Preview UI components and design tokens",
     icon: Palette,
   },
-  element: <ThemePreview />,
+  element: <ThemePreviewRouteElement />,
 } satisfies SlabRouteObject;

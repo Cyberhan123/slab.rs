@@ -2,8 +2,8 @@
 
 /**
  * Animated text shimmer, re-implemented from the
- * `example-full-message/shimmer.tsx` reference (that directory must not be
- * imported). Used by the reasoning trigger while a thought is streaming.
+ * `docs/development/references/assistant-message-reference/shimmer.tsx`
+ * reference (archived; must not be imported). Used by the reasoning trigger while a thought is streaming.
  */
 
 import { cn } from "@slab/ui/lib/utils"

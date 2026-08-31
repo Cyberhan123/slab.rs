@@ -2,8 +2,8 @@
 
 /**
  * Local shiki-backed code block, re-implemented (trimmed) from the
- * `example-full-message/code-block.tsx` reference — that directory must not be
- * imported. Used to render tool-call parameters and results as syntax-highlighted
+ * `docs/development/references/assistant-message-reference/code-block.tsx`
+ * reference (archived; must not be imported). Used to render tool-call parameters and results as syntax-highlighted
  * JSON with a copy button. The language-selector surface is intentionally
  * omitted (over-scope for tool I/O); markdown code fences are still handled by
  * Streamdown's own code plugin.

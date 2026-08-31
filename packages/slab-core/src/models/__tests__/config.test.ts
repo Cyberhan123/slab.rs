@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import api from '@slab/api';
-import type { ModelConfigDocumentResponse } from './config';
+import type { ModelConfigDocumentResponse } from '../config';
 import {
   getModelConfigField,
   getModelConfigFieldValue,
   useModelConfigDocumentQuery,
   useUpdateModelConfigSelectionMutation,
-} from './config';
+} from '../config';
 
 vi.mock('@slab/api', () => ({
   default: {

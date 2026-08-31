@@ -20,6 +20,13 @@ export type { SlabRoutesConfig } from "./create-slab-routes";
 
 // ── Desktop assembly (full route set; kept as the pre-factory exports) ──────
 
+// Dev-only theme preview: `import.meta.env.DEV` is statically replaced, so the
+// conditional below keeps the route (and its lazy chunk) out of production
+// builds entirely — /theme-preview does not exist in prod.
+const devOnlyRoutes: SlabRouteObject[] = import.meta.env.DEV
+  ? [themePreviewRoute]
+  : [];
+
 const desktopLayoutChildren: SlabRouteObject[] = [
   ...assistantRoutes,
   workspaceRoute,
@@ -42,13 +49,13 @@ export const staticDesktopRoutes: SlabRouteObject[] = [
     element: <DesktopLayoutRoute />,
     children: desktopLayoutChildren,
   },
-  themePreviewRoute,
+  ...devOnlyRoutes,
 ] satisfies SlabRouteObject[];
 
 export function createDesktopRoutes(): SlabRouteObject[] {
   return createSlabRoutes({
     app: <App />,
     layoutChildren: desktopLayoutChildren,
-    rootChildren: [setupRoute, themePreviewRoute],
+    rootChildren: [setupRoute, ...devOnlyRoutes],
   });
 }

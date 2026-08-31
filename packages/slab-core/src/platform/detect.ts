@@ -1,7 +1,13 @@
-import type { SlabPlatformInfo } from "../ports"
+import type { SlabPlatformInfo, SlabPlatformOs } from "../ports"
+
+export type { SlabPlatformOs }
 
 type TauriWindow = Window & {
   __TAURI_INTERNALS__?: unknown
+}
+
+type NavigatorWithUserAgentData = Navigator & {
+  userAgentData?: { platform?: string }
 }
 
 /**
@@ -24,9 +30,35 @@ export function isMobileWeb(): boolean {
   return /Android|iPhone|iPad|iPod/i.test(ua)
 }
 
+/** Best-effort desktop OS family from the modern hint or user-agent parsing. */
+export function detectPlatformOs(): SlabPlatformOs {
+  if (typeof navigator === "undefined") return "unknown"
+
+  // Prefer the low-entropy client hint when present; `navigator.platform` is
+  // deprecated, so the user agent is the only fallback.
+  const navigatorWithHints = navigator as NavigatorWithUserAgentData
+  const hinted = navigatorWithHints.userAgentData?.platform?.toLowerCase() ?? ""
+  const userAgent = navigator.userAgent?.toLowerCase() ?? ""
+
+  if (hinted.includes("mac") || userAgent.includes("mac os")) {
+    return "macos"
+  }
+
+  if (hinted.includes("win") || userAgent.includes("windows")) {
+    return "windows"
+  }
+
+  if (hinted.includes("linux") || userAgent.includes("linux")) {
+    return "linux"
+  }
+
+  return "unknown"
+}
+
 export function detectPlatformInfo(): SlabPlatformInfo {
   return {
     desktop: isTauri(),
     mobile: !isTauri() && isMobileWeb(),
+    os: detectPlatformOs(),
   }
 }

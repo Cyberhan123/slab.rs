@@ -131,7 +131,7 @@ describe("PluginsPage browser visual regression", () => {
   it("captures the plugins page empty state in Tauri", async () => {
     await renderDesktopScene(<PluginsPage />, {
       route: "/plugins",
-      portsOverrides: { platformInfo: { desktop: true, mobile: false } },
+      portsOverrides: { platformInfo: { desktop: true, mobile: false, os: "windows" } },
     });
     await new Promise((resolve) => setTimeout(resolve, 100));
 
@@ -165,7 +165,7 @@ describe("PluginsPage browser visual regression", () => {
 
     await renderDesktopScene(<PluginsPage />, {
       route: "/plugins",
-      portsOverrides: { platformInfo: { desktop: true, mobile: false } },
+      portsOverrides: { platformInfo: { desktop: true, mobile: false, os: "windows" } },
     });
     await new Promise((resolve) => setTimeout(resolve, 100));
 
@@ -182,7 +182,7 @@ describe("PluginsPage browser visual regression", () => {
 
     await renderDesktopScene(<PluginsPage />, {
       route: "/plugins",
-      portsOverrides: { platformInfo: { desktop: true, mobile: false } },
+      portsOverrides: { platformInfo: { desktop: true, mobile: false, os: "windows" } },
     });
 
     await expect.element(page.getByText(/refresh/i)).toBeVisible();

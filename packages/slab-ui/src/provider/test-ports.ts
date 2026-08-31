@@ -45,6 +45,7 @@ export function createTestSlabPorts(
     platformInfo: {
       desktop: false,
       mobile: false,
+      os: "unknown",
     },
     windowChrome: {
       async minimize() {},

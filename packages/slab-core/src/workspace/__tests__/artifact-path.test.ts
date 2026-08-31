@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { normalizeWorkspaceArtifactPath } from './artifact-path';
+import { normalizeWorkspaceArtifactPath } from '../artifact-path';
 
 describe('normalizeWorkspaceArtifactPath', () => {
   it.each([
