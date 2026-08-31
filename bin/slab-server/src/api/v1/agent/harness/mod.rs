@@ -516,7 +516,7 @@ fn push_skill_block(blocks: &mut Vec<String>, name: &str, path: &std::path::Path
     }
 }
 
-/// Map an [`UserInput::Image`] detail hint to its wire string (`"low"` /
+/// Map a [`slab_proto::harness::user_input::UserInput::Image`] detail hint to its wire string (`"low"` /
 /// `"high"` / `"auto"`), matching [`slab_proto::harness::user_input::ImageDetail`]'s
 /// `rename_all = "lowercase"`.
 fn image_detail_str(detail: &slab_proto::harness::user_input::ImageDetail) -> &'static str {

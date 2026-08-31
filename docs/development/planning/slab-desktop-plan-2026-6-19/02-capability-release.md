@@ -4,7 +4,7 @@
 |---|---|
 | Plan ID | B |
 | 关联根因 | R1（能力释放失败） |
-| 上游审计 | [slab-deskotp-audits-2026-6-19.md](../../audits/slab-deskotp-audits-2026-6-19.md) |
+| 上游审计 | [slab-desktop-audits-2026-06-19.md](../../audits/archive/slab-desktop-audits-2026-06-19.md) |
 | 负责域 | Assistant · Media · Hub · Plugins · Infra(errors) |
 | 状态 | Implemented / Verified（Plan B scope） |
 | 预估总工作量 | L |

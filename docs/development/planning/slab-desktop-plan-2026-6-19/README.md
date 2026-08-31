@@ -1,6 +1,6 @@
 # Slab Desktop 前端对齐执行计划集 (2026-06-19)
 
-> 本计划集是 [前端审计文档](../../audits/slab-deskotp-audits-2026-6-19.md) 的**直接执行响应**。
+> 本计划集是 [前端审计文档](../../audits/archive/slab-desktop-audits-2026-06-19.md) 的**直接执行响应**。
 > 审计归纳出 **5 大系统性根因（R1–R5）+ 9 个 P0**，本计划集将其拆解为 **5 个相互平行、职责清晰的专项计划（A–E）** 与 **1 个综合收尾保障计划（F）**。
 
 ---
@@ -49,7 +49,7 @@
 
 ## 阅读与执行建议
 
-1. **先读** [审计文档](../../audits/slab-deskotp-audits-2026-6-19.md) §1.4（9 个 P0）与 §4（五大最高杠杆动作），建立全局优先级。
+1. **先读** [审计文档](../../audits/archive/slab-desktop-audits-2026-06-19.md) §1.4（9 个 P0）与 §4（五大最高杠杆动作），建立全局优先级。
 2. **按 Wave 推进**：W0 止损优先（安全 P0 不可拖）；W1 地基（T-B-7/T-E-1）是后续并行的前提。
 3. **每张任务卡**含：严重度·类型·预估 / 证据(file:line) / 问题 / 方案(可执行步骤) / 验收标准(checklist) / 依赖——可直接拆为 issue/PR。
 4. **接缝变更**：任一交接产出方变更，回 [06-closure-guardrails.md §2.2](06-closure-guardrails.md) 更新并通知消费方。
@@ -69,4 +69,4 @@
 
 - **状态**：Draft / Pending Review
 - **生成方式**：5 个专项计划由独立 Agent 并行起草并对照当前代码取证；Plan F 与本索引由架构师综合收尾。
-- **上游**：[slab-deskotp-audits-2026-6-19.md](../../audits/slab-deskotp-audits-2026-6-19.md)
+- **上游**：[slab-desktop-audits-2026-06-19.md](../../audits/archive/slab-desktop-audits-2026-06-19.md)

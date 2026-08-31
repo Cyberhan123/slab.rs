@@ -1,3 +1,6 @@
+::: warning [Historical snapshot — archived 2026-08-31]
+This audit predates the 2026-08-15 DDD frontend split (`packages/slab-ui` / `packages/slab-core` / thin `slab-desktop` & `slab-web` shells) and the completed Ant Design → shadcn migration. References to `packages/slab-desktop/src/pages`, `antd`, or other retired layouts describe a codebase shape that no longer exists. Treat `AGENTS.md` and current code as the source of truth.
+:::
 # 全栈代码审计报告 (2026-06-17)
 
 > **审计方法**：多智能体协作（6 路并行深度审计，分 2 批 × 3 路以规避账号并发限流）覆盖 `model_pack` 配置体系、PMID 回显引擎、API↔DB 契约、DTO↔Entity↔DB 转换链、跨模块冗余与逻辑死角、全栈数据流拓扑六大维度。所有 High 级发现由主审计员**直接读源码落地核实**，被核实推翻或已修复的发现已剔除/降级（见 §1.3 的纠错记录）。所有结论均要求 `path:line` 证据。

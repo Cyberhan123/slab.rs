@@ -20,7 +20,7 @@ const FS_WATCH_MAX_TIMEOUT_MS: u64 = 30_000;
 /// Watch a path for file-system changes and return the list of changed paths.
 ///
 /// The tool subscribes to the watcher, waits up to `timeout_ms` milliseconds
-/// (capped at [`FS_WATCH_MAX_TIMEOUT_MS`]) for the first batch of events,
+/// (capped at `FS_WATCH_MAX_TIMEOUT_MS`) for the first batch of events,
 /// then returns.
 ///
 /// # JSON schema

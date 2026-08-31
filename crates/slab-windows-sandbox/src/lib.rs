@@ -1,6 +1,6 @@
 //! Windows OS-enforced sandbox for slab.rs.
 //!
-//! Sits beneath [`slab_sandboxing`] (which depends on this crate, cfg-gated, downward only —
+//! Sits beneath `slab_sandboxing` (which depends on this crate, cfg-gated, downward only —
 //! this crate MUST NOT depend on `slab_sandboxing`). Owns the `SpawnedChild` seam and every
 //! Windows isolation primitive (Job Object, restricted token, integrity-label ACLs, the
 //! elevated helper IPC).

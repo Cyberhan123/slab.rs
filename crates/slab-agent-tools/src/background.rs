@@ -140,7 +140,7 @@ impl BackgroundTaskRegistry {
     }
 
     /// Allocate the next task id (callers need it BEFORE spawning, to place
-    /// the output files). Format: `bg-<nonce>-<n>` — see [`Self::id_nonce`].
+    /// the output files). Format: `bg-<nonce>-<n>` — see `Self::id_nonce`.
     pub fn alloc_task_id(&self) -> String {
         let n = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         format!("bg-{}-{n}", self.id_nonce)

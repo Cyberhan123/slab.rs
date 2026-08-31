@@ -87,7 +87,7 @@ impl GpuMemoryScheduler {
     /// Background refresh loop: detached task, warn-and-continue on
     /// failures, lives for the process lifetime and keeps the cache warm.
     /// The cadence backs off sixfold while no consumer has needed fresh
-    /// telemetry (see [`next_refresh_delay`]) — on an idle laptop the probe
+    /// telemetry (see `next_refresh_delay`) — on an idle laptop the probe
     /// runs every 30s instead of every 5s; any load-sizing or display
     /// refresh snaps it back to the fast cadence.
     pub fn spawn_periodic_refresh(self: &Arc<Self>) {

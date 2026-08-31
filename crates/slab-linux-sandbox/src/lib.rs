@@ -1,6 +1,6 @@
 //! Linux OS-enforced sandbox for slab.rs.
 //!
-//! Sits beneath [`slab_sandboxing`] (which depends on this crate, cfg-gated, downward only —
+//! Sits beneath `slab_sandboxing` (which depends on this crate, cfg-gated, downward only —
 //! this crate MUST NOT depend on `slab_sandboxing`). Owns the `SpawnedChild` seam and the Linux
 //! isolation primitives: bubblewrap (`bwrap`) for the filesystem namespace view, a network-only
 //! seccomp BPF filter (always stacked under the network predicate), and a landlock

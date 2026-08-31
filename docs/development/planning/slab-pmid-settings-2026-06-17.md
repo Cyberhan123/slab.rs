@@ -1,6 +1,6 @@
 # PMID 回显与设置可靠性专项设计 (2026-06-17)
 
-> **文档定位**：本规划书基于 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §3.2 的 11 项 PMID 回显缺陷（PMID-F1–F11）、§2.3 跨边界缺陷的 settings 部分（F-Stack-1/F-Stack-2）、§5 G4（config-path 静默吞错）/G5（脱敏白名单），以及 §6 行动项 P1-1/P1-2/P1-3/P1-4/P2-3，在 `crates/slab-config` 回显引擎 + `crates/slab-app-core::SettingsService` + `bin/slab-server` 鉴权/启动管线 + `packages/api` 前端 fetch 客户端上，演进出一套**回显诚实、单源真源、声明即强制、热重载边界可观测**的设置可靠性规范。
+> **文档定位**：本规划书基于 [code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) §3.2 的 11 项 PMID 回显缺陷（PMID-F1–F11）、§2.3 跨边界缺陷的 settings 部分（F-Stack-1/F-Stack-2）、§5 G4（config-path 静默吞错）/G5（脱敏白名单），以及 §6 行动项 P1-1/P1-2/P1-3/P1-4/P2-3，在 `crates/slab-config` 回显引擎 + `crates/slab-app-core::SettingsService` + `bin/slab-server` 鉴权/启动管线 + `packages/api` 前端 fetch 客户端上，演进出一套**回显诚实、单源真源、声明即强制、热重载边界可观测**的设置可靠性规范。
 >
 > **方法**：首席配置架构师主导，逐 finding 直接读源码落地核实。所有 `path:line` 证据已对齐 **2026-06-18 工作树**（审计原件为 2026-06-17，期间发生若干行漂移与一处目录迁移——已在 §1.4 与各 finding 注明当前正确坐标）。审计 §1.3 已对抗式核实 `secret()`/`redact_setting_value` 脱敏正确，本规范直接建立其上、**不重新论证脱敏正确性**，而是把脱敏的**驱动方式**从硬编码白名单升级为 schema `writeOnly` 单源。
 >
@@ -25,7 +25,7 @@
 
 ### 1.1 现状与痛点
 
-`slab.rs` 的设置体系是一个**双源（env + PMID）+ 回显（PMID）+ 热重载（窄）+ 脱敏（硬编码）**的四层结构。审计暴露的核心痛点（[code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §1.1 第三短板、§3.2、§2.3）：
+`slab.rs` 的设置体系是一个**双源（env + PMID）+ 回显（PMID）+ 热重载（窄）+ 脱敏（硬编码）**的四层结构。审计暴露的核心痛点（[code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) §1.1 第三短板、§3.2、§2.3）：
 
 1. **环境变量与 PMID 双源断开，且优先级未定义**（PMID-F1 / F-Stack-2）：
    - 鉴权走 `Config::admin_api_token`（[app_config.rs:79](../../../crates/slab-config/src/app_config.rs#L79)），其值来自 `SLAB_ADMIN_TOKEN` env（[app_config.rs:170](../../../crates/slab-config/src/app_config.rs#L170)）；而设置页的 `server.admin.token` PMID（[descriptor.rs:402](../../../crates/slab-config/src/descriptor.rs#L402)）写回 settings.json，**与鉴权完全不相通**。`auth_middleware`（[auth.rs:22-26](../../../bin/slab-server/src/api/middleware/auth.rs#L22-L26)）读 `state.context.config.admin_api_token` —— 用户在设置页改 `server.admin.token` 不改变实际鉴权要求。
@@ -487,7 +487,7 @@ match change_effect_for(pmid) {
 
 - **涉及文件**：
   - [pmid.rs](../../../crates/slab-app-core/src/domain/services/pmid.rs)：Phase 4 已挂 domain 逻辑，本阶段补 doc 注释说明"app-core 视角的设置变更语义层"职责（§3.9）。
-  - 复审：基于 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) 出一份新审计文档，确认 PMID-F1–F11 / F-Stack-1 / F-Stack-2 / G4-config / G5 关闭且回显路径无新发现。
+  - 复审：基于 [code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) 出一份新审计文档，确认 PMID-F1–F11 / F-Stack-1 / F-Stack-2 / G4-config / G5 关闭且回显路径无新发现。
 - **关闭**：**PMID-F11**（sham 决策落地）+ 全部 P1-1/P1-2/P1-3/P1-4/P2-3。
 - **校验**：全量 `bun run check` + `bun run test`（[AGENTS.md:68](../../../AGENTS.md)/[:72](../../../AGENTS.md)）。
 - **退出标准**：复审显示所有 owned finding 关闭；新审计无回归。
@@ -517,7 +517,7 @@ match change_effect_for(pmid) {
 
 ## 附录 A：审计发现 → 计划条款 闭环追溯
 
-| 审计发现（[code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md)） | 本计划机制 | 实施阶段 |
+| 审计发现（[code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md)） | 本计划机制 | 实施阶段 |
 |---|---|---|
 | **PMID-F1** env vs PMID 双源断开（[app_config.rs:170](../../../crates/slab-config/src/app_config.rs#L170) vs [descriptor.rs:402](../../../crates/slab-config/src/descriptor.rs#L402)） | env→PMID 单向桥（轨 A 种子化）+ `overridden_by` 标注（轨 B）+ 鉴权读实时投影 | Phase 3 |
 | **PMID-F2** 5 层 logging override 无级联（[pmid_service.rs:180-181](../../../crates/slab-config/src/pmid_service.rs#L180-L181) 仅 path fallback） | `resolve_effective_logging` 显式优先级链 + `override_value`/`overridden_by: Parent` 回显 + `description_md` 文档 | Phase 4 |
@@ -555,4 +555,4 @@ match change_effect_for(pmid) {
 
 ---
 
-*本规范由首席配置架构师主导，逐 finding 直接读源码落地核实（app_config.rs/descriptor.rs/view.rs/pmid_service.rs/settings/document.rs/settings.rs/auth.rs/otel/config.rs/packages/api/index.ts 均已对齐 2026-06-18 工作树；审计 §1.3 的 `secret()`/`redact_setting_value` 纠错记录确认无误，本规范建立其上）。规范以 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §3.2 PMID-F1–F11、§2.3 F-Stack-1/F-Stack-2、§5 G4-config/G5 与 §6 P1-1/P1-2/P1-3/P1-4/P2-3 为闭环目标。*
+*本规范由首席配置架构师主导，逐 finding 直接读源码落地核实（app_config.rs/descriptor.rs/view.rs/pmid_service.rs/settings/document.rs/settings.rs/auth.rs/otel/config.rs/packages/api/index.ts 均已对齐 2026-06-18 工作树；审计 §1.3 的 `secret()`/`redact_setting_value` 纠错记录确认无误，本规范建立其上）。规范以 [code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) §3.2 PMID-F1–F11、§2.3 F-Stack-1/F-Stack-2、§5 G4-config/G5 与 §6 P1-1/P1-2/P1-3/P1-4/P2-3 为闭环目标。*

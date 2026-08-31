@@ -72,13 +72,20 @@ chunk budget while reporting workspace chunk baselines.
 
 ```sh
 bun run gen:api
+bun run gen:harness
 bun run gen:schemas
 bun run gen:plugin-packs
 bun run gen:model-packs
+bun run gen:mobile
 ```
 
 When backend `/v1/*` API shapes change, regenerate
 `packages/api/src/v1.d.ts` with `bun run gen:api`.
+When harness wire contracts (`crates/slab-proto/src/harness`, ts-rs bindings)
+change, regenerate `packages/api/src/harness/` with `bun run gen:harness`;
+CI diffs all three ends and fails on drift.
+`bun run gen:mobile` re-exports design tokens and locales into
+`flutter/slab-mobile` (see that package's README).
 
 ## Vendored Patch Workflow
 

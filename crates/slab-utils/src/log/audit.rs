@@ -97,7 +97,7 @@ impl SandboxAudit {
         self
     }
 
-    /// Raw argument blob; truncated to [`MAX_ARG_CHARS`] chars to bound log size.
+    /// Raw argument blob; truncated to `MAX_ARG_CHARS` chars to bound log size.
     pub fn args(mut self, args: impl Into<String>) -> Self {
         let mut value = args.into();
         if value.chars().count() > MAX_ARG_CHARS {

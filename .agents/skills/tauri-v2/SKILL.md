@@ -7,6 +7,13 @@ description: "Tauri v2 cross-platform app development with Rust backend. Use whe
 
 > Build cross-platform desktop and mobile apps with web frontends and Rust backends.
 
+> [!NOTE]
+> Slab repository boundary: Tauri is the **desktop host only** (`bin/slab-app/src-tauri`). The
+> desktop host starts `slab-server`; product API traffic stays on HTTP; Tauri commands stay
+> host-only. **This repo has no Tauri mobile target** — the mobile client is the Flutter thin
+> client at `flutter/slab-mobile` (pure network client over `/v1` + harness WS); do not follow
+> this skill's Tauri mobile build guidance here.
+
 ## Before You Start
 
 **This skill prevents 8+ common errors and saves ~60% tokens.**

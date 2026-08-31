@@ -4,7 +4,7 @@
 |---|---|
 | Plan ID | D |
 | 关联根因 | R4（交互硬伤） |
-| 上游审计 | [slab-deskotp-audits-2026-6-19.md](../../audits/slab-deskotp-audits-2026-6-19.md) |
+| 上游审计 | [slab-desktop-audits-2026-06-19.md](../../audits/archive/slab-desktop-audits-2026-06-19.md) |
 | 负责域 | Assistant · Media · Workspace · Settings/Setup |
 | 状态 | Draft / Pending Review |
 | 预估总工作量 | L |

@@ -251,7 +251,6 @@ parity-tokio-ipc = "0.9"
 winapi = { version = "0.3.9", features = ["winerror"] }
 tokio-stream = "0.1"
 tokio-tungstenite = "0.30.0"
-jsonrpc-core = "18"
 extism = "1.30.0"
 deno_core = "0.408.0"
 deno_ast = { version = "0.53.3", features = ["transpiling"] }
@@ -265,7 +264,6 @@ deno_error = { version = "0.7.1", features = [
 async-trait = "0.1"
 bytemuck = "1"
 async_io = { package = "async-io", version = "2.6.0" }
-tokio_util = { package = "tokio-util", version = "0.7.18" }
 uds_windows = "1.2.1"
 strum = { version = "0.28.0", features = ["derive"] }
 clap = { version = "4.6.2", features = ["derive"] }
@@ -273,7 +271,6 @@ protoc-bin-vendored = "3"
 cargo_metadata = "0.23.1"
 sysinfo = "0.39.6"
 dirs = "6"
-dirs-next = "2.0.0"
 validator = "0.20"
 jsonschema = { version = "0.48.1", default-features = false }
 all-smi = "0.24.1"
@@ -287,7 +284,6 @@ quote = "1.0"
 syn = "3.0"
 trybuild = "1.0"
 tokio-util = "0.7.18"
-runfiles = "0.2.0"
 # GUI
 egui = "0.35.0"
 eframe = { version = "0.35.0", default-features = false, features = [

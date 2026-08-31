@@ -4,7 +4,7 @@
 |---|---|
 | Plan ID | A |
 | 关联根因 | R3（安全与正确性 P0） |
-| 上游审计 | [slab-deskotp-audits-2026-6-19.md](../../audits/slab-deskotp-audits-2026-6-19.md)（§1.4 P0 #1/#2/#3/#7、§3.1.3、Plugins/Workspace 域） |
+| 上游审计 | [slab-desktop-audits-2026-06-19.md](../../audits/archive/slab-desktop-audits-2026-06-19.md)（§1.4 P0 #1/#2/#3/#7、§3.1.3、Plugins/Workspace 域） |
 | 负责域 | Plugins · Workspace · Task · Tauri Host |
 | 状态 | Draft / Pending Review |
 | 预估总工作量 | M+L（≈ 4.5 人日：P0 ×4 ≈ 3 人日，P1 ≈ 1 人日，P2 ≈ 0.5 人日） |

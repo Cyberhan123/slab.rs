@@ -1,3 +1,6 @@
+::: warning [Historical snapshot — archived 2026-08-31]
+This audit predates the 2026-08-15 DDD frontend split (`packages/slab-ui` / `packages/slab-core` / thin `slab-desktop` & `slab-web` shells) and the completed Ant Design → shadcn migration. References to `packages/slab-desktop/src/pages`, `antd`, or other retired layouts describe a codebase shape that no longer exists. Treat `AGENTS.md` and current code as the source of truth.
+:::
 # Test Capability Audit Report (2026-06-17)
 
 > **审计方法**: 15 个子系统并行审计（10 个本轮新审 + 5 个首轮已完成且经对抗式验证的 carry-forward），覆盖 Rust 与 TypeScript 双栈，新增**冗余维度 (Redundancy)** 与**对抗式验证 (Adversarial Verification)** 两个维度。24 项 High-severity 发现经独立 verifier 核实，被推翻的剔除、被高估的降级。用户当前打开的 `bin/slab-server/tests/smoke/server-api/todos.ts` 所在的 smoke 子系统，因两次 rate-limit 失败，由主审计员**直接读源码落地核实**（见 §3.1 G3）。

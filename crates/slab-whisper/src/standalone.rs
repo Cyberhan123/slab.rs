@@ -103,27 +103,3 @@ impl Whisper {
         c_str.to_str().unwrap()
     }
 }
-
-//  Programmatically exposes the information provided by `print_system_info`
-
-//  # C++ equivalent
-//  `int ggml_cpu_has_...`
-// pub struct SystemInfo {
-//     pub avx: bool,
-//     pub avx2: bool,
-//     pub fma: bool,
-//     pub f16c: bool,
-// }
-
-// impl Default for SystemInfo {
-//     fn default() -> Self {
-//         unsafe {
-//             Self {
-//                 avx: slab_whisper_sys::ggml_cpu_has_avx() != 0,
-//                 avx2: slab_whisper_sys::ggml_cpu_has_avx2() != 0,
-//                 fma: slab_whisper_sys::ggml_cpu_has_fma() != 0,
-//                 f16c: slab_whisper_sys::ggml_cpu_has_f16c() != 0,
-//             }
-//         }
-//     }
-// }

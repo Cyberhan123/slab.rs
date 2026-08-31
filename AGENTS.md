@@ -80,6 +80,7 @@ bun run test:rust:cargo
 bun run test:browser
 bun run test:components
 bun run test:server
+bun run test:e2e
 
 bun run build:desktop
 bun run build:desktop:debug
@@ -90,6 +91,7 @@ bun run build:sidecars:release
 bun run build:windows-installer
 
 bun run gen:api
+bun run gen:harness
 bun run gen:schemas
 bun run gen:plugin-packs
 bun run gen:model-packs

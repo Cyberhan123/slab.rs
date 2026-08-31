@@ -1,6 +1,6 @@
 # model_pack v3 增强型模型配置包专项设计 (2026-06-17)
 
-> **文档定位**：本规划书基于 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §3.1 的 11 项 `model_pack` 字段缺陷（F1–F11）与 §2.3 的跨边界缺陷（F-Stack-1/3/4），在现有 `crates/slab-model-pack` 配置体系上演进出一套**字段无歧义、多引擎可回滚、多源可路由、面向未来模态可扩展**的 v3 规范。
+> **文档定位**：本规划书基于 [code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) §3.1 的 11 项 `model_pack` 字段缺陷（F1–F11）与 §2.3 的跨边界缺陷（F-Stack-1/3/4），在现有 `crates/slab-model-pack` 配置体系上演进出一套**字段无歧义、多引擎可回滚、多源可路由、面向未来模态可扩展**的 v3 规范。
 >
 > **方法**：首席架构师主导 + Agent Team 三路并行深度设计（A：本地多引擎/变体 Schema；B：云端模型 + 多源下载路由；C：引擎切换/回滚机制 + 实施路线图），三路结论经主架构师直接读源码核实后整合。所有 `path:line` 证据已对齐 2026-06-17 工作树。
 >
@@ -14,7 +14,7 @@
 
 ### 1.1 现状与痛点
 
-`slab.rs` 的模型配置以 `model_pack`（一个 `.slab` zip，内含 `manifest.json` + 一组被 `ref://` 引用的子文档）为载体，经 `crates/slab-model-pack` 解析、`crates/slab-app-core` 编目入库、`runtime_bridge` 编译成 `RuntimeBackendLoadSpec`，最终由 `slab-runtime` 执行。该链路工程完成度高，但审计暴露三类系统性短板（详见 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §1.1）：
+`slab.rs` 的模型配置以 `model_pack`（一个 `.slab` zip，内含 `manifest.json` + 一组被 `ref://` 引用的子文档）为载体，经 `crates/slab-model-pack` 解析、`crates/slab-app-core` 编目入库、`runtime_bridge` 编译成 `RuntimeBackendLoadSpec`，最终由 `slab-runtime` 执行。该链路工程完成度高，但审计暴露三类系统性短板（详见 [code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) §1.1）：
 
 1. **字段语义结构性模糊（§3.1 F1–F11）**——这是本规范要解决的核心：
    - **引用字段双词汇表**：manifest 入口用 `$config`（[manifest.rs:102](../../../crates/slab-model-pack/src/manifest.rs#L102)），子文档内用 `$load_config`/`$inference_config`（[manifest.rs:450](../../../crates/slab-model-pack/src/manifest.rs#L450)），同名族却意义不同。
@@ -40,7 +40,7 @@
 
 - 不重做 `ref://` 寻址（[refs.rs](../../../crates/slab-model-pack/src/refs.rs)）与子文档 kind 体系（variant/preset/backend_config/component/adapter）；**演进，不重造**。
 - 不改动 `slab-runtime` 内部各 backend 的加载实现，只改"如何选定并回退 backend"。
-- 不在本文落地 PMID 热重载拓宽（属 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §3.2 / F-Stack-1 的独立治理项），但 §4 会明确引擎回退**不消费**热重载路径。
+- 不在本文落地 PMID 热重载拓宽（属 [code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) §3.2 / F-Stack-1 的独立治理项），但 §4 会明确引擎回退**不消费**热重载路径。
 
 ---
 
@@ -475,7 +475,7 @@ RuntimeGateway::load_model                 runtime_gateway.rs:194-202
 
 ### 4.5 兼容性 guard（根治 F2 类懒校验）
 
-`compile_runtime_bridge` 在 satisfiability 裁剪链后运行 guard：`variant.format` 必须等于候选 `EngineTarget.format`，否则该引擎移出**此变体**的链；若链空，**导入期**返回 `ModelPackError::NoCompatibleEngineForVariant { variant_id, format }`。于是"GGUF-only 变体被强塞给 Candle"在**导入期即拒绝**，而非加载期崩溃——结构上根治 F2 的懒校验模式（[code-audits-2026-06-17.md:147-151](../audits/code-audits-2026-06-17.md#L147-L151)）。
+`compile_runtime_bridge` 在 satisfiability 裁剪链后运行 guard：`variant.format` 必须等于候选 `EngineTarget.format`，否则该引擎移出**此变体**的链；若链空，**导入期**返回 `ModelPackError::NoCompatibleEngineForVariant { variant_id, format }`。于是"GGUF-only 变体被强塞给 Candle"在**导入期即拒绝**，而非加载期崩溃——结构上根治 F2 的懒校验模式（[code-audits-2026-06-17.md:147-151](../audits/archive/code-audits-2026-06-17.md#L147-L151)）。
 
 ### 4.6 桥接结构演进
 
@@ -512,7 +512,7 @@ Selected ─dispatch(load_cmd[0])─▶ Loading ─ok─▶ Ready
 
 状态驻于**网关**（每次加载瞬态，不持久化——引擎可用性是动态的：GPU 拔出、VRAM 被他模型释放）。持久态仅存"上次成功引擎" `StoredModelConfig.selected_engine`（冷启动优化，非正确性杠杆）。
 
-**跨 HTTP 边界保留机器可读 code**（根治 F-Stack-3，[code-audits-2026-06-17.md:125-129](../audits/code-audits-2026-06-17.md#L125-L129)）：当前代码复用 runtime reliability 的通用 `RuntimeFailure` 信封，不再新增 `ServerError::RuntimeEngineExhausted` / `AppCoreErrorData::RuntimeEngineExhausted` 特化变体。HTTP 体保持外层 numeric `code = 5000` 兼容旧客户端，机器可读分支走 `data.runtime_code`：
+**跨 HTTP 边界保留机器可读 code**（根治 F-Stack-3，[code-audits-2026-06-17.md:125-129](../audits/archive/code-audits-2026-06-17.md#L125-L129)）：当前代码复用 runtime reliability 的通用 `RuntimeFailure` 信封，不再新增 `ServerError::RuntimeEngineExhausted` / `AppCoreErrorData::RuntimeEngineExhausted` 特化变体。HTTP 体保持外层 numeric `code = 5000` 兼容旧客户端，机器可读分支走 `data.runtime_code`：
 
 ```jsonc
 {
@@ -603,7 +603,7 @@ return Err(AllSourcesExhausted)
 
 ### 5.4 凭证模型：按引用、永不按值
 
-经核实，PMID 脱敏层正确但由**硬编码白名单**驱动（[code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §1.3/§3.2 PMID-F9）：`secret()`（[pmid_service.rs:971-975](../../../crates/slab-config/src/pmid_service.rs#L971-L975)）覆盖 `server.admin.token`/`providers.registry`/`agent.tools.websearch.providers`；`redact_setting_value`（`:977`）对 leaf 与对象/数组内 `api_key` 字段脱敏，写回经 `restore_secret_placeholders`（`:1016`）保留原值。
+经核实，PMID 脱敏层正确但由**硬编码白名单**驱动（[code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) §1.3/§3.2 PMID-F9）：`secret()`（[pmid_service.rs:971-975](../../../crates/slab-config/src/pmid_service.rs#L971-L975)）覆盖 `server.admin.token`/`providers.registry`/`agent.tools.websearch.providers`；`redact_setting_value`（`:977`）对 leaf 与对象/数组内 `api_key` 字段脱敏，写回经 `restore_secret_placeholders`（`:1016`）保留原值。
 
 **v3 规则**：pack **不得**含字面 `api_key`/含凭证的 `api_base`/bearer token，只可引用：
 - **云端**：`cloud.provider_id`（首选）→ 操作员 `chat.providers[id]` 的 `api_key`/`api_key_env`（已由 `providers.registry` 脱敏，[settings/config.rs:11-28](../../../crates/slab-config/src/settings/config.rs#L11-L28)）。
@@ -672,7 +672,7 @@ pack 文件即便外泄也零密钥——这正是"可批量生成、人类可�
 - **文件**：
   - [migrations/20260618000000_model_config_selected_engine.sql](../../../crates/slab-app-core/migrations/)（新，append-only）：`ALTER TABLE model_config_state ADD COLUMN selected_engine TEXT;`（nullable，回填 NULL）。纯加性，无数据转换。
   - [repository/model_config_state.rs](../../../crates/slab-app-core/src/infra/db/repository/model_config_state.rs) + [entities/model_config_state.rs](../../../crates/slab-app-core/src/infra/db/entities/)：读写 `selected_engine`。
-  - [schemas/models.rs](../../../crates/slab-app-core/src/api/schemas/models.rs)：`UpdateModelConfigSelectionRequest`（:213，审计 D5）与 `UnifiedModel` 响应携带 `selected_engine`。**该列经 Rust re-serialize 整列写，禁用 `json_set`**（审计 T1/D4，[code-audits-2026-06-17.md:94-101](../audits/code-audits-2026-06-17.md#L94-L101)）。
+  - [schemas/models.rs](../../../crates/slab-app-core/src/api/schemas/models.rs)：`UpdateModelConfigSelectionRequest`（:213，审计 D5）与 `UnifiedModel` 响应携带 `selected_engine`。**该列经 Rust re-serialize 整列写，禁用 `json_set`**（审计 T1/D4，[code-audits-2026-06-17.md:94-101](../audits/archive/code-audits-2026-06-17.md#L94-L101)）。
 - **关闭**：D5 部分（selected 状态跨表问题的*引擎选择*归口 `model_config_state`）。
 - **校验**：`bun run gen:api` → `bun run test:rust:cargo`。
 - **退出标准**：[v1.d.ts](../../../packages/api/src/v1.d.ts) 暴露 `selected_engine`；round-trip 测试读写一致。
@@ -693,7 +693,7 @@ pack 文件即便外泄也零密钥——这正是"可批量生成、人类可�
 - **文件**：
   - 生成器（`bun run gen:model-packs` 派发处，[infra/model_packs/mod.rs:469](../../../crates/slab-app-core/src/infra/model_packs/mod.rs#L469) 一带）：生成的 pack 也产出 `engines`/`format`/`deployment`；**新增两个 HF 转换器**——① `generation_config.json` → inference payload（采样参数，按 §3.2.1 映射表），② `config.json` `max_position_embeddings` → 顶层 `context_window`（训练 ctx 上限）；**未覆盖字段一律 `warn!`**（不静默丢弃，对齐审计 G4）。无独立 `generation_config` 声明块——inference payload 即生成配置。
   - [schema.rs](../../../crates/slab-model-pack/src/schema.rs)（:10-36 仅发 manifest，审计 F3）：扩展为对 `VariantDocument`/`PresetDocument`/`BackendConfigDocument`/`ComponentDocument`/`AdapterDocument` 也发 `$defs`，并扩展 :69-74 对照测试。否则子文档顶部 `$schema` 指针验证空。
-  - 复审：基于 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) 出一份新审计文档，确认 F1/F2/F3/F4/F5/F8/F-Stack-3 关闭且引擎路径无新发现。
+  - 复审：基于 [code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) 出一份新审计文档，确认 F1/F2/F3/F4/F5/F8/F-Stack-3 关闭且引擎路径无新发现。
 - **关闭**：**F3**（schema 覆盖子文档）。
 - **校验**：`bun run gen:model-packs` → `bun run gen:schemas` → `bun run check:rust` → `bun run test:rust:cargo`。
 - **退出标准**：生成 pack 携带引擎链与归属分离的 variant/preset、顶层 `context_window`（训练 ctx）；inference 由 HF generation_config 代码转换产生、`context_window` 由 config.json 提取（未映射字段 warn）；发布 JSON Schema 覆盖所有子文档 kind；复审显示 F1–F5/F8/F-Stack-3 关闭。
@@ -709,7 +709,7 @@ pack 文件即便外泄也零密钥——这正是"可批量生成、人类可�
 
 ## 附录 A：审计发现 → 规范条款 闭环追溯
 
-| 审计发现（[code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md)） | v3 机制 | 实现阶段 |
+| 审计发现（[code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md)） | v3 机制 | 实现阶段 |
 |---|---|---|
 | **F1** variant.id 重复 last-wins（resolve.rs:147；已发布 pack 带病） | `validate_manifest_references` 导入期发 `DuplicateEntryId`；`variant.format` 取代 `file.id==variant.id` 隐式约定 | Phase 1 + Phase 5（删数据） |
 | **F2** asset-ref / payload 懒校验（pack.rs:197-258；runtime_bridge.rs:362-373） | payload 形态 + asset-ref 校验前移到 `from_bytes`；`format`-based 兼容 guard | Phase 1 + Phase 5 |
@@ -737,4 +737,4 @@ pack 文件即便外泄也零密钥——这正是"可批量生成、人类可�
 
 ---
 
-*本文由首席架构师主导 + Agent Team 三路并行深度设计（本地多引擎/变体 Schema、云端 + 多源下载路由、引擎切换/回滚 + 实施路线图）整合而成，所有 High 级设计点经主架构师直接读源码落地核实（`ModelFamily`/`RuntimeBackendId` 的 `#[non_exhaustive]` 状态、`affects_agent_runtime` 实际行号、`RuntimeBackendId::ALL` 编译集、runtime_bridge 云端硬拒、slab-hub probe/cache/fallback 均已核实）。规范以 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §3.1 的 F1–F11 与 §2.3 跨边界缺陷为闭环目标。*
+*本文由首席架构师主导 + Agent Team 三路并行深度设计（本地多引擎/变体 Schema、云端 + 多源下载路由、引擎切换/回滚 + 实施路线图）整合而成，所有 High 级设计点经主架构师直接读源码落地核实（`ModelFamily`/`RuntimeBackendId` 的 `#[non_exhaustive]` 状态、`affects_agent_runtime` 实际行号、`RuntimeBackendId::ALL` 编译集、runtime_bridge 云端硬拒、slab-hub probe/cache/fallback 均已核实）。规范以 [code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) §3.1 的 F1–F11 与 §2.3 跨边界缺陷为闭环目标。*

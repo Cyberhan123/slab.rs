@@ -4,7 +4,7 @@
 |---|---|
 | Plan ID | C |
 | 关联根因 | R2（状态对齐脆弱） |
-| 上游审计 | [slab-deskotp-audits-2026-6-19.md](../../audits/slab-deskotp-audits-2026-6-19.md) |
+| 上游审计 | [slab-desktop-audits-2026-06-19.md](../../audits/archive/slab-desktop-audits-2026-06-19.md) |
 | 负责域 | Assistant · Media · Hub · Infra(QueryClient/stores) |
 | 状态 | Implemented / Validated (2026-06-21) |
 | 预估总工作量 | L |

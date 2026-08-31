@@ -4,7 +4,7 @@
 |---|---|
 | Plan ID | F |
 | 角色 | 最后一道防线 / 综合收尾 / 风险兜底 |
-| 上游审计 | [slab-deskotp-audits-2026-6-19.md](../../audits/slab-deskotp-audits-2026-6-19.md) |
+| 上游审计 | [slab-desktop-audits-2026-06-19.md](../../audits/archive/slab-desktop-audits-2026-06-19.md) |
 | 依赖 | 承接 Plan A–E 全部任务；自身横切，不产出业务功能 |
 | 状态 | Implemented / Local Validation Complete, Fullstack Blocked |
 | 预估总工作量 | M（持续贯穿 A–E 全周期） |
@@ -262,4 +262,4 @@
 - **节奏**：W0 止损必须最先落地（安全 P0 不可拖）；W1 地基（T-B-7/T-E-1）是后续并行能展开的前提，资源优先向其倾斜。
 - **闭环原则**：任一"接缝"（§2.2）产出方变更，须同步通知消费方并更新本文件 §2.2 与风险登记册——这是本计划作为"逻辑闭环"的核心动作。
 - **不做的事**：本计划不为赶进度而放宽任一保障门；若 F-1/F-2/F-8 任一红线未过，发布推迟。
-- **与审计的关系**：本计划集是对 [slab-deskotp-audits-2026-6-19.md](../../audits/slab-deskotp-audits-2026-6-19.md) 的直接响应；审计中的 9 个 P0 全部映射到 W0/W1 任务卡，无遗漏。
+- **与审计的关系**：本计划集是对 [slab-desktop-audits-2026-06-19.md](../../audits/archive/slab-desktop-audits-2026-06-19.md) 的直接响应；审计中的 9 个 P0 全部映射到 W0/W1 任务卡，无遗漏。

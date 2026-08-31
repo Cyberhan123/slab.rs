@@ -1,6 +1,6 @@
 # 跨进程可靠性、冗余治理与安全收敛专项设计 (2026-06-17)
 
-> **文档定位**：本规划书基于 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §5 的跨模块冗余（R1/R5/R6）、§5.2 的逻辑死角与边界隐患（G1/G2/G3/G6/G7/G8/G9），以及 §2.3 F-Stack-3 的 gRPC 错误跨边界结构损失（general case），在 `slab.rs` 的跨进程层（JSON-RPC 插件宿主、gRPC runtime 网关、进程监督器）上落地一套**路径单一真源、宿主骨架去重、pending-map 有界、task 可监督、错误跨边界保结构**的契约级设计。
+> **文档定位**：本规划书基于 [code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) §5 的跨模块冗余（R1/R5/R6）、§5.2 的逻辑死角与边界隐患（G1/G2/G3/G6/G7/G8/G9），以及 §2.3 F-Stack-3 的 gRPC 错误跨边界结构损失（general case），在 `slab.rs` 的跨进程层（JSON-RPC 插件宿主、gRPC runtime 网关、进程监督器）上落地一套**路径单一真源、宿主骨架去重、pending-map 有界、task 可监督、错误跨边界保结构**的契约级设计。
 >
 > **方法**：首席架构师主导，所有 path:line 证据由主审计员在 2026-06-18（审计发布次日）**直接读源码重新核实**——审计原文行号有 +1 ~ +9 行漂移，且发现两处需纠错的事实（见 §1.3 与对应条款）。本文引用**当前工作树行号**。
 >
@@ -1015,7 +1015,7 @@ HTTP body  +  agent Error{code: "runtime_queue_full", message, i18n}
 
 ## 附录 A：审计发现 → 计划条款 闭环追溯
 
-| 审计发现（[code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md)） | §6 行动项 | 本计划条款 | 实现阶段 | 状态 |
+| 审计发现（[code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md)） | §6 行动项 | 本计划条款 | 实现阶段 | 状态 |
 |---|---|---|---|---|
 | **§5.1 R1** 路径校验 3 套实现混杂（catalog.rs:572-588 / package.rs:203-221 / registry.rs:148-156） | **P0-1** | §3.1 插件 root containment 归 `slab_utils::path::ensure_within_root` 单一真源，两侧 canonicalize；registry/package 保 thin wrapper/错误映射；catalog 模型路径改绝对路径 helper，不套 root containment | Phase 1 | 关闭 |
 | **§5.1 R5** js/py JSON-RPC 宿主 ~95% 重复 ~150 行 | **P1-7** | §3.2 抽 `JsonRpcRuntimeHost`/`RequestHandler`/`serve_reader`/`drain_outbound` 入 `slab_jsonrpc::host` | Phase 2 | 关闭 |
@@ -1144,8 +1144,8 @@ bin/slab-app → bin/slab-server → crates/slab-app-core runtime supervisor
 
 ### 闭环声明
 
-**本计划（Track C：跨进程可靠性、冗余治理与安全收敛）+ model_pack 计划（[slab-model-pack-2026-06-17.md](slab-model-pack-2026-06-17.md)）+ 存储-契约计划 + PMID-设置计划，四份计划合计覆盖审计 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §6 行动表的全部 P0（7/7）、P1（10/10）、P2（9/9）条款。** Track C 无未承接残留；G4 由姊妹计划归属闭环。审计 §6 全表闭环。
+**本计划（Track C：跨进程可靠性、冗余治理与安全收敛）+ model_pack 计划（[slab-model-pack-2026-06-17.md](slab-model-pack-2026-06-17.md)）+ 存储-契约计划 + PMID-设置计划，四份计划合计覆盖审计 [code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) §6 行动表的全部 P0（7/7）、P1（10/10）、P2（9/9）条款。** Track C 无未承接残留；G4 由姊妹计划归属闭环。审计 §6 全表闭环。
 
 ---
 
-*本计划由首席可靠性/安全架构师主导，所有 path:line 证据在 2026-06-18（审计发布次日）由主审计员直接读源码重新核实——审计原文行号有 +1~+9 行漂移，且发现两处需纠错的事实（G6 config_document 实际路径在 slab-app-core 而非 slab-config；G8 OpenAI URL 三处全部位于测试代码非生产路径；R1 第三套 `is_path_within_root` 实为三者中最严谨实现）。本文引用当前工作树行号。规范以 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §5 的 R1/R5/R6 + §5.2 的 G1/G2/G3/G6/G7/G8/G9 + §2.3 F-Stack-3 general case 为闭环目标，与三份姊妹计划一起构成 §6 全表闭环。*
+*本计划由首席可靠性/安全架构师主导，所有 path:line 证据在 2026-06-18（审计发布次日）由主审计员直接读源码重新核实——审计原文行号有 +1~+9 行漂移，且发现两处需纠错的事实（G6 config_document 实际路径在 slab-app-core 而非 slab-config；G8 OpenAI URL 三处全部位于测试代码非生产路径；R1 第三套 `is_path_within_root` 实为三者中最严谨实现）。本文引用当前工作树行号。规范以 [code-audits-2026-06-17.md](../audits/archive/code-audits-2026-06-17.md) §5 的 R1/R5/R6 + §5.2 的 G1/G2/G3/G6/G7/G8/G9 + §2.3 F-Stack-3 general case 为闭环目标，与三份姊妹计划一起构成 §6 全表闭环。*

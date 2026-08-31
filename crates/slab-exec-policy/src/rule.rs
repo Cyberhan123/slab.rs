@@ -47,9 +47,9 @@ pub struct Rule {
     pub matcher: RuleMatcher,
     pub pattern: String,
     /// Optional per-tool-name scope (Claude-Code-style `Bash(git *)`). `None`
-    /// matches any tool of [`category`]; `Some(pattern)` matches only the named
-    /// tool, where `pattern` supports a trailing `*` glob for namespaced tools
-    /// (e.g. `mcp__github__*`).
+    /// matches any tool of this rule's `category`; `Some(pattern)` matches only
+    /// the named tool, where `pattern` supports a trailing `*` glob for
+    /// namespaced tools (e.g. `mcp__github__*`).
     pub tool_name: Option<String>,
     pub source: RuleSource,
 }

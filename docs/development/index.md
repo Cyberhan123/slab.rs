@@ -15,12 +15,12 @@ This section keeps planning artifacts, audits, worklogs, AI-maintenance notes, a
 
 - [slab-core Dataflow Audit](/development/audits/slab-core-dataflow-audit-2026-03-31)
 - [slab Project Audit](/development/audits/slab-project-audit-2026-03-31)
-- [slab Project Audit (2026-04-18)](/development/audits/slab-project-audit-2026-04-18)
+- [slab Project Audit (2026-04-18)](/development/audits/archive/slab-project-audit-2026-04-18)
 - [slab-server Audit](/development/audits/slab-server-audit-2026-03-31)
 - [Runtime Restructure Audit](/development/audits/slab-runtime-restructure-audit-2026-04-20)
 - [Runtime Restructure + Quality Merged Audit](/development/audits/slab-runtime-restructure-and-quality-merged-audit-2026-04-20)
 - [Code Quality Review](/development/audits/code-quality-review-2026-04-20)
-- [Backend + Frontend Merged Audit](/development/audits/backend-frontend-merged-audit-2026-05-26)
+- [Backend + Frontend Merged Audit](/development/audits/archive/backend-frontend-merged-audit-2026-05-26)
 - [Implementation Audit 2026-05-28](/development/audits/slab-implementation-audit-2026-05-28)
 
 ## Guides

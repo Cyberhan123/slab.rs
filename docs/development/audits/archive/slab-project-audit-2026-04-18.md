@@ -1,3 +1,6 @@
+::: warning [Historical snapshot — archived 2026-08-31]
+This audit predates the 2026-08-15 DDD frontend split (`packages/slab-ui` / `packages/slab-core` / thin `slab-desktop` & `slab-web` shells) and the completed Ant Design → shadcn migration. References to `packages/slab-desktop/src/pages`, `antd`, or other retired layouts describe a codebase shape that no longer exists. Treat `AGENTS.md` and current code as the source of truth.
+:::
 # Slab.rs 项目审计报告（2026-04-18，核实修订版）
 
 **日期**: 2026-04-18

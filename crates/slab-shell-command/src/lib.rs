@@ -167,7 +167,7 @@ impl ShellExecutor {
 
     /// Spawn a DETACHED background command: stdout/stderr append to the given
     /// files (no pipes to drain), the tree stays resident, and the returned
-    /// [`BackgroundChild`] hands the caller the wait/kill lifecycle. The
+    /// [`slab_sandboxing::BackgroundChild`] hands the caller the wait/kill lifecycle. The
     /// dangerous-command defense-in-depth check applies exactly as the
     /// foreground path; `timeout_secs` is ignored (background tasks have no
     /// timeout — the caller stops them explicitly).

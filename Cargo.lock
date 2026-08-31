@@ -13897,12 +13897,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "runfiles"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f730e313f0558b5a8e7684197c08464ed9cfbaf4bcc85fc70763d87eec4982c5"
-
-[[package]]
 name = "rusqlite"
 version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16252,7 +16246,6 @@ dependencies = [
  "regex",
  "regex-lite",
  "ring",
- "runfiles",
  "schemars 1.2.1",
  "serde",
  "serde_json",

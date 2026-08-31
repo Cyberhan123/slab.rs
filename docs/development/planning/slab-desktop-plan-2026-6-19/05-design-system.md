@@ -4,7 +4,7 @@
 |---|---|
 | Plan ID | E |
 | 关联根因 | R5（设计系统碎片化） |
-| 上游审计 | [slab-deskotp-audits-2026-6-19.md](../../audits/slab-deskotp-audits-2026-6-19.md) §3.2 |
+| 上游审计 | [slab-desktop-audits-2026-06-19.md](../../audits/archive/slab-desktop-audits-2026-06-19.md) §3.2 |
 | 负责域 | slab-components · layouts · 各 workbench · Monaco |
 | 状态 | Draft / Pending Review |
 | 预估总工作量 | L |

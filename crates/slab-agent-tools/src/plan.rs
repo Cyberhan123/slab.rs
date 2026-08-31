@@ -3,7 +3,7 @@
 //! In Plan interaction mode the agent explores read-only, drafts a durable plan
 //! with `plan`, refines it with `update_plan`, then calls `present_plan` to
 //! request user approval. The durable plan lives in the per-thread
-//! [`PlanStorePort`] (injected into each [`ToolContext`]); these tools are thin
+//! [`slab_agent::PlanStorePort`] (injected into each [`ToolContext`]); these tools are thin
 //! validate/normalize/persist shells over it. The approval gate itself is
 //! driven by the agent turn loop (`slab_agent::turn_tool_call`), which detects
 //! `present_plan` and reuses the existing approval channel — see

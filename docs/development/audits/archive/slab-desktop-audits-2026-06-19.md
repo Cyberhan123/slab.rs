@@ -1,8 +1,11 @@
+::: warning [Historical snapshot — archived 2026-08-31]
+This audit predates the 2026-08-15 DDD frontend split (`packages/slab-ui` / `packages/slab-core` / thin `slab-desktop` & `slab-web` shells) and the completed Ant Design → shadcn migration. References to `packages/slab-desktop/src/pages`, `antd`, or other retired layouts describe a codebase shape that no longer exists. Treat `AGENTS.md` and current code as the source of truth.
+:::
 # Frontend Audit & Alignment Specification: Slab Desktop
 
 - **Audit Date:** 2026-06-19
 - **Status:** Draft / Pending Review
-- **Target Location:** `docs/development/audits/slab-deskotp-audits-2026-6-19.md`
+- **Target Location:** `docs/development/audits/archive/slab-desktop-audits-2026-06-19.md`
 - **Audit Scope:** `packages/slab-desktop`（桌面/Web 前端）↔ `bin/slab-server` `/v1/*` ↔ `crates/slab-app-core` / `bin/slab-runtime`
 - **Frontend Stack:** React 18 · react-router-dom · Ant Design + `antd-style` + `@ant-design/x` · Tailwind · TanStack React Query · Zustand · Tauri · Monaco · xterm
 - **Method:** 7 个领域审计 Agent 并行取证，逐条对照当前代码（非陈旧文档），所有结论附 `file:line` 证据。
