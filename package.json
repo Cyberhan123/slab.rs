@@ -247,7 +247,7 @@
     "vscode-languageclient": "^10.1.0",
     "vscode-languageserver-protocol": "~3.18.2",
     "vscode-languageserver-textdocument": "~1.0.12",
-    "vscode-uri": "~3.1.0",
+    "vscode-uri": "~3.2.0",
     "vscode-ws-jsonrpc": "^3.5.0",
     "wtd-core": "~4.0.1",
     "zod": "^4.4.3",
