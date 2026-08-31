@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
+use std::path::Path;
 use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
@@ -8,6 +9,7 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use serde_json::Value;
+use slab_utils::uds::UnixStream;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{Mutex, Semaphore, mpsc, oneshot};
 use tokio::task::JoinSet;
@@ -194,6 +196,42 @@ where
     serve_reader(host, handler, tokio::io::BufReader::new(reader)).await
 }
 
+/// Serves line-delimited JSON-RPC over the process stdin/stdout.
+///
+/// This is the transport entry point for sidecar runtimes without a host
+/// socket; see [`serve_uds`] for the socket-based variant.
+pub async fn serve_stdio<H>(
+    host: Arc<JsonRpcRuntimeHost>,
+    handler: Arc<H>,
+    outbound: mpsc::UnboundedReceiver<String>,
+) -> std::io::Result<()>
+where
+    H: RequestHandler,
+{
+    serve_io(host, handler, outbound, tokio::io::stdin(), tokio::io::stdout()).await
+}
+
+/// Connects to the host's Unix domain socket and serves line-delimited
+/// JSON-RPC over the stream until either side closes.
+pub async fn serve_uds<H>(
+    host: Arc<JsonRpcRuntimeHost>,
+    handler: Arc<H>,
+    outbound: mpsc::UnboundedReceiver<String>,
+    socket_path: &Path,
+) -> std::io::Result<()>
+where
+    H: RequestHandler,
+{
+    let stream = UnixStream::connect(socket_path).await.map_err(|error| {
+        std::io::Error::other(format!(
+            "failed to connect runtime JSON-RPC socket {}: {error}",
+            socket_path.display()
+        ))
+    })?;
+    let (socket_reader, socket_writer) = tokio::io::split(stream);
+    serve_io(host, handler, outbound, socket_reader, socket_writer).await
+}
+
 pub async fn serve_reader<R, H>(
     host: Arc<JsonRpcRuntimeHost>,
     handler: Arc<H>,
@@ -359,6 +397,7 @@ mod tests {
 
     use super::{
         HostConfig, JsonRpcRuntimeHost, RequestHandler, drain_outbound, serve_io, serve_reader,
+        serve_uds,
     };
 
     #[derive(Default)]
@@ -594,6 +633,63 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(response["result"], json!({"ok": true}));
+        serve.await.expect("join").expect("serve");
+    }
+
+    #[tokio::test]
+    async fn serve_uds_reports_connect_failure_with_socket_path() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let socket_path = temp_dir.path().join("missing.sock");
+        let (host, outbound) = JsonRpcRuntimeHost::with_config(test_config());
+        let host = Arc::new(host);
+        let handler = Arc::new(EchoHandler::default());
+
+        let error = serve_uds(Arc::clone(&host), handler, outbound, &socket_path)
+            .await
+            .expect_err("connect should fail");
+
+        assert!(error.to_string().contains("failed to connect runtime JSON-RPC socket"));
+    }
+
+    #[tokio::test]
+    async fn serve_uds_round_trips_request_over_socket() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let socket_path = temp_dir.path().join("jsonrpc.sock");
+        let mut listener = match slab_utils::uds::UnixListener::bind(&socket_path).await {
+            Ok(listener) => listener,
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                eprintln!("skipping test: failed to bind unix socket: {error}");
+                return;
+            }
+            Err(error) => panic!("failed to bind test socket: {error}"),
+        };
+
+        let (host, outbound) = JsonRpcRuntimeHost::with_config(test_config());
+        let host = Arc::new(host);
+        let handler = Arc::new(EchoHandler::default());
+        let serve = tokio::spawn(async move {
+            serve_uds(Arc::clone(&host), handler, outbound, &socket_path).await
+        });
+
+        let server = listener.accept().await.expect("accept");
+        let (server_reader, mut server_writer) = tokio::io::split(server);
+        server_writer
+            .write_all(br#"{"jsonrpc":"2.0","id":7,"method":"echo","params":{"ok":true}}"#)
+            .await
+            .expect("write request");
+        server_writer.write_all(b"\n").await.expect("write newline");
+        server_writer.shutdown().await.expect("shutdown");
+
+        let mut lines = BufReader::new(server_reader).lines();
+        let line = tokio::time::timeout(Duration::from_secs(1), lines.next_line())
+            .await
+            .expect("response timeout")
+            .expect("read response line")
+            .expect("response line present");
+        let response: Value = serde_json::from_str(&line).expect("response json");
+
+        assert_eq!(response["id"], 7);
         assert_eq!(response["result"], json!({"ok": true}));
         serve.await.expect("join").expect("serve");
     }

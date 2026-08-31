@@ -1,14 +1,13 @@
 //! JSON-RPC handlers for the standalone Slab MCP server process.
 
 use serde_json::{Value, json};
+use slab_jsonrpc::{
+    INVALID_PARAMS, INVALID_REQUEST, JSONRPC_VERSION, METHOD_NOT_FOUND, PARSE_ERROR,
+};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
 const SERVER_NAME: &str = "slab-mcp-server";
 const SERVER_INFO_TOOL: &str = "slab_server_info";
-const PARSE_ERROR: i64 = -32700;
-const INVALID_REQUEST: i64 = -32600;
-const METHOD_NOT_FOUND: i64 = -32601;
-const INVALID_PARAMS: i64 = -32602;
 
 pub fn handle_message(message: Value) -> Option<Value> {
     let id = message.get("id").cloned();
@@ -38,11 +37,7 @@ pub fn handle_message(message: Value) -> Option<Value> {
         }
     };
 
-    Some(json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": result,
-    }))
+    Some(success_response(id, result))
 }
 
 pub fn parse_error_response(message: impl Into<String>) -> Value {
@@ -132,7 +127,7 @@ fn slab_tool_meta(tool: &str, permission: &str) -> Value {
 
 fn success_response(id: Value, result: Value) -> Value {
     json!({
-        "jsonrpc": "2.0",
+        "jsonrpc": JSONRPC_VERSION,
         "id": id,
         "result": result,
     })
@@ -140,7 +135,7 @@ fn success_response(id: Value, result: Value) -> Value {
 
 fn error_response(id: Value, code: i64, message: impl Into<String>) -> Value {
     json!({
-        "jsonrpc": "2.0",
+        "jsonrpc": JSONRPC_VERSION,
         "id": id,
         "error": {
             "code": code,

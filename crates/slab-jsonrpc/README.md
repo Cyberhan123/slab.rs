@@ -16,7 +16,8 @@ helpers:
   field.
 - A reusable sidecar host pipe in `slab_jsonrpc::host` for line-delimited
   JSON-RPC transports, bounded pending requests, request timeouts, outbound
-  draining, and inbound dispatch through a caller-provided `RequestHandler`.
+  draining, and inbound dispatch through a caller-provided `RequestHandler`,
+  with `serve_stdio` / `serve_uds` transport entry points for sidecar runtimes.
 
 The host pipe owns transport mechanics only. Runtime process lifecycle, ready
 payload content, authorization, plugin dispatch, and business routing belong in

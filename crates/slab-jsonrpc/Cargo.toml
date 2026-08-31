@@ -14,6 +14,10 @@ futures = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+slab-utils = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 ts-rs = { workspace = true, features = ["serde-json-impl", "no-serde-warnings"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -4,12 +4,10 @@ use std::sync::Arc;
 use serde_json::Value;
 pub use slab_jsonrpc::host::JsonRpcRuntimeHost;
 use slab_jsonrpc::host::RequestHandler;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
 use crate::PythonRuntime;
 use crate::domain::RuntimeHost;
-use slab_utils::uds::UnixStream;
 
 struct PythonRequestHandler {
     runtime: Arc<PythonRuntime>,
@@ -45,7 +43,8 @@ pub async fn serve_stdio(
     runtime: Arc<PythonRuntime>,
     outbound: mpsc::UnboundedReceiver<String>,
 ) -> anyhow::Result<()> {
-    serve_io(host, runtime, outbound, tokio::io::stdin(), tokio::io::stdout()).await
+    let handler = ready_handler(host.as_ref(), runtime);
+    slab_jsonrpc::host::serve_stdio(host, handler, outbound).await.map_err(Into::into)
 }
 
 pub async fn serve_uds(
@@ -54,31 +53,16 @@ pub async fn serve_uds(
     outbound: mpsc::UnboundedReceiver<String>,
     socket_path: &Path,
 ) -> anyhow::Result<()> {
-    let stream = UnixStream::connect(socket_path).await.map_err(|error| {
-        anyhow::anyhow!(
-            "failed to connect runtime JSON-RPC socket {}: {error}",
-            socket_path.display()
-        )
-    })?;
-    let (socket_reader, socket_writer) = tokio::io::split(stream);
-
-    serve_io(host, runtime, outbound, socket_reader, socket_writer).await
+    let handler = ready_handler(host.as_ref(), runtime);
+    slab_jsonrpc::host::serve_uds(host, handler, outbound, socket_path).await.map_err(Into::into)
 }
 
-async fn serve_io<R, W>(
-    host: Arc<JsonRpcRuntimeHost>,
+fn ready_handler(
+    host: &JsonRpcRuntimeHost,
     runtime: Arc<PythonRuntime>,
-    outbound: mpsc::UnboundedReceiver<String>,
-    reader: R,
-    writer: W,
-) -> anyhow::Result<()>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin + Send + 'static,
-{
+) -> Arc<PythonRequestHandler> {
     host.send_notification("runtime.ready", ready_payload());
-    let handler = Arc::new(PythonRequestHandler { runtime });
-    slab_jsonrpc::host::serve_io(host, handler, outbound, reader, writer).await.map_err(Into::into)
+    Arc::new(PythonRequestHandler { runtime })
 }
 
 fn ready_payload() -> Value {
@@ -89,41 +73,17 @@ fn ready_payload() -> Value {
 }
 
 #[cfg(test)]
-async fn serve_reader<R>(
-    host: Arc<JsonRpcRuntimeHost>,
-    runtime: Arc<PythonRuntime>,
-    reader: R,
-) -> anyhow::Result<()>
-where
-    R: tokio::io::AsyncBufRead + Unpin,
-{
-    let handler = Arc::new(PythonRequestHandler { runtime });
-    slab_jsonrpc::host::serve_reader(host, handler, reader).await.map_err(Into::into)
-}
-
-#[cfg(test)]
-async fn drain_outbound<W>(outbound: mpsc::UnboundedReceiver<String>, writer: W)
-where
-    W: AsyncWrite + Unpin,
-{
-    slab_jsonrpc::host::drain_outbound(outbound, writer).await;
-}
-
-#[cfg(test)]
 mod tests {
-    use std::io;
     use std::path::Path;
-    use std::pin::Pin;
     use std::sync::Arc;
-    use std::task::{Context, Poll};
     use std::time::Duration;
 
     use serde_json::{Value, json};
+    use slab_jsonrpc::host::{serve_io, serve_reader};
     use slab_types::{PluginPermissionsManifest, PluginRuntimeCallRequest};
-    use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-    use tokio::sync::mpsc;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-    use super::{JsonRpcRuntimeHost, drain_outbound, serve_io, serve_reader};
+    use super::{JsonRpcRuntimeHost, PythonRequestHandler, ready_handler, ready_payload};
     use crate::PythonRuntime;
 
     fn plugin_call_request(root_dir: &str) -> PluginRuntimeCallRequest {
@@ -165,9 +125,9 @@ def run(params):\n\
     async fn serve_messages(lines: Vec<Value>) -> Vec<Value> {
         let (host, mut outbound) = JsonRpcRuntimeHost::new();
         let host = Arc::new(host);
-        let runtime = Arc::new(PythonRuntime::new());
+        let handler = Arc::new(PythonRequestHandler { runtime: Arc::new(PythonRuntime::new()) });
         let (mut writer, reader) = tokio::io::duplex(4096);
-        let serve = tokio::spawn(serve_reader(Arc::clone(&host), runtime, BufReader::new(reader)));
+        let serve = tokio::spawn(serve_reader(Arc::clone(&host), handler, BufReader::new(reader)));
 
         for line in lines {
             writer.write_all(format!("{line}\n").as_bytes()).await.expect("write request");
@@ -195,17 +155,11 @@ def run(params):\n\
 
         let (host, mut outbound) = JsonRpcRuntimeHost::new();
         let host = Arc::new(host);
-        host.send_notification(
-            "runtime.ready",
-            json!({
-                "runtime": "slab-python-runtime",
-                "engine": "cpython-pyo3"
-            }),
-        );
-        let runtime = Arc::new(PythonRuntime::new());
+        host.send_notification("runtime.ready", ready_payload());
+        let handler = Arc::new(PythonRequestHandler { runtime: Arc::new(PythonRuntime::new()) });
 
         let (mut writer, reader) = tokio::io::duplex(1024);
-        let serve = tokio::spawn(serve_reader(Arc::clone(&host), runtime, BufReader::new(reader)));
+        let serve = tokio::spawn(serve_reader(Arc::clone(&host), handler, BufReader::new(reader)));
 
         let line = json!({
             "jsonrpc": "2.0",
@@ -252,17 +206,11 @@ def run(params):\n\
     async fn rejects_invalid_jsonrpc_payloads() {
         let (host, mut outbound) = JsonRpcRuntimeHost::new();
         let host = Arc::new(host);
-        host.send_notification(
-            "runtime.ready",
-            json!({
-                "runtime": "slab-python-runtime",
-                "engine": "cpython-pyo3"
-            }),
-        );
-        let runtime = Arc::new(PythonRuntime::new());
+        host.send_notification("runtime.ready", ready_payload());
+        let handler = Arc::new(PythonRequestHandler { runtime: Arc::new(PythonRuntime::new()) });
 
         let (mut writer, reader) = tokio::io::duplex(1024);
-        let serve = tokio::spawn(serve_reader(Arc::clone(&host), runtime, BufReader::new(reader)));
+        let serve = tokio::spawn(serve_reader(Arc::clone(&host), handler, BufReader::new(reader)));
 
         writer.write_all(b"{not json}\n").await.expect("write request");
         writer.shutdown().await.expect("shutdown");
@@ -375,7 +323,7 @@ def run(params):\n\
 
         let (host, outbound) = JsonRpcRuntimeHost::new();
         let host = Arc::new(host);
-        let runtime = Arc::new(PythonRuntime::new());
+        let handler = ready_handler(host.as_ref(), Arc::new(PythonRuntime::new()));
         let (mut input_host, input_runtime) = tokio::io::duplex(4096);
         let (output_runtime, output_host) = tokio::io::duplex(4096);
 
@@ -395,7 +343,7 @@ def run(params):\n\
         input_host.write_all(b"\n").await.unwrap();
         input_host.shutdown().await.unwrap();
 
-        let serve = tokio::spawn(serve_io(host, runtime, outbound, input_runtime, output_runtime));
+        let serve = tokio::spawn(serve_io(host, handler, outbound, input_runtime, output_runtime));
         let mut lines = BufReader::new(output_host).lines();
         let ready: Value =
             serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
@@ -407,58 +355,5 @@ def run(params):\n\
         assert_eq!(ready["method"], "runtime.ready");
         assert_eq!(response["id"], 1);
         assert_eq!(response["result"], json!({ "result": { "value": 3 } }));
-    }
-
-    #[tokio::test]
-    async fn drain_outbound_stops_on_writer_and_flush_failures() {
-        for writer in [FailingWriter::write_error(), FailingWriter::flush_error()] {
-            let (tx, rx) = mpsc::unbounded_channel();
-            tx.send("{}".to_string()).expect("queue message");
-            drop(tx);
-
-            tokio::time::timeout(Duration::from_secs(1), drain_outbound(rx, writer))
-                .await
-                .expect("drain should stop on writer failure");
-        }
-    }
-
-    struct FailingWriter {
-        fail_on_write: bool,
-    }
-
-    impl FailingWriter {
-        fn write_error() -> Self {
-            Self { fail_on_write: true }
-        }
-
-        fn flush_error() -> Self {
-            Self { fail_on_write: false }
-        }
-    }
-
-    impl AsyncWrite for FailingWriter {
-        fn poll_write(
-            self: Pin<&mut Self>,
-            _cx: &mut Context<'_>,
-            buf: &[u8],
-        ) -> Poll<io::Result<usize>> {
-            if self.fail_on_write {
-                Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "write failed")))
-            } else {
-                Poll::Ready(Ok(buf.len()))
-            }
-        }
-
-        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-            if self.fail_on_write {
-                Poll::Ready(Ok(()))
-            } else {
-                Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "flush failed")))
-            }
-        }
-
-        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
     }
 }
