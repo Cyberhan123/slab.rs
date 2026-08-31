@@ -215,7 +215,7 @@
     "openapi-fetch": "^0.17.0",
     "openapi-react-query": "^0.5.4",
     "openapi-typescript": "^7.13.0",
-    "oxlint": "^1.79.0",
+    "oxlint": "^1.80.0",
     "playwright": "^1.62.1",
     "postcss": "^8.5.26",
     "radix-ui": "^1.6.7",
