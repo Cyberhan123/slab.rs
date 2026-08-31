@@ -73,6 +73,17 @@ pub fn register_all_tools(
     shell_bash_path: Option<PathBuf>,
     background_tasks: Arc<BackgroundTaskRegistry>,
 ) {
+    // Fail loud(er): a missing workspace root silently degrades the suite —
+    // apply_patch/git tools stay unregistered (while `tool_search` keeps
+    // advertising discovery) and the fs tools lose their path constraint,
+    // resolving relatives against the PROCESS cwd instead. A warn in the log
+    // beats a model silently working against the wrong root.
+    if workspace_root.is_none() {
+        tracing::warn!(
+            "registering agent tools WITHOUT a workspace root: apply_patch and the git tools \
+             are not registered, and file tools resolve relative paths against the process cwd"
+        );
+    }
     router.register(Box::new(
         ShellTool::new(
             workspace_root.clone(),

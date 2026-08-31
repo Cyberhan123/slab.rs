@@ -68,23 +68,30 @@ fn classify_shell(shell: &str, flag: &str) -> Option<ApplyPatchShell> {
     })
 }
 
-fn can_skip_flag(shell: &str, flag: &str) -> bool {
-    classify_shell_name(shell).is_some_and(|name| {
-        matches!(name.as_str(), "pwsh" | "powershell") && flag.eq_ignore_ascii_case("-noprofile")
-    })
+/// Shell-neutral hygiene flags that may precede the command flag without
+/// changing what the script is: bash `--noprofile`/`--norc` (the agent shell
+/// launcher uses them instead of a login shell), PowerShell
+/// `-NoLogo`/`-NoProfile`/`-NonInteractive`, cmd `/S`. Anything else
+/// (`-x`, `-e`, `-o`, …) changes execution semantics and must not be skipped.
+fn is_ignorable_shell_option(flag: &str) -> bool {
+    let flag = flag.to_ascii_lowercase();
+    matches!(
+        flag.as_str(),
+        "--noprofile" | "--norc" | "-nologo" | "-noprofile" | "-noninteractive" | "/s"
+    )
 }
 
 fn parse_shell_script(argv: &[String]) -> Option<(ApplyPatchShell, &str)> {
-    match argv {
-        [shell, flag, script] => classify_shell(shell, flag).map(|shell_type| {
-            let script = script.as_str();
-            (shell_type, script)
-        }),
-        [shell, skip_flag, flag, script] if can_skip_flag(shell, skip_flag) => {
-            classify_shell(shell, flag).map(|shell_type| {
-                let script = script.as_str();
-                (shell_type, script)
-            })
+    let (shell, rest) = (argv.first()?, &argv[1..]);
+    // Skip leading hygiene flags up to the command flag (`-c`/`-Command`/`/C`),
+    // so `bash --noprofile --norc -c <script>` parses like `bash -c <script>`.
+    let mut index = 0;
+    while index < rest.len() && is_ignorable_shell_option(&rest[index]) {
+        index += 1;
+    }
+    match rest.get(index..index + 2)? {
+        [flag, script] => {
+            classify_shell(shell, flag).map(|shell_type| (shell_type, script.as_str()))
         }
         _ => None,
     }
@@ -419,6 +426,13 @@ mod tests {
         strs_to_strings(&["pwsh", "-NoProfile", "-Command", script])
     }
 
+    /// The PRODUCTION agent shell argv shape: `slab-shell-command` runs bash
+    /// non-login/non-rc (`--noprofile --norc -c`), so the parser must skip
+    /// the hygiene flags to still intercept apply_patch through the shell.
+    fn args_bash_production(script: &str) -> Vec<String> {
+        strs_to_strings(&["bash", "--noprofile", "--norc", "-c", script])
+    }
+
     fn args_cmd(script: &str) -> Vec<String> {
         strs_to_strings(&["cmd.exe", "/c", script])
     }
@@ -491,6 +505,24 @@ mod tests {
             .await,
             MaybeApplyPatchVerified::CorrectnessError(ApplyPatchError::ImplicitInvocation)
         );
+    }
+
+    /// Regression: the production bash argv (`--noprofile --norc -c`) must
+    /// still be recognized as a shell-wrapped apply_patch (the hygiene flags
+    /// are skipped by the parser, not treated as the command flag).
+    #[tokio::test]
+    async fn test_production_bash_argv_with_hygiene_flags_parses() {
+        let script = heredoc_script("");
+        let args = args_bash_production(&script);
+        assert_match_args(args, None);
+    }
+
+    /// Execution-semantics flags (`-x`, `-e`) are NOT skipped: a script run
+    /// under them is not the plain `bash -c` form this parser trusts.
+    #[test]
+    fn test_semantic_shell_flags_are_not_skipped() {
+        let args = strs_to_strings(&["bash", "-x", "-c", &heredoc_script("")]);
+        assert_matches!(maybe_parse_apply_patch(&args), MaybeApplyPatch::NotApplyPatch);
     }
 
     #[tokio::test]

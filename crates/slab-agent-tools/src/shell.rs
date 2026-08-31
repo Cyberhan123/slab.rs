@@ -153,7 +153,7 @@ impl ToolHandler for ShellTool {
             .to_string();
         // Models sometimes pretty-print tool-call JSON with the command value
         // starting (or ending) on its own line, e.g. {"command": "\nls -la"}.
-        // `bash -lc $'\nls'` then treats the command as starting on line 2 and
+        // `bash -c $'\nls'` then treats the command as starting on line 2 and
         // reports `line 2: syntax error` for perfectly valid single-line
         // commands — trim both ends before execution. (Fixing this at the tool
         // layer covers every producer: streaming increments, non-streaming
@@ -539,7 +539,7 @@ mod tests {
     }
 
     /// P8 regression: leading/trailing newlines around the command (from
-    /// pretty-printed tool-call JSON) must be trimmed so `bash -lc` does not
+    /// pretty-printed tool-call JSON) must be trimmed so `bash -c` does not
     /// see the command "starting on line 2".
     #[tokio::test]
     async fn shell_tool_trims_leading_and_trailing_whitespace() {
@@ -683,6 +683,32 @@ mod tests {
         let output = result.expect("execute");
         let value: Value = serde_json::from_str(&output.content).expect("json");
         assert_eq!(value["exit_code"], 0, "stderr: {}", value["stderr"]);
+    }
+
+    /// Harness-review regression: `2>/dev/null` — the most common shell
+    /// silencing idiom — must survive the FULL production path (guard ->
+    /// platform sandbox driver -> bash). The guard used to join the target
+    /// with the cwd (`C:\…\dev\null`) and refuse the command outright.
+    #[tokio::test]
+    async fn shell_tool_runs_dev_null_redirection_through_platform_driver() {
+        use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
+
+        let workspace = PathBuf::from(".");
+        let env = SandboxEnvironment::new(Some(workspace.clone()), SandboxPolicy::WorkspaceWrite);
+        let driver = create_platform_driver(env).expect("platform driver");
+        if !driver.setup_status().available {
+            eprintln!("skipping: platform driver unavailable");
+            return;
+        }
+
+        let tool = ShellTool::new(Some(workspace), Some(driver), ShellLauncher::Auto, None);
+        let output = tool
+            .execute(&ctx(), &json!({ "command": "echo dev-null-marker 2>/dev/null" }))
+            .await
+            .expect("dev-null redirection run");
+        let value: Value = serde_json::from_str(&output.content).expect("json");
+        assert_eq!(value["exit_code"], 0, "stderr: {}", value["stderr"]);
+        assert!(value["stdout"].as_str().unwrap_or("").contains("dev-null-marker"));
     }
 
     /// Background contract: `shell background=true` returns immediately with a

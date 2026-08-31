@@ -107,6 +107,12 @@ struct TaskSlot {
 pub struct BackgroundTaskRegistry {
     tasks: Mutex<HashMap<String, TaskSlot>>,
     next_id: std::sync::atomic::AtomicU64,
+    /// Per-registry (process) nonce embedded in every task id. The registry
+    /// is in-memory only, so after a server restart the counter restarts at
+    /// `bg-…-1` — without the nonce, a restarted server's first task would
+    /// CREATE/TRUNCATE the log files of a pre-restart task in the same
+    /// thread's artifact directory.
+    id_nonce: String,
     event_sink: Option<Arc<dyn BackgroundTaskEventSink>>,
 }
 
@@ -118,18 +124,26 @@ impl Default for BackgroundTaskRegistry {
 
 impl BackgroundTaskRegistry {
     pub fn new(event_sink: Option<Arc<dyn BackgroundTaskEventSink>>) -> Self {
+        // Time + pid keep ids from colliding across restarts and concurrent
+        // registries (tests); monotonicity is not required, uniqueness is.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let id_nonce = format!("{:x}{:x}", nanos, std::process::id());
         Self {
             tasks: Mutex::new(HashMap::new()),
             next_id: std::sync::atomic::AtomicU64::new(1),
+            id_nonce,
             event_sink,
         }
     }
 
     /// Allocate the next task id (callers need it BEFORE spawning, to place
-    /// the output files).
+    /// the output files). Format: `bg-<nonce>-<n>` — see [`Self::id_nonce`].
     pub fn alloc_task_id(&self) -> String {
         let n = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        format!("bg-{n}")
+        format!("bg-{}-{n}", self.id_nonce)
     }
 
     /// Where a task's output files live:
@@ -261,7 +275,8 @@ impl BackgroundTaskRegistry {
     }
 
     /// Evict the OLDEST terminal slots beyond the retention bound (insertion
-    /// order is approximated by the numeric id suffix).
+    /// order is approximated by the numeric id suffix after the nonce:
+    /// `bg-<nonce>-<n>`).
     fn prune_terminal(tasks: &mut HashMap<String, TaskSlot>) {
         let terminal: Vec<(u64, String)> = tasks
             .iter()
@@ -270,7 +285,10 @@ impl BackgroundTaskRegistry {
                     != BackgroundTaskStatus::Running
             })
             .filter_map(|(id, _)| {
-                id.strip_prefix("bg-").and_then(|n| n.parse::<u64>().ok()).map(|n| (n, id.clone()))
+                id.strip_prefix("bg-")
+                    .and_then(|rest| rest.rsplit_once('-'))
+                    .and_then(|(_, n)| n.parse::<u64>().ok())
+                    .map(|n| (n, id.clone()))
             })
             .collect();
         if terminal.len() > MAX_RETAINED_TERMINAL_TASKS {
@@ -654,5 +672,31 @@ impl ToolHandler for TaskStopTool {
             content: serde_json::json!({ "stopped": snapshot_json(&task) }).to_string(),
             metadata: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: after a restart the counter restarts at 1, so ids must
+    /// carry a per-registry nonce — otherwise a new task would CREATE/TRUNCATE
+    /// a pre-restart task's log directory in the same thread.
+    #[test]
+    fn task_ids_carry_a_per_registry_nonce_and_increment() {
+        let registry = BackgroundTaskRegistry::default();
+        let first = registry.alloc_task_id();
+        let second = registry.alloc_task_id();
+
+        // `bg-<nonce>-<n>` shape with a shared nonce and incrementing counter.
+        let nonce = first
+            .strip_prefix("bg-")
+            .and_then(|rest| rest.rsplit_once('-'))
+            .map(|(nonce, _)| nonce)
+            .expect("nonce segment");
+        assert_eq!(second, format!("bg-{nonce}-2"), "{first} vs {second}");
+
+        // A fresh registry (server restart) never reuses the id space.
+        assert_ne!(first, BackgroundTaskRegistry::default().alloc_task_id());
     }
 }

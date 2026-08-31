@@ -12,6 +12,21 @@ use std::path::Path;
 
 use slab_agent::AgentError;
 
+/// Map a [`slab_file::FileSystemError`] to a tool error without leaking the
+/// OS-localized io message: the `Io` variant is routed through
+/// [`io_tool_error`]; every other variant already renders a stable,
+/// coded English message (`workspace path … is invalid`, etc.).
+pub(crate) fn file_system_tool_error(
+    action: &str,
+    path: &Path,
+    error: slab_file::FileSystemError,
+) -> AgentError {
+    match error {
+        slab_file::FileSystemError::Io(io) => io_tool_error(action, path, &io),
+        other => AgentError::ToolExecution(other.to_string()),
+    }
+}
+
 /// Map an io error from a filesystem action on `path` to a stable, coded,
 /// English tool error.
 pub(crate) fn io_tool_error(action: &str, path: &Path, error: &std::io::Error) -> AgentError {

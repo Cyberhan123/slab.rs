@@ -285,9 +285,20 @@ impl ResolvedShell {
     /// Build the argv that launches `command` through this shell.
     fn argv(&self, command: &str) -> Vec<String> {
         match self {
-            ResolvedShell::Bash(path) => {
-                vec![path.to_string_lossy().into_owned(), "-lc".to_string(), command.to_string()]
-            }
+            // `--noprofile --norc` (matching PowerShell's `-NoProfile`): a
+            // LOGIN shell made every command inherit `~/.bash_profile` —
+            // profile echos polluted stdout, a profile `set -e` aborted
+            // perfectly valid commands, and `conda init` slowed every spawn.
+            // Coreutils still resolve: the MSYS runtime prepends its own
+            // `/mingw64/bin:/usr/bin` to PATH, and the server's inherited
+            // Windows PATH keeps user-installed tools reachable.
+            ResolvedShell::Bash(path) => vec![
+                path.to_string_lossy().into_owned(),
+                "--noprofile".to_string(),
+                "--norc".to_string(),
+                "-c".to_string(),
+                command.to_string(),
+            ],
             ResolvedShell::PowerShell => vec![
                 "powershell.exe".to_string(),
                 "-NoLogo".to_string(),
@@ -585,10 +596,13 @@ mod tests {
             ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "date +%A"]
         );
 
-        // Bash argv shape: `<bash> -lc <cmd>` (test the pure argv builder, not
-        // PATH resolution — see resolve_bash_honors_explicit_existing_path...).
+        // Bash argv shape: `<bash> --noprofile --norc -c <cmd>` (non-login,
+        // non-rc — profile side effects must not leak into agent commands).
         let bash = ResolvedShell::Bash(PathBuf::from("/usr/local/bin/bash"));
-        assert_eq!(bash.argv("echo hi"), ["/usr/local/bin/bash", "-lc", "echo hi"]);
+        assert_eq!(
+            bash.argv("echo hi"),
+            ["/usr/local/bin/bash", "--noprofile", "--norc", "-c", "echo hi"]
+        );
 
         let cmd = ShellLauncher::Cmd.resolve(None);
         assert_eq!(cmd.argv("dir"), ["cmd.exe", "/S", "/C", "dir"]);

@@ -78,6 +78,10 @@ pub(crate) struct AppContextSources {
     /// PARENT memory root; the read side routes to the current project's
     /// store under `<memory_root>/projects/<key>/`.
     memory_root: PathBuf,
+    /// The LIVE tool router — the single source of truth for what the
+    /// dispatch layer can actually route to (registration is rebuilt on
+    /// workspace open/close via `refresh_workspace_tools`).
+    tool_router: Arc<slab_agent::ToolRouter>,
     /// Per-thread recall selections (surfaced-memory dedup). Bounded by
     /// TTL + capacity; entries are dropped on thread end (`evict_thread`).
     recall_cache: Arc<DashMap<String, RecallCacheEntry>>,
@@ -90,6 +94,7 @@ impl AppContextSources {
         exec_policy: Arc<dyn slab_exec_policy::ExecPolicyPort>,
         memory_config: slab_config::AgentMemoriesConfig,
         memory_root: PathBuf,
+        tool_router: Arc<slab_agent::ToolRouter>,
     ) -> Self {
         Self {
             model_state,
@@ -97,6 +102,7 @@ impl AppContextSources {
             exec_policy,
             memory_config,
             memory_root,
+            tool_router,
             recall_cache: Arc::new(DashMap::new()),
         }
     }
@@ -235,6 +241,16 @@ fn map_baseline(baseline: slab_exec_policy::PermissionBaseline) -> PermissionBas
 impl AgentContextSources for AppContextSources {
     fn workspace_root(&self) -> Option<PathBuf> {
         workspace_root_from_config(self.model_state.config())
+    }
+
+    /// Single source of truth: the LIVE tool router, not a re-derivation of
+    /// the config. Registration is rebuilt on workspace open/close, so a
+    /// config-derived answer can drift from the actual tool table mid-flight
+    /// and the prompt would tell the model to prefer a tool it cannot call
+    /// (or stay silent about one it can). Router truth makes the prompt's
+    /// claim a subset of the dispatchable set by construction.
+    fn apply_patch_registered(&self) -> bool {
+        self.tool_router.get("apply_patch").is_some()
     }
 
     fn app_home_skills_dir(&self) -> PathBuf {

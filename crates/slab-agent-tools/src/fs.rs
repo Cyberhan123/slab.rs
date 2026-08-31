@@ -17,6 +17,12 @@ const MAX_LINES: usize = 1000;
 const MAX_CONTENT_BYTES: usize = 48 * 1024;
 /// Head fraction of the kept budget when the byte cap fires.
 const CONTENT_HEAD_RATIO: f32 = 0.7;
+/// Files at or below this size take the simple full-read path (bounded,
+/// transient allocation). Anything larger is only served through an explicit
+/// narrow line window, streamed line by line — a whole-file read of a
+/// multi-GB log is a memory spike (read + lossy copy) that the 48KB context
+/// budget never needed.
+const MAX_INLINE_READ_BYTES: u64 = 8 * 1024 * 1024;
 
 pub struct ReadFileTool {
     pub workspace_root: Option<PathBuf>,
@@ -54,8 +60,11 @@ impl ToolHandler for ReadFileTool {
          marker inserted when more lines remain — page with \
          start_line/end_line); content is additionally bounded to 48KB \
          (head+tail kept, middle omitted with a marker) and the full selected \
-         range is spilled to an artifact. start_line past the end of the file \
-         is an error, not an empty result."
+         range is spilled to an artifact. Files over 8MB are only served \
+         through an explicit start_line/end_line window (max 1000 lines) — \
+         a range-less read of an oversized file is refused with an error \
+         pointing at grep. start_line past the end of the file is an error, \
+         not an empty result."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -87,44 +96,88 @@ impl ToolHandler for ReadFileTool {
         let start_line = arguments.get("start_line").and_then(Value::as_u64).unwrap_or(1) as usize;
         let end_line = arguments.get("end_line").and_then(Value::as_u64).map(|v| v as usize);
         let path = resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
-        // Read raw BYTES: content must be byte-faithful. Normalizing through
-        // `read_to_string` + `lines()` used to strip every `\r` (a CRLF file
-        // re-read short) and report the NORMALIZED length as `total_bytes`
-        // instead of the on-disk size. `split_inclusive('\n')` keeps each
-        // line's terminator (and the `\r` before it) verbatim, including a
-        // trailing newline.
-        let bytes = tokio::fs::read(&path)
+        // Stat FIRST: the on-disk size both gates the read strategy (inline vs
+        // streamed window) and is the reported `total_bytes` — no multi-GB
+        // allocation just to discover the file is huge.
+        let metadata = tokio::fs::metadata(&path)
             .await
             .map_err(|error| crate::error::io_tool_error("read file", &path, &error))?;
-        let total_bytes = bytes.len();
-        let raw = String::from_utf8_lossy(&bytes);
-        let lines: Vec<&str> = raw.split_inclusive('\n').collect();
-        let total = lines.len();
-
+        let total_bytes = metadata.len();
         let start_idx = start_line.saturating_sub(1);
-        if start_idx >= total {
-            // Paging past EOF is a client error, not an empty result: the old
-            // silent-empty behavior read as "file is empty" and misdirected
-            // the model.
-            return Err(AgentError::ToolExecution(format!(
-                "read_file: start_line {start_line} is past the end of the file ({total} lines); \
-                 request an existing line range"
-            )));
-        }
 
-        let requested_end = end_line.map(|end| end.min(total)).unwrap_or(total);
-        let capped_end = requested_end.min(start_idx + MAX_LINES);
-        let line_cap_truncated = capped_end < requested_end;
-        let selected = lines.get(start_idx..capped_end).unwrap_or(&[]);
+        // Oversized files are only served through an explicit narrow window,
+        // streamed line by line (memory bounded by the window, not the file).
+        // `total_lines` is then unknown unless the scan reached EOF (null in
+        // the envelope instead of a made-up number).
+        let (selected_content, returned_lines, total_lines, line_cap_truncated) = if total_bytes
+            > MAX_INLINE_READ_BYTES
+        {
+            let Some(end) = end_line else {
+                return Err(AgentError::ToolExecution(format!(
+                    "[file.too_large] read_file: '{}' is {} bytes (inline limit {} bytes); \
+                         re-read with an explicit start_line/end_line window \
+                         (max {MAX_LINES} lines per call) or use grep to locate the content",
+                    path.display(),
+                    total_bytes,
+                    MAX_INLINE_READ_BYTES
+                )));
+            };
+            if end.saturating_sub(start_idx) > MAX_LINES {
+                return Err(AgentError::ToolExecution(format!(
+                    "[file.too_large] read_file: '{}' is {} bytes (inline limit {} bytes); \
+                         narrow the window to at most {MAX_LINES} lines \
+                         (start_line={start_line}, end_line={end}) or use grep",
+                    path.display(),
+                    total_bytes,
+                    MAX_INLINE_READ_BYTES
+                )));
+            }
+            let window = read_narrow_window(&path, start_idx, end).await?;
+            if window.start_past_end {
+                return Err(AgentError::ToolExecution(format!(
+                    "read_file: start_line {start_line} is past the end of the file \
+                         ({} lines); request an existing line range",
+                    window.total_lines.unwrap_or(0)
+                )));
+            }
+            (window.content, window.returned_lines, window.total_lines, false)
+        } else {
+            // Read raw BYTES: content must be byte-faithful. Normalizing
+            // through `read_to_string` + `lines()` used to strip every
+            // `\r` (a CRLF file re-read short) and report the NORMALIZED
+            // length as `total_bytes` instead of the on-disk size.
+            // `split_inclusive('\n')` keeps each line's terminator (and
+            // the `\r` before it) verbatim, including a trailing newline.
+            let bytes = tokio::fs::read(&path)
+                .await
+                .map_err(|error| crate::error::io_tool_error("read file", &path, &error))?;
+            let raw = String::from_utf8_lossy(&bytes);
+            let lines: Vec<&str> = raw.split_inclusive('\n').collect();
+            let total = lines.len();
+            if start_idx >= total {
+                // Paging past EOF is a client error, not an empty result:
+                // the old silent-empty behavior read as "file is empty"
+                // and misdirected the model.
+                return Err(AgentError::ToolExecution(format!(
+                    "read_file: start_line {start_line} is past the end of the file ({total} lines); \
+                         request an existing line range"
+                )));
+            }
+            let requested_end = end_line.map(|end| end.min(total)).unwrap_or(total);
+            let capped_end = requested_end.min(start_idx + MAX_LINES);
+            let line_cap_truncated = capped_end < requested_end;
+            let selected = lines.get(start_idx..capped_end).unwrap_or(&[]);
+            (selected.concat(), selected.len(), Some(total), line_cap_truncated)
+        };
 
-        let selected_content = selected.concat();
         let mut joined = selected_content.clone();
         if line_cap_truncated {
             // Match the byte-cap contract: an explicit omission signal with a
             // narrowing hint, never a silent head-only cut.
+            let total = total_lines.unwrap_or(0);
             joined.push_str(&format!(
                 "\n[... {} of {total} lines omitted — narrow the range with start_line/end_line ...]\n",
-                total - capped_end
+                total.saturating_sub(start_idx + returned_lines)
             ));
         }
         let (bounded, omitted_bytes) =
@@ -150,8 +203,8 @@ impl ToolHandler for ReadFileTool {
 
         let mut envelope = serde_json::json!({
             "content": bounded,
-            "total_lines": total,
-            "returned_lines": selected.len(),
+            "total_lines": total_lines,
+            "returned_lines": returned_lines,
             "total_bytes": total_bytes,
             "omitted_bytes": omitted_bytes,
             "truncated": line_cap_truncated || omitted_bytes > 0
@@ -162,6 +215,67 @@ impl ToolHandler for ReadFileTool {
 
         Ok(ToolOutput { content: envelope.to_string(), metadata: None })
     }
+}
+
+/// A streamed line-window read over an oversized file.
+struct NarrowWindow {
+    /// Byte-faithful content of the `[start_line, end_line]` window
+    /// (lossy-decoded per line — `read_until(b'\n')` never splits a UTF-8
+    /// sequence because multibyte continuation bytes never equal `\n`).
+    content: String,
+    /// Lines inside the window.
+    returned_lines: usize,
+    /// Total line count when the scan reached EOF; `None` when it stopped at
+    /// `end_line` first (the rest of the file was not read).
+    total_lines: Option<usize>,
+    /// The file ended before `start_line` (start past the end).
+    start_past_end: bool,
+}
+
+/// Stream `[start_idx + 1 ..= end]` (1-based inclusive) from `path` without
+/// holding the file in memory: `read_until(b'\n')` per line, collecting only
+/// the lines inside the window. The scan stops at `end` (or EOF).
+async fn read_narrow_window(
+    path: &std::path::Path,
+    start_idx: usize,
+    end: usize,
+) -> Result<NarrowWindow, AgentError> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| crate::error::io_tool_error("read file", path, &error))?;
+    let mut reader = BufReader::new(file);
+    let mut window = NarrowWindow {
+        content: String::new(),
+        returned_lines: 0,
+        total_lines: None,
+        start_past_end: false,
+    };
+    let mut line_no: usize = 0;
+    let mut line_buf: Vec<u8> = Vec::with_capacity(512);
+    loop {
+        if line_no >= end {
+            break;
+        }
+        line_buf.clear();
+        let read = reader
+            .read_until(b'\n', &mut line_buf)
+            .await
+            .map_err(|error| crate::error::io_tool_error("read file", path, &error))?;
+        if read == 0 {
+            // EOF: the total line count is now known.
+            window.total_lines = Some(line_no);
+            window.start_past_end = start_idx >= line_no;
+            break;
+        }
+        line_no += 1;
+        if line_no > start_idx {
+            window.content.push_str(&String::from_utf8_lossy(&line_buf));
+            window.returned_lines += 1;
+        }
+    }
+    Ok(window)
 }
 
 pub struct WriteFileTool {
@@ -321,7 +435,11 @@ impl ToolHandler for ListDirTool {
         let path = string_arg(arguments, "path")?;
         let path = resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
         let entries =
-            slab_file::list_dir(None, &path.to_string_lossy()).await.map_err(to_tool_error)?;
+            slab_file::list_dir(None, &path.to_string_lossy()).await.map_err(|error| {
+                // Route the localized io message through the coded mapper; a
+                // bare `to_string()` used to leak "系统找不到指定的路径。".
+                crate::error::file_system_tool_error("list directory", &path, error)
+            })?;
 
         Ok(ToolOutput {
             content: serde_json::json!({ "entries": entries }).to_string(),
@@ -457,6 +575,24 @@ mod tests {
             .execute(&ctx(), &json!({"path": "does_not_exist.txt"}))
             .await
             .expect_err("missing file");
+        let rendered = error.to_string();
+        assert!(rendered.contains("[io.not_found]"), "{rendered}");
+        assert!(rendered.contains("not found"), "{rendered}");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Same P5 contract for `list_dir`: a missing directory must report a
+    /// coded English error, not the OS-localized "系统找不到指定的路径。".
+    #[tokio::test]
+    async fn list_dir_reports_coded_error_for_missing_directory() {
+        let root = temp_root("missing_list");
+        let tool = ListDirTool::new(Some(root.clone()));
+
+        let error = tool
+            .execute(&ctx(), &json!({"path": "does_not_exist"}))
+            .await
+            .expect_err("missing directory");
         let rendered = error.to_string();
         assert!(rendered.contains("[io.not_found]"), "{rendered}");
         assert!(rendered.contains("not found"), "{rendered}");
@@ -617,6 +753,79 @@ mod tests {
         assert!(reference.ends_with("-t0.txt"));
         let spilled = fs::read_to_string(root.join(reference)).expect("artifact exists");
         assert_eq!(spilled.len(), content.len(), "artifact holds the full content");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// ~112-byte padded line so 90k lines clear the 8MB inline limit.
+    fn huge_line(idx: usize) -> String {
+        format!("line-{idx:06}-{}\n", "x".repeat(100))
+    }
+
+    fn huge_file_content() -> String {
+        (0..90_000).map(huge_line).collect::<Vec<_>>().concat()
+    }
+
+    /// Oversized files (over [`MAX_INLINE_READ_BYTES`]) never take the
+    /// whole-file read path: without an explicit line window the call fails
+    /// with a coded, actionable error instead of a memory spike.
+    #[tokio::test]
+    async fn read_file_oversized_without_range_errors_with_guidance() {
+        let root = temp_root("read_oversized");
+        let content = huge_file_content();
+        assert!(content.len() as u64 > MAX_INLINE_READ_BYTES);
+        fs::write(root.join("huge.log"), &content).expect("seed file");
+        let tool = ReadFileTool::new(Some(root.clone()));
+
+        let error = tool
+            .execute(&ctx(), &json!({"path": "huge.log"}))
+            .await
+            .expect_err("oversized read without a range");
+        let rendered = error.to_string();
+        assert!(rendered.contains("[file.too_large]"), "{rendered}");
+        assert!(rendered.contains("start_line/end_line"), "{rendered}");
+        assert!(rendered.contains("grep"), "{rendered}");
+
+        // A window wider than MAX_LINES is rejected with a narrowing hint.
+        let error = tool
+            .execute(&ctx(), &json!({"path": "huge.log", "end_line": 5_000}))
+            .await
+            .expect_err("oversized read with a too-wide window");
+        assert!(error.to_string().contains("narrow the window"), "{}", error);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// An oversized file with a narrow window is served via the streamed path:
+    /// byte-faithful content, `total_lines` null when the scan stopped at
+    /// `end_line` (the rest of the file was never read).
+    #[tokio::test]
+    async fn read_file_oversized_serves_streamed_narrow_window() {
+        let root = temp_root("read_stream");
+        let content = huge_file_content();
+        assert!(content.len() as u64 > MAX_INLINE_READ_BYTES);
+        fs::write(root.join("huge.log"), &content).expect("seed file");
+        let tool = ReadFileTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": "huge.log", "start_line": 50_000, "end_line": 50_002}))
+            .await
+            .expect("streamed window");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        let expected = [huge_line(49_999), huge_line(50_000), huge_line(50_001)].concat();
+        assert_eq!(value["content"], expected);
+        assert_eq!(value["returned_lines"], 3);
+        assert_eq!(value["total_lines"], Value::Null, "stopped at end_line: total unknown");
+        assert_eq!(value["truncated"], false);
+        assert_eq!(value["total_bytes"].as_u64().expect("total"), content.len() as u64);
+
+        // A window whose start is past EOF scans to EOF and reports the real
+        // line count (both known there).
+        let error = tool
+            .execute(&ctx(), &json!({"path": "huge.log", "start_line": 90_001, "end_line": 90_002}))
+            .await
+            .expect_err("past the end");
+        assert!(error.to_string().contains("past the end of the file (90000 lines)"), "{}", error);
 
         let _ = fs::remove_dir_all(root);
     }

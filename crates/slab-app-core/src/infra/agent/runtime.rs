@@ -240,6 +240,7 @@ impl AgentRuntimeReloader {
                     exec_policy,
                     memory_config,
                     memory_root,
+                    Arc::clone(&self.tool_router),
                 ),
             ))),
         ]

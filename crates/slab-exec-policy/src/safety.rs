@@ -112,15 +112,46 @@ fn is_network_reaching_shell(command: &str) -> bool {
         "telnet",
         "invoke-webrequest",
         "iwr",
+        "invoke-restmethod",
+        "irm",
+        // Package managers / registry clients always reach the network — an
+        // acceptEdits auto-run must not silently execute downloaded code.
+        "npm",
+        "npx",
+        "pip",
+        "pip3",
+        "gh",
+        "docker",
+    ];
+    // Tools whose NETWORK reach depends on the subcommand: `git clone` reaches
+    // the network, `git status` does not; `cargo install` fetches crates,
+    // `cargo build` (offline deps cached) typically does not. The subcommand is
+    // matched anywhere AFTER the tool token so `git -C ../repo clone <url>`
+    // cannot dodge the check by interleaving flags.
+    static NET_SUBCOMMAND_TOOLS: &[(&str, &[&str])] = &[
+        (
+            "cargo",
+            &[
+                "add", "install", "update", "upgrade", "search", "publish", "fetch", "login",
+                "yank", "owner",
+            ],
+        ),
+        ("git", &["clone", "fetch", "pull", "push", "ls-remote"]),
     ];
     let lower = command.to_ascii_lowercase();
-    for token in lower.split_whitespace() {
+    let tokens: Vec<&str> = lower.split_whitespace().collect();
+    for (index, token) in tokens.iter().enumerate() {
         // Strip a leading path (/usr/bin/curl, C:\tools\wget.exe) so a qualified
         // invocation still matches. Token-exact comparison keeps short names
         // like `nc` from matching unrelated words.
         let base = token.rsplit(['/', '\\']).next().unwrap_or(token);
-        let base = base.trim_end_matches(".exe");
+        let base = base.trim_end_matches(".exe").trim_end_matches(".cmd").trim_end_matches(".bat");
         if NET_TOOLS.contains(&base) {
+            return true;
+        }
+        if let Some((_, subcommands)) = NET_SUBCOMMAND_TOOLS.iter().find(|(tool, _)| *tool == base)
+            && tokens[index + 1..].iter().any(|token| subcommands.contains(token))
+        {
             return true;
         }
     }
@@ -138,19 +169,50 @@ pub fn is_shell_autorun_safe(command: &str) -> bool {
     !is_destructive_command(command) && !is_network_reaching_shell(command)
 }
 
-/// Detects sensitive filesystem paths (`.env`, `.pem`, `.ssh`, the slab DB,
-/// or paths mentioning `token`/`credential`). Reading or writing these always
-/// forces a human review, mirroring the legacy `approval_for_path` heuristic.
+/// Detects sensitive filesystem paths (`.env` variants, `.pem`, an `.ssh`
+/// directory, the slab DB, or credential-shaped DATA files). Reading or
+/// writing these always forces a human review, mirroring the legacy
+/// `approval_for_path` heuristic.
+///
+/// Matching is anchored to the file NAME at word boundaries — a whole-path
+/// substring scan used to flag every `tokens.json` (design tokens) and
+/// `tokenizer.rs`, and approval fatigue is itself a security failure (users
+/// escape it by switching to FullControl). A miss here only skips the forced
+/// prompt; the sandbox and the category baseline still apply.
 pub fn is_sensitive_path(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     let filename = lower.rsplit(['/', '\\']).next().unwrap_or(&lower);
     filename == ".env"
+        || filename.starts_with(".env.")
         || filename.ends_with(".pem")
-        || lower.contains(".ssh")
+        // An `.ssh` DIRECTORY component (not a substring like `my.sshconfig`).
+        || lower.split(['/', '\\']).any(|component| component == ".ssh")
         || lower.contains(".slab/slab.db")
         || lower.contains(".slab\\slab.db")
-        || lower.contains("token")
-        || lower.contains("credential")
+        || has_credential_word(filename)
+}
+
+/// Whether the file name carries a whole credential/token WORD (`token`,
+/// `credential`, `credentials`) in a data/config format. Source files like
+/// `credentials.rs` or `tokenizer.rs` are excluded both by the word boundary
+/// (`tokenizer` ≠ `token`) and by the extension gate; an extensionless name
+/// (gcloud's `credentials`) still matches.
+fn has_credential_word(filename: &str) -> bool {
+    const WORDS: [&str; 3] = ["token", "credential", "credentials"];
+    const DATA_EXTENSIONS: [&str; 15] = [
+        "json", "yaml", "yml", "toml", "txt", "ini", "cfg", "conf", "xml", "key", "p12", "pfx",
+        "crt", "secret", "env",
+    ];
+    let (stem, extension) = match filename.rsplit_once('.') {
+        Some((stem, extension)) => (stem, Some(extension)),
+        None => (filename, None),
+    };
+    if let Some(extension) = extension
+        && !DATA_EXTENSIONS.contains(&extension)
+    {
+        return false;
+    }
+    stem.split(|c: char| !c.is_ascii_alphanumeric()).any(|word| WORDS.contains(&word))
 }
 
 #[cfg(test)]
@@ -197,5 +259,66 @@ mod tests {
         assert!(!is_shell_autorun_safe("C:\\tools\\wget.exe http://x"));
         // Token-exact match: `nc` must not match unrelated words.
         assert!(is_shell_autorun_safe("echo concurrency"));
+    }
+
+    #[test]
+    fn shell_autorun_flags_package_managers_and_registry_clients() {
+        // Package managers reach the network ⇒ never auto-run under acceptEdits.
+        assert!(!is_shell_autorun_safe("npm install left-pad"));
+        assert!(!is_shell_autorun_safe("npx create-vite"));
+        assert!(!is_shell_autorun_safe("pip install requests"));
+        assert!(!is_shell_autorun_safe("gh pr view 123"));
+        assert!(!is_shell_autorun_safe("docker pull alpine"));
+        // PowerShell fetch aliases (Windows `npm.cmd` / `pip.exe` included).
+        assert!(!is_shell_autorun_safe("irm https://example.test/script.ps1"));
+        assert!(!is_shell_autorun_safe("Invoke-RestMethod https://example.test"));
+        assert!(!is_shell_autorun_safe("C:\\tools\\npm.cmd install left-pad"));
+        // Compound commands carrying a network tool anywhere are flagged too.
+        assert!(!is_shell_autorun_safe("cargo test && npm install left-pad"));
+    }
+
+    #[test]
+    fn shell_autorun_flags_only_network_subcommands_of_git_and_cargo() {
+        // Network subcommands.
+        assert!(!is_shell_autorun_safe("git clone https://example.test/repo"));
+        assert!(!is_shell_autorun_safe("git fetch origin"));
+        assert!(!is_shell_autorun_safe("cargo install cargo-deny"));
+        assert!(!is_shell_autorun_safe("cargo add anyhow"));
+        // Flags interleaved before the subcommand must not dodge the check.
+        assert!(!is_shell_autorun_safe("git -C ../repo clone https://example.test/repo"));
+        // Local subcommands stay auto-runnable.
+        assert!(is_shell_autorun_safe("git status"));
+        assert!(is_shell_autorun_safe("git commit -m fix"));
+        assert!(is_shell_autorun_safe("cargo build"));
+        assert!(is_shell_autorun_safe("cargo test -p slab-exec-policy"));
+        // A later unrelated token equal to a subcommand name is a false
+        // positive by design (prompt-only), but common phrasings stay clean.
+        assert!(is_shell_autorun_safe("cargo build --message-format short"));
+    }
+
+    #[test]
+    fn sensitive_path_matches_credential_files() {
+        assert!(is_sensitive_path("/home/u/.env"));
+        assert!(is_sensitive_path("deploy/.env.production"));
+        assert!(is_sensitive_path("certs/server.pem"));
+        assert!(is_sensitive_path("C:/Users/u/.ssh/id_rsa"));
+        assert!(is_sensitive_path(".ssh/known_hosts"));
+        assert!(is_sensitive_path("api_token.json"));
+        assert!(is_sensitive_path("creds/CREDENTIALS"));
+        assert!(is_sensitive_path("secrets/github_token.txt"));
+        assert!(is_sensitive_path("app/.slab/slab.db"));
+    }
+
+    /// Approval-fatigue regression: whole-path substring scans used to flag
+    /// design-token catalogs, tokenizer source files, and `credentials.rs`.
+    #[test]
+    fn sensitive_path_ignores_design_tokens_and_source_files() {
+        assert!(!is_sensitive_path("flutter/slab-mobile/design/tokens.json"));
+        assert!(!is_sensitive_path("crates/slab-mtmd/src/tokenizer.rs"));
+        assert!(!is_sensitive_path("src/auth/credentials.rs"));
+        assert!(!is_sensitive_path("src/tokens.rs"));
+        assert!(!is_sensitive_path("docs/using_tokens.md"));
+        // `my.sshconfig` is not an `.ssh` directory component.
+        assert!(!is_sensitive_path("config/my.sshconfig"));
     }
 }

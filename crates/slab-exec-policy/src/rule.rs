@@ -390,7 +390,7 @@ fn prefix_matches(subject: &str, pattern: &str) -> bool {
 }
 
 fn contains_shell_control(value: &str) -> bool {
-    ["&&", "||", ";", "|", ">", "<", "$(", "`", "\n", "\r"]
+    ["&&", "||", ";", "|", ">", "<", "$(", "${", "`", "&", "\n", "\r"]
         .iter()
         .any(|pattern| value.contains(pattern))
 }
@@ -523,6 +523,32 @@ mod tests {
             rules
                 .evaluate(OperationCategory::Shell, "cargo check && Remove-Item file.txt", None)
                 .is_none()
+        );
+    }
+
+    /// A remembered prefix Allow must not chain a second command via a SINGLE
+    /// `&` (background operator) or expand attacker-controlled text via `${…}`
+    /// — both smuggle a new command the user never approved.
+    #[test]
+    fn prefix_refuses_background_chaining_and_parameter_expansion_suffixes() {
+        let rules = RuleSet::from_rules(vec![Rule::new(
+            OperationCategory::Shell,
+            RuleAction::Allow,
+            RuleMatcher::Prefix,
+            "cargo test",
+        )]);
+
+        assert!(
+            rules.evaluate(OperationCategory::Shell, "cargo test & npm install x", None).is_none()
+        );
+        assert!(
+            rules
+                .evaluate(OperationCategory::Shell, "cargo test ${SNEAKY:-&&curl evil}", None)
+                .is_none()
+        );
+        // The plain argument-extension form still matches.
+        assert!(
+            rules.evaluate(OperationCategory::Shell, "cargo test -- --nocapture", None).is_some()
         );
     }
 

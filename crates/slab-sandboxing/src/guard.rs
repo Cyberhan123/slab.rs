@@ -84,6 +84,13 @@ fn ensure_target_allowed(
     }
 
     let expanded = expand_known_env(target);
+    if is_discard_sink(&expanded) {
+        // `/dev/null` (and its Windows/PowerShell spellings) is a data sink,
+        // not a file write — refusing it broke the most common shell idiom
+        // (`2>/dev/null`) with a message about "C:\dev\null" the model could
+        // not act on. MSYS/bash maps it to the null device itself.
+        return Ok(());
+    }
     ensure_no_path_namespace_escape(&expanded)?;
 
     let path = path_from_token(cwd, &expanded);
@@ -369,6 +376,15 @@ fn tokenize(command: &str) -> Vec<String> {
     tokens
 }
 
+/// Whether a redirection target is a discard sink rather than a file:
+/// `/dev/null` (POSIX, incl. `\\dev\\null` and a bare `dev/null`), the
+/// Windows null device `NUL`, and PowerShell's `$null`.
+fn is_discard_sink(target: &str) -> bool {
+    let target = target.trim().trim_matches('"').trim_matches('\'');
+    let target = target.trim_start_matches('\\').to_ascii_lowercase();
+    matches!(target.as_str(), "/dev/null" | "dev/null" | "nul" | "$null")
+}
+
 fn path_from_token(cwd: Option<&Path>, token: &str) -> PathBuf {
     let raw = PathBuf::from(token);
     if raw.is_absolute() {
@@ -513,5 +529,41 @@ mod tests {
         };
 
         assert!(validate_command(&env, &cmd).is_ok());
+    }
+
+    /// Regression: `/dev/null` is a discard sink, not a write target — the
+    /// guard used to join it with the cwd (`C:\…\dev\null`) and refuse the
+    /// most common shell idiom with an inactionable error.
+    #[test]
+    fn workspace_write_allows_discard_sink_redirections() {
+        let env = SandboxEnvironment::new(
+            Some(PathBuf::from("workspace")),
+            SandboxPolicy::WorkspaceWrite,
+        );
+        for command in
+            ["echo x 2>/dev/null", "noise > /dev/null 2>&1", "echo x > $null", "dir > NUL"]
+        {
+            let cmd = SandboxedCommand {
+                argv: vec!["bash".into(), "-c".into(), command.into()],
+                env: Default::default(),
+                cwd: Some(PathBuf::from("workspace")),
+                timeout: None,
+                output_sink: None,
+            };
+            assert!(
+                validate_command(&env, &cmd).is_ok(),
+                "discard-sink redirection must pass: {command}"
+            );
+        }
+
+        // A REAL file target is still checked normally.
+        let cmd = SandboxedCommand {
+            argv: vec!["bash".into(), "-c".into(), "echo x > /etc/passwd.copy".into()],
+            env: Default::default(),
+            cwd: Some(PathBuf::from("workspace")),
+            timeout: None,
+            output_sink: None,
+        };
+        assert!(validate_command(&env, &cmd).is_err());
     }
 }

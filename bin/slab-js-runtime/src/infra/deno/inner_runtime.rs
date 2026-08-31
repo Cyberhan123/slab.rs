@@ -484,7 +484,11 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
     /// A `Result` containing the deserialized result of the expression (`T`)
     /// or an error (`Error`) if the expression cannot be evaluated or if the
     /// result cannot be deserialized.
-    #[allow(clippy::unused_async, reason = "Prevent panic on sleep calls")]
+    #[allow(
+        clippy::unused_async,
+        clippy::unused_async_trait_impl,
+        reason = "Prevent panic on sleep calls"
+    )]
     pub async fn eval(&mut self, expr: impl ToString) -> Result<v8::Global<v8::Value>, Error> {
         let result = self.deno_runtime().execute_script("", expr.to_string())?;
         Ok(result)

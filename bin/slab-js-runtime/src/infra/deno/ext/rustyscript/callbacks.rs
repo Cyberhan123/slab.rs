@@ -129,6 +129,11 @@ macro_rules! codegen_function {
                     Ok(($($n,)+))
                 }
 
+                // The trait contract is `async fn body`, but a registered
+                // callback body is usually fully synchronous. Keep the async
+                // signature (await-ing bodies must stay supported) and silence
+                // the "no .await statements" lint for the sync case.
+                #[allow(clippy::unused_async_trait_impl)]
                 async fn body(($($n,)+): Self::Arguments) -> Result<Self::Return, $crate::Error> {
                     $body
                 }

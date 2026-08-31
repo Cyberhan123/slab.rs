@@ -517,6 +517,57 @@ mod tests {
         assert_eq!(engine.evaluate("t1", &d).await, ExecDecision::Allow);
     }
 
+    /// Security regression: a remembered prefix Allow must never silence a
+    /// COMPOUND command. `cargo test && npm install x` (and the `&` background
+    /// form) fall through the rule match to the base decision — the rule only
+    /// ever auto-allows argument extensions of the approved command.
+    #[tokio::test]
+    async fn allow_rule_does_not_silence_compound_commands() {
+        let engine = engine_with_rules(
+            PermissionMode::RequestApproval,
+            PermissionBaseline::WorkspaceWrite,
+            vec![Rule::new(
+                OperationCategory::Shell,
+                RuleAction::Allow,
+                crate::rule::RuleMatcher::Prefix,
+                "cargo test",
+            )],
+            ws(),
+        );
+        for command in ["cargo test && npm install x", "cargo test & npm install x"] {
+            let d = OperationDescriptor::shell(command);
+            assert_eq!(
+                engine.evaluate("t1", &d).await,
+                ExecDecision::RequireApproval,
+                "compound command must fall through to the base decision: {command}"
+            );
+        }
+        // The exact approved command still auto-allows (argument extension).
+        let d = OperationDescriptor::shell("cargo test -p slab-exec-policy");
+        assert_eq!(engine.evaluate("t1", &d).await, ExecDecision::Allow);
+    }
+
+    /// Security regression: a network-reaching compound is never auto-allowed
+    /// under acceptEdits, even when a prefix rule covers its leading command.
+    #[tokio::test]
+    async fn accept_edits_never_auto_allows_network_compound_even_with_rule() {
+        let engine = engine_with_rules(
+            PermissionMode::ApproveForMe,
+            PermissionBaseline::WorkspaceWrite,
+            vec![Rule::new(
+                OperationCategory::Shell,
+                RuleAction::Allow,
+                crate::rule::RuleMatcher::Prefix,
+                "cargo test",
+            )],
+            ws(),
+        );
+        let d = OperationDescriptor::shell("cargo test && npm install x");
+        // The rule does not match the compound (control chars in the suffix),
+        // and the acceptEdits base refuses the network-reaching command.
+        assert_eq!(engine.evaluate("t1", &d).await, ExecDecision::RequireApproval);
+    }
+
     #[tokio::test]
     async fn block_rule_denies() {
         let engine = engine_with_rules(

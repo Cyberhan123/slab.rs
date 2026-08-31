@@ -326,6 +326,7 @@ fn build_agent_control(
                 Arc::clone(&exec_policy),
                 memory_config.clone(),
                 memory_root.clone(),
+                Arc::clone(&tool_router),
             ),
         ))),
     ];
