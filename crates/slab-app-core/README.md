@@ -1,6 +1,16 @@
 # slab-app-core
 
-HTTP-free business logic library for Slab.
+HTTP-server-free business logic library for Slab: no routes, handlers, or
+listeners live here — the entire HTTP/WS surface belongs to `bin/slab-server`.
+
+Two outbound-network seams are the sanctioned exceptions to "no HTTP here":
+
+- `reqwest` outbound calls (runtime CAB download in `domain/services/setup.rs`,
+  plugin package download in `domain/services/plugin/package.rs`, the plugin
+  host `fetch` capability adapter in `infra/plugin_runtime/host_api.rs`).
+- The optional `axum` feature, enabled only by `bin/slab-server`, which
+  implements `FromRef` extractors for the service context (`context/mod.rs`).
+  It adds no routing; it only lets axum handlers pull services out of state.
 
 ## Role
 

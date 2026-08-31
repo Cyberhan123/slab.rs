@@ -27,7 +27,7 @@ Use this as the repo-wide AI reference for architecture boundaries, workflow, an
 - Desktop and web frontends share one core/ui/shell DDD layout: feature pages/components/layouts live in `packages/slab-ui`; cross-shell logic, ports/seams, and the harness client live in `packages/slab-core`; `packages/slab-desktop` (Tauri) and `packages/slab-web` (browser) stay thin shells; fullstack e2e suites live under `packages/slab-desktop/tests/e2e`.
 - Backend API shape changes require `bun run gen:api` to refresh `packages/api/src/v1.d.ts`.
 - Prefer `crates/slab-types` and `crates/slab-proto` for contracts that cross crate boundaries.
-- Keep `crates/slab-app-core` HTTP-free. Keep `bin/slab-runtime` as the runtime composition root. Keep `crates/slab-runtime-core` limited to scheduler and backend protocol concerns.
+- Keep `crates/slab-app-core` HTTP-server-free: routes/handlers/listeners belong to `bin/slab-server`; the only sanctioned network surface is outbound `reqwest` plus the axum-extractor feature (see the crate README). Keep `bin/slab-runtime` as the runtime composition root. Keep `crates/slab-runtime-core` limited to scheduler and backend protocol concerns.
 - Keep `crates/slab-agent` pure. Built-in deterministic tools belong in `crates/slab-agent-tools`; plugin/API capability adapters are registered by host or app-core layers.
 - Keep long-running AI work in task-oriented flows when the feature already follows that model.
 - Preserve Tauri CSP, capabilities, permissions, sidecar boundaries, and plugin sandboxing unless the task explicitly changes them.
