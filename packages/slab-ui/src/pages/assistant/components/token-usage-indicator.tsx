@@ -1,7 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@slab/components/tooltip"
 import { useTranslation } from "@slab/i18n"
 
-import type { TurnUsage } from "@slab/core/harness"
+import type { TurnUsage } from "@slab/api/harness"
 
 /**
  * Token-usage indicator driven by the `turn/completed` harness notification's

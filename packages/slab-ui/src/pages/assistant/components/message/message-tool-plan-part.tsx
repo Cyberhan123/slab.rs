@@ -10,7 +10,7 @@ import {
 } from "lucide-react"
 import type { ReactNode } from "react"
 
-import type { Plan, PlanCounts, PlanItem, PlanStatus } from "@slab/core/harness/types"
+import type { Plan, PlanCounts, PlanItem, PlanStatus } from "@slab/api/harness"
 import { useMessageInteraction } from "../message-interaction-context"
 import { ToolRow, ToolRowContent, ToolRowTrigger, toolRowIcon } from "./message-tool-row"
 import type { MessagePartRenderProps } from "./message-parts"

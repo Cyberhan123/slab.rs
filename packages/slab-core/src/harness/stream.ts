@@ -24,8 +24,7 @@
 
 import type { UIMessageChunk } from "ai"
 
-import { HARNESS_NOTIFICATION } from "./types"
-import { toolItemFields } from "./turn-items"
+import { HARNESS_NOTIFICATION } from "@slab/api/harness"
 import type {
   AgentMessageDeltaParams,
   CommandExecutionRequestApprovalParams,
@@ -39,7 +38,9 @@ import type {
   ServerNotification,
   TurnCompletedParams,
   TurnItem,
-} from "./types"
+} from "@slab/api/harness"
+
+import { toolItemFields } from "./turn-items"
 
 /** Every server → client notification method we model. */
 const HARNESS_NOTIFICATION_METHODS = new Set<string>(Object.values(HARNESS_NOTIFICATION))

@@ -15798,6 +15798,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "ts-rs",
 ]
 
 [[package]]
@@ -16224,6 +16225,7 @@ dependencies = [
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.19",
+ "ts-rs",
  "utoipa",
  "uuid",
 ]

@@ -22,6 +22,14 @@ import {
   createUIMessageStream,
 } from "ai"
 
+import type {
+  JsonRpcNotification,
+  PermissionMode,
+  ReasoningEffort,
+  TurnStartParams,
+  UserInput,
+} from "@slab/api/harness"
+
 import { getNotifier } from "../platform/notifications"
 
 import type { HarnessClient } from "./harness-client"
@@ -32,13 +40,6 @@ import {
   isTerminalNotification,
 } from "./stream"
 import { buildTurnInput } from "./turn-input"
-import type {
-  JsonRpcNotification,
-  PermissionMode,
-  ReasoningEffort,
-  TurnStartParams,
-  UserInput,
-} from "./types"
 
 export interface HarnessChatTransportOptions {
   /** The shared, long-lived harness client (owns the WS + bound thread). */

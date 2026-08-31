@@ -1,4 +1,4 @@
-import type { CommandInfo } from "@slab/core/harness/types"
+import type { CommandInfo } from "@slab/api/harness"
 
 const COMMAND_PREFIX = "/"
 

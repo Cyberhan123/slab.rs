@@ -51,7 +51,7 @@ import type {
   CommandInfo,
   PermissionMode,
   ReasoningEffort,
-} from "@slab/core/harness"
+} from "@slab/api/harness"
 import type { ApprovalRequest } from "@slab/core/harness"
 import { resolveCommandDispatch } from "../lib/assistant-commands"
 import { ApprovalCard } from "./approval-banner"

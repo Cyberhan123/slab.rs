@@ -5,7 +5,7 @@ import { MessageCircleDashedIcon } from "lucide-react"
 
 import { useTranslation } from "@slab/i18n"
 import { WorkspaceSelector } from "@slab/ui/components/workspace-selector"
-import type { CommandInfo } from "@slab/core/harness"
+import type { CommandInfo } from "@slab/api/harness"
 
 import Sender, { type SenderSubmitOptions } from "@slab/ui/pages/assistant/components/sender.tsx"
 import { useGreeting } from "../hooks/use-greeting"

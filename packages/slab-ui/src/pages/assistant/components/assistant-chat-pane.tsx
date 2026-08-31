@@ -30,17 +30,19 @@ import { resolveCommandDispatch } from "@slab/ui/pages/assistant/lib/assistant-c
 import { useWorkspaceConfirmDialog } from "@slab/ui/pages/workspace/hooks/use-workspace-confirm"
 import { useGreeting } from "../hooks/use-greeting"
 import type {
-    ApprovalRequest,
     ApprovalScope,
+    CommandInfo,
+    TurnUsage,
+} from "@slab/api/harness"
+import type {
+    ApprovalRequest,
     ApprovalStatus,
     BackgroundTaskInfo,
-    CommandInfo,
     CompactionMarker,
     HarnessChatTransport,
     ModelLoadState,
     ThreadStatusString,
     TurnSendOptions,
-    TurnUsage,
 } from "@slab/core/harness"
 
 /** Static i18n keys per wire abort reason (static strings satisfy the key guards). */

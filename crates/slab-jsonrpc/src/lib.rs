@@ -2,6 +2,7 @@ use std::fmt;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 pub mod host;
 pub mod notifier;
@@ -16,9 +17,10 @@ pub const INTERNAL_ERROR: i64 = -32603;
 pub const APPLICATION_ERROR: i64 = -32000;
 
 #[derive(
-    Debug, Clone, PartialEq, PartialOrd, Ord, Deserialize, Serialize, Hash, Eq, JsonSchema,
+    TS, Debug, Clone, PartialEq, PartialOrd, Ord, Deserialize, Serialize, Hash, Eq, JsonSchema,
 )]
 #[serde(untagged)]
+#[ts(export)]
 pub enum RequestId {
     String(String),
     Integer(i64),
@@ -36,8 +38,9 @@ impl fmt::Display for RequestId {
 pub type Result = serde_json::Value;
 
 /// Refers to any valid JSON-RPC object that can be decoded off the wire, or encoded to be sent.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(TS, Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
+#[ts(export, rename = "JsonRpcMessage")]
 pub enum JSONRPCMessage {
     Request(JSONRPCRequest),
     Notification(JSONRPCNotification),
@@ -46,8 +49,9 @@ pub enum JSONRPCMessage {
 }
 
 /// A request that expects a response.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(TS, Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[ts(export, rename = "JsonRpcRequest")]
 pub struct JSONRPCRequest {
     pub id: RequestId,
     pub method: String,
@@ -59,8 +63,9 @@ pub struct JSONRPCRequest {
 }
 
 /// A notification which does not expect a response.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(TS, Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[ts(export, rename = "JsonRpcNotification")]
 pub struct JSONRPCNotification {
     pub method: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,23 +73,26 @@ pub struct JSONRPCNotification {
 }
 
 /// A successful (non-error) response to a request.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(TS, Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[ts(export, rename = "JsonRpcResponse")]
 pub struct JSONRPCResponse {
     pub id: RequestId,
     pub result: Result,
 }
 
 /// A response to a request that indicates an error occurred.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(TS, Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[ts(export, rename = "JsonRpcErrorResponse")]
 pub struct JSONRPCError {
     pub error: JSONRPCErrorError,
     pub id: RequestId,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(TS, Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[ts(export, rename = "JsonRpcErrorBody")]
 pub struct JSONRPCErrorError {
     pub code: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -92,8 +100,9 @@ pub struct JSONRPCErrorError {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(TS, Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[ts(export)]
 pub struct W3cTraceContext {
     pub traceparent: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

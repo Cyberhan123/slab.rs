@@ -14,7 +14,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 
-import type { ApprovalScope } from "@slab/core/harness"
+import type { ApprovalScope } from "@slab/api/harness"
 import type { ApprovalRequest } from "@slab/core/harness"
 import { PatchDiffView } from "./patch-diff-view"
 import { PlanCardBody } from "./message/message-tool-plan-part"

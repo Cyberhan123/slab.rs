@@ -3,7 +3,7 @@ import type { UIMessage, UIMessageChunk } from "ai"
 
 import { HarnessChatTransport } from "../harness-transport"
 import type { HarnessClient } from "../harness-client"
-import type { JsonRpcNotification, ThreadStartResult, TurnStartParams, TurnStartResult } from "../types"
+import type { JsonRpcNotification, ThreadStartResult, TurnStartParams, TurnStartResult } from "@slab/api/harness"
 
 interface FakeClientOptions {
   /** When set, `threadStart` resolves with this thread id (else `null` = fresh). */

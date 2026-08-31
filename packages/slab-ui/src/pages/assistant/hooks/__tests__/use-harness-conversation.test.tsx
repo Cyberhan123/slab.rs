@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { renderHook } from "vitest-browser-react"
 
-import type { Thread } from "@slab/core/harness"
+import type { Thread } from "@slab/api/harness"
 import { FakeWebSocket } from "@slab/core/harness/testing/fake-websocket"
 import { useHarnessConversation } from "../use-harness-conversation"
 

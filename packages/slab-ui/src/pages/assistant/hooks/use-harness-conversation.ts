@@ -18,9 +18,9 @@ import type { UIMessage } from "ai"
 import {
   ConversationController,
   HarnessChatTransport,
-  type ApprovalScope,
   type ConversationState,
 } from "@slab/core/harness"
+import type { ApprovalScope } from "@slab/api/harness"
 
 export interface HarnessConversation extends ConversationState {
   /** Transport bound to the live client (always defined; safe to pass to `useChat`). */

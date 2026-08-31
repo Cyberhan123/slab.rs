@@ -14,8 +14,7 @@
  */
 
 import { SERVER_BASE_URL } from "@slab/api/config"
-
-import { classifyJsonRpcMessage, nextRequestId } from "./json-rpc"
+import { HARNESS_METHOD } from "@slab/api/harness"
 import type {
   ApprovalResolveParams,
   ApprovalResolveResult,
@@ -51,8 +50,9 @@ import type {
   TurnStartResult,
   WorkspaceMigrateParams,
   WorkspaceMigrateResult,
-} from "./types"
-import { HARNESS_METHOD } from "./types"
+} from "@slab/api/harness"
+
+import { classifyJsonRpcMessage, nextRequestId } from "./json-rpc"
 
 export interface HarnessClientOptions {
   /** Slab session id, carried on the WS URL as `?token=`. */

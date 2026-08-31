@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { convertNotification, createStreamState, isTerminalNotification } from "../stream"
-import type { ServerNotification, TurnItem } from "../types"
+import type { ServerNotification, TurnItem } from "@slab/api/harness"
 
 const THREAD = "hthread-1"
 const TURN = "0"

@@ -14,6 +14,7 @@
     ".": "./src/index.ts",
     "./config": "./src/config.ts",
     "./errors": "./src/errors.ts",
+    "./harness": "./src/harness/index.ts",
     "./v1": "./src/v1.d.ts"
   },
   "dependencies": {

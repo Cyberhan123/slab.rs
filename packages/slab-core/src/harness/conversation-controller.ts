@@ -26,11 +26,9 @@
 
 import type { UIMessage } from "ai"
 
-import { HarnessClient } from "./harness-client"
-import { turnItemsToMessages } from "./turn-items"
-import { buildTurnInput } from "./turn-input"
-import { HARNESS_NOTIFICATION } from "./types"
+import { HARNESS_NOTIFICATION } from "@slab/api/harness"
 import type {
+  AgentThreadStatus,
   ApprovalScope,
   CommandExecutionOutputDeltaParams,
   CommandExecutionRequestApprovalParams,
@@ -54,7 +52,11 @@ import type {
   TurnStartResult,
   TurnUsage,
   UserInput,
-} from "./types"
+} from "@slab/api/harness"
+
+import { HarnessClient } from "./harness-client"
+import { turnItemsToMessages } from "./turn-items"
+import { buildTurnInput } from "./turn-input"
 
 // ── Public types (moved from the ui hook verbatim) ──────────────────────────
 
@@ -128,16 +130,10 @@ export type ActionError = { kind: "compact" | "fork"; message: string }
  * Wire values of the authoritative thread status pushed by
  * `thread/statusChanged` — the SERVER-side source of truth the UI should
  * derive busy/terminal state from (instead of a local AI-SDK heuristic that
- * can diverge after interrupts).
+ * can diverge after interrupts). Generated from
+ * `slab_types::agent::AgentThreadStatus` via `@slab/api/harness`.
  */
-export type ThreadStatusString =
-  | "pending"
-  | "running"
-  | "interrupting"
-  | "interrupted"
-  | "completed"
-  | "errored"
-  | "shutdown"
+export type ThreadStatusString = AgentThreadStatus
 
 /** Terminal thread statuses — no further work until a new turn starts. */
 const TERMINAL_THREAD_STATUSES: ReadonlySet<ThreadStatusString> = new Set([

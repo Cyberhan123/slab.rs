@@ -7,13 +7,15 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
+use ts_rs::TS;
 
 /// Lifecycle status of a single agent thread.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Display, EnumString,
+    TS, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Display, EnumString,
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
+#[ts(export)]
 pub enum AgentThreadStatus {
     /// Created but not yet executing.
     Pending,

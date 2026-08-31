@@ -8,9 +8,9 @@
 
 import type { UIMessage } from "ai"
 
-import { getImageSrcPort } from "../platform/image-src"
+import type { UserInput } from "@slab/api/harness"
 
-import type { UserInput } from "./types"
+import { getImageSrcPort } from "../platform/image-src"
 
 /**
  * Build the new turn's `input` from the latest user message: its text plus any

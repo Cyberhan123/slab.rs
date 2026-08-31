@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import type { FileUIPart } from "ai"
 
-import type { PermissionMode, ReasoningEffort } from "@slab/core/harness"
+import type { PermissionMode, ReasoningEffort } from "@slab/api/harness"
 
 type AssistantDraftSource = {
   label: string

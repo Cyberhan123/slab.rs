@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import { FakeWebSocket } from "../testing/fake-websocket"
 import { HarnessClient } from "../harness-client"
-import { HARNESS_METHOD } from "../types"
+import { HARNESS_METHOD } from "@slab/api/harness"
 
 /** Flush microtasks + the macrotask queue so the client's async open/await settle. */
 function flush(): Promise<void> {

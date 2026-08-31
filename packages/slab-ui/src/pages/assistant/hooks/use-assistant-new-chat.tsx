@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 
-import type { CommandInfo } from "@slab/core/harness"
+import type { CommandInfo } from "@slab/api/harness"
 import { WORKSPACE_STATE_QUERY_KEY, workspaceState } from "@slab/core/workspace/bridge"
 import { useWorkspaceHandoffStore } from "@slab/ui/store/useWorkspaceHandoffStore"
 

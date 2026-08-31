@@ -111,6 +111,11 @@ jobs:
           bun run gen:api
           git diff --exit-code packages/api/src/v1.d.ts python/slab-python-sdk/src/slab_api_client
 
+      - name: Check harness bindings drift
+        run: |
+          bun run gen:harness
+          git diff --exit-code packages/api/src/harness
+
       - name: Check settings/schema drift
         run: |
           bun run gen:schemas

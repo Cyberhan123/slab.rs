@@ -6,7 +6,7 @@ import {
   MAX_RESTORE_ATTEMPTS,
   RESTORE_BACKOFF_MS,
 } from "../conversation-controller"
-import { HARNESS_NOTIFICATION, type Thread } from "../types"
+import { HARNESS_NOTIFICATION, type Thread } from "@slab/api/harness"
 
 /** Flush microtasks + the macrotask queue so the client's async open/await settle. */
 function flush(): Promise<void> {

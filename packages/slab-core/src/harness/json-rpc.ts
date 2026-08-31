@@ -12,7 +12,7 @@ import type {
   JsonRpcRequest,
   JsonRpcResponse,
   RequestId,
-} from "./types"
+} from "@slab/api/harness"
 
 let nextId = 1
 

@@ -27,7 +27,7 @@ export default defineConfig({
         "packages/slab-plugin-cli/src/index.ts",
         "packages/slab-ui/src/components/error-boundary.tsx",
         "packages/slab-core/src/harness/testing/**",
-        "packages/slab-core/src/harness/generated/**",
+        "packages/api/src/harness/generated/**",
         // Test helpers living under src (same policy as slab-test-utils being
         // excluded wholesale): they are test scaffolding, not product surface.
         "packages/slab-ui/src/provider/test-ports.ts",

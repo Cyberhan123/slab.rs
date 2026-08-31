@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { turnItemToUiParts, turnItemsToMessages, toolItemFields } from "../turn-items"
-import type { TurnItem } from "../types"
+import type { TurnItem } from "@slab/api/harness"
 
 const user = (id: string, text: string): TurnItem => ({
   type: "userMessage",

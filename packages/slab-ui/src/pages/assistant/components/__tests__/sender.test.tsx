@@ -15,7 +15,7 @@ function renderSender(ui: ReactElement) {
     <SlabProvider deps={{ ports: createTestSlabPorts() }}>{ui}</SlabProvider>,
   )
 }
-import type { CommandInfo } from "@slab/core/harness"
+import type { CommandInfo } from "@slab/api/harness"
 
 /** Mirror of the server-side `command/list` snapshot: the three built-ins. */
 const COMMANDS: CommandInfo[] = [

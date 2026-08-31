@@ -17,9 +17,9 @@
 import type { UIMessage } from "ai"
 
 import { SERVER_BASE_URL } from "@slab/api/config"
+import type { ReasoningText, TurnItem, UserMessageContent } from "@slab/api/harness"
 
 import { getImageSrcPort } from "../platform/image-src"
-import type { ReasoningText, TurnItem, UserMessageContent } from "./types"
 
 /** A single UI message part (the finalized shape `useChat` assembles). */
 type UiPart = UIMessage["parts"][number]

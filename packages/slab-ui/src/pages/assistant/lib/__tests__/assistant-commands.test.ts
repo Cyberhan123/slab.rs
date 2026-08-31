@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CommandInfo } from '@slab/core/harness/types'
+import type { CommandInfo } from '@slab/api/harness'
 
 import {
   isCompactCommand,
