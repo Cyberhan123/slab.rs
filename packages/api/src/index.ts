@@ -200,6 +200,8 @@ function uploadFormDataWithProgress(
 
 export default api;
 export type { components, operations, paths } from "./v1.d.ts";
+export { DEFAULT_HEALTH_PATH, waitForApiServer } from "./health";
+export type { WaitForApiServerOptions } from "./health";
 export type {
   ApiErrorResponse,
   AppCoreErrorData,

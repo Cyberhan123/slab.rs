@@ -5,10 +5,43 @@
     <link rel="icon" type="image/svg+xml" href="" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Slab App</title>
+    <style>
+      /* Static splash shown while main.tsx waits for the sidecar /health gate.
+         Replaced automatically when createRoot().render() first commits. */
+      #boot-splash {
+        align-items: center;
+        display: flex;
+        height: 100vh;
+        justify-content: center;
+      }
+      #boot-splash .spinner {
+        animation: boot-spin 1s linear infinite;
+        border: 3px solid rgba(107, 114, 128, 0.25);
+        border-radius: 9999px;
+        border-top-color: #6b7280;
+        height: 28px;
+        width: 28px;
+      }
+      @media (prefers-color-scheme: dark) {
+        #boot-splash .spinner {
+          border-color: rgba(107, 114, 128, 0.35);
+          border-top-color: #d1d5db;
+        }
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(1turn);
+        }
+      }
+    </style>
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="boot-splash" aria-label="Loading Slab">
+        <div class="spinner"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
