@@ -11,6 +11,11 @@ The runtime now uses a unified full Deno runtime path for plugin and LSP
 execution. Plugin transport can be stdio or Unix-domain-socket based, while the
 runtime core stays shared.
 
+Build requirement: the Deno dependency chain (`deno_cache` enables rusqlite's
+`session` feature, which turns on `libsqlite3-sys` `buildtime_bindgen`) runs
+`bindgen` at build time, so LLVM/Clang with `libclang` must be installed. See
+the prerequisites section in `docs/development/guides/build.md`.
+
 CLI modes:
 
 - `slab-js-runtime`: plugin JSON-RPC mode for `plugin.call`.

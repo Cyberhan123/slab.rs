@@ -114,6 +114,10 @@ Slab 适合希望在本地电脑上完成 AI 任务的个人开发者、研究�
 
 - 安装 Rust 稳定版工具链。
 - 安装 Bun。
+- 安装 LLVM/Clang（`libclang`）——`bindgen` 类原生依赖在构建期需要它。Windows 可执行：`winget install -e --id LLVM.LLVM`。
+- Windows 平台还需要 FFmpeg 开发库（原生链接 FFmpeg 使用），例如：`vcpkg install ffmpeg:x64-windows-static-md`。
+
+系统依赖的详细说明见 [构建工作流指南](./docs/development/guides/build.md)。
 
 ```sh
 # 在仓库根目录执行

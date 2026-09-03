@@ -8,6 +8,53 @@ Slab uses Bun and Cargo as the repository build entrypoints. Run commands from t
 repository root unless a subproject README says otherwise. Do not use Bazel or
 cargo-make wrappers for the top-level build flow.
 
+## Prerequisites
+
+Besides the Rust stable toolchain and Bun, the native dependency graph needs two
+system packages on developer machines. Without them `bun run dev` fails during
+`build:sidecars`.
+
+### LLVM / Clang (libclang)
+
+`bindgen` runs at build time for native dependencies, so `libclang` must be
+installed:
+
+- `libsqlite3-sys` compiles with `buildtime_bindgen` because `slab-js-runtime`
+  pulls `deno_cache`, which enables rusqlite's `session` feature.
+- `ffmpeg-sys-next` generates its own bindings with `bindgen`.
+
+Install it per platform:
+
+- Windows: `winget install -e --id LLVM.LLVM` (or `choco install llvm`). The
+  default `C:\Program Files\LLVM\bin` location is detected automatically; for any
+  other location set `LIBCLANG_PATH` to the directory containing `libclang.dll`.
+- macOS: Xcode Command Line Tools (`xcode-select --install`) or `brew install llvm`.
+- Linux: `sudo apt install libclang-dev` (or your distribution's equivalent).
+
+Without it the build fails with
+`Unable to find libclang: ... set the LIBCLANG_PATH environment variable`.
+
+### FFmpeg development libraries
+
+`slab-app-core` links FFmpeg natively by default (`ffmpeg-next-static` feature;
+see `crates/slab-app-core/Cargo.toml`). `ffmpeg-sys-next` resolves FFmpeg
+through, in order: the `FFMPEG_DIR` environment variable (`<dir>/include` plus
+`<dir>/lib`), vcpkg (MSVC targets, `VCPKG_ROOT`), then pkg-config.
+
+- Windows (MSVC): `vcpkg install ffmpeg:x64-windows-static-md` with `VCPKG_ROOT`
+  pointing at your vcpkg checkout. The `x64-windows-static-md` triplet keeps
+  Rust's default dynamic CRT while providing static FFmpeg libraries, and it is
+  the default triplet the `vcpkg` crate probes, so no extra environment
+  variables are needed. The installed FFmpeg major version must match the
+  `ffmpeg-next` crate major version (currently 8.x); vcpkg classic mode always
+  installs the newest port, so if `ports/ffmpeg/vcpkg.json` in your checkout is
+  newer, pin the registry first, for example
+  `git -C %VCPKG_ROOT% checkout <commit-with-ffmpeg-8.x>` before installing.
+- Linux/macOS: install the libav development packages so pkg-config can find
+  them (`libavcodec-dev`, `libavdevice-dev`, `libavfilter-dev`,
+  `libavformat-dev`, `libavutil-dev`, `libswresample-dev`, `libswscale-dev` on
+  Debian/Ubuntu; `brew install ffmpeg` on macOS).
+
 ## Daily Commands
 
 ```sh
