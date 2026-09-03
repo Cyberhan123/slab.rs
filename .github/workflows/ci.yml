@@ -49,7 +49,8 @@ jobs:
             libssl-dev \
             pkg-config \
             python3-dev \
-            libglib2.0-dev
+            libglib2.0-dev \
+            libgtk-3-dev
 
       - name: Apply patches (vendor setup)
         run: bun run scripts/apply-patches.ts
