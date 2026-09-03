@@ -14,3 +14,9 @@
 # Force LF on every platform so CRLF <-> LF drift cannot desync the stored
 # checksum and abort slab-server startup with a VersionMismatch error.
 *.sql text eol=lf
+
+# Patch files are parsed byte-exactly by `git apply` (scripts/apply-patches.ts)
+# and bun's patchedDependencies. Force LF on every platform so Windows
+# core.autocrlf checkouts cannot turn blank context lines into lone "\r"
+# bytes that git apply rejects as a corrupt patch.
+patches/*.patch text eol=lf

@@ -16,7 +16,7 @@
  *  5. Apply the patch with `git apply` inside the extracted directory.
  */
 
-import { existsSync, mkdirSync, readdirSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "fs";
 import { join, relative, resolve } from "path";
 import { spawnSync } from "child_process";
 
@@ -47,34 +47,16 @@ function parseCrateId(base: string): { name: string; version: string } | null {
   };
 }
 
-function run(
-  cmd: string,
+function gitApplyInput(
   args: string[],
-  opts: { cwd?: string } = {}
-): boolean {
-  const result = spawnSync(cmd, args, {
-    cwd: opts.cwd,
-    stdio: "inherit",
-    shell: false,
-  });
-
-  if (result.error) {
-    if (result.error.code === "ENOENT") {
-      throw new Error(
-        `Command '${cmd}' not found. scripts/apply-patches.ts requires tools like 'tar' and 'git' to be installed and available in PATH.`
-      );
-    }
-
-    throw new Error(`Failed to run ${cmd}: ${result.error.message}`);
-  }
-
-  return result.status === 0;
-}
-
-function checkGitApply(args: string[]): number {
+  input: Buffer,
+  opts: { quiet?: boolean } = {}
+): { status: number; stderr: string } {
+  const quiet = opts.quiet ?? false;
   const result = spawnSync("git", args, {
     cwd: ROOT,
-    stdio: "pipe",
+    input,
+    stdio: ["pipe", quiet ? "pipe" : "inherit", quiet ? "pipe" : "inherit"],
     shell: false,
   });
 
@@ -88,7 +70,24 @@ function checkGitApply(args: string[]): number {
     throw new Error(`Failed to run git: ${result.error.message}`);
   }
 
-  return result.status ?? 1;
+  return {
+    status: result.status ?? 1,
+    stderr: (result.stderr ?? "").toString(),
+  };
+}
+
+/**
+ * Read a patch file and normalize CRLF line endings to LF.
+ *
+ * crates.io archives use LF, but patch files can be checked out with CRLF on
+ * Windows (core.autocrlf). `git apply` cannot parse CRLF patches whose blank
+ * context lines become lone "\r" bytes ("corrupt patch at line N"), so the
+ * normalized content is fed to git via stdin instead of by path.
+ */
+function readPatchNormalized(patchAbsPath: string): Buffer {
+  return Buffer.from(
+    readFileSync(patchAbsPath, "utf8").replace(/\r\n/g, "\n")
+  );
 }
 
 async function downloadCrate(name: string, version: string): Promise<Buffer> {
@@ -139,20 +138,32 @@ function applyPatch(vendorDir: string, patchAbsPath: string): void {
     `--directory=${vendorRelPath}`,
   ];
 
-  // crates.io archives use LF; patch files can be CRLF on Windows checkouts.
-  if (checkGitApply([...baseArgs, "--check", patchAbsPath]) === 0) {
-    if (!run("git", [...baseArgs, patchAbsPath], { cwd: ROOT })) {
+  const patch = readPatchNormalized(patchAbsPath);
+
+  const forward = gitApplyInput([...baseArgs, "--check", "-"], patch, {
+    quiet: true,
+  });
+  if (forward.status === 0) {
+    if (gitApplyInput([...baseArgs, "-"], patch).status !== 0) {
       throw new Error(`Failed to apply patch ${patchAbsPath} to ${vendorDir}`);
     }
     return;
   }
 
-  if (checkGitApply([...baseArgs, "--reverse", "--check", patchAbsPath]) === 0) {
+  const reverse = gitApplyInput(
+    [...baseArgs, "--reverse", "--check", "-"],
+    patch,
+    { quiet: true }
+  );
+  if (reverse.status === 0) {
     console.log("  Patch already applied – skipping.");
     return;
   }
 
-  throw new Error(`Failed to apply patch ${patchAbsPath} to ${vendorDir}`);
+  // Surface git's own diagnosis so a bad patch is debuggable, not just "no".
+  throw new Error(
+    `Failed to apply patch ${patchAbsPath} to ${vendorDir}: ${forward.stderr.trim()}`
+  );
 }
 
 async function main(): Promise<void> {
