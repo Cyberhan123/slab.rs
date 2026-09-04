@@ -505,6 +505,17 @@ mod tests {
         ToolContext::for_thread("thread").build()
     }
 
+    #[test]
+    fn read_file_schema_declares_line_window_bounds() {
+        let schema = ReadFileTool::new(None).parameters_schema();
+
+        assert_eq!(schema["properties"]["path"]["type"], "string");
+        assert_eq!(schema["properties"]["start_line"]["minimum"], 1);
+        assert_eq!(schema["properties"]["start_line"]["default"], 1);
+        assert_eq!(schema["properties"]["end_line"]["minimum"], 1);
+        assert_eq!(schema["required"], json!(["path"]));
+    }
+
     #[tokio::test]
     async fn read_file_tool_respects_line_ranges_and_reports_truncation() {
         let root = temp_root("read_range");

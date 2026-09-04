@@ -3,14 +3,27 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
     AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, ToolVisibility,
-    protocol::TurnItem,
+    parse_tool_input, protocol::TurnItem, typed_input_schema,
 };
 use slab_mcp::{McpClient, McpToolSpec};
 
-use crate::args::string_arg;
+/// Arguments for the `mcp_call` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct McpCallArgs {
+    server_name: String,
+    tool_name: String,
+    #[serde(default = "default_arguments")]
+    arguments: Value,
+}
+
+fn default_arguments() -> Value {
+    Value::Object(serde_json::Map::new())
+}
 
 pub struct McpCallTool {
     client: Arc<McpClient>,
@@ -33,18 +46,7 @@ impl ToolHandler for McpCallTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "server_name": { "type": "string" },
-                "tool_name": { "type": "string" },
-                "arguments": {
-                    "type": "object",
-                    "default": {}
-                }
-            },
-            "required": ["server_name", "tool_name"]
-        })
+        typed_input_schema::<McpCallArgs>()
     }
 
     fn category(&self) -> slab_agent::OperationCategory {
@@ -80,13 +82,10 @@ impl ToolHandler for McpCallTool {
         _ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let server_name = string_arg(arguments, "server_name")?;
-        let tool_name = string_arg(arguments, "tool_name")?;
-        let tool_arguments =
-            arguments.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({}));
+        let args = parse_tool_input::<McpCallArgs>(arguments)?;
         let result = self
             .client
-            .call_tool(server_name, tool_name, tool_arguments)
+            .call_tool(&args.server_name, &args.tool_name, args.arguments)
             .await
             .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
         Ok(ToolOutput {
@@ -118,7 +117,9 @@ impl ToolHandler for McpListToolsTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({ "type": "object", "properties": {} })
+        // No-arg tool: `Value` keeps any stray arguments tolerated at parse
+        // time (an empty struct would reject non-object calls).
+        typed_input_schema::<Value>()
     }
 
     fn category(&self) -> slab_agent::OperationCategory {
