@@ -4,14 +4,16 @@
 //! describes its operation (`describe_operation`) and executes when the kernel
 //! has authorized it.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use slab_agent::protocol::TurnItem;
 use slab_agent::{
     AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver,
-    ToolOutputStream,
+    ToolOutputStream, parse_tool_input, typed_input_schema,
 };
 use slab_sandboxing::{OutputSink, OutputStream, SandboxDriver};
 pub use slab_shell_command::ShellPolicy;
@@ -24,6 +26,43 @@ use slab_utils::string::truncate_middle_bytes;
 const SHELL_CAPTURE_LIMIT_BYTES: usize = 512 * 1024;
 /// Head fraction of the kept budget when the tool-layer truncation fires.
 const CONTEXT_STREAM_HEAD_RATIO: f32 = 0.7;
+
+/// Arguments for the `shell` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ShellArgs {
+    /// The shell command to execute.
+    command: String,
+    /// Maximum execution time in seconds (foreground only; background tasks have no timeout).
+    #[serde(default = "default_timeout_secs")]
+    timeout_secs: u64,
+    /// Run as a detached background task: returns a task_id immediately, output streams to files, poll task_status/task_output.
+    #[serde(default)]
+    background: bool,
+    /// Environment variables to inject into the command.
+    #[serde(default, deserialize_with = "deserialize_env")]
+    env: HashMap<String, String>,
+}
+
+fn default_timeout_secs() -> u64 {
+    30
+}
+
+/// Keep the historical leniency: non-string env values (and an explicit
+/// `null`) are silently dropped instead of failing the whole call.
+fn deserialize_env<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let env = Option::<serde_json::Map<String, Value>>::deserialize(deserializer)?;
+    Ok(env
+        .into_iter()
+        .flat_map(|env| {
+            env.into_iter().filter_map(|(key, value)| {
+                value.as_str().map(|value| (key, value.to_owned()))
+            })
+        })
+        .collect())
+}
 
 /// Adapts the agent-side [`ToolOutputObserver`] to the sandbox's [`OutputSink`],
 /// mapping stream tags 1:1.
@@ -91,32 +130,7 @@ impl ToolHandler for ShellTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute."
-                },
-                "timeout_secs": {
-                    "type": "integer",
-                    "description": "Maximum execution time in seconds (foreground only; background tasks have no timeout).",
-                    "default": 30
-                },
-                "background": {
-                    "type": "boolean",
-                    "description": "Run as a detached background task: returns a task_id immediately, output streams to files, poll task_status/task_output.",
-                    "default": false
-                },
-                "env": {
-                    "type": "object",
-                    "description": "Environment variables to inject into the command.",
-                    "additionalProperties": { "type": "string" },
-                    "default": {}
-                }
-            },
-            "required": ["command"]
-        })
+        typed_input_schema::<ShellArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -146,11 +160,7 @@ impl ToolHandler for ShellTool {
         ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let command = arguments
-            .get("command")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AgentError::ToolExecution("missing 'command' argument".into()))?
-            .to_string();
+        let args = parse_tool_input::<ShellArgs>(arguments)?;
         // Models sometimes pretty-print tool-call JSON with the command value
         // starting (or ending) on its own line, e.g. {"command": "\nls -la"}.
         // `bash -c $'\nls'` then treats the command as starting on line 2 and
@@ -158,27 +168,17 @@ impl ToolHandler for ShellTool {
         // commands — trim both ends before execution. (Fixing this at the tool
         // layer covers every producer: streaming increments, non-streaming
         // calls, and subagents.)
-        let command = command.trim().to_string();
+        let command = args.command.trim().to_string();
         if command.is_empty() {
             return Err(AgentError::ToolExecution("'command' is empty".into()));
         }
-        let timeout_secs = arguments.get("timeout_secs").and_then(Value::as_u64).unwrap_or(30);
-        let env = arguments
-            .get("env")
-            .and_then(Value::as_object)
-            .map(|env| {
-                env.iter()
-                    .filter_map(|(key, value)| {
-                        value.as_str().map(|value| (key.clone(), value.to_string()))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let timeout_secs = args.timeout_secs;
+        let env = args.env;
 
         // Detached background variant: spawn with file-redirected stdio,
         // register the task, and return the handle immediately. The turn
         // ends; the task stays resident (dev servers, watchers).
-        if arguments.get("background").and_then(Value::as_bool).unwrap_or(false) {
+        if args.background {
             let registry = self.background.as_ref().ok_or_else(|| {
                 AgentError::ToolExecution(
                     "background execution is not available in this configuration".into(),

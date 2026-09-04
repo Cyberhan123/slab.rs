@@ -7,8 +7,12 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use regex::Regex;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
+};
 use slab_utils::string::{truncate_line_bytes, truncate_middle_bytes};
 
 const DEFAULT_MAX_RESULTS: usize = 200;
@@ -25,6 +29,36 @@ const MAX_MATCH_PREVIEW_BYTES: usize = 4 * 1024;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 /// Headroom inside [`MAX_RESPONSE_BYTES`] for the envelope keys themselves.
 const RESPONSE_ENVELOPE_MARGIN_BYTES: usize = 1024;
+
+/// Arguments for the `grep` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GrepArgs {
+    /// Regular expression to search for.
+    pattern: String,
+    /// Directory or file to search (default: workspace root or '.').
+    #[serde(default = "default_path")]
+    path: String,
+    /// Glob pattern to restrict which files are searched (e.g. '*.rs'). Negated patterns are not supported. Files ignored by .gitignore are always excluded regardless of the glob.
+    glob: Option<String>,
+    /// If true, match case-insensitively.
+    #[serde(default)]
+    case_insensitive: bool,
+    #[serde(default = "default_max_results")]
+    #[schemars(range(min = 1, max = 1000))]
+    max_results: u64,
+    /// Number of surrounding lines to include before and after each match.
+    #[serde(default)]
+    #[schemars(range(min = 0, max = 10))]
+    context_lines: u64,
+}
+
+fn default_path() -> String {
+    ".".to_owned()
+}
+
+fn default_max_results() -> u64 {
+    DEFAULT_MAX_RESULTS as u64
+}
 
 /// Search files for lines matching a regular expression.
 ///
@@ -81,45 +115,7 @@ impl ToolHandler for GrepTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "pattern": {
-                    "type": "string",
-                    "description": "Regular expression to search for."
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Directory or file to search (default: workspace root or '.').",
-                    "default": "."
-                },
-                "glob": {
-                    "type": "string",
-                    "description": "Glob pattern to restrict which files are searched (e.g. '*.rs'). \
-                     Negated patterns are not supported. Files ignored by .gitignore are always \
-                     excluded regardless of the glob."
-                },
-                "case_insensitive": {
-                    "type": "boolean",
-                    "description": "If true, match case-insensitively.",
-                    "default": false
-                },
-                "max_results": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 1000,
-                    "default": 200
-                },
-                "context_lines": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 10,
-                    "description": "Number of surrounding lines to include before and after each match.",
-                    "default": 0
-                }
-            },
-            "required": ["pattern"]
-        })
+        typed_input_schema::<GrepArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -136,43 +132,27 @@ impl ToolHandler for GrepTool {
         ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let pattern = arguments
-            .get("pattern")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AgentError::ToolExecution("missing 'pattern' argument".into()))?
-            .to_owned();
-
-        let path_str = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
-
-        let glob_str = arguments.get("glob").and_then(Value::as_str).map(str::to_owned);
-        let case_insensitive =
-            arguments.get("case_insensitive").and_then(Value::as_bool).unwrap_or(false);
-        let max_results = arguments
-            .get("max_results")
-            .and_then(Value::as_u64)
-            .map(|value| value.clamp(1, HARD_MAX_RESULTS as u64) as usize)
-            .unwrap_or(DEFAULT_MAX_RESULTS);
-        let context_lines = arguments
-            .get("context_lines")
-            .and_then(Value::as_u64)
-            .map(|value| value.min(MAX_CONTEXT_LINES as u64) as usize)
-            .unwrap_or(0);
+        let args = parse_tool_input::<GrepArgs>(arguments)?;
+        let max_results = args.max_results.clamp(1, HARD_MAX_RESULTS as u64) as usize;
+        let context_lines = args.context_lines.min(MAX_CONTEXT_LINES as u64) as usize;
 
         let search_root = crate::fs::resolve_agent_path(
             self.workspace_root.as_deref(),
             &self.extra_roots,
-            path_str,
+            &args.path,
         )?;
 
         // Build the regex.
-        let re = regex::RegexBuilder::new(&pattern)
-            .case_insensitive(case_insensitive)
+        let re = regex::RegexBuilder::new(&args.pattern)
+            .case_insensitive(args.case_insensitive)
             .build()
-            .map_err(|e| AgentError::ToolExecution(format!("invalid regex '{pattern}': {e}")))?;
+            .map_err(|e| {
+                AgentError::ToolExecution(format!("invalid regex '{}': {e}", args.pattern))
+            })?;
 
         // Run the blocking scan on a dedicated thread so we don't block the async runtime.
         let scan = tokio::task::spawn_blocking(move || {
-            grep_blocking(&search_root, &re, glob_str.as_deref(), max_results, context_lines)
+            grep_blocking(&search_root, &re, args.glob.as_deref(), max_results, context_lines)
         })
         .await
         .map_err(|e| AgentError::ToolExecution(format!("grep task panicked: {e}")))?;
@@ -186,8 +166,8 @@ impl ToolHandler for GrepTool {
             let nonce = {
                 use std::hash::{DefaultHasher, Hash, Hasher};
                 let mut hasher = DefaultHasher::new();
-                pattern.hash(&mut hasher);
-                path_str.hash(&mut hasher);
+                args.pattern.hash(&mut hasher);
+                args.path.hash(&mut hasher);
                 format!("{:016x}", hasher.finish())
             };
             match serde_json::to_vec_pretty(&scan.all_matches) {
