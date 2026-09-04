@@ -37,6 +37,7 @@ pub mod runtime;
 pub mod thread;
 pub mod tool;
 pub mod tool_schema;
+pub mod typed_tool;
 
 mod concurrency_gate;
 mod llm_output;
@@ -87,4 +88,5 @@ pub use tool::{
     ToolContextBuilder, ToolDiscoveryState, ToolHandler, ToolName, ToolNamespace, ToolOutput,
     ToolOutputObserver, ToolOutputStream, ToolRouter, ToolVisibility, WorkspaceRef,
 };
+pub use typed_tool::{parse_tool_input, typed_input_schema};
 pub use turn::strip_think_blocks;
