@@ -8,7 +8,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
     AgentError, ToolCallRender, ToolContext, ToolOutput, TypedTool, protocol::TurnItem,
-    typed_input_schema,
 };
 use slab_utils::string::truncate_middle_bytes;
 
@@ -95,10 +94,6 @@ impl TypedTool for ReadFileTool {
          a range-less read of an oversized file is refused with an error \
          pointing at grep. start_line past the end of the file is an error, \
          not an empty result."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<ReadFileArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -329,10 +324,6 @@ impl TypedTool for WriteFileTool {
         "Write content to a file, creating parent directories when needed."
     }
 
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<WriteFileArgs>()
-    }
-
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
         let path = arguments.get("path").and_then(Value::as_str)?;
         Some(
@@ -424,10 +415,6 @@ impl TypedTool for ListDirTool {
         "List the immediate children of a directory."
     }
 
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<ListDirArgs>()
-    }
-
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
         let path = arguments.get("path").and_then(Value::as_str)?;
         Some(
@@ -498,7 +485,6 @@ mod tests {
     };
 
     use serde_json::{Value, json};
-    use slab_agent::TypedTool;
 
     use super::*;
 

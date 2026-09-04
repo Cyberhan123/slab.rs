@@ -3,8 +3,7 @@
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool};
 use slab_types::plugin::PluginLanguageServerTransport;
 
 use crate::domain::services::WorkspaceLspService;
@@ -70,10 +69,6 @@ impl TypedTool for CodeLspStatusTool {
 
     fn description(&self) -> &str {
         "Report whether Slab can resolve a workspace language-server provider for a language or file path."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<CodeLspStatusArgs>()
     }
 
     async fn execute(

@@ -13,7 +13,7 @@ use serde_json::Value;
 use slab_agent::protocol::TurnItem;
 use slab_agent::{
     AgentError, ToolCallRender, ToolContext, ToolOutput, ToolOutputObserver, ToolOutputStream,
-    TypedTool, typed_input_schema,
+    TypedTool,
 };
 use slab_sandboxing::{OutputSink, OutputStream, SandboxDriver};
 pub use slab_shell_command::ShellPolicy;
@@ -127,10 +127,6 @@ impl TypedTool for ShellTool {
          returns immediately with a task_id; output streams to files; poll \
          task_status/task_output and stop with task_stop. Use background only \
          for long-running servers/watchers."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<ShellArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {

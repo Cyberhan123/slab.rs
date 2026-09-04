@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool};
 use slab_file::watcher::{FileWatcher, WatchPath};
 
 /// Upper bound on the blocking wait. The model controls `timeout_ms`; without
@@ -94,10 +94,6 @@ impl TypedTool for FsWatchTool {
     /// tool batch for the full watch timeout).
     fn is_concurrency_safe(&self, _arguments: &Value) -> bool {
         true
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<FsWatchArgs>()
     }
 
     async fn execute(

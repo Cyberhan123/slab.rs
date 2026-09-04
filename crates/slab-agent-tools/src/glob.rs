@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool};
 
 const DEFAULT_MAX_RESULTS: usize = 200;
 const HARD_MAX_RESULTS: usize = 1000;
@@ -69,10 +69,6 @@ impl TypedTool for FileGlobTool {
         "Find files by gitignore-aware glob pattern inside a workspace path. \
          Skips .git, node_modules, target, vendor, dist, lockfiles, and \
          cargo-bazel generated files by default."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<FileGlobArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {

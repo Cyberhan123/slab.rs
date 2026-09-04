@@ -10,7 +10,7 @@ use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool};
 use slab_utils::string::{truncate_line_bytes, truncate_middle_bytes};
 
 const DEFAULT_MAX_RESULTS: usize = 200;
@@ -111,10 +111,6 @@ impl TypedTool for GrepTool {
          200 matches with file path, line number (1-based), and the matching \
          line (very long lines and oversized result sets are truncated with \
          explicit markers)."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<GrepArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {

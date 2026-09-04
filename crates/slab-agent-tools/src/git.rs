@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool};
 use slab_git::GitRepository;
 use slab_sandboxing::SandboxDriver;
 
@@ -41,6 +41,9 @@ impl GitStatusTool {
 
 #[async_trait]
 impl TypedTool for GitStatusTool {
+    // No-arg tool: `Value` keeps any stray arguments tolerated at parse
+    // time (an empty struct would reject non-object calls), and the empty
+    // object schema is the normalized default for `Value`.
     type Input = serde_json::Value;
     fn name(&self) -> &str {
         "git_status"
@@ -53,12 +56,6 @@ impl TypedTool for GitStatusTool {
 
     fn description(&self) -> &str {
         "Return the current Git status for the configured workspace."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        // No-arg tool: `Value` keeps any stray arguments tolerated at parse
-        // time (an empty struct would reject non-object calls).
-        typed_input_schema::<Value>()
     }
 
     async fn execute(
@@ -102,10 +99,6 @@ impl TypedTool for GitDiffTool {
         "Return a staged or unstaged Git diff for the configured workspace."
     }
 
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<GitDiffArgs>()
-    }
-
     async fn execute(
         &self,
         _ctx: &ToolContext,
@@ -140,10 +133,6 @@ impl TypedTool for GitCommitTool {
 
     fn description(&self) -> &str {
         "Stage all workspace changes and commit them with the provided message."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<GitCommitArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -195,7 +184,6 @@ mod tests {
     };
 
     use serde_json::{Value, json};
-    use slab_agent::TypedTool;
 
     use super::*;
 

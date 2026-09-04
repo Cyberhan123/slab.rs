@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
     AgentError, ToolCallRender, ToolContext, ToolOutput, ToolVisibility, TypedTool,
-    protocol::TurnItem, typed_input_schema,
+    protocol::TurnItem,
 };
 use slab_mcp::{McpClient, McpToolSpec};
 
@@ -44,10 +44,6 @@ impl TypedTool for McpCallTool {
 
     fn description(&self) -> &str {
         "Call a tool on a configured external MCP server."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<McpCallArgs>()
     }
 
     fn category(&self) -> slab_agent::OperationCategory {
@@ -108,6 +104,9 @@ impl McpListToolsTool {
 
 #[async_trait]
 impl TypedTool for McpListToolsTool {
+    // No-arg tool: `Value` keeps any stray arguments tolerated at parse
+    // time (an empty struct would reject non-object calls), and the empty
+    // object schema is the normalized default for `Value`.
     type Input = serde_json::Value;
     fn name(&self) -> &str {
         "mcp_list_tools"
@@ -115,12 +114,6 @@ impl TypedTool for McpListToolsTool {
 
     fn description(&self) -> &str {
         "List tools exposed by configured external MCP servers."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        // No-arg tool: `Value` keeps any stray arguments tolerated at parse
-        // time (an empty struct would reject non-object calls).
-        typed_input_schema::<Value>()
     }
 
     fn category(&self) -> slab_agent::OperationCategory {

@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
     AgentError, ToolCallRender, ToolContext, ToolOutput, ToolOutputObserver, ToolOutputStream,
-    TypedTool, protocol::TurnItem, typed_input_schema,
+    TypedTool, protocol::TurnItem,
 };
 use slab_apply_patch::{
     AppliedPatchDelta, AppliedPatchFileChange, Hunk, PatchProgress, PatchProgressKind,
@@ -58,10 +58,6 @@ impl TypedTool for ApplyPatchTool {
          `*** End of File` to anchor the end of the file). Updates match the \
          surrounding context leniently, and a partial application reports \
          which files already changed."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<ApplyPatchArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {

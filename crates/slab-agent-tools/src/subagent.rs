@@ -4,10 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::Value;
 use slab_agent::{
     AgentConfig, AgentControl, AgentError, ModelPolicy, ToolContext, ToolOutput, TypedTool,
-    typed_input_schema,
 };
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
@@ -53,10 +51,6 @@ impl TypedTool for DelegateSubagentTool {
 
     fn description(&self) -> &str {
         "Delegate a focused task to an isolated child agent and wait for its result."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<DelegateSubagentArgs>()
     }
 
     async fn execute(

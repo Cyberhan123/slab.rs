@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
     AgentError, ToolCallRender, ToolContext, ToolOutput, TypedTool, protocol::TurnItem,
-    tool::default_tool_turn_item, typed_input_schema,
+    tool::default_tool_turn_item,
 };
 
 use crate::domain::models::{
@@ -124,10 +124,6 @@ impl TypedTool for GenerateImageTool {
          automatically on first use (downloads when the weights are not local \
          yet). Returns the artifact URL(s); the image appears inline \
          automatically — do not describe it as text."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<GenerateImageArgs>()
     }
 
     fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {

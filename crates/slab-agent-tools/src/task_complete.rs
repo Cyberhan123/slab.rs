@@ -21,7 +21,7 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool};
 
 /// Tool name recognized by the agent turn loop as the structured-completion
 /// signal. Mirrored as a literal in `crates/slab-agent::turn_tool_call` because
@@ -111,10 +111,6 @@ impl TypedTool for TaskCompleteTool {
 
     fn description(&self) -> &str {
         "Signal that the task is complete. Denied unless every plan item is completed; on success the run ends with the summary as the final answer."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<TaskCompleteArgs>()
     }
 
     async fn execute(

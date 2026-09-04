@@ -456,7 +456,7 @@ impl BackgroundTaskRegistry {
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use slab_agent::{ToolContext, ToolOutput, TypedTool, typed_input_schema};
+use slab_agent::{ToolContext, ToolOutput, TypedTool};
 
 /// Arguments for the `task_status` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -524,10 +524,6 @@ impl TypedTool for TaskStatusTool {
          or list all background tasks when task_id is omitted."
     }
 
-    fn parameters_schema(&self) -> serde_json::Value {
-        typed_input_schema::<TaskStatusArgs>()
-    }
-
     /// Read-only registry query.
     fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
         true
@@ -584,10 +580,6 @@ impl TypedTool for TaskOutputTool {
          256KB). Returns the text plus the total log size so far."
     }
 
-    fn parameters_schema(&self) -> serde_json::Value {
-        typed_input_schema::<TaskOutputArgs>()
-    }
-
     /// Read-only file tail.
     fn is_concurrency_safe(&self, _arguments: &serde_json::Value) -> bool {
         true
@@ -641,10 +633,6 @@ impl TypedTool for TaskStopTool {
     fn description(&self) -> &str {
         "Stop a background task started with `shell background=true`: kills \
          its whole process tree and reports the resulting status."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        typed_input_schema::<TaskStopArgs>()
     }
 
     /// Touches only the task's own process tree — no shared workspace state.

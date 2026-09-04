@@ -8,7 +8,6 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use slab_agent::{
     AgentError, ToolCallRender, ToolContext, ToolOutput, TypedTool, protocol::TurnItem,
-    typed_input_schema,
 };
 use slab_config::secret_port::{EnvSecretAdapter, resolve_secret_or_plain};
 use slab_config::{
@@ -194,10 +193,6 @@ impl TypedTool for WebSearchTool {
         "Search the web through configured providers. Credentials are read from settings, \
          not tool arguments. On failure the search falls back through every other \
          credential-resolvable provider before reporting an aggregated error."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<WebSearchArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {

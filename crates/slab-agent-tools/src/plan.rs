@@ -187,10 +187,6 @@ executing. Once the plan is ready for the user, call present_plan; as you comple
 call update_plan to record progress."
     }
 
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<PlanArgs>()
-    }
-
     async fn execute(&self, ctx: &ToolContext, args: PlanArgs) -> Result<ToolOutput, AgentError> {
         let plan = build_plan(args, next_plan_id())?;
         let snapshot = serde_json::to_value(&plan)
@@ -229,10 +225,6 @@ impl TypedTool for UpdatePlanTool {
     fn description(&self) -> &str {
         "Update the current execution plan: mark a step done, replan, or add steps. Pass the full \
 updated item list. Preserve the plan id across updates."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<PlanArgs>()
     }
 
     async fn execute(&self, ctx: &ToolContext, args: PlanArgs) -> Result<ToolOutput, AgentError> {

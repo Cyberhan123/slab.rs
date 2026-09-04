@@ -17,8 +17,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{Value, json};
-use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
+use serde_json::json;
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool};
 use slab_sandboxing::{SandboxDriver, spawn_sandboxed_option};
 
 /// Deterministic verification target. The command mapped to each variant is
@@ -226,10 +226,6 @@ impl TypedTool for VerifyTool {
 
     fn description(&self) -> &str {
         "Run a deterministic workspace check (workspace_build / lint / test / diff) and return pass/fail with a result_ref for plan nodes."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        typed_input_schema::<VerifyArgs>()
     }
 
     async fn execute(&self, ctx: &ToolContext, args: VerifyArgs) -> Result<ToolOutput, AgentError> {
