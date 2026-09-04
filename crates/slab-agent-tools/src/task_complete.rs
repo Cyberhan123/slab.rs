@@ -18,9 +18,12 @@
 //! ```
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
+};
 
 /// Tool name recognized by the agent turn loop as the structured-completion
 /// signal. Mirrored as a literal in `crates/slab-agent::turn_tool_call` because
@@ -39,27 +42,30 @@ impl TaskCompleteTool {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct TaskCompleteArgs {
+    /// Concise summary of what was accomplished; becomes the final answer text.
     summary: String,
-    #[serde(default)]
+    /// The final plan snapshot. Every item must be completed or completion is denied.
+    #[schemars(length(min = 1))]
     plan: Vec<TaskPlanItemInput>,
+    /// Workspace-relative artifacts produced by the task.
     #[serde(default)]
     artifact_refs: Vec<ArtifactRefInput>,
+    /// Optional suggested follow-up actions surfaced to the user.
     #[serde(default)]
     followup_actions: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct TaskPlanItemInput {
     step: String,
     status: TaskPlanStatus,
-    /// Optional reference to a deterministic verify result (e.g. from `verify`).
-    #[serde(default)]
+    /// Optional reference to a verify result.
     result_ref: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 enum TaskPlanStatus {
     Pending,
@@ -74,10 +80,20 @@ impl TaskPlanStatus {
     }
 }
 
-#[derive(Debug, Deserialize)]
+/// Schema-only hint for [`ArtifactRefInput::kind`]: the runtime keeps `kind`
+/// as a free-form string so unknown kinds are surfaced, not rejected.
+#[derive(JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum ArtifactKindSchema {
+    File,
+    Diff,
+    Image,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct ArtifactRefInput {
     path: String,
-    #[serde(default)]
+    #[schemars(with = "ArtifactKindSchema")]
     kind: Option<String>,
 }
 
@@ -92,47 +108,7 @@ impl ToolHandler for TaskCompleteTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "Concise summary of what was accomplished; becomes the final answer text."
-                },
-                "plan": {
-                    "type": "array",
-                    "minItems": 1,
-                    "description": "The final plan snapshot. Every item must be completed or completion is denied.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "step": { "type": "string" },
-                            "status": { "enum": ["pending", "in_progress", "completed", "blocked"] },
-                            "result_ref": { "type": "string", "description": "Optional reference to a verify result." }
-                        },
-                        "required": ["step", "status"]
-                    }
-                },
-                "artifact_refs": {
-                    "type": "array",
-                    "description": "Workspace-relative artifacts produced by the task.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "path": { "type": "string" },
-                            "kind": { "enum": ["file", "diff", "image"] }
-                        },
-                        "required": ["path"]
-                    }
-                },
-                "followup_actions": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Optional suggested follow-up actions surfaced to the user."
-                }
-            },
-            "required": ["summary", "plan"]
-        })
+        typed_input_schema::<TaskCompleteArgs>()
     }
 
     async fn execute(
@@ -140,10 +116,7 @@ impl ToolHandler for TaskCompleteTool {
         ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let args: TaskCompleteArgs =
-            serde_json::from_value(arguments.clone()).map_err(|error| {
-                AgentError::ToolExecution(format!("invalid task.complete args: {error}"))
-            })?;
+        let args = parse_tool_input::<TaskCompleteArgs>(arguments)?;
 
         let summary = args.summary.trim();
         if summary.is_empty() {

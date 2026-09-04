@@ -2,10 +2,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
     AgentConfig, AgentControl, AgentError, ModelPolicy, ToolContext, ToolHandler, ToolOutput,
+    parse_tool_input, typed_input_schema,
 };
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
@@ -21,22 +23,24 @@ impl DelegateSubagentTool {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct DelegateSubagentArgs {
+    /// The focused task for the child agent.
     task: String,
-    #[serde(default)]
+    /// Optional built-in agent type (e.g. "plan"). Resolves a tool constraint and system prompt from the agent registry; the call fails if the type is unknown.
     agent_type: Option<String>,
-    #[serde(default)]
+    /// Optional model override for the child agent.
     model: Option<String>,
-    #[serde(default)]
+    /// Optional child-agent system prompt.
     system_prompt: Option<String>,
-    #[serde(default)]
+    /// Optional tool allow-list for the child agent.
     allowed_tools: Option<Vec<String>>,
-    #[serde(default)]
+    /// Optional child-agent turn limit.
+    #[schemars(range(min = 1))]
     max_turns: Option<u32>,
-    #[serde(default)]
+    /// Optional requested output format for the child result.
     output_format: Option<String>,
-    #[serde(default)]
+    /// Optional workspace-relative path that bounds the delegated work.
     workspace_scope: Option<String>,
 }
 
@@ -51,46 +55,7 @@ impl ToolHandler for DelegateSubagentTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": "The focused task for the child agent."
-                },
-                "agent_type": {
-                    "type": "string",
-                    "description": "Optional built-in agent type (e.g. \"plan\"). Resolves a tool constraint and system prompt from the agent registry; the call fails if the type is unknown."
-                },
-                "model": {
-                    "type": "string",
-                    "description": "Optional model override for the child agent."
-                },
-                "system_prompt": {
-                    "type": "string",
-                    "description": "Optional child-agent system prompt."
-                },
-                "allowed_tools": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Optional tool allow-list for the child agent."
-                },
-                "max_turns": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Optional child-agent turn limit."
-                },
-                "output_format": {
-                    "type": "string",
-                    "description": "Optional requested output format for the child result."
-                },
-                "workspace_scope": {
-                    "type": "string",
-                    "description": "Optional workspace-relative path that bounds the delegated work."
-                }
-            },
-            "required": ["task"]
-        })
+        typed_input_schema::<DelegateSubagentArgs>()
     }
 
     async fn execute(
@@ -98,10 +63,7 @@ impl ToolHandler for DelegateSubagentTool {
         ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let args: DelegateSubagentArgs =
-            serde_json::from_value(arguments.clone()).map_err(|error| {
-                AgentError::ToolExecution(format!("invalid subagent args: {error}"))
-            })?;
+        let args = parse_tool_input::<DelegateSubagentArgs>(arguments)?;
         if args.task.trim().is_empty() {
             return Err(AgentError::ToolExecution("subagent task must not be blank".to_owned()));
         }

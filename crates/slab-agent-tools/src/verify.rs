@@ -15,9 +15,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
+};
 use slab_sandboxing::{SandboxDriver, spawn_sandboxed_option};
 
 /// Deterministic verification target. The command mapped to each variant is
@@ -193,10 +196,24 @@ impl Default for VerifyTool {
     }
 }
 
-#[derive(Debug, Deserialize)]
+/// Schema-only mirror of [`VerifyTarget`]'s canonical wire values. The
+/// runtime `from_str` accepts a wider alias set ("build", "tests",
+/// case variants); the schema advertises only the canonical four.
+#[derive(JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum VerifyTargetSchema {
+    WorkspaceBuild,
+    Lint,
+    Test,
+    Diff,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct VerifyArgs {
+    /// Which deterministic check to run.
+    #[schemars(with = "VerifyTargetSchema")]
     target: String,
-    #[serde(default)]
+    /// Optional workspace-relative scope hint (informational).
     path: Option<String>,
 }
 
@@ -211,21 +228,7 @@ impl ToolHandler for VerifyTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "target": {
-                    "type": "string",
-                    "enum": ["workspace_build", "lint", "test", "diff"],
-                    "description": "Which deterministic check to run."
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Optional workspace-relative scope hint (informational)."
-                }
-            },
-            "required": ["target"]
-        })
+        typed_input_schema::<VerifyArgs>()
     }
 
     async fn execute(
@@ -233,8 +236,10 @@ impl ToolHandler for VerifyTool {
         ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let args: VerifyArgs = serde_json::from_value(arguments.clone())
-            .map_err(|error| AgentError::ToolExecution(format!("invalid verify args: {error}")))?;
+        let args = parse_tool_input::<VerifyArgs>(arguments)?;
+        // `target` stays a string: the runtime alias set ("build", "tests",
+        // case variants) is wider than the schema's canonical enum, exactly
+        // as before.
         let target = VerifyTarget::from_str(&args.target).ok_or_else(|| {
             AgentError::ToolExecution(format!(
                 "verify target must be one of: workspace_build, lint, test, diff (got '{}')",
