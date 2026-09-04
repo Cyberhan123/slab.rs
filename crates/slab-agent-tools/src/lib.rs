@@ -11,7 +11,6 @@ use slab_mcp::McpClient;
 use slab_sandboxing::SandboxDriver;
 
 pub mod apply_patch;
-mod args;
 mod artifact;
 pub mod background;
 pub(crate) mod error;

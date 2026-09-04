@@ -67,6 +67,7 @@ utoipa = { workspace = true, features = ["uuid", "chrono"] }
 # Serialization
 serde      = { workspace = true }
 serde_json = { workspace = true }
+schemars   = { workspace = true }
 minijinja  = { workspace = true }
 genai      = { workspace = true }
 reqwest    = { workspace = true }

@@ -3,13 +3,37 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
-
-use crate::args::string_arg;
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool};
 
 const DEFAULT_MAX_RESULTS: usize = 200;
 const HARD_MAX_RESULTS: usize = 1000;
+
+/// Arguments for the `file_glob` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FileGlobArgs {
+    /// Glob pattern relative to 'path', e.g. '*.rs' or 'src/**/*.ts'. Negated patterns are not supported. Files ignored by .gitignore are always excluded regardless of the pattern.
+    pattern: String,
+    /// Directory or file to search (default: workspace root or '.').
+    #[serde(default = "default_path")]
+    path: String,
+    #[serde(default = "default_max_results")]
+    #[schemars(range(min = 1, max = 1000))]
+    max_results: u64,
+    /// Whether matching directories should be included.
+    #[serde(default)]
+    include_dirs: bool,
+}
+
+fn default_path() -> String {
+    ".".to_owned()
+}
+
+fn default_max_results() -> u64 {
+    DEFAULT_MAX_RESULTS as u64
+}
 
 pub struct FileGlobTool {
     workspace_root: Option<PathBuf>,
@@ -30,7 +54,8 @@ impl FileGlobTool {
 }
 
 #[async_trait]
-impl ToolHandler for FileGlobTool {
+impl TypedTool for FileGlobTool {
+    type Input = FileGlobArgs;
     fn name(&self) -> &str {
         "file_glob"
     }
@@ -46,37 +71,6 @@ impl ToolHandler for FileGlobTool {
          cargo-bazel generated files by default."
     }
 
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "pattern": {
-                    "type": "string",
-                    "description": "Glob pattern relative to 'path', e.g. '*.rs' or 'src/**/*.ts'. \
-                     Negated patterns are not supported. Files ignored by .gitignore are always \
-                     excluded regardless of the pattern."
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Directory or file to search (default: workspace root or '.').",
-                    "default": "."
-                },
-                "max_results": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 1000,
-                    "default": 200
-                },
-                "include_dirs": {
-                    "type": "boolean",
-                    "description": "Whether matching directories should be included.",
-                    "default": false
-                }
-            },
-            "required": ["pattern"]
-        })
-    }
-
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
         let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
         let pattern = arguments.get("pattern").and_then(Value::as_str).unwrap_or("");
@@ -89,21 +83,17 @@ impl ToolHandler for FileGlobTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: FileGlobArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let pattern = string_arg(arguments, "pattern")?.to_owned();
-        let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
-        let max_results = arguments
-            .get("max_results")
-            .and_then(Value::as_u64)
-            .map(|value| value.clamp(1, HARD_MAX_RESULTS as u64) as usize)
-            .unwrap_or(DEFAULT_MAX_RESULTS);
-        let include_dirs = arguments.get("include_dirs").and_then(Value::as_bool).unwrap_or(false);
-        let search_root =
-            crate::fs::resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
+        let max_results = args.max_results.clamp(1, HARD_MAX_RESULTS as u64) as usize;
+        let search_root = crate::fs::resolve_agent_path(
+            self.workspace_root.as_deref(),
+            &self.extra_roots,
+            &args.path,
+        )?;
 
         let results = tokio::task::spawn_blocking(move || {
-            glob_blocking(&search_root, &pattern, max_results, include_dirs)
+            glob_blocking(&search_root, &args.pattern, max_results, args.include_dirs)
         })
         .await
         .map_err(|error| AgentError::ToolExecution(format!("file_glob task panicked: {error}")))?;
@@ -216,8 +206,7 @@ mod tests {
         fs::write(root.join("ignored").join("skip.rs"), "").expect("write ignored file");
         let tool = FileGlobTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "*.rs"}))
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({"path": ".", "pattern": "*.rs"}))
             .await
             .expect("glob output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
@@ -238,9 +227,9 @@ mod tests {
     fn file_glob_describes_read_only_operation() {
         let tool = FileGlobTool::new(Some(PathBuf::from(".")));
 
-        let desc = tool
-            .describe_operation(&json!({"path": "src", "pattern": "*.rs"}))
-            .expect("descriptor");
+        let desc =
+            ToolHandler::describe_operation(&tool, &json!({"path": "src", "pattern": "*.rs"}))
+                .expect("descriptor");
         assert_eq!(desc.category, slab_agent::OperationCategory::ReadOnly);
         assert_eq!(desc.subject, "src/*.rs");
     }
@@ -253,10 +242,13 @@ mod tests {
         }
         let tool = FileGlobTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "*.txt", "max_results": 1}))
-            .await
-            .expect("glob output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": ".", "pattern": "*.txt", "max_results": 1}),
+        )
+        .await
+        .expect("glob output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["matches"].as_array().expect("matches").len(), 1);
@@ -271,8 +263,9 @@ mod tests {
         let root = temp_root("invalid_glob");
         let tool = FileGlobTool::new(Some(root.clone()));
 
-        let error =
-            tool.execute(&ctx(), &json!({"path": ".", "pattern": "["})).await.expect_err("glob");
+        let error = ToolHandler::execute(&tool, &ctx(), &json!({"path": ".", "pattern": "["}))
+            .await
+            .expect_err("glob");
 
         assert!(error.to_string().contains("invalid glob"));
         let _ = fs::remove_dir_all(root);
@@ -291,8 +284,7 @@ mod tests {
         fs::write(root.join("src").join("a.rs"), "").expect("write source file");
         let tool = FileGlobTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "**/*"}))
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({"path": ".", "pattern": "**/*"}))
             .await
             .expect("glob output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
@@ -326,10 +318,10 @@ mod tests {
         fs::write(root.join("a").join("build").join("y.rs"), "").expect("write nested file");
         let tool = FileGlobTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "**/*.rs"}))
-            .await
-            .expect("glob output");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": ".", "pattern": "**/*.rs"}))
+                .await
+                .expect("glob output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         let paths: Vec<String> = value["matches"]
@@ -360,10 +352,13 @@ mod tests {
         fs::write(root.join("keep.rs"), "").expect("write kept file");
         let tool = FileGlobTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "*", "include_dirs": true}))
-            .await
-            .expect("glob output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": ".", "pattern": "*", "include_dirs": true}),
+        )
+        .await
+        .expect("glob output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         let paths: Vec<String> = value["matches"]
@@ -392,10 +387,10 @@ mod tests {
         fs::write(&file, "x").expect("write file");
         let tool = FileGlobTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": "notes.md", "pattern": "*.md"}))
-            .await
-            .expect("glob output");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": "notes.md", "pattern": "*.md"}))
+                .await
+                .expect("glob output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         let matches = value["matches"].as_array().expect("matches");
@@ -409,10 +404,10 @@ mod tests {
         let root = temp_root("escape");
         let tool = FileGlobTool::new(Some(root.clone()));
 
-        let error = tool
-            .execute(&ctx(), &json!({"path": "../outside", "pattern": "*"}))
-            .await
-            .expect_err("escape rejected");
+        let error =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": "../outside", "pattern": "*"}))
+                .await
+                .expect_err("escape rejected");
 
         assert!(error.to_string().contains("workspace path"));
         let _ = fs::remove_dir_all(root);
@@ -420,7 +415,7 @@ mod tests {
 
     #[test]
     fn file_glob_schema_matches_required_arguments() {
-        let schema = FileGlobTool::new(None).parameters_schema();
+        let schema = ToolHandler::parameters_schema(&FileGlobTool::new(None));
 
         assert_eq!(schema["properties"]["pattern"]["type"], "string");
         assert_eq!(schema["properties"]["path"]["default"], ".");
@@ -445,8 +440,7 @@ mod tests {
         fs::write(root.join("src").join("keep.rs"), "").expect("write kept file");
         let tool = FileGlobTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "**/*"}))
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({"path": ".", "pattern": "**/*"}))
             .await
             .expect("glob output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");

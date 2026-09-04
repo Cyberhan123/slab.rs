@@ -3,9 +3,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use slab_agent::{
-    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, protocol::TurnItem,
+    AgentError, ToolCallRender, ToolContext, ToolOutput, TypedTool, protocol::TurnItem,
 };
 use slab_config::secret_port::{EnvSecretAdapter, resolve_secret_or_plain};
 use slab_config::{
@@ -22,6 +24,136 @@ use websearch::{
     },
     types::{SafeSearch, SearchProvider, SearchResult, SortBy, SortOrder},
 };
+
+// Schema-only mirrors of the enum-valued string arguments (plain comments on
+// purpose — a doc comment would leak into the generated schema as a
+// description). Runtime parsing keeps the wider lenient string handling with
+// its exact error messages; only the schema enumerates the canonical values.
+
+#[derive(JsonSchema)]
+#[schemars(inline)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
+enum WebSearchProviderSchema {
+    Duckduckgo,
+    Arxiv,
+    Google,
+    Tavily,
+    Exa,
+    Serpapi,
+    Brave,
+    Searxng,
+}
+
+#[derive(JsonSchema)]
+#[schemars(inline)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
+enum SafeSearchSchema {
+    Off,
+    Moderate,
+    Strict,
+}
+
+#[derive(JsonSchema)]
+#[schemars(inline)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
+enum SortBySchema {
+    Relevance,
+    LastUpdatedDate,
+    SubmittedDate,
+}
+
+#[derive(JsonSchema)]
+#[schemars(inline)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
+enum SortOrderSchema {
+    Ascending,
+    Descending,
+}
+
+/// Arguments for the `web_search` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct WebSearchArgs {
+    /// Search query text.
+    query: String,
+    /// Search provider. An explicit choice is used strictly; the default falls back through the other configured providers on failure. Defaults to agent.tools.websearch.default_provider.
+    #[schemars(with = "Option<WebSearchProviderSchema>")]
+    provider: Option<String>,
+    /// Maximum number of results to return.
+    #[serde(default, deserialize_with = "deserialize_max_results")]
+    #[schemars(range(min = 1))]
+    max_results: Option<u64>,
+    language: Option<String>,
+    region: Option<String>,
+    #[schemars(with = "Option<SafeSearchSchema>")]
+    safe_search: Option<String>,
+    /// Result page number (1-based).
+    #[serde(default, deserialize_with = "deserialize_page")]
+    #[schemars(range(min = 1))]
+    page: Option<u64>,
+    /// Comma-delimited ArXiv IDs to fetch.
+    id_list: Option<String>,
+    /// ArXiv result offset.
+    #[serde(default, deserialize_with = "deserialize_start")]
+    #[schemars(range(min = 0))]
+    start: Option<u64>,
+    #[schemars(with = "Option<SortBySchema>")]
+    sort_by: Option<String>,
+    #[schemars(with = "Option<SortOrderSchema>")]
+    sort_order: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_timeout_ms")]
+    #[schemars(range(min = 1))]
+    timeout_ms: Option<u64>,
+    /// Include provider raw payloads when available.
+    #[serde(default)]
+    include_raw: bool,
+}
+
+// Integer fields keep the exact "'<name>' must be an integer" wording for
+// non-numeric values instead of serde's generic invalid-type message.
+fn optional_integer<'de, D>(deserializer: D, name: &str) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match Option::<Value>::deserialize(deserializer)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom(format!("'{name}' must be an integer"))),
+    }
+}
+
+fn deserialize_max_results<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    optional_integer(deserializer, "max_results")
+}
+
+fn deserialize_page<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    optional_integer(deserializer, "page")
+}
+
+fn deserialize_start<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    optional_integer(deserializer, "start")
+}
+
+fn deserialize_timeout_ms<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    optional_integer(deserializer, "timeout_ms")
+}
 
 pub struct WebSearchTool {
     config: AgentWebSearchConfig,
@@ -46,7 +178,8 @@ impl Default for WebSearchTool {
 }
 
 #[async_trait]
-impl ToolHandler for WebSearchTool {
+impl TypedTool for WebSearchTool {
+    type Input = WebSearchArgs;
     fn name(&self) -> &str {
         "web_search"
     }
@@ -60,74 +193,6 @@ impl ToolHandler for WebSearchTool {
         "Search the web through configured providers. Credentials are read from settings, \
          not tool arguments. On failure the search falls back through every other \
          credential-resolvable provider before reporting an aggregated error."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query text."
-                },
-                "provider": {
-                    "type": "string",
-                    "enum": [
-                        "duckduckgo",
-                        "arxiv",
-                        "google",
-                        "tavily",
-                        "exa",
-                        "serpapi",
-                        "brave",
-                        "searxng"
-                    ],
-                    "description": "Search provider. An explicit choice is used strictly; the default falls back through the other configured providers on failure. Defaults to agent.tools.websearch.default_provider."
-                },
-                "max_results": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Maximum number of results to return."
-                },
-                "language": { "type": "string" },
-                "region": { "type": "string" },
-                "safe_search": {
-                    "type": "string",
-                    "enum": ["off", "moderate", "strict"]
-                },
-                "page": {
-                    "type": "integer",
-                    "minimum": 1
-                },
-                "id_list": {
-                    "type": "string",
-                    "description": "Comma-delimited ArXiv IDs to fetch."
-                },
-                "start": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": "ArXiv result offset."
-                },
-                "sort_by": {
-                    "type": "string",
-                    "enum": ["relevance", "last_updated_date", "submitted_date"]
-                },
-                "sort_order": {
-                    "type": "string",
-                    "enum": ["ascending", "descending"]
-                },
-                "timeout_ms": {
-                    "type": "integer",
-                    "minimum": 1
-                },
-                "include_raw": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Include provider raw payloads when available."
-                }
-            },
-            "required": ["query"]
-        })
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -149,10 +214,10 @@ impl ToolHandler for WebSearchTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: WebSearchArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let request = WebSearchRequest::from_arguments(arguments, self.config.default_provider)?;
-        let include_raw = arguments.get("include_raw").and_then(Value::as_bool).unwrap_or(false);
+        let include_raw = args.include_raw;
+        let request = WebSearchRequest::from_args(args, self.config.default_provider)?;
         let results = self.runner.search(&self.config, request.clone()).await?;
         let results = results
             .into_iter()
@@ -193,17 +258,11 @@ struct WebSearchRequest {
 }
 
 impl WebSearchRequest {
-    fn from_arguments(
-        arguments: &Value,
+    fn from_args(
+        args: WebSearchArgs,
         default_provider: WebSearchProviderId,
     ) -> Result<Self, AgentError> {
-        let query = arguments
-            .get("query")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AgentError::ToolExecution("missing 'query' argument".into()))?
-            .to_owned();
-        let (provider, explicit_provider) = match arguments.get("provider").and_then(Value::as_str)
-        {
+        let (provider, explicit_provider) = match args.provider.as_deref() {
             Some(value) => {
                 let parsed =
                     value.parse::<WebSearchProviderId>().map_err(AgentError::ToolExecution)?;
@@ -215,17 +274,17 @@ impl WebSearchRequest {
         Ok(Self {
             provider,
             explicit_provider,
-            query,
-            id_list: optional_string(arguments, "id_list"),
-            max_results: optional_positive_u32(arguments, "max_results")?,
-            language: optional_string(arguments, "language"),
-            region: optional_string(arguments, "region"),
-            safe_search: optional_safe_search(arguments)?,
-            page: optional_positive_u32(arguments, "page")?,
-            start: optional_u32(arguments, "start")?,
-            sort_by: optional_sort_by(arguments)?,
-            sort_order: optional_sort_order(arguments)?,
-            timeout_ms: optional_positive_u64(arguments, "timeout_ms")?,
+            query: args.query,
+            id_list: args.id_list,
+            max_results: narrow_positive_u32("max_results", args.max_results)?,
+            language: args.language,
+            region: args.region,
+            safe_search: parse_safe_search(args.safe_search.as_deref())?,
+            page: narrow_positive_u32("page", args.page)?,
+            start: narrow_u32("start", args.start)?,
+            sort_by: parse_sort_by(args.sort_by.as_deref())?,
+            sort_order: parse_sort_order(args.sort_order.as_deref())?,
+            timeout_ms: positive_u64("timeout_ms", args.timeout_ms)?,
         })
     }
 }
@@ -539,12 +598,9 @@ fn trimmed(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
-fn optional_string(arguments: &Value, name: &str) -> Option<String> {
-    arguments.get(name).and_then(Value::as_str).map(str::to_owned)
-}
-
-fn optional_u32(arguments: &Value, name: &str) -> Result<Option<u32>, AgentError> {
-    optional_u64(arguments, name)?
+/// Narrow a non-negative integer to `u32` with the historical wording.
+fn narrow_u32(name: &str, value: Option<u64>) -> Result<Option<u32>, AgentError> {
+    value
         .map(|value| {
             u32::try_from(value)
                 .map_err(|_| AgentError::ToolExecution(format!("'{name}' is too large")))
@@ -552,28 +608,9 @@ fn optional_u32(arguments: &Value, name: &str) -> Result<Option<u32>, AgentError
         .transpose()
 }
 
-fn optional_positive_u32(arguments: &Value, name: &str) -> Result<Option<u32>, AgentError> {
-    optional_positive_u64(arguments, name)?
-        .map(|value| {
-            u32::try_from(value)
-                .map_err(|_| AgentError::ToolExecution(format!("'{name}' is too large")))
-        })
-        .transpose()
-}
-
-fn optional_u64(arguments: &Value, name: &str) -> Result<Option<u64>, AgentError> {
-    arguments
-        .get(name)
-        .map(|value| {
-            value
-                .as_u64()
-                .ok_or_else(|| AgentError::ToolExecution(format!("'{name}' must be an integer")))
-        })
-        .transpose()
-}
-
-fn optional_positive_u64(arguments: &Value, name: &str) -> Result<Option<u64>, AgentError> {
-    optional_u64(arguments, name)?
+/// Narrow to `u32` and require at least 1.
+fn narrow_positive_u32(name: &str, value: Option<u64>) -> Result<Option<u32>, AgentError> {
+    narrow_u32(name, positive_u64(name, value)?)?
         .map(|value| {
             if value == 0 {
                 Err(AgentError::ToolExecution(format!("'{name}' must be at least 1")))
@@ -584,8 +621,21 @@ fn optional_positive_u64(arguments: &Value, name: &str) -> Result<Option<u64>, A
         .transpose()
 }
 
-fn optional_safe_search(arguments: &Value) -> Result<Option<SafeSearch>, AgentError> {
-    match arguments.get("safe_search").and_then(Value::as_str) {
+/// Require at least 1 when present.
+fn positive_u64(name: &str, value: Option<u64>) -> Result<Option<u64>, AgentError> {
+    value
+        .map(|value| {
+            if value == 0 {
+                Err(AgentError::ToolExecution(format!("'{name}' must be at least 1")))
+            } else {
+                Ok(value)
+            }
+        })
+        .transpose()
+}
+
+fn parse_safe_search(value: Option<&str>) -> Result<Option<SafeSearch>, AgentError> {
+    match value {
         Some("off") => Ok(Some(SafeSearch::Off)),
         Some("moderate") => Ok(Some(SafeSearch::Moderate)),
         Some("strict") => Ok(Some(SafeSearch::Strict)),
@@ -594,8 +644,8 @@ fn optional_safe_search(arguments: &Value) -> Result<Option<SafeSearch>, AgentEr
     }
 }
 
-fn optional_sort_by(arguments: &Value) -> Result<Option<SortBy>, AgentError> {
-    match arguments.get("sort_by").and_then(Value::as_str) {
+fn parse_sort_by(value: Option<&str>) -> Result<Option<SortBy>, AgentError> {
+    match value {
         Some("relevance") => Ok(Some(SortBy::Relevance)),
         Some("last_updated_date" | "lastUpdatedDate") => Ok(Some(SortBy::LastUpdatedDate)),
         Some("submitted_date" | "submittedDate") => Ok(Some(SortBy::SubmittedDate)),
@@ -604,8 +654,8 @@ fn optional_sort_by(arguments: &Value) -> Result<Option<SortBy>, AgentError> {
     }
 }
 
-fn optional_sort_order(arguments: &Value) -> Result<Option<SortOrder>, AgentError> {
-    match arguments.get("sort_order").and_then(Value::as_str) {
+fn parse_sort_order(value: Option<&str>) -> Result<Option<SortOrder>, AgentError> {
+    match value {
         Some("ascending") => Ok(Some(SortOrder::Ascending)),
         Some("descending") => Ok(Some(SortOrder::Descending)),
         Some(value) => Err(AgentError::ToolExecution(format!("unsupported sort_order '{value}'"))),
@@ -619,6 +669,7 @@ fn tool_error(error: impl std::fmt::Display) -> AgentError {
 
 #[cfg(test)]
 mod tests {
+    use slab_agent::ToolHandler;
     use std::sync::Mutex;
 
     use super::*;
@@ -653,7 +704,7 @@ mod tests {
 
     #[test]
     fn schema_includes_provider_enum() {
-        let schema = WebSearchTool::default().parameters_schema();
+        let schema = ToolHandler::parameters_schema(&WebSearchTool::default());
         let providers = schema["properties"]["provider"]["enum"].as_array().expect("provider enum");
 
         assert!(providers.contains(&Value::String("duckduckgo".to_owned())));
@@ -674,10 +725,13 @@ mod tests {
         let tool = WebSearchTool::new(config);
         // EXPLICIT provider: used strictly — the missing key must fail without
         // the fallback chain firing (and without touching the network).
-        let error = tool
-            .execute(&ctx(), &serde_json::json!({"query": "rust", "provider": "google"}))
-            .await
-            .expect_err("missing credentials should fail");
+        let error = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &serde_json::json!({"query": "rust", "provider": "google"}),
+        )
+        .await
+        .expect_err("missing credentials should fail");
 
         assert!(error.to_string().contains("missing api key"));
     }
@@ -689,20 +743,26 @@ mod tests {
             ..AgentWebSearchConfig::default()
         };
         google.providers.google.auth.api_key = Some("key".to_owned());
-        let error = WebSearchTool::new(google)
-            .execute(&ctx(), &serde_json::json!({"query": "rust", "provider": "google"}))
-            .await
-            .expect_err("missing cx should fail");
+        let error = ToolHandler::execute(
+            &WebSearchTool::new(google),
+            &ctx(),
+            &serde_json::json!({"query": "rust", "provider": "google"}),
+        )
+        .await
+        .expect_err("missing cx should fail");
         assert!(error.to_string().contains("agent.tools.websearch.providers.google.cx"));
 
         let searxng = AgentWebSearchConfig {
             default_provider: WebSearchProviderId::Searxng,
             ..AgentWebSearchConfig::default()
         };
-        let error = WebSearchTool::new(searxng)
-            .execute(&ctx(), &serde_json::json!({"query": "rust", "provider": "searxng"}))
-            .await
-            .expect_err("missing base url should fail");
+        let error = ToolHandler::execute(
+            &WebSearchTool::new(searxng),
+            &ctx(),
+            &serde_json::json!({"query": "rust", "provider": "searxng"}),
+        )
+        .await
+        .expect_err("missing base url should fail");
         assert!(error.to_string().contains("agent.tools.websearch.providers.searxng.base_url"));
     }
 
@@ -762,10 +822,13 @@ mod tests {
     async fn fake_runner_shapes_output_without_raw_by_default() {
         let runner = Arc::new(FakeRunner { requests: Mutex::new(Vec::new()) });
         let tool = WebSearchTool::with_runner(AgentWebSearchConfig::default(), runner);
-        let output = tool
-            .execute(&ctx(), &serde_json::json!({"query": "rust", "max_results": 1}))
-            .await
-            .expect("search output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &serde_json::json!({"query": "rust", "max_results": 1}),
+        )
+        .await
+        .expect("search output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["provider"], "duckduckgo");
@@ -778,10 +841,13 @@ mod tests {
     async fn fake_runner_includes_raw_when_requested() {
         let runner = Arc::new(FakeRunner { requests: Mutex::new(Vec::new()) });
         let tool = WebSearchTool::with_runner(AgentWebSearchConfig::default(), runner);
-        let output = tool
-            .execute(&ctx(), &serde_json::json!({"query": "rust", "include_raw": true}))
-            .await
-            .expect("search output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &serde_json::json!({"query": "rust", "include_raw": true}),
+        )
+        .await
+        .expect("search output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["results"][0]["raw"]["hidden"], true);
@@ -792,7 +858,8 @@ mod tests {
         let runner = Arc::new(FakeRunner { requests: Mutex::new(Vec::new()) });
         let tool = WebSearchTool::with_runner(AgentWebSearchConfig::default(), runner.clone());
 
-        tool.execute(
+        ToolHandler::execute(
+            &tool,
             &ctx(),
             &serde_json::json!({
                 "query": "rust",
@@ -869,7 +936,9 @@ mod tests {
         for (arguments, expected) in cases {
             let runner = Arc::new(FakeRunner { requests: Mutex::new(Vec::new()) });
             let tool = WebSearchTool::with_runner(AgentWebSearchConfig::default(), runner.clone());
-            let error = tool.execute(&ctx(), &arguments).await.expect_err("invalid arguments");
+            let error = ToolHandler::execute(&tool, &ctx(), &arguments)
+                .await
+                .expect_err("invalid arguments");
 
             assert!(error.to_string().contains(expected), "{error}");
             assert!(runner.requests.lock().expect("requests").is_empty());

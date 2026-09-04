@@ -8,14 +8,38 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool};
 use slab_file::watcher::{FileWatcher, WatchPath};
 
 /// Upper bound on the blocking wait. The model controls `timeout_ms`; without
 /// a cap a single 60s watch serialized its whole tool batch (the tool used to
 /// be concurrency-unsafe, so it ran ALONE in a serial batch).
 const FS_WATCH_MAX_TIMEOUT_MS: u64 = 30_000;
+
+/// Arguments for the `fs_watch` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FsWatchArgs {
+    /// Path to watch (workspace-relative paths resolve against the workspace root).
+    path: String,
+    /// Watch subdirectories recursively.
+    #[serde(default = "default_recursive")]
+    recursive: bool,
+    /// How long to wait for an event (milliseconds); clamped to at most 30000.
+    #[serde(default = "default_timeout_ms")]
+    #[schemars(range(max = 30_000))]
+    timeout_ms: u64,
+}
+
+fn default_recursive() -> bool {
+    true
+}
+
+fn default_timeout_ms() -> u64 {
+    2000
+}
 
 /// Watch a path for file-system changes and return the list of changed paths.
 ///
@@ -50,7 +74,8 @@ impl FsWatchTool {
 }
 
 #[async_trait]
-impl ToolHandler for FsWatchTool {
+impl TypedTool for FsWatchTool {
+    type Input = FsWatchArgs;
     fn name(&self) -> &str {
         "fs_watch"
     }
@@ -71,52 +96,19 @@ impl ToolHandler for FsWatchTool {
         true
     }
 
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Path to watch (workspace-relative paths resolve against the workspace root)."
-                },
-                "recursive": {
-                    "type": "boolean",
-                    "description": "Watch subdirectories recursively.",
-                    "default": true
-                },
-                "timeout_ms": {
-                    "type": "integer",
-                    "description": "How long to wait for an event (milliseconds); clamped to at most 30000.",
-                    "default": 2000,
-                    "maximum": 30000
-                }
-            },
-            "required": ["path"]
-        })
-    }
-
     async fn execute(
         &self,
         ctx: &ToolContext,
-        arguments: &Value,
+        args: FsWatchArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let path_str = arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AgentError::ToolExecution("missing 'path' argument".into()))?;
-
-        let recursive = arguments.get("recursive").and_then(Value::as_bool).unwrap_or(true);
-        let timeout_ms = arguments
-            .get("timeout_ms")
-            .and_then(Value::as_u64)
-            .unwrap_or(2000)
-            .min(FS_WATCH_MAX_TIMEOUT_MS);
+        let recursive = args.recursive;
+        let timeout_ms = args.timeout_ms.min(FS_WATCH_MAX_TIMEOUT_MS);
 
         // Resolve against the active workspace so a relative path does not
         // silently land in the server process's CWD.
         let path = match ctx.workspace.as_ref() {
-            Some(workspace) => workspace.root.join(path_str),
-            None => PathBuf::from(path_str),
+            Some(workspace) => workspace.root.join(&args.path),
+            None => PathBuf::from(&args.path),
         };
         let watch_path = WatchPath { path, recursive };
 
@@ -159,7 +151,7 @@ mod tests {
 
     #[test]
     fn fs_watch_schema_requires_path() {
-        let schema = FsWatchTool::noop().parameters_schema();
+        let schema = ToolHandler::parameters_schema(&FsWatchTool::noop());
 
         assert_eq!(schema["properties"]["path"]["type"], "string");
         assert_eq!(schema["properties"]["recursive"]["default"], true);
@@ -171,7 +163,8 @@ mod tests {
     async fn fs_watch_requires_path_argument() {
         let tool = FsWatchTool::noop();
 
-        let error = tool.execute(&ctx(), &json!({})).await.expect_err("missing path");
+        let error =
+            ToolHandler::execute(&tool, &ctx(), &json!({})).await.expect_err("missing path");
 
         assert_eq!(error.to_string(), "tool execution error: missing 'path' argument");
     }
@@ -180,10 +173,13 @@ mod tests {
     async fn noop_fs_watch_times_out_with_empty_change_list() {
         let tool = FsWatchTool::noop();
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "recursive": false, "timeout_ms": 1}))
-            .await
-            .expect("watch output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": ".", "recursive": false, "timeout_ms": 1}),
+        )
+        .await
+        .expect("watch output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["changed_paths"], json!([]));

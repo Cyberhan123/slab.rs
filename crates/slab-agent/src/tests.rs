@@ -18,7 +18,7 @@ use std::{
 use crate::{
     AgentControl, AgentControlLimits, AgentDefinition, AgentError, AgentHook, AgentThreadContext,
     HookEvent, HookOutcome, ModelPolicy, PlanRef, ToolCallRender, ToolConstraint, ToolContext,
-    ToolHandler, ToolOutput, ToolRouter, ToolVisibility, WorkspaceRef,
+    ToolOutput, ToolRouter, ToolVisibility, TypedTool, WorkspaceRef,
     compact::{CompactContext, CompactOutcome, CompactPort, SlidingWindowCompactPort},
     config::{AgentConfig, AgentToolChoice},
     port::{
@@ -38,7 +38,8 @@ use slab_types::{
 struct TestEchoTool;
 
 #[async_trait]
-impl ToolHandler for TestEchoTool {
+impl TypedTool for TestEchoTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "echo"
     }
@@ -47,23 +48,10 @@ impl ToolHandler for TestEchoTool {
         "Echo the provided message back verbatim."
     }
 
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "description": "The text to echo back."
-                }
-            },
-            "required": ["message"]
-        })
-    }
-
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &serde_json::Value,
+        arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let message = arguments.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
         Ok(ToolOutput { content: message.to_owned(), metadata: None })
@@ -75,7 +63,8 @@ struct CountingEchoTool {
 }
 
 #[async_trait]
-impl ToolHandler for CountingEchoTool {
+impl TypedTool for CountingEchoTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "echo"
     }
@@ -84,20 +73,10 @@ impl ToolHandler for CountingEchoTool {
         "Echo and count executions."
     }
 
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "message": { "type": "string" }
-            },
-            "required": ["message"]
-        })
-    }
-
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &serde_json::Value,
+        arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         *self.executions.lock().unwrap() += 1;
         let message = arguments.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
@@ -111,7 +90,8 @@ struct CapturingContextTool {
 }
 
 #[async_trait]
-impl ToolHandler for CapturingContextTool {
+impl TypedTool for CapturingContextTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "echo"
     }
@@ -120,20 +100,10 @@ impl ToolHandler for CapturingContextTool {
         "Capture tool context and echo the provided message."
     }
 
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "message": { "type": "string" }
-            },
-            "required": ["message"]
-        })
-    }
-
     async fn execute(
         &self,
         ctx: &ToolContext,
-        arguments: &serde_json::Value,
+        arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         self.workspaces.lock().unwrap().push(ctx.workspace.clone());
         self.plans.lock().unwrap().push(ctx.plan.clone());
@@ -145,23 +115,14 @@ impl ToolHandler for CapturingContextTool {
 struct ApprovalEchoTool;
 
 #[async_trait]
-impl ToolHandler for ApprovalEchoTool {
+impl TypedTool for ApprovalEchoTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "echo"
     }
 
     fn description(&self) -> &str {
         "Echo with approval."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "message": { "type": "string" }
-            },
-            "required": ["message"]
-        })
     }
 
     fn describe_operation(
@@ -175,7 +136,7 @@ impl ToolHandler for ApprovalEchoTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &serde_json::Value,
+        arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let message = arguments.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
         Ok(ToolOutput { content: format!("approved: {message}"), metadata: None })
@@ -189,17 +150,14 @@ struct SecretTool {
 }
 
 #[async_trait]
-impl ToolHandler for SecretTool {
+impl TypedTool for SecretTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "secret"
     }
 
     fn description(&self) -> &str {
         "A tool that must not run unless explicitly allowed."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({ "type": "object" })
     }
 
     fn describe_operation(
@@ -214,7 +172,7 @@ impl ToolHandler for SecretTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        _arguments: &serde_json::Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         *self.executions.lock().unwrap() += 1;
         Ok(ToolOutput { content: "secret executed".to_owned(), metadata: None })
@@ -224,7 +182,8 @@ impl ToolHandler for SecretTool {
 struct DelayEchoTool;
 
 #[async_trait]
-impl ToolHandler for DelayEchoTool {
+impl TypedTool for DelayEchoTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "echo"
     }
@@ -233,21 +192,10 @@ impl ToolHandler for DelayEchoTool {
         "Echo after an optional delay."
     }
 
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "message": { "type": "string" },
-                "delay_ms": { "type": "integer" }
-            },
-            "required": ["message"]
-        })
-    }
-
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &serde_json::Value,
+        arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let delay_ms = arguments.get("delay_ms").and_then(serde_json::Value::as_u64).unwrap_or(0);
         if delay_ms > 0 {
@@ -516,7 +464,8 @@ struct JsonNoopTool {
 }
 
 #[async_trait]
-impl ToolHandler for JsonNoopTool {
+impl TypedTool for JsonNoopTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         self.name
     }
@@ -525,14 +474,10 @@ impl ToolHandler for JsonNoopTool {
         "No-op JSON tool for agent loop tests."
     }
 
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({ "type": "object" })
-    }
-
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        _arguments: &serde_json::Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         Ok(ToolOutput { content: "{}".to_owned(), metadata: None })
     }
@@ -585,15 +530,13 @@ impl LlmPort for CapturingToolsLlm {
 struct DeferredSearchableTool;
 
 #[async_trait]
-impl ToolHandler for DeferredSearchableTool {
+impl TypedTool for DeferredSearchableTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "deferred_read_tool"
     }
     fn description(&self) -> &str {
         "A deferred read-only tool used for tool_search tests."
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({"type": "object", "properties": {}})
     }
     fn visibility(&self) -> ToolVisibility {
         ToolVisibility::Deferred
@@ -601,7 +544,7 @@ impl ToolHandler for DeferredSearchableTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        _arguments: &serde_json::Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         Ok(ToolOutput { content: "deferred ok".to_owned(), metadata: None })
     }
@@ -612,20 +555,18 @@ impl ToolHandler for DeferredSearchableTool {
 struct ToolSearchStubTool;
 
 #[async_trait]
-impl ToolHandler for ToolSearchStubTool {
+impl TypedTool for ToolSearchStubTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "tool_search"
     }
     fn description(&self) -> &str {
         "Discover deferred tools."
     }
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})
-    }
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        _arguments: &serde_json::Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         Ok(ToolOutput { content: "{}".to_owned(), metadata: None })
     }
@@ -1563,15 +1504,13 @@ impl ApprovalPort for ApprovingApproval {
 /// A mutation (FileEdit) tool used only to assert progressive exposure.
 struct MutatingTestTool;
 #[async_trait]
-impl ToolHandler for MutatingTestTool {
+impl TypedTool for MutatingTestTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "mutate_tool"
     }
     fn description(&self) -> &str {
         "A mutating tool used to assert visibility."
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({"type":"object","properties":{}})
     }
     fn category(&self) -> crate::OperationCategory {
         crate::OperationCategory::FileEdit
@@ -1579,7 +1518,7 @@ impl ToolHandler for MutatingTestTool {
     async fn execute(
         &self,
         _: &ToolContext,
-        _: &serde_json::Value,
+        _: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         Ok(ToolOutput { content: "mutated".into(), metadata: None })
     }
@@ -1588,20 +1527,18 @@ impl ToolHandler for MutatingTestTool {
 /// Test-only `plan` tool (slab-agent tests cannot depend on slab-agent-tools).
 struct PlanStubTool;
 #[async_trait]
-impl ToolHandler for PlanStubTool {
+impl TypedTool for PlanStubTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "plan"
     }
     fn description(&self) -> &str {
         "Create a plan (test stub)."
     }
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({"type":"object","properties":{"items":{"type":"array"}}})
-    }
     async fn execute(
         &self,
         ctx: &ToolContext,
-        _: &serde_json::Value,
+        _: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let plan = crate::Plan {
             plan_id: "plan-test".into(),
@@ -1627,20 +1564,18 @@ impl ToolHandler for PlanStubTool {
 /// approval gate; this stub just surfaces the stored plan as content.
 struct PresentPlanStubTool;
 #[async_trait]
-impl ToolHandler for PresentPlanStubTool {
+impl TypedTool for PresentPlanStubTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "present_plan"
     }
     fn description(&self) -> &str {
         "Present the plan (test stub)."
     }
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({"type":"object","properties":{}})
-    }
     async fn execute(
         &self,
         ctx: &ToolContext,
-        _: &serde_json::Value,
+        _: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let plan = ctx
             .plan_store
@@ -2415,15 +2350,13 @@ struct CategorizedTool {
 }
 
 #[async_trait]
-impl ToolHandler for CategorizedTool {
+impl TypedTool for CategorizedTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         self.name
     }
     fn description(&self) -> &str {
         "Categorized no-op tool for progressive-exposure tests."
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({ "type": "object" })
     }
     fn category(&self) -> crate::OperationCategory {
         self.category
@@ -2431,7 +2364,7 @@ impl ToolHandler for CategorizedTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        _arguments: &serde_json::Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         Ok(ToolOutput { content: "{}".to_owned(), metadata: None })
     }
@@ -3030,19 +2963,13 @@ async fn approval_notification_shares_item_id_with_lifecycle_events() {
 async fn file_change_tool_approval_uses_file_change_notification() {
     struct FileEditWriteTool;
     #[async_trait]
-    impl ToolHandler for FileEditWriteTool {
+    impl TypedTool for FileEditWriteTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             "write_file"
         }
         fn description(&self) -> &str {
             "Write a file (approval routing test)."
-        }
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({
-                "type": "object",
-                "properties": { "path": { "type": "string" }, "content": { "type": "string" } },
-                "required": ["path", "content"]
-            })
         }
         fn describe_operation(
             &self,
@@ -3066,7 +2993,7 @@ async fn file_change_tool_approval_uses_file_change_notification() {
         async fn execute(
             &self,
             _ctx: &ToolContext,
-            _args: &serde_json::Value,
+            _args: serde_json::Value,
         ) -> Result<ToolOutput, AgentError> {
             Ok(ToolOutput { content: "written".to_owned(), metadata: None })
         }
@@ -3134,15 +3061,13 @@ async fn streaming_tool_after_approval_completes_without_hang() {
 
     struct StreamingEchoTool;
     #[async_trait]
-    impl ToolHandler for StreamingEchoTool {
+    impl TypedTool for StreamingEchoTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             "streaming_echo"
         }
         fn description(&self) -> &str {
             "Echo with streaming output."
-        }
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({"type":"object","properties":{"message":{"type":"string"}},"required":["message"]})
         }
         fn describe_operation(
             &self,
@@ -3155,7 +3080,7 @@ async fn streaming_tool_after_approval_completes_without_hang() {
         async fn execute(
             &self,
             ctx: &ToolContext,
-            args: &serde_json::Value,
+            args: serde_json::Value,
         ) -> Result<ToolOutput, AgentError> {
             if let Some(observer) = ctx.output.as_ref() {
                 observer.on_output(ToolOutputStream::Stdout, "chunk-1\n");
@@ -3656,20 +3581,18 @@ impl TaskCompleteMarkerTool {
 }
 
 #[async_trait]
-impl ToolHandler for TaskCompleteMarkerTool {
+impl TypedTool for TaskCompleteMarkerTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "task.complete"
     }
     fn description(&self) -> &str {
         "Test double for the task.complete structured-completion tool."
     }
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({"type": "object"})
-    }
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        _arguments: &serde_json::Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let mut calls = self.calls.lock().unwrap();
         *calls += 1;
@@ -3788,7 +3711,8 @@ struct SeedPlanTool {
 }
 
 #[async_trait]
-impl ToolHandler for SeedPlanTool {
+impl TypedTool for SeedPlanTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "seed_plan"
     }
@@ -3797,14 +3721,10 @@ impl ToolHandler for SeedPlanTool {
         "Test double that writes a plan into the durable plan store."
     }
 
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({"type": "object"})
-    }
-
     async fn execute(
         &self,
         ctx: &ToolContext,
-        _arguments: &serde_json::Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         ctx.plan_store
             .replace_plan(
@@ -4037,7 +3957,8 @@ async fn echo_tool_returns_input() {
     let ctx = ToolContext::for_thread("t1").build();
     let args = serde_json::json!({"message": "test message"});
 
-    let output = TestEchoTool.execute(&ctx, &args).await.expect("echo should succeed");
+    let output =
+        ToolHandler::execute(&TestEchoTool, &ctx, &args).await.expect("echo should succeed");
     assert_eq!(output.content, "test message");
 }
 
@@ -4048,7 +3969,8 @@ async fn echo_tool_missing_message_returns_empty() {
     let ctx = ToolContext::for_thread("t1").build();
     let args = serde_json::json!({});
 
-    let output = TestEchoTool.execute(&ctx, &args).await.expect("echo should succeed");
+    let output =
+        ToolHandler::execute(&TestEchoTool, &ctx, &args).await.expect("echo should succeed");
     assert_eq!(output.content, "");
 }
 
@@ -4077,14 +3999,15 @@ async fn tool_router_returns_none_for_unregistered_tool() {
 
 #[tokio::test]
 async fn tool_router_overwrites_existing_tool() {
-    use crate::tool::{ToolContext, ToolHandler, ToolRouter};
+    use crate::tool::{ToolContext, ToolRouter};
 
     // Create a custom test tool that returns "custom"
     #[derive(Debug)]
     struct CustomTool;
 
     #[async_trait]
-    impl ToolHandler for CustomTool {
+    impl TypedTool for CustomTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             "custom"
         }
@@ -4093,14 +4016,10 @@ async fn tool_router_overwrites_existing_tool() {
             "A custom test tool"
         }
 
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({"type": "object"})
-        }
-
         async fn execute(
             &self,
             _ctx: &ToolContext,
-            _arguments: &serde_json::Value,
+            _arguments: serde_json::Value,
         ) -> Result<crate::tool::ToolOutput, AgentError> {
             Ok(crate::tool::ToolOutput { content: "custom".to_string(), metadata: None })
         }
@@ -5557,7 +5476,8 @@ struct WorkspaceProbeTool {
 }
 
 #[async_trait]
-impl ToolHandler for WorkspaceProbeTool {
+impl TypedTool for WorkspaceProbeTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "echo"
     }
@@ -5566,14 +5486,10 @@ impl ToolHandler for WorkspaceProbeTool {
         "Records the executing ToolContext's workspace root."
     }
 
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({"type": "object"})
-    }
-
     async fn execute(
         &self,
         ctx: &ToolContext,
-        _arguments: &serde_json::Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         *self.seen.lock().unwrap() = ctx.workspace.as_ref().map(|workspace| workspace.root.clone());
         Ok(ToolOutput { content: "probed".to_owned(), metadata: None })
@@ -6089,7 +6005,8 @@ struct BigOutputTool {
 }
 
 #[async_trait]
-impl ToolHandler for BigOutputTool {
+impl TypedTool for BigOutputTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         self.name
     }
@@ -6098,14 +6015,10 @@ impl ToolHandler for BigOutputTool {
         "Returns a large fixed payload for context-budget tests."
     }
 
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({ "type": "object" })
-    }
-
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        _arguments: &serde_json::Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let payload = "m".repeat(self.payload_bytes);
         Ok(ToolOutput { content: payload, metadata: None })

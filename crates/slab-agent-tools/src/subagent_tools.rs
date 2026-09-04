@@ -9,8 +9,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentControl, AgentError, SendOutcome, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{AgentControl, AgentError, SendOutcome, ToolContext, ToolOutput, TypedTool};
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use crate::background::{BackgroundTaskRegistry, BackgroundTaskSnapshot, TaskKind};
@@ -32,6 +34,13 @@ fn subagent_snapshot(
     Ok(snapshot)
 }
 
+/// Arguments for the `subagent_status` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SubagentStatusArgs {
+    /// Task id returned by delegate_subagent; omit to list all subagent delegations.
+    task_id: Option<String>,
+}
+
 /// `subagent_status`: current state of one background subagent delegation
 /// (or all of them when `task_id` is omitted).
 pub struct SubagentStatusTool {
@@ -45,7 +54,9 @@ impl SubagentStatusTool {
 }
 
 #[async_trait]
-impl ToolHandler for SubagentStatusTool {
+impl TypedTool for SubagentStatusTool {
+    type Input = SubagentStatusArgs;
+
     fn name(&self) -> &str {
         "subagent_status"
     }
@@ -55,18 +66,6 @@ impl ToolHandler for SubagentStatusTool {
          delegate_subagent (running/completed/errored/stopped, plus its \
          result once terminal), or list all subagent delegations when task_id \
          is omitted."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "Task id returned by delegate_subagent; omit to list all subagent delegations."
-                }
-            }
-        })
     }
 
     /// Read-only registry query.
@@ -82,9 +81,9 @@ impl ToolHandler for SubagentStatusTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: SubagentStatusArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let content = match arguments.get("task_id").and_then(Value::as_str) {
+        let content = match args.task_id.as_deref() {
             Some(task_id) => {
                 let task = subagent_snapshot(&self.registry, task_id)?;
                 serde_json::json!({ "task": subagent_snapshot_json(&task) })
@@ -114,6 +113,15 @@ fn subagent_snapshot_json(task: &BackgroundTaskSnapshot) -> Value {
     })
 }
 
+/// Arguments for the `subagent_message` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SubagentMessageArgs {
+    /// Task id returned by delegate_subagent.
+    task_id: String,
+    /// Message text for the subagent.
+    message: String,
+}
+
 /// `subagent_message`: queue a steering message into a RUNNING subagent.
 pub struct SubagentMessageTool {
     registry: Arc<BackgroundTaskRegistry>,
@@ -127,7 +135,9 @@ impl SubagentMessageTool {
 }
 
 #[async_trait]
-impl ToolHandler for SubagentMessageTool {
+impl TypedTool for SubagentMessageTool {
+    type Input = SubagentMessageArgs;
+
     fn name(&self) -> &str {
         "subagent_message"
     }
@@ -137,23 +147,6 @@ impl ToolHandler for SubagentMessageTool {
          instructions, a scope change, or a request to wrap up). The message \
          is injected at the subagent's next iteration boundary — it does not \
          interrupt the step currently in flight."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "Task id returned by delegate_subagent."
-                },
-                "message": {
-                    "type": "string",
-                    "description": "Message text for the subagent."
-                }
-            },
-            "required": ["task_id", "message"]
-        })
     }
 
     /// Steers a specific child agent's input queue — keep it exclusive.
@@ -169,18 +162,16 @@ impl ToolHandler for SubagentMessageTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: SubagentMessageArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let task_id = arguments
-            .get("task_id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AgentError::ToolExecution("missing 'task_id' argument".into()))?;
-        let message = arguments
-            .get("message")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| AgentError::ToolExecution("missing 'message' argument".into()))?;
+        let task_id = args.task_id.as_str();
+        // A blank message keeps the historical "missing" wording (the call is
+        // a no-op without text to steer with).
+        let message = if args.message.trim().is_empty() {
+            return Err(AgentError::ToolExecution("missing 'message' argument".to_owned()));
+        } else {
+            args.message.trim()
+        };
 
         let task = subagent_snapshot(&self.registry, task_id)?;
         if task.status != crate::background::BackgroundTaskStatus::Running {
@@ -221,6 +212,13 @@ impl ToolHandler for SubagentMessageTool {
     }
 }
 
+/// Arguments for the `subagent_stop` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SubagentStopArgs {
+    /// Task id returned by delegate_subagent.
+    task_id: String,
+}
+
 /// `subagent_stop`: cancel a running background subagent delegation.
 pub struct SubagentStopTool {
     registry: Arc<BackgroundTaskRegistry>,
@@ -233,7 +231,9 @@ impl SubagentStopTool {
 }
 
 #[async_trait]
-impl ToolHandler for SubagentStopTool {
+impl TypedTool for SubagentStopTool {
+    type Input = SubagentStopArgs;
+
     fn name(&self) -> &str {
         "subagent_stop"
     }
@@ -242,19 +242,6 @@ impl ToolHandler for SubagentStopTool {
         "Stop a running background subagent delegation: interrupts the child \
          agent thread and reports the resulting status. A stopped subagent \
          does NOT deliver a completion message."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "Task id returned by delegate_subagent."
-                }
-            },
-            "required": ["task_id"]
-        })
     }
 
     /// Touches only the task's own child thread — no shared workspace state.
@@ -270,12 +257,9 @@ impl ToolHandler for SubagentStopTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: SubagentStopArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let task_id = arguments
-            .get("task_id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AgentError::ToolExecution("missing 'task_id' argument".into()))?;
+        let task_id = args.task_id.as_str();
         // Kind-check first so shell ids get a precise error, then stop.
         subagent_snapshot(&self.registry, task_id)?;
         let task = self.registry.stop(task_id)?;

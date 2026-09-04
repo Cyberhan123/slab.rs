@@ -3,13 +3,13 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
-    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, protocol::TurnItem,
+    AgentError, ToolCallRender, ToolContext, ToolOutput, TypedTool, protocol::TurnItem,
 };
 use slab_utils::string::truncate_middle_bytes;
-
-use crate::args::string_arg;
 
 const MAX_LINES: usize = 1000;
 /// Byte cap on the returned content — the line cap alone lets files with very
@@ -23,6 +23,34 @@ const CONTENT_HEAD_RATIO: f32 = 0.7;
 /// multi-GB log is a memory spike (read + lossy copy) that the 48KB context
 /// budget never needed.
 const MAX_INLINE_READ_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Arguments for the `read_file` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReadFileArgs {
+    path: String,
+    #[serde(default = "default_start_line")]
+    #[schemars(range(min = 1))]
+    start_line: u64,
+    #[schemars(range(min = 1))]
+    end_line: Option<u64>,
+}
+
+fn default_start_line() -> u64 {
+    1
+}
+
+/// Arguments for the `write_file` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct WriteFileArgs {
+    path: String,
+    content: String,
+}
+
+/// Arguments for the `list_dir` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListDirArgs {
+    path: String,
+}
 
 pub struct ReadFileTool {
     pub workspace_root: Option<PathBuf>,
@@ -43,7 +71,8 @@ impl ReadFileTool {
 }
 
 #[async_trait]
-impl ToolHandler for ReadFileTool {
+impl TypedTool for ReadFileTool {
+    type Input = ReadFileArgs;
     fn name(&self) -> &str {
         "read_file"
     }
@@ -67,18 +96,6 @@ impl ToolHandler for ReadFileTool {
          not an empty result."
     }
 
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string" },
-                "start_line": { "type": "integer", "minimum": 1 },
-                "end_line": { "type": "integer", "minimum": 1 }
-            },
-            "required": ["path"]
-        })
-    }
-
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
         let path = arguments.get("path").and_then(Value::as_str)?;
         Some(
@@ -90,12 +107,12 @@ impl ToolHandler for ReadFileTool {
     async fn execute(
         &self,
         ctx: &ToolContext,
-        arguments: &Value,
+        args: ReadFileArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let path = string_arg(arguments, "path")?;
-        let start_line = arguments.get("start_line").and_then(Value::as_u64).unwrap_or(1) as usize;
-        let end_line = arguments.get("end_line").and_then(Value::as_u64).map(|v| v as usize);
-        let path = resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
+        let start_line = args.start_line as usize;
+        let end_line = args.end_line.map(|v| v as usize);
+        let path =
+            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, &args.path)?;
         // Stat FIRST: the on-disk size both gates the read strategy (inline vs
         // streamed window) and is the reported `total_bytes` — no multi-GB
         // allocation just to discover the file is huge.
@@ -297,24 +314,14 @@ impl WriteFileTool {
 }
 
 #[async_trait]
-impl ToolHandler for WriteFileTool {
+impl TypedTool for WriteFileTool {
+    type Input = WriteFileArgs;
     fn name(&self) -> &str {
         "write_file"
     }
 
     fn description(&self) -> &str {
         "Write content to a file, creating parent directories when needed."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string" },
-                "content": { "type": "string" }
-            },
-            "required": ["path", "content"]
-        })
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -350,25 +357,23 @@ impl ToolHandler for WriteFileTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: WriteFileArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let requested_path = string_arg(arguments, "path")?;
-        let content = string_arg(arguments, "content")?;
         let path =
-            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, requested_path)?;
+            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, &args.path)?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|error| {
                 crate::error::io_tool_error("create parent directory", parent, &error)
             })?;
         }
-        tokio::fs::write(&path, content)
+        tokio::fs::write(&path, &args.content)
             .await
             .map_err(|error| crate::error::io_tool_error("write file", &path, &error))?;
 
         Ok(ToolOutput {
             content: serde_json::json!({
-                "written": requested_path,
-                "bytes": content.len()
+                "written": args.path,
+                "bytes": args.content.len()
             })
             .to_string(),
             metadata: None,
@@ -395,7 +400,8 @@ impl ListDirTool {
 }
 
 #[async_trait]
-impl ToolHandler for ListDirTool {
+impl TypedTool for ListDirTool {
+    type Input = ListDirArgs;
     fn name(&self) -> &str {
         "list_dir"
     }
@@ -409,16 +415,6 @@ impl ToolHandler for ListDirTool {
         "List the immediate children of a directory."
     }
 
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string" }
-            },
-            "required": ["path"]
-        })
-    }
-
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
         let path = arguments.get("path").and_then(Value::as_str)?;
         Some(
@@ -430,10 +426,10 @@ impl ToolHandler for ListDirTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: ListDirArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let path = string_arg(arguments, "path")?;
-        let path = resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
+        let path =
+            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, &args.path)?;
         let entries =
             slab_file::list_dir(None, &path.to_string_lossy()).await.map_err(|error| {
                 // Route the localized io message through the coded mapper; a
@@ -481,6 +477,7 @@ fn path_is_under_extra_root(path: &std::path::Path, extra_roots: &[PathBuf]) -> 
 
 #[cfg(test)]
 mod tests {
+    use slab_agent::ToolHandler;
     use std::{
         fs,
         path::PathBuf,
@@ -488,12 +485,22 @@ mod tests {
     };
 
     use serde_json::{Value, json};
-    use slab_agent::ToolHandler;
 
     use super::*;
 
     fn ctx() -> ToolContext {
         ToolContext::for_thread("thread").build()
+    }
+
+    #[test]
+    fn read_file_schema_declares_line_window_bounds() {
+        let schema = ToolHandler::parameters_schema(&ReadFileTool::new(None));
+
+        assert_eq!(schema["properties"]["path"]["type"], "string");
+        assert_eq!(schema["properties"]["start_line"]["minimum"], 1);
+        assert_eq!(schema["properties"]["start_line"]["default"], 1);
+        assert_eq!(schema["properties"]["end_line"]["minimum"], 1);
+        assert_eq!(schema["required"], json!(["path"]));
     }
 
     #[tokio::test]
@@ -502,10 +509,13 @@ mod tests {
         fs::write(root.join("notes.txt"), "one\ntwo\nthree\n").expect("seed file");
         let tool = ReadFileTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": "notes.txt", "start_line": 2, "end_line": 3}))
-            .await
-            .expect("read file");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": "notes.txt", "start_line": 2, "end_line": 3}),
+        )
+        .await
+        .expect("read file");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         // Byte-faithful: the selected lines keep their terminators, including
         // the file's trailing newline.
@@ -516,10 +526,10 @@ mod tests {
 
         // Out-of-range start is a client error, not a silent empty read (the
         // old empty-string behavior read as "file is empty").
-        let error = tool
-            .execute(&ctx(), &json!({"path": "notes.txt", "start_line": 2_000}))
-            .await
-            .expect_err("out of range read");
+        let error =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": "notes.txt", "start_line": 2_000}))
+                .await
+                .expect_err("out of range read");
         assert!(error.to_string().contains("past the end of the file"));
 
         let _ = fs::remove_dir_all(root);
@@ -534,7 +544,9 @@ mod tests {
         fs::write(root.join("crlf.txt"), b"AB\r\nCD\n").expect("seed file");
         let tool = ReadFileTool::new(Some(root.clone()));
 
-        let output = tool.execute(&ctx(), &json!({"path": "crlf.txt"})).await.expect("read file");
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({"path": "crlf.txt"}))
+            .await
+            .expect("read file");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert_eq!(value["content"], "AB\r\nCD\n");
         assert_eq!(value["total_bytes"], 7);
@@ -552,7 +564,9 @@ mod tests {
         fs::write(root.join("long.txt"), &content).expect("seed file");
         let tool = ReadFileTool::new(Some(root.clone()));
 
-        let output = tool.execute(&ctx(), &json!({"path": "long.txt"})).await.expect("read file");
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({"path": "long.txt"}))
+            .await
+            .expect("read file");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         let returned = value["content"].as_str().expect("content");
         assert_eq!(value["returned_lines"], 1000);
@@ -571,8 +585,7 @@ mod tests {
         let root = temp_root("missing_read");
         let tool = ReadFileTool::new(Some(root.clone()));
 
-        let error = tool
-            .execute(&ctx(), &json!({"path": "does_not_exist.txt"}))
+        let error = ToolHandler::execute(&tool, &ctx(), &json!({"path": "does_not_exist.txt"}))
             .await
             .expect_err("missing file");
         let rendered = error.to_string();
@@ -589,8 +602,7 @@ mod tests {
         let root = temp_root("missing_list");
         let tool = ListDirTool::new(Some(root.clone()));
 
-        let error = tool
-            .execute(&ctx(), &json!({"path": "does_not_exist"}))
+        let error = ToolHandler::execute(&tool, &ctx(), &json!({"path": "does_not_exist"}))
             .await
             .expect_err("missing directory");
         let rendered = error.to_string();
@@ -605,18 +617,19 @@ mod tests {
         let read = ReadFileTool::new(Some(PathBuf::from(".")));
         let list = ListDirTool::new(Some(PathBuf::from(".")));
 
-        let read_desc =
-            read.describe_operation(&json!({"path": "src/main.rs"})).expect("descriptor");
+        let read_desc = ToolHandler::describe_operation(&read, &json!({"path": "src/main.rs"}))
+            .expect("descriptor");
         assert_eq!(read_desc.category, slab_agent::OperationCategory::ReadOnly);
         assert_eq!(read_desc.subject, "src/main.rs");
 
-        let list_desc = list.describe_operation(&json!({"path": "src"})).expect("descriptor");
+        let list_desc =
+            ToolHandler::describe_operation(&list, &json!({"path": "src"})).expect("descriptor");
         assert_eq!(list_desc.category, slab_agent::OperationCategory::ReadOnly);
         assert_eq!(list_desc.subject, "src");
 
         // Sensitive-path protection now lives in the exec-policy engine, not
         // the tool — `describe_operation` returns a descriptor regardless.
-        assert!(read.describe_operation(&json!({"path": ".env"})).is_some());
+        assert!(ToolHandler::describe_operation(&read, &json!({"path": ".env"})).is_some());
     }
 
     #[test]
@@ -637,7 +650,7 @@ mod tests {
             exit_code: None,
             duration_ms: None,
         };
-        match tool.render_turn_item(&render) {
+        match ToolHandler::render_turn_item(&tool, &render) {
             TurnItem::FileChange { changes, status, .. } => {
                 assert_eq!(status, "running");
                 assert_eq!(changes.len(), 1);
@@ -655,24 +668,31 @@ mod tests {
         let write = WriteFileTool::new(Some(root.clone()));
         let list = ListDirTool::new(Some(root.clone()));
 
-        let output = write
-            .execute(&ctx(), &json!({"path": "dir/note.txt", "content": "hello"}))
-            .await
-            .expect("write file");
+        let output = ToolHandler::execute(
+            &write,
+            &ctx(),
+            &json!({"path": "dir/note.txt", "content": "hello"}),
+        )
+        .await
+        .expect("write file");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert_eq!(value["written"], "dir/note.txt");
         assert_eq!(value["bytes"], 5);
         assert_eq!(fs::read_to_string(root.join("dir").join("note.txt")).unwrap(), "hello");
 
-        let output = list.execute(&ctx(), &json!({"path": "dir"})).await.expect("list dir");
+        let output =
+            ToolHandler::execute(&list, &ctx(), &json!({"path": "dir"})).await.expect("list dir");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert_eq!(value["entries"].as_array().expect("entries").len(), 1);
         assert_eq!(value["entries"][0]["name"], "note.txt");
 
-        let error = write
-            .execute(&ctx(), &json!({"path": "../outside.txt", "content": "nope"}))
-            .await
-            .expect_err("escape rejected");
+        let error = ToolHandler::execute(
+            &write,
+            &ctx(),
+            &json!({"path": "../outside.txt", "content": "nope"}),
+        )
+        .await
+        .expect_err("escape rejected");
         assert!(error.to_string().contains("workspace path `../outside.txt` is invalid"));
 
         let _ = fs::remove_dir_all(root);
@@ -689,7 +709,9 @@ mod tests {
         fs::write(root.join("wide.txt"), &content).expect("seed file");
         let tool = ReadFileTool::new(Some(root.clone()));
 
-        let output = tool.execute(&ctx(), &json!({"path": "wide.txt"})).await.expect("read file");
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({"path": "wide.txt"}))
+            .await
+            .expect("read file");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         let returned = value["content"].as_str().expect("content");
@@ -716,10 +738,10 @@ mod tests {
         let payload = "SECRETPAYLOAD-".repeat(400); // ~6KB
         let tool = WriteFileTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": "out.txt", "content": payload}))
-            .await
-            .expect("write file");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": "out.txt", "content": payload}))
+                .await
+                .expect("write file");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["written"], "out.txt");
@@ -744,7 +766,9 @@ mod tests {
             .workspace(slab_agent::WorkspaceRef { root: root.clone(), session_id: None })
             .build();
 
-        let output = tool.execute(&ctx, &json!({"path": "wide.txt"})).await.expect("read file");
+        let output = ToolHandler::execute(&tool, &ctx, &json!({"path": "wide.txt"}))
+            .await
+            .expect("read file");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert!(value["omitted_bytes"].as_u64().expect("omitted") > 0);
@@ -777,8 +801,7 @@ mod tests {
         fs::write(root.join("huge.log"), &content).expect("seed file");
         let tool = ReadFileTool::new(Some(root.clone()));
 
-        let error = tool
-            .execute(&ctx(), &json!({"path": "huge.log"}))
+        let error = ToolHandler::execute(&tool, &ctx(), &json!({"path": "huge.log"}))
             .await
             .expect_err("oversized read without a range");
         let rendered = error.to_string();
@@ -787,10 +810,10 @@ mod tests {
         assert!(rendered.contains("grep"), "{rendered}");
 
         // A window wider than MAX_LINES is rejected with a narrowing hint.
-        let error = tool
-            .execute(&ctx(), &json!({"path": "huge.log", "end_line": 5_000}))
-            .await
-            .expect_err("oversized read with a too-wide window");
+        let error =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": "huge.log", "end_line": 5_000}))
+                .await
+                .expect_err("oversized read with a too-wide window");
         assert!(error.to_string().contains("narrow the window"), "{}", error);
 
         let _ = fs::remove_dir_all(root);
@@ -807,10 +830,13 @@ mod tests {
         fs::write(root.join("huge.log"), &content).expect("seed file");
         let tool = ReadFileTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": "huge.log", "start_line": 50_000, "end_line": 50_002}))
-            .await
-            .expect("streamed window");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": "huge.log", "start_line": 50_000, "end_line": 50_002}),
+        )
+        .await
+        .expect("streamed window");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         let expected = [huge_line(49_999), huge_line(50_000), huge_line(50_001)].concat();
         assert_eq!(value["content"], expected);
@@ -821,10 +847,13 @@ mod tests {
 
         // A window whose start is past EOF scans to EOF and reports the real
         // line count (both known there).
-        let error = tool
-            .execute(&ctx(), &json!({"path": "huge.log", "start_line": 90_001, "end_line": 90_002}))
-            .await
-            .expect_err("past the end");
+        let error = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": "huge.log", "start_line": 90_001, "end_line": 90_002}),
+        )
+        .await
+        .expect_err("past the end");
         assert!(error.to_string().contains("past the end of the file (90000 lines)"), "{}", error);
 
         let _ = fs::remove_dir_all(root);

@@ -708,25 +708,24 @@ impl Default for ToolRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TypedTool;
 
     // Minimal handler stub to exercise the default trait methods.
     struct StubTool;
 
     #[async_trait]
-    impl ToolHandler for StubTool {
+    impl TypedTool for StubTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             "stub"
         }
         fn description(&self) -> &str {
             "stub"
         }
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({})
-        }
         async fn execute(
             &self,
             _ctx: &ToolContext,
-            _arguments: &serde_json::Value,
+            _arguments: serde_json::Value,
         ) -> Result<ToolOutput, crate::error::AgentError> {
             Ok(ToolOutput { content: String::new(), metadata: None })
         }
@@ -813,8 +812,8 @@ mod tests {
     #[test]
     fn handler_visibility_and_namespace_defaults() {
         let tool = StubTool;
-        assert_eq!(tool.visibility(), ToolVisibility::Direct);
-        assert_eq!(tool.namespace().as_str(), "builtin");
+        assert_eq!(ToolHandler::visibility(&tool), ToolVisibility::Direct);
+        assert_eq!(ToolHandler::namespace(&tool).as_str(), "builtin");
     }
 
     // ── visible_tool_specs projection ──────────────────────────────────────────
@@ -825,20 +824,18 @@ mod tests {
 
     struct ReadOnlyDirectTool;
     #[async_trait]
-    impl ToolHandler for ReadOnlyDirectTool {
+    impl TypedTool for ReadOnlyDirectTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             "read_direct"
         }
         fn description(&self) -> &str {
             "read direct"
         }
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({})
-        }
         async fn execute(
             &self,
             _: &ToolContext,
-            _: &serde_json::Value,
+            _: serde_json::Value,
         ) -> Result<ToolOutput, crate::error::AgentError> {
             noop_output()
         }
@@ -846,15 +843,13 @@ mod tests {
 
     struct ShellDirectTool;
     #[async_trait]
-    impl ToolHandler for ShellDirectTool {
+    impl TypedTool for ShellDirectTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             "shell_direct"
         }
         fn description(&self) -> &str {
             "shell direct"
-        }
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({})
         }
         fn category(&self) -> slab_exec_policy::OperationCategory {
             slab_exec_policy::OperationCategory::Shell
@@ -862,7 +857,7 @@ mod tests {
         async fn execute(
             &self,
             _: &ToolContext,
-            _: &serde_json::Value,
+            _: serde_json::Value,
         ) -> Result<ToolOutput, crate::error::AgentError> {
             noop_output()
         }
@@ -870,15 +865,13 @@ mod tests {
 
     struct DeferredTool;
     #[async_trait]
-    impl ToolHandler for DeferredTool {
+    impl TypedTool for DeferredTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             "deferred_read"
         }
         fn description(&self) -> &str {
             "deferred read"
-        }
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({})
         }
         fn visibility(&self) -> ToolVisibility {
             ToolVisibility::Deferred
@@ -886,7 +879,7 @@ mod tests {
         async fn execute(
             &self,
             _: &ToolContext,
-            _: &serde_json::Value,
+            _: serde_json::Value,
         ) -> Result<ToolOutput, crate::error::AgentError> {
             noop_output()
         }
@@ -894,15 +887,13 @@ mod tests {
 
     struct HiddenTool;
     #[async_trait]
-    impl ToolHandler for HiddenTool {
+    impl TypedTool for HiddenTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             "hidden_helper"
         }
         fn description(&self) -> &str {
             "hidden helper"
-        }
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({})
         }
         fn visibility(&self) -> ToolVisibility {
             ToolVisibility::Hidden
@@ -910,7 +901,7 @@ mod tests {
         async fn execute(
             &self,
             _: &ToolContext,
-            _: &serde_json::Value,
+            _: serde_json::Value,
         ) -> Result<ToolOutput, crate::error::AgentError> {
             noop_output()
         }

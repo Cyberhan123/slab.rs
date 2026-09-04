@@ -648,7 +648,37 @@ impl BackgroundTaskRegistry {
 // ── task_* tools ─────────────────────────────────────────────────────────────
 
 use async_trait::async_trait;
-use slab_agent::{ToolContext, ToolHandler, ToolOutput};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use slab_agent::{ToolContext, ToolOutput, TypedTool};
+
+/// Arguments for the `task_status` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TaskStatusArgs {
+    /// Optional task id from the background spawn; omit to list all tasks.
+    task_id: Option<String>,
+}
+
+/// Arguments for the `task_output` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TaskOutputArgs {
+    /// Task id from the background spawn.
+    task_id: String,
+    /// How many trailing bytes to read (default 16384, max 262144).
+    #[schemars(default = "default_output_tail_bytes", range(max = 262_144))]
+    tail_bytes: Option<u64>,
+}
+
+/// Arguments for the `task_stop` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TaskStopArgs {
+    /// Task id from the background spawn.
+    task_id: String,
+}
+
+fn default_output_tail_bytes() -> u64 {
+    DEFAULT_OUTPUT_TAIL_BYTES as u64
+}
 
 /// Build a snapshot view from a slot with the caller-held field values (the
 /// per-field mutexes are already unlocked by the time we get here).
@@ -718,7 +748,8 @@ impl TaskStatusTool {
 }
 
 #[async_trait]
-impl ToolHandler for TaskStatusTool {
+impl TypedTool for TaskStatusTool {
+    type Input = TaskStatusArgs;
     fn name(&self) -> &str {
         "task_status"
     }
@@ -728,18 +759,6 @@ impl ToolHandler for TaskStatusTool {
          `shell background=true` (running/exited/stopped/failed + exit code), \
          or list all background tasks when task_id is omitted. For subagent \
          delegations use subagent_status instead."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "Optional task id from the background spawn; omit to list all tasks."
-                }
-            }
-        })
     }
 
     /// Read-only registry query.
@@ -758,9 +777,9 @@ impl ToolHandler for TaskStatusTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &serde_json::Value,
+        args: TaskStatusArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let content = match arguments.get("task_id").and_then(serde_json::Value::as_str) {
+        let content = match args.task_id.as_deref() {
             Some(task_id) => {
                 let task = self.registry.snapshot(task_id).ok_or_else(|| {
                     AgentError::ToolExecution(format!("unknown background task: {task_id}"))
@@ -787,7 +806,8 @@ impl TaskOutputTool {
 }
 
 #[async_trait]
-impl ToolHandler for TaskOutputTool {
+impl TypedTool for TaskOutputTool {
+    type Input = TaskOutputArgs;
     fn name(&self) -> &str {
         "task_output"
     }
@@ -796,22 +816,6 @@ impl ToolHandler for TaskOutputTool {
         "Read the TAIL of a background SHELL task's stdout log (default 16KB, \
          max 256KB). Returns the text plus the total log size so far. For a \
          subagent delegation's result use subagent_status."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "task_id": { "type": "string", "description": "Task id from the background spawn." },
-                "tail_bytes": {
-                    "type": "integer",
-                    "description": "How many trailing bytes to read (default 16384, max 262144).",
-                    "default": DEFAULT_OUTPUT_TAIL_BYTES,
-                    "maximum": MAX_OUTPUT_TAIL_BYTES
-                }
-            },
-            "required": ["task_id"]
-        })
     }
 
     /// Read-only file tail.
@@ -830,18 +834,13 @@ impl ToolHandler for TaskOutputTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &serde_json::Value,
+        args: TaskOutputArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let task_id = arguments
-            .get("task_id")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| AgentError::ToolExecution("missing 'task_id' argument".into()))?;
-        let tail_bytes =
-            arguments.get("tail_bytes").and_then(serde_json::Value::as_u64).map(|v| v as usize);
-        let (output, total_bytes) = self.registry.read_output(task_id, tail_bytes).await?;
+        let tail_bytes = args.tail_bytes.map(|v| v as usize);
+        let (output, total_bytes) = self.registry.read_output(&args.task_id, tail_bytes).await?;
         Ok(ToolOutput {
             content: serde_json::json!({
-                "task_id": task_id,
+                "task_id": args.task_id,
                 "output": output,
                 "total_bytes": total_bytes,
             })
@@ -863,7 +862,8 @@ impl TaskStopTool {
 }
 
 #[async_trait]
-impl ToolHandler for TaskStopTool {
+impl TypedTool for TaskStopTool {
+    type Input = TaskStopArgs;
     fn name(&self) -> &str {
         "task_stop"
     }
@@ -872,16 +872,6 @@ impl ToolHandler for TaskStopTool {
         "Stop a background SHELL task started with `shell background=true`: \
          kills its whole process tree and reports the resulting status. To \
          cancel a subagent delegation use subagent_stop."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "task_id": { "type": "string", "description": "Task id from the background spawn." }
-            },
-            "required": ["task_id"]
-        })
     }
 
     /// Touches only the task's own process tree — no shared workspace state.
@@ -900,13 +890,9 @@ impl ToolHandler for TaskStopTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &serde_json::Value,
+        args: TaskStopArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let task_id = arguments
-            .get("task_id")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| AgentError::ToolExecution("missing 'task_id' argument".into()))?;
-        let task = self.registry.stop(task_id)?;
+        let task = self.registry.stop(&args.task_id)?;
         Ok(ToolOutput {
             content: serde_json::json!({ "stopped": snapshot_json(&task) }).to_string(),
             metadata: None,

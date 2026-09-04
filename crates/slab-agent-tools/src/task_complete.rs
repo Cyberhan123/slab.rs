@@ -18,9 +18,10 @@
 //! ```
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool};
 
 /// Tool name recognized by the agent turn loop as the structured-completion
 /// signal. Mirrored as a literal in `crates/slab-agent::turn_tool_call` because
@@ -39,27 +40,32 @@ impl TaskCompleteTool {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct TaskCompleteArgs {
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TaskCompleteArgs {
+    /// Concise summary of what was accomplished; becomes the final answer text.
     summary: String,
-    #[serde(default)]
+    /// The final plan snapshot. Every item must be completed or completion is denied.
+    #[schemars(length(min = 1))]
     plan: Vec<TaskPlanItemInput>,
+    /// Workspace-relative artifacts produced by the task.
     #[serde(default)]
     artifact_refs: Vec<ArtifactRefInput>,
+    /// Optional suggested follow-up actions surfaced to the user.
     #[serde(default)]
     followup_actions: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(inline)]
 struct TaskPlanItemInput {
     step: String,
     status: TaskPlanStatus,
-    /// Optional reference to a deterministic verify result (e.g. from `verify`).
-    #[serde(default)]
+    /// Optional reference to a verify result.
     result_ref: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(inline)]
 #[serde(rename_all = "snake_case")]
 enum TaskPlanStatus {
     Pending,
@@ -74,15 +80,31 @@ impl TaskPlanStatus {
     }
 }
 
-#[derive(Debug, Deserialize)]
+// Schema-only hint for `ArtifactRefInput::kind`: the runtime keeps `kind` as
+// a free-form string so unknown kinds are surfaced, not rejected. (Deliberate
+// plain comment — a doc comment would leak into the generated schema as a
+// description.)
+#[derive(JsonSchema)]
+#[schemars(inline)]
+#[serde(rename_all = "lowercase")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
+enum ArtifactKindSchema {
+    File,
+    Diff,
+    Image,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(inline)]
 struct ArtifactRefInput {
     path: String,
-    #[serde(default)]
+    #[schemars(with = "Option<ArtifactKindSchema>")]
     kind: Option<String>,
 }
 
 #[async_trait]
-impl ToolHandler for TaskCompleteTool {
+impl TypedTool for TaskCompleteTool {
+    type Input = TaskCompleteArgs;
     fn name(&self) -> &str {
         TASK_COMPLETE_TOOL_NAME
     }
@@ -91,60 +113,11 @@ impl ToolHandler for TaskCompleteTool {
         "Signal that the task is complete. Denied unless every plan item is completed; on success the run ends with the summary as the final answer."
     }
 
-    fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "Concise summary of what was accomplished; becomes the final answer text."
-                },
-                "plan": {
-                    "type": "array",
-                    "minItems": 1,
-                    "description": "The final plan snapshot. Every item must be completed or completion is denied.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "step": { "type": "string" },
-                            "status": { "enum": ["pending", "in_progress", "completed", "blocked"] },
-                            "result_ref": { "type": "string", "description": "Optional reference to a verify result." }
-                        },
-                        "required": ["step", "status"]
-                    }
-                },
-                "artifact_refs": {
-                    "type": "array",
-                    "description": "Workspace-relative artifacts produced by the task.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "path": { "type": "string" },
-                            "kind": { "enum": ["file", "diff", "image"] }
-                        },
-                        "required": ["path"]
-                    }
-                },
-                "followup_actions": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Optional suggested follow-up actions surfaced to the user."
-                }
-            },
-            "required": ["summary", "plan"]
-        })
-    }
-
     async fn execute(
         &self,
         ctx: &ToolContext,
-        arguments: &Value,
+        args: TaskCompleteArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args: TaskCompleteArgs =
-            serde_json::from_value(arguments.clone()).map_err(|error| {
-                AgentError::ToolExecution(format!("invalid task.complete args: {error}"))
-            })?;
-
         let summary = args.summary.trim();
         if summary.is_empty() {
             return Err(AgentError::ToolExecution(
@@ -326,7 +299,8 @@ mod tests {
     #[tokio::test]
     async fn task_complete_succeeds_when_plan_fully_completed() {
         let tool = TaskCompleteTool::new();
-        let output = tool.execute(&ctx(), &completed_plan()).await.expect("plan is complete");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &completed_plan()).await.expect("plan is complete");
 
         let metadata = output.metadata.expect("metadata marker present");
         assert_eq!(metadata[TASK_COMPLETE_METADATA_KEY]["summary"], "shipped the fix");
@@ -349,7 +323,8 @@ mod tests {
                 { "step": "implement", "status": "in_progress" }
             ]
         });
-        let error = tool.execute(&ctx(), &args).await.expect_err("incomplete plan denied");
+        let error =
+            ToolHandler::execute(&tool, &ctx(), &args).await.expect_err("incomplete plan denied");
 
         assert!(matches!(error, AgentError::ToolExecution(_)));
         assert!(error.to_string().contains("1 plan item(s) are not completed"));
@@ -358,8 +333,7 @@ mod tests {
     #[tokio::test]
     async fn task_complete_denied_when_plan_empty() {
         let tool = TaskCompleteTool::new();
-        let error = tool
-            .execute(&ctx(), &json!({ "summary": "done", "plan": [] }))
+        let error = ToolHandler::execute(&tool, &ctx(), &json!({ "summary": "done", "plan": [] }))
             .await
             .expect_err("empty plan denied");
 
@@ -369,13 +343,13 @@ mod tests {
     #[tokio::test]
     async fn task_complete_denied_when_summary_blank() {
         let tool = TaskCompleteTool::new();
-        let error = tool
-            .execute(
-                &ctx(),
-                &json!({ "summary": "   ", "plan": [{ "step": "x", "status": "completed" }] }),
-            )
-            .await
-            .expect_err("blank summary denied");
+        let error = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({ "summary": "   ", "plan": [{ "step": "x", "status": "completed" }] }),
+        )
+        .await
+        .expect_err("blank summary denied");
 
         assert!(error.to_string().contains("non-empty summary"));
     }
@@ -393,7 +367,7 @@ mod tests {
                 { "path": "src/ok.rs", "kind": "image" }
             ]
         });
-        let output = tool.execute(&ctx(), &args).await.expect("plan complete");
+        let output = ToolHandler::execute(&tool, &ctx(), &args).await.expect("plan complete");
 
         let metadata = output.metadata.unwrap();
         let refs = metadata[TASK_COMPLETE_METADATA_KEY]["artifact_refs"].as_array().unwrap();
@@ -404,10 +378,15 @@ mod tests {
 
     #[test]
     fn task_complete_schema_requires_summary_and_plan() {
-        let schema = TaskCompleteTool::new().parameters_schema();
+        let schema = ToolHandler::parameters_schema(&TaskCompleteTool::new());
         let required = schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "summary"));
         assert!(required.iter().any(|v| v == "plan"));
+        // The artifact kind stays optional with its enum hint intact (an
+        // optional enum advertises null alongside the values).
+        let artifact_props = &schema["properties"]["artifact_refs"]["items"]["properties"];
+        assert!(!required.iter().any(|v| v == "kind"));
+        assert_eq!(artifact_props["kind"]["enum"], json!(["file", "diff", "image", null]));
     }
 
     #[tokio::test]
@@ -416,8 +395,7 @@ mod tests {
         // resumed run finalizing on stale context) must be denied with the
         // recovery path instead of silently finalizing.
         let tool = TaskCompleteTool::new();
-        let error = tool
-            .execute(&empty_store_ctx(), &completed_plan())
+        let error = ToolHandler::execute(&tool, &empty_store_ctx(), &completed_plan())
             .await
             .expect_err("replay without an active plan denied");
 

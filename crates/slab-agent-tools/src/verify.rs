@@ -15,9 +15,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{Value, json};
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use serde_json::json;
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool};
 use slab_sandboxing::{SandboxDriver, spawn_sandboxed_option};
 
 /// Deterministic verification target. The command mapped to each variant is
@@ -193,15 +194,32 @@ impl Default for VerifyTool {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct VerifyArgs {
+/// Schema-only mirror of [`VerifyTarget`]'s canonical wire values. The
+/// runtime `from_str` accepts a wider alias set ("build", "tests",
+/// case variants); the schema advertises only the canonical four.
+#[derive(JsonSchema)]
+#[schemars(inline)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
+enum VerifyTargetSchema {
+    WorkspaceBuild,
+    Lint,
+    Test,
+    Diff,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VerifyArgs {
+    /// Which deterministic check to run.
+    #[schemars(with = "VerifyTargetSchema")]
     target: String,
-    #[serde(default)]
+    /// Optional workspace-relative scope hint (informational).
     path: Option<String>,
 }
 
 #[async_trait]
-impl ToolHandler for VerifyTool {
+impl TypedTool for VerifyTool {
+    type Input = VerifyArgs;
     fn name(&self) -> &str {
         "verify"
     }
@@ -210,31 +228,10 @@ impl ToolHandler for VerifyTool {
         "Run a deterministic workspace check (workspace_build / lint / test / diff) and return pass/fail with a result_ref for plan nodes."
     }
 
-    fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "target": {
-                    "type": "string",
-                    "enum": ["workspace_build", "lint", "test", "diff"],
-                    "description": "Which deterministic check to run."
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Optional workspace-relative scope hint (informational)."
-                }
-            },
-            "required": ["target"]
-        })
-    }
-
-    async fn execute(
-        &self,
-        ctx: &ToolContext,
-        arguments: &Value,
-    ) -> Result<ToolOutput, AgentError> {
-        let args: VerifyArgs = serde_json::from_value(arguments.clone())
-            .map_err(|error| AgentError::ToolExecution(format!("invalid verify args: {error}")))?;
+    async fn execute(&self, ctx: &ToolContext, args: VerifyArgs) -> Result<ToolOutput, AgentError> {
+        // `target` stays a string: the runtime alias set ("build", "tests",
+        // case variants) is wider than the schema's canonical enum, exactly
+        // as before.
         let target = VerifyTarget::from_str(&args.target).ok_or_else(|| {
             AgentError::ToolExecution(format!(
                 "verify target must be one of: workspace_build, lint, test, diff (got '{}')",
@@ -321,10 +318,10 @@ mod tests {
         });
         let verifier: Arc<dyn WorkspaceVerifier> = Arc::new(fake.clone());
         let tool = VerifyTool::new_with_verifier(verifier);
-        let output = tool
-            .execute(&ctx_with_workspace(), &json!({ "target": "lint" }))
-            .await
-            .expect("verify executes");
+        let output =
+            ToolHandler::execute(&tool, &ctx_with_workspace(), &json!({ "target": "lint" }))
+                .await
+                .expect("verify executes");
 
         let seen = fake.seen.lock().expect("lock").clone();
         assert_eq!(seen.len(), 1);
@@ -347,10 +344,13 @@ mod tests {
             summary: "error[E0599]: ...".to_owned(),
         }));
         let tool = VerifyTool::new_with_verifier(verifier);
-        let output = tool
-            .execute(&ctx_with_workspace(), &json!({ "target": "workspace_build" }))
-            .await
-            .expect("verify executes");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx_with_workspace(),
+            &json!({ "target": "workspace_build" }),
+        )
+        .await
+        .expect("verify executes");
 
         let value: Value = serde_json::from_str(&output.content).unwrap();
         assert_eq!(value["passed"], false);
@@ -365,10 +365,10 @@ mod tests {
             exit_code: Some(0),
             summary: String::new(),
         })));
-        let error = tool
-            .execute(&ctx_without_workspace(), &json!({ "target": "diff" }))
-            .await
-            .expect_err("workspace required");
+        let error =
+            ToolHandler::execute(&tool, &ctx_without_workspace(), &json!({ "target": "diff" }))
+                .await
+                .expect_err("workspace required");
 
         assert!(matches!(error, AgentError::ToolExecution(_)));
         assert!(error.to_string().contains("workspace"));
@@ -382,10 +382,10 @@ mod tests {
             exit_code: Some(0),
             summary: String::new(),
         })));
-        let error = tool
-            .execute(&ctx_with_workspace(), &json!({ "target": "rubify" }))
-            .await
-            .expect_err("unknown target rejected");
+        let error =
+            ToolHandler::execute(&tool, &ctx_with_workspace(), &json!({ "target": "rubify" }))
+                .await
+                .expect_err("unknown target rejected");
 
         assert!(error.to_string().contains("workspace_build, lint, test, diff"));
     }

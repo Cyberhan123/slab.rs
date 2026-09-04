@@ -12,10 +12,12 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
-    AgentError, Plan, PlanCounts, PlanItem, PlanStatus, ToolContext, ToolHandler, ToolOutput,
+    AgentError, Plan, PlanCounts, PlanItem, PlanStatus, ToolContext, ToolOutput, TypedTool,
+    typed_input_schema,
 };
 
 /// Metadata key under which `present_plan` stashes the plan snapshot so the
@@ -36,25 +38,33 @@ fn next_plan_id() -> String {
 
 // ── Shared argument shape ────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
-struct PlanArgs {
-    #[serde(default)]
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PlanArgs {
+    /// Optional short summary of what this plan is tracking.
     summary: Option<String>,
     #[serde(deserialize_with = "deserialize_items")]
+    #[schemars(length(min = 1))]
     items: Vec<PlanItemInput>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(inline)]
 struct PlanItemInput {
+    /// A concrete task or checkpoint.
     step: String,
     status: PlanStatus,
-    /// Lightweight dependencies (step references); not enforced, carried for rendering.
-    #[serde(default)]
+    /// Optional step references this step depends on (lightweight, not enforced).
     depends_on: Option<Vec<String>>,
-    /// Optional `verify:<target>:<passed|failed>` reference binding execution evidence.
-    #[serde(default)]
+    /// Optional verify:<target>:<passed|failed> reference binding execution evidence to this step.
     result_ref: Option<String>,
 }
+
+/// Schema-only shape for `present_plan`'s no-argument call: the schema
+/// declares a closed empty object, while execution keeps tolerating stray
+/// arguments (see [`PresentPlanTool::parameters_schema`]).
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PresentPlanArgs {}
 
 /// Tolerant deserializer for the plan `items` array. Smaller models sometimes
 /// emit the array as a JSON-encoded string (e.g. Qwen3.5-9B sends
@@ -152,41 +162,6 @@ fn build_plan(args: PlanArgs, plan_id: String) -> Result<Plan, AgentError> {
     })
 }
 
-/// Shared JSON schema for the `plan` / `update_plan` item array.
-fn items_schema() -> Value {
-    serde_json::json!({
-        "type": "array",
-        "minItems": 1,
-        "items": {
-            "type": "object",
-            "properties": {
-                "step": { "type": "string", "description": "A concrete task or checkpoint." },
-                "status": {
-                    "type": "string",
-                    "enum": ["pending", "in_progress", "completed", "blocked"]
-                },
-                "depends_on": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Optional step references this step depends on (lightweight, not enforced)."
-                },
-                "result_ref": {
-                    "type": "string",
-                    "description": "Optional verify:<target>:<passed|failed> reference binding execution evidence to this step."
-                }
-            },
-            "required": ["step", "status"]
-        }
-    })
-}
-
-fn summary_schema() -> Value {
-    serde_json::json!({
-        "type": "string",
-        "description": "Optional short summary of what this plan is tracking."
-    })
-}
-
 // ── plan ─────────────────────────────────────────────────────────────────────
 
 /// Create the structured execution plan (Plan interaction mode).
@@ -200,7 +175,8 @@ impl PlanTool {
 }
 
 #[async_trait]
-impl ToolHandler for PlanTool {
+impl TypedTool for PlanTool {
+    type Input = PlanArgs;
     fn name(&self) -> &str {
         PLAN_TOOL_NAME
     }
@@ -211,24 +187,7 @@ executing. Once the plan is ready for the user, call present_plan; as you comple
 call update_plan to record progress."
     }
 
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "summary": summary_schema(),
-                "items": items_schema()
-            },
-            "required": ["items"]
-        })
-    }
-
-    async fn execute(
-        &self,
-        ctx: &ToolContext,
-        arguments: &Value,
-    ) -> Result<ToolOutput, AgentError> {
-        let args: PlanArgs = serde_json::from_value(arguments.clone())
-            .map_err(|error| AgentError::ToolExecution(format!("invalid plan args: {error}")))?;
+    async fn execute(&self, ctx: &ToolContext, args: PlanArgs) -> Result<ToolOutput, AgentError> {
         let plan = build_plan(args, next_plan_id())?;
         let snapshot = serde_json::to_value(&plan)
             .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
@@ -257,7 +216,8 @@ impl UpdatePlanTool {
 }
 
 #[async_trait]
-impl ToolHandler for UpdatePlanTool {
+impl TypedTool for UpdatePlanTool {
+    type Input = PlanArgs;
     fn name(&self) -> &str {
         UPDATE_PLAN_TOOL_NAME
     }
@@ -267,25 +227,7 @@ impl ToolHandler for UpdatePlanTool {
 updated item list. Preserve the plan id across updates."
     }
 
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "summary": summary_schema(),
-                "items": items_schema()
-            },
-            "required": ["items"]
-        })
-    }
-
-    async fn execute(
-        &self,
-        ctx: &ToolContext,
-        arguments: &Value,
-    ) -> Result<ToolOutput, AgentError> {
-        let args: PlanArgs = serde_json::from_value(arguments.clone()).map_err(|error| {
-            AgentError::ToolExecution(format!("invalid update_plan args: {error}"))
-        })?;
+    async fn execute(&self, ctx: &ToolContext, args: PlanArgs) -> Result<ToolOutput, AgentError> {
         // Preserve the existing plan id when a plan already exists; otherwise mint one.
         let plan_id = ctx
             .plan_store
@@ -323,7 +265,8 @@ impl PresentPlanTool {
 }
 
 #[async_trait]
-impl ToolHandler for PresentPlanTool {
+impl TypedTool for PresentPlanTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         PRESENT_PLAN_TOOL_NAME
     }
@@ -334,17 +277,16 @@ mutation tools unlock for execution; if rejected, revise the plan and call prese
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        })
+        // The closed-empty-object schema is advisory; execution ignores any
+        // arguments, so parsing stays on the raw Value (not PresentPlanArgs,
+        // whose deny_unknown_fields would newly reject stray keys).
+        typed_input_schema::<PresentPlanArgs>()
     }
 
     async fn execute(
         &self,
         ctx: &ToolContext,
-        _arguments: &Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let plan = ctx.plan_store.current_plan(&ctx.thread_id).await.ok_or_else(|| {
             AgentError::ToolExecution(
@@ -435,7 +377,9 @@ mod tests {
     async fn plan_creates_durable_plan() {
         let store = Arc::new(RecordingPlanStore::default()) as Arc<dyn PlanStorePort>;
         let ctx = ctx_with_store(store.clone());
-        let output = PlanTool::new().execute(&ctx, &sample_args()).await.expect("plan output");
+        let output = ToolHandler::execute(&PlanTool::new(), &ctx, &sample_args())
+            .await
+            .expect("plan output");
 
         // The store now holds the plan (durable + queryable).
         let stored = store.current_plan("thread").await.expect("plan persisted");
@@ -464,10 +408,13 @@ mod tests {
             { "step": "implement", "status": "in_progress" }
         ])
         .to_string();
-        PlanTool::new()
-            .execute(&ctx, &json!({ "summary": "stringified", "items": stringified }))
-            .await
-            .expect("plan accepts stringified items");
+        ToolHandler::execute(
+            &PlanTool::new(),
+            &ctx,
+            &json!({ "summary": "stringified", "items": stringified }),
+        )
+        .await
+        .expect("plan accepts stringified items");
         let stored = store.current_plan("thread").await.expect("plan persisted");
         assert_eq!(stored.summary.as_deref(), Some("stringified"));
         assert_eq!(stored.items.len(), 2);
@@ -479,23 +426,23 @@ mod tests {
     async fn update_plan_preserves_plan_id_and_marks_done() {
         let store = Arc::new(RecordingPlanStore::default()) as Arc<dyn PlanStorePort>;
         let ctx = ctx_with_store(store.clone());
-        PlanTool::new().execute(&ctx, &sample_args()).await.unwrap();
+        ToolHandler::execute(&PlanTool::new(), &ctx, &sample_args()).await.unwrap();
         let original_id = store.current_plan("thread").await.unwrap().plan_id;
 
         // Mark implement completed, verify in progress.
-        UpdatePlanTool::new()
-            .execute(
-                &ctx,
-                &json!({
-                    "items": [
-                        { "step": "inspect", "status": "completed" },
-                        { "step": "implement", "status": "completed" },
-                        { "step": "verify", "status": "in_progress" }
-                    ]
-                }),
-            )
-            .await
-            .expect("update output");
+        ToolHandler::execute(
+            &UpdatePlanTool::new(),
+            &ctx,
+            &json!({
+                "items": [
+                    { "step": "inspect", "status": "completed" },
+                    { "step": "implement", "status": "completed" },
+                    { "step": "verify", "status": "in_progress" }
+                ]
+            }),
+        )
+        .await
+        .expect("update output");
 
         let stored = store.current_plan("thread").await.expect("plan still present");
         assert_eq!(stored.plan_id, original_id, "plan id preserved across update");
@@ -508,10 +455,13 @@ mod tests {
         // update_plan mints a plan id if no plan exists yet.
         let store = Arc::new(RecordingPlanStore::default()) as Arc<dyn PlanStorePort>;
         let ctx = ctx_with_store(store.clone());
-        UpdatePlanTool::new()
-            .execute(&ctx, &json!({ "items": [{ "step": "solo", "status": "pending" }] }))
-            .await
-            .expect("update output");
+        ToolHandler::execute(
+            &UpdatePlanTool::new(),
+            &ctx,
+            &json!({ "items": [{ "step": "solo", "status": "pending" }] }),
+        )
+        .await
+        .expect("update output");
         assert!(store.current_plan("thread").await.is_some());
     }
 
@@ -519,10 +469,11 @@ mod tests {
     async fn present_plan_reads_current_plan() {
         let store = Arc::new(RecordingPlanStore::default()) as Arc<dyn PlanStorePort>;
         let ctx = ctx_with_store(store.clone());
-        PlanTool::new().execute(&ctx, &sample_args()).await.unwrap();
+        ToolHandler::execute(&PlanTool::new(), &ctx, &sample_args()).await.unwrap();
 
-        let output =
-            PresentPlanTool::new().execute(&ctx, &json!({})).await.expect("present output");
+        let output = ToolHandler::execute(&PresentPlanTool::new(), &ctx, &json!({}))
+            .await
+            .expect("present output");
         let metadata = output.metadata.expect("metadata");
         assert_eq!(metadata[PRESENT_PLAN_METADATA_KEY]["summary"], "code change");
     }
@@ -530,7 +481,9 @@ mod tests {
     #[tokio::test]
     async fn present_plan_errors_without_a_plan() {
         let ctx = noop_ctx();
-        let error = PresentPlanTool::new().execute(&ctx, &json!({})).await.expect_err("no plan");
+        let error = ToolHandler::execute(&PresentPlanTool::new(), &ctx, &json!({}))
+            .await
+            .expect_err("no plan");
         assert!(error.to_string().contains("no plan"));
     }
 
@@ -538,18 +491,18 @@ mod tests {
     async fn build_plan_rejects_multiple_in_progress() {
         let store = Arc::new(RecordingPlanStore::default()) as Arc<dyn PlanStorePort>;
         let ctx = ctx_with_store(store);
-        let error = PlanTool::new()
-            .execute(
-                &ctx,
-                &json!({
-                    "items": [
-                        { "step": "one", "status": "in_progress" },
-                        { "step": "two", "status": "in_progress" }
-                    ]
-                }),
-            )
-            .await
-            .expect_err("multiple in progress rejected");
+        let error = ToolHandler::execute(
+            &PlanTool::new(),
+            &ctx,
+            &json!({
+                "items": [
+                    { "step": "one", "status": "in_progress" },
+                    { "step": "two", "status": "in_progress" }
+                ]
+            }),
+        )
+        .await
+        .expect_err("multiple in progress rejected");
         assert!(error.to_string().contains("at most one in_progress"));
     }
 
@@ -557,16 +510,18 @@ mod tests {
     async fn build_plan_rejects_blank_steps_and_empty_items() {
         let store = Arc::new(RecordingPlanStore::default()) as Arc<dyn PlanStorePort>;
         let ctx = ctx_with_store(store);
-        let blank = PlanTool::new()
-            .execute(&ctx, &json!({ "items": [{ "step": " ", "status": "pending" }] }))
-            .await
-            .expect_err("blank step rejected");
+        let blank = ToolHandler::execute(
+            &PlanTool::new(),
+            &ctx,
+            &json!({ "items": [{ "step": " ", "status": "pending" }] }),
+        )
+        .await
+        .expect_err("blank step rejected");
         assert!(blank.to_string().contains("step must not be blank"));
 
         let store2 = Arc::new(RecordingPlanStore::default()) as Arc<dyn PlanStorePort>;
         let ctx2 = ctx_with_store(store2);
-        let empty = PlanTool::new()
-            .execute(&ctx2, &json!({ "items": [] }))
+        let empty = ToolHandler::execute(&PlanTool::new(), &ctx2, &json!({ "items": [] }))
             .await
             .expect_err("empty items rejected");
         assert!(empty.to_string().contains("at least one item"));
@@ -576,8 +531,8 @@ mod tests {
     async fn build_plan_preserves_trimmed_result_ref_and_depends_on() {
         let store = Arc::new(RecordingPlanStore::default()) as Arc<dyn PlanStorePort>;
         let ctx = ctx_with_store(store);
-        PlanTool::new()
-            .execute(
+        ToolHandler::execute(
+            &PlanTool::new(),
                 &ctx,
                 &json!({
                     "items": [
@@ -597,16 +552,17 @@ mod tests {
 
     #[test]
     fn schema_declares_result_ref_and_depends_on() {
-        let schema = PlanTool::new().parameters_schema();
+        let schema = ToolHandler::parameters_schema(&PlanTool::new());
         let item_props = &schema["properties"]["items"]["items"]["properties"];
         assert_eq!(schema["required"], json!(["items"]));
         assert_eq!(
             item_props["status"]["enum"],
             json!(["pending", "in_progress", "completed", "blocked"])
         );
-        // The schema gap from the toy plan_update is fixed: both optional fields are declared.
-        assert_eq!(item_props["result_ref"]["type"], "string");
-        assert_eq!(item_props["depends_on"]["type"], "array");
+        // The schema gap from the toy plan_update is fixed: both optional fields are declared
+        // (optional = nullable in the generated schema).
+        assert_eq!(item_props["result_ref"]["type"], json!(["string", "null"]));
+        assert_eq!(item_props["depends_on"]["type"], json!(["array", "null"]));
     }
 
     #[tokio::test]

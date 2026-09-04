@@ -1406,6 +1406,7 @@ fn append_hook_observations(output: &mut String, observations: Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TypedTool;
     use crate::port::ParsedToolCall;
     use crate::tool::{ToolCallRender, ToolContext};
     use async_trait::async_trait;
@@ -1540,20 +1541,18 @@ mod tests {
     struct DefaultRenderTool;
 
     #[async_trait]
-    impl ToolHandler for DefaultRenderTool {
+    impl TypedTool for DefaultRenderTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             "default_render"
         }
         fn description(&self) -> &str {
             "stub"
         }
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({})
-        }
         async fn execute(
             &self,
             _ctx: &ToolContext,
-            _arguments: &serde_json::Value,
+            _arguments: serde_json::Value,
         ) -> Result<ToolOutput, crate::error::AgentError> {
             Ok(ToolOutput { content: String::new(), metadata: None })
         }
@@ -1589,15 +1588,13 @@ mod tests {
     struct CustomRenderTool;
 
     #[async_trait]
-    impl ToolHandler for CustomRenderTool {
+    impl TypedTool for CustomRenderTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             "custom"
         }
         fn description(&self) -> &str {
             "stub"
-        }
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({})
         }
         fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
             TurnItem::AgentMessage {
@@ -1608,7 +1605,7 @@ mod tests {
         async fn execute(
             &self,
             _ctx: &ToolContext,
-            _arguments: &serde_json::Value,
+            _arguments: serde_json::Value,
         ) -> Result<ToolOutput, crate::error::AgentError> {
             Ok(ToolOutput { content: String::new(), metadata: None })
         }

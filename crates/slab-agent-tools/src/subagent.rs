@@ -2,10 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
-    AgentConfig, AgentControl, AgentError, ModelPolicy, ToolContext, ToolHandler, ToolOutput,
+    AgentConfig, AgentControl, AgentError, ModelPolicy, ToolContext, ToolOutput, TypedTool,
 };
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
@@ -90,32 +91,43 @@ impl DelegateSubagentTool {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct DelegateSubagentArgs {
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DelegateSubagentArgs {
+    /// The focused task for the child agent.
     task: String,
-    #[serde(default)]
+    /// Optional built-in agent type (e.g. "plan"). Resolves a tool constraint and system prompt from the agent registry; the call fails if the type is unknown.
     agent_type: Option<String>,
-    #[serde(default)]
+    /// Optional model override for the child agent.
     model: Option<String>,
-    #[serde(default)]
+    /// Optional child-agent system prompt.
     system_prompt: Option<String>,
-    #[serde(default)]
+    /// Optional tool allow-list for the child agent.
     allowed_tools: Option<Vec<String>>,
-    #[serde(default)]
+    /// Optional child-agent turn limit.
+    #[schemars(range(min = 1))]
     max_turns: Option<u32>,
-    #[serde(default)]
+    /// Optional requested output format for the child result.
     output_format: Option<String>,
-    #[serde(default)]
+    /// Optional workspace-relative path that bounds the delegated work.
     workspace_scope: Option<String>,
     /// Run the delegation in the background (default `true`): the call
     /// returns immediately with a task id and the result is delivered to
     /// this agent as a follow-up message when the subagent finishes.
     #[serde(default)]
+    #[schemars(default = "default_background")]
     background: Option<bool>,
 }
 
+/// Schema-only default for `background`: absence means `true` at runtime
+/// (`unwrap_or(true)`), so the schema advertises that default without
+/// changing deserialization.
+fn default_background() -> Option<bool> {
+    Some(true)
+}
+
 #[async_trait]
-impl ToolHandler for DelegateSubagentTool {
+impl TypedTool for DelegateSubagentTool {
+    type Input = DelegateSubagentArgs;
     fn name(&self) -> &str {
         "delegate_subagent"
     }
@@ -130,54 +142,6 @@ impl ToolHandler for DelegateSubagentTool {
          result before this agent can continue."
     }
 
-    fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": "The focused task for the child agent."
-                },
-                "agent_type": {
-                    "type": "string",
-                    "description": "Optional built-in agent type (e.g. \"plan\"). Resolves a tool constraint and system prompt from the agent registry; the call fails if the type is unknown."
-                },
-                "model": {
-                    "type": "string",
-                    "description": "Optional model override for the child agent."
-                },
-                "system_prompt": {
-                    "type": "string",
-                    "description": "Optional child-agent system prompt."
-                },
-                "allowed_tools": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Optional tool allow-list for the child agent."
-                },
-                "max_turns": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Optional child-agent turn limit."
-                },
-                "output_format": {
-                    "type": "string",
-                    "description": "Optional requested output format for the child result."
-                },
-                "workspace_scope": {
-                    "type": "string",
-                    "description": "Optional workspace-relative path that bounds the delegated work."
-                },
-                "background": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Run in the background (default true): return a task_id immediately and receive the result as a follow-up message. false = block this agent until the subagent finishes."
-                }
-            },
-            "required": ["task"]
-        })
-    }
-
     /// Background delegation is a quick spawn + registry bookkeeping — safe
     /// to run alongside other calls in the same batch. Inline delegation
     /// parks this agent for the whole child run, so it stays exclusive.
@@ -188,12 +152,8 @@ impl ToolHandler for DelegateSubagentTool {
     async fn execute(
         &self,
         ctx: &ToolContext,
-        arguments: &Value,
+        args: DelegateSubagentArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args: DelegateSubagentArgs =
-            serde_json::from_value(arguments.clone()).map_err(|error| {
-                AgentError::ToolExecution(format!("invalid subagent args: {error}"))
-            })?;
         if args.task.trim().is_empty() {
             return Err(AgentError::ToolExecution("subagent task must not be blank".to_owned()));
         }
@@ -544,6 +504,7 @@ async fn write_subagent_artifact(
 
 #[cfg(test)]
 mod tests {
+    use slab_agent::ToolHandler;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -798,8 +759,8 @@ mod tests {
 
         // No workspace: the stripped completion flows into the parent tool
         // output verbatim.
-        let output = tool
-            .execute(
+        let output = ToolHandler::execute(
+            &tool, 
                 &ToolContext::for_thread("parent").build(),
                 &serde_json::json!({ "task": "summarize", "max_turns": 1, "background": false }),
             )
@@ -817,8 +778,8 @@ mod tests {
             .join(format!("slab-agent-tools-subagent-think-{}", std::process::id()));
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
         tokio::fs::create_dir_all(&temp_dir).await.expect("temp workspace");
-        let output = tool
-            .execute(
+        let output = ToolHandler::execute(
+            &tool, 
                 &ToolContext::for_thread("parent")
                     .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
                     .build(),
@@ -852,8 +813,8 @@ mod tests {
         ));
         let tool = delegate_tool(control);
 
-        let output = tool
-            .execute(
+        let output = ToolHandler::execute(
+            &tool, 
                 &ToolContext::for_thread("parent").build(),
                 &serde_json::json!({
                     "task": "summarize",
@@ -900,8 +861,8 @@ mod tests {
         ));
         let tool = delegate_tool(control);
 
-        let output = tool
-            .execute(
+        let output = ToolHandler::execute(
+            &tool, 
                 &ToolContext::for_thread("parent")
                     .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
                     .build(),
@@ -959,17 +920,17 @@ mod tests {
         ));
         let tool = delegate_tool(control);
 
-        let result = tool
-            .execute(
-                &ToolContext::for_thread("parent")
-                    .workspace(WorkspaceRef {
-                        root: PathBuf::from("C:/workspace/demo"),
-                        session_id: None,
-                    })
-                    .build(),
-                &serde_json::json!({"task": "summarize", "workspace_scope": "../outside"}),
-            )
-            .await;
+        let result = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent")
+                .workspace(WorkspaceRef {
+                    root: PathBuf::from("C:/workspace/demo"),
+                    session_id: None,
+                })
+                .build(),
+            &serde_json::json!({"task": "summarize", "workspace_scope": "../outside"}),
+        )
+        .await;
 
         let error = result.expect_err("scope escape rejected").to_string();
         assert!(error.contains("workspace_scope must stay inside the workspace"));
@@ -991,12 +952,12 @@ mod tests {
         ));
         let tool = delegate_tool(control);
 
-        let result = tool
-            .execute(
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({"task": "summarize"}),
-            )
-            .await;
+        let result = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({"task": "summarize"}),
+        )
+        .await;
 
         assert!(matches!(result, Err(AgentError::DepthLimitExceeded { current: 1, max: 0 })));
     }
@@ -1045,7 +1006,8 @@ mod tests {
     }
 
     #[async_trait]
-    impl ToolHandler for StubTool {
+    impl TypedTool for StubTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             &self.tool_name
         }
@@ -1054,14 +1016,10 @@ mod tests {
             "stub"
         }
 
-        fn parameters_schema(&self) -> Value {
-            serde_json::json!({ "type": "object", "properties": {} })
-        }
-
         async fn execute(
             &self,
             _ctx: &ToolContext,
-            _arguments: &Value,
+            _arguments: serde_json::Value,
         ) -> Result<ToolOutput, AgentError> {
             Ok(ToolOutput { content: "stub".to_owned(), metadata: None })
         }
@@ -1139,8 +1097,8 @@ mod tests {
         );
         let tool = delegate_tool(control);
 
-        let output = tool
-            .execute(
+        let output = ToolHandler::execute(
+            &tool, 
                 &ToolContext::for_thread("parent").build(),
                 &serde_json::json!({ "task": "plan it", "agent_type": "plan", "background": false }),
             )
@@ -1173,7 +1131,8 @@ mod tests {
         );
         let tool = delegate_tool(control);
 
-        tool.execute(
+        ToolHandler::execute(
+            &tool,
             &ToolContext::for_thread("parent").build(),
             &serde_json::json!({ "task": "plan it", "agent_type": "plan", "max_turns": 1, "background": false }),
         )
@@ -1205,12 +1164,12 @@ mod tests {
         );
         let tool = delegate_tool(control);
 
-        let result = tool
-            .execute(
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({ "task": "plan it", "agent_type": "missing" }),
-            )
-            .await;
+        let result = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "plan it", "agent_type": "missing" }),
+        )
+        .await;
 
         let error = result.expect_err("unknown agent_type rejected").to_string();
         assert!(error.contains("unknown agent_type: missing"), "{error}");
@@ -1228,8 +1187,8 @@ mod tests {
         );
         let tool = delegate_tool(control);
 
-        let output = tool
-            .execute(
+        let output = ToolHandler::execute(
+            &tool, 
                 &ToolContext::for_thread("parent").build(),
                 &serde_json::json!({
                     "task": "plan it",
@@ -1262,8 +1221,8 @@ mod tests {
         );
         let tool = delegate_tool(control);
 
-        let output = tool
-            .execute(
+        let output = ToolHandler::execute(
+            &tool, 
                 &ToolContext::for_thread("parent").build(),
                 &serde_json::json!({
                     "task": "plan it",
@@ -1297,8 +1256,8 @@ mod tests {
         );
         let tool = delegate_tool(control);
 
-        let output = tool
-            .execute(
+        let output = ToolHandler::execute(
+            &tool, 
                 &ToolContext::for_thread("parent").build(),
                 &serde_json::json!({ "task": "plan it", "agent_type": "plan", "background": false }),
             )
@@ -1337,8 +1296,8 @@ mod tests {
         // Default (background omitted) = async: the call must NOT wait for
         // the child. The child here finishes nearly instantly — the contract
         // under test is the immediate return SHAPE plus eventual tracking.
-        let output = tool
-            .execute(
+        let output = ToolHandler::execute(
+            &tool, 
                 &ToolContext::for_thread("parent").build(),
                 &serde_json::json!({ "task": "summarize", "max_turns": 1 }),
             )
@@ -1386,8 +1345,8 @@ mod tests {
         ));
         let tool = delegate_tool(control);
 
-        let output = tool
-            .execute(
+        let output = ToolHandler::execute(
+            &tool, 
                 &ToolContext::for_thread("parent").build(),
                 &serde_json::json!({ "task": "summarize", "background": false }),
             )
@@ -1414,10 +1373,10 @@ mod tests {
         ));
         let tool = delegate_tool(control);
         // Default (omitted) is background → parallel-safe.
-        assert!(tool.is_concurrency_safe(&serde_json::json!({ "task": "x" })));
-        assert!(tool.is_concurrency_safe(&serde_json::json!({ "task": "x", "background": true })));
+        assert!(ToolHandler::is_concurrency_safe(&tool, &serde_json::json!({ "task": "x" })));
+        assert!(ToolHandler::is_concurrency_safe(&tool, &serde_json::json!({ "task": "x", "background": true })));
         assert!(
-            !tool.is_concurrency_safe(&serde_json::json!({ "task": "x", "background": false }))
+            !ToolHandler::is_concurrency_safe(&tool, &serde_json::json!({ "task": "x", "background": false }))
         );
     }
 }
