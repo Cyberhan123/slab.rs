@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
@@ -198,7 +199,7 @@ describe("plugin pack generation", () => {
       await writePluginFile(
         pluginRoot,
         "python/requirements.txt",
-        `sample-dep @ file:///${dependencyRoot.replace(/\\/g, "/")}\n`,
+        `sample-dep @ ${pathToFileURL(dependencyRoot).href}\n`,
       );
       await writePluginFile(
         dependencyRoot,
