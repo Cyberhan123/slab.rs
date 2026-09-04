@@ -89,6 +89,7 @@ impl TaskPlanStatus {
 #[derive(JsonSchema)]
 #[schemars(inline)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
 enum ArtifactKindSchema {
     File,
     Diff,

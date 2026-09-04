@@ -9,11 +9,12 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
-    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, protocol::TurnItem,
-    tool::default_tool_turn_item,
+    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, parse_tool_input,
+    protocol::TurnItem, typed_input_schema, tool::default_tool_turn_item,
 };
 
 use crate::domain::models::{
@@ -90,22 +91,23 @@ impl GenerateImageTool {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct GenerateImageArgs {
+    /// Text description of the desired image.
     prompt: String,
-    #[serde(default)]
+    /// What to avoid in the generated image.
     negative_prompt: Option<String>,
-    #[serde(default)]
+    /// Image width in pixels (default 512).
     width: Option<u32>,
-    #[serde(default)]
+    /// Image height in pixels (default 512).
     height: Option<u32>,
-    #[serde(default)]
+    /// Number of images to generate (default 1).
     n: Option<u32>,
-    #[serde(default)]
+    /// Sampling steps.
     steps: Option<i32>,
-    #[serde(default)]
+    /// Reproducibility seed.
     seed: Option<i64>,
-    #[serde(default)]
+    /// Classifier-free guidance scale.
     cfg_scale: Option<f32>,
 }
 
@@ -124,7 +126,7 @@ impl ToolHandler for GenerateImageTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        generate_image_schema()
+        typed_input_schema::<GenerateImageArgs>()
     }
 
     fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
@@ -148,10 +150,7 @@ impl ToolHandler for GenerateImageTool {
         _ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let args: GenerateImageArgs =
-            serde_json::from_value(arguments.clone()).map_err(|error| {
-                AgentError::ToolExecution(format!("invalid generate_image args: {error}"))
-            })?;
+        let args = parse_tool_input::<GenerateImageArgs>(arguments)?;
 
         // Lazy-load: prepare the diffusion model BEFORE dispatching the
         // generation (no-op fast path when it is already resident).
@@ -249,29 +248,6 @@ fn to_tool_execution_error(error: AppCoreError) -> AgentError {
     AgentError::ToolExecution(coded)
 }
 
-fn generate_image_schema() -> Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "prompt": {
-                "type": "string",
-                "description": "Text description of the desired image."
-            },
-            "negative_prompt": {
-                "type": "string",
-                "description": "What to avoid in the generated image."
-            },
-            "width": { "type": "integer", "description": "Image width in pixels (default 512)." },
-            "height": { "type": "integer", "description": "Image height in pixels (default 512)." },
-            "n": { "type": "integer", "description": "Number of images to generate (default 1)." },
-            "steps": { "type": "integer", "description": "Sampling steps." },
-            "seed": { "type": "integer", "description": "Reproducibility seed." },
-            "cfg_scale": { "type": "number", "description": "Classifier-free guidance scale." }
-        },
-        "required": ["prompt"]
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -280,7 +256,7 @@ mod tests {
 
     #[test]
     fn prompt_field_is_required() {
-        let schema = generate_image_schema();
+        let schema = typed_input_schema::<GenerateImageArgs>();
         assert_eq!(schema["properties"]["prompt"]["type"], "string");
         assert_eq!(schema["required"], json!(["prompt"]));
     }

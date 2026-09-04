@@ -27,6 +27,7 @@ pub const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
 /// `slab-agent::turn_tool_call`), which intercepts the call before this
 /// crate's handler runs; the struct exists to declare the schema.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[allow(dead_code)] // schema-only; the dispatch layer parses the raw arguments
 struct ToolSearchArgs {
     /// Keyword(s) matched (case-insensitive) against tool names and descriptions. Empty lists all discoverable tools.
     query: String,

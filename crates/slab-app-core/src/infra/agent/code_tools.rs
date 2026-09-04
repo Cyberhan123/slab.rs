@@ -1,9 +1,12 @@
 //! Host-side code intelligence tools for the agent runtime.
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
+};
 use slab_types::plugin::PluginLanguageServerTransport;
 
 use crate::domain::services::WorkspaceLspService;
@@ -20,10 +23,44 @@ impl CodeLspStatusTool {
 
 #[derive(Debug, Deserialize)]
 struct CodeLspStatusArgs {
-    #[serde(default)]
+    /// Workspace language id such as typescript, rust, go, or python.
     language_id: Option<String>,
-    #[serde(default)]
+    /// Optional file path used to infer the language id when language_id is omitted.
     path: Option<String>,
+}
+
+// The "language_id OR path" requirement is not expressible by field derives,
+// so the schema is spelled out by hand (both fields stay optional; the
+// top-level anyOf carries the requirement).
+impl JsonSchema for CodeLspStatusArgs {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "CodeLspStatusArgs".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "object",
+            "properties": {
+                "language_id": {
+                    "type": "string",
+                    "description": "Workspace language id such as typescript, rust, go, or python."
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Optional file path used to infer the language id when language_id is omitted."
+                }
+            },
+            "anyOf": [
+                { "required": ["language_id"] },
+                { "required": ["path"] }
+            ]
+        })
+    }
+
+    /// Inline (like a primitive) rather than emitting a `$ref` definition.
+    fn inline_schema() -> bool {
+        true
+    }
 }
 
 #[async_trait]
@@ -37,7 +74,7 @@ impl ToolHandler for CodeLspStatusTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        code_lsp_status_schema()
+        typed_input_schema::<CodeLspStatusArgs>()
     }
 
     async fn execute(
@@ -45,10 +82,7 @@ impl ToolHandler for CodeLspStatusTool {
         _ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let args: CodeLspStatusArgs =
-            serde_json::from_value(arguments.clone()).map_err(|error| {
-                AgentError::ToolExecution(format!("invalid code_lsp_status args: {error}"))
-            })?;
+        let args = parse_tool_input::<CodeLspStatusArgs>(arguments)?;
         let language_id = requested_language_id(&args)?;
         let workspace_root =
             self.workspace_lsp.workspace_root().map_err(to_tool_execution_error)?;
@@ -78,26 +112,6 @@ impl ToolHandler for CodeLspStatusTool {
             metadata: None,
         })
     }
-}
-
-fn code_lsp_status_schema() -> Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "language_id": {
-                "type": "string",
-                "description": "Workspace language id such as typescript, rust, go, or python."
-            },
-            "path": {
-                "type": "string",
-                "description": "Optional file path used to infer the language id when language_id is omitted."
-            }
-        },
-        "anyOf": [
-            { "required": ["language_id"] },
-            { "required": ["path"] }
-        ]
-    })
 }
 
 fn requested_language_id(args: &CodeLspStatusArgs) -> Result<String, AgentError> {
@@ -208,7 +222,7 @@ mod tests {
 
     #[test]
     fn schema_accepts_language_or_path() {
-        let schema = code_lsp_status_schema();
+        let schema = typed_input_schema::<CodeLspStatusArgs>();
 
         assert_eq!(schema["properties"]["language_id"]["type"], "string");
         assert_eq!(schema["properties"]["path"]["type"], "string");

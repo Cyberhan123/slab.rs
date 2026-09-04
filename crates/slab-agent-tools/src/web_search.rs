@@ -34,6 +34,7 @@ use websearch::{
 #[derive(JsonSchema)]
 #[schemars(inline)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
 enum WebSearchProviderSchema {
     Duckduckgo,
     Arxiv,
@@ -48,6 +49,7 @@ enum WebSearchProviderSchema {
 #[derive(JsonSchema)]
 #[schemars(inline)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
 enum SafeSearchSchema {
     Off,
     Moderate,
@@ -57,6 +59,7 @@ enum SafeSearchSchema {
 #[derive(JsonSchema)]
 #[schemars(inline)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
 enum SortBySchema {
     Relevance,
     LastUpdatedDate,
@@ -66,6 +69,7 @@ enum SortBySchema {
 #[derive(JsonSchema)]
 #[schemars(inline)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
 enum SortOrderSchema {
     Ascending,
     Descending,

@@ -202,6 +202,7 @@ impl Default for VerifyTool {
 #[derive(JsonSchema)]
 #[schemars(inline)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // schema-only mirror; variants are never constructed
 enum VerifyTargetSchema {
     WorkspaceBuild,
     Lint,
