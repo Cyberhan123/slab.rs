@@ -3,13 +3,14 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
-    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, protocol::TurnItem,
+    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, parse_tool_input,
+    protocol::TurnItem, typed_input_schema,
 };
 use slab_utils::string::truncate_middle_bytes;
-
-use crate::args::string_arg;
 
 const MAX_LINES: usize = 1000;
 /// Byte cap on the returned content — the line cap alone lets files with very
@@ -23,6 +24,34 @@ const CONTENT_HEAD_RATIO: f32 = 0.7;
 /// multi-GB log is a memory spike (read + lossy copy) that the 48KB context
 /// budget never needed.
 const MAX_INLINE_READ_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Arguments for the `read_file` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ReadFileArgs {
+    path: String,
+    #[serde(default = "default_start_line")]
+    #[schemars(range(min = 1))]
+    start_line: u64,
+    #[schemars(range(min = 1))]
+    end_line: Option<u64>,
+}
+
+fn default_start_line() -> u64 {
+    1
+}
+
+/// Arguments for the `write_file` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct WriteFileArgs {
+    path: String,
+    content: String,
+}
+
+/// Arguments for the `list_dir` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ListDirArgs {
+    path: String,
+}
 
 pub struct ReadFileTool {
     pub workspace_root: Option<PathBuf>,
@@ -68,15 +97,7 @@ impl ToolHandler for ReadFileTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string" },
-                "start_line": { "type": "integer", "minimum": 1 },
-                "end_line": { "type": "integer", "minimum": 1 }
-            },
-            "required": ["path"]
-        })
+        typed_input_schema::<ReadFileArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -92,10 +113,11 @@ impl ToolHandler for ReadFileTool {
         ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let path = string_arg(arguments, "path")?;
-        let start_line = arguments.get("start_line").and_then(Value::as_u64).unwrap_or(1) as usize;
-        let end_line = arguments.get("end_line").and_then(Value::as_u64).map(|v| v as usize);
-        let path = resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
+        let args = parse_tool_input::<ReadFileArgs>(arguments)?;
+        let start_line = args.start_line as usize;
+        let end_line = args.end_line.map(|v| v as usize);
+        let path =
+            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, &args.path)?;
         // Stat FIRST: the on-disk size both gates the read strategy (inline vs
         // streamed window) and is the reported `total_bytes` — no multi-GB
         // allocation just to discover the file is huge.
@@ -307,14 +329,7 @@ impl ToolHandler for WriteFileTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string" },
-                "content": { "type": "string" }
-            },
-            "required": ["path", "content"]
-        })
+        typed_input_schema::<WriteFileArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -352,23 +367,22 @@ impl ToolHandler for WriteFileTool {
         _ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let requested_path = string_arg(arguments, "path")?;
-        let content = string_arg(arguments, "content")?;
+        let args = parse_tool_input::<WriteFileArgs>(arguments)?;
         let path =
-            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, requested_path)?;
+            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, &args.path)?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|error| {
                 crate::error::io_tool_error("create parent directory", parent, &error)
             })?;
         }
-        tokio::fs::write(&path, content)
+        tokio::fs::write(&path, &args.content)
             .await
             .map_err(|error| crate::error::io_tool_error("write file", &path, &error))?;
 
         Ok(ToolOutput {
             content: serde_json::json!({
-                "written": requested_path,
-                "bytes": content.len()
+                "written": args.path,
+                "bytes": args.content.len()
             })
             .to_string(),
             metadata: None,
@@ -410,13 +424,7 @@ impl ToolHandler for ListDirTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string" }
-            },
-            "required": ["path"]
-        })
+        typed_input_schema::<ListDirArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -432,8 +440,9 @@ impl ToolHandler for ListDirTool {
         _ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let path = string_arg(arguments, "path")?;
-        let path = resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
+        let args = parse_tool_input::<ListDirArgs>(arguments)?;
+        let path =
+            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, &args.path)?;
         let entries =
             slab_file::list_dir(None, &path.to_string_lossy()).await.map_err(|error| {
                 // Route the localized io message through the coded mapper; a

@@ -3,13 +3,39 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
-
-use crate::args::string_arg;
+use slab_agent::{
+    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
+};
 
 const DEFAULT_MAX_RESULTS: usize = 200;
 const HARD_MAX_RESULTS: usize = 1000;
+
+/// Arguments for the `file_glob` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct FileGlobArgs {
+    /// Glob pattern relative to 'path', e.g. '*.rs' or 'src/**/*.ts'. Negated patterns are not supported. Files ignored by .gitignore are always excluded regardless of the pattern.
+    pattern: String,
+    /// Directory or file to search (default: workspace root or '.').
+    #[serde(default = "default_path")]
+    path: String,
+    #[serde(default = "default_max_results")]
+    #[schemars(range(min = 1, max = 1000))]
+    max_results: u64,
+    /// Whether matching directories should be included.
+    #[serde(default)]
+    include_dirs: bool,
+}
+
+fn default_path() -> String {
+    ".".to_owned()
+}
+
+fn default_max_results() -> u64 {
+    DEFAULT_MAX_RESULTS as u64
+}
 
 pub struct FileGlobTool {
     workspace_root: Option<PathBuf>,
@@ -47,34 +73,7 @@ impl ToolHandler for FileGlobTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "pattern": {
-                    "type": "string",
-                    "description": "Glob pattern relative to 'path', e.g. '*.rs' or 'src/**/*.ts'. \
-                     Negated patterns are not supported. Files ignored by .gitignore are always \
-                     excluded regardless of the pattern."
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Directory or file to search (default: workspace root or '.').",
-                    "default": "."
-                },
-                "max_results": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 1000,
-                    "default": 200
-                },
-                "include_dirs": {
-                    "type": "boolean",
-                    "description": "Whether matching directories should be included.",
-                    "default": false
-                }
-            },
-            "required": ["pattern"]
-        })
+        typed_input_schema::<FileGlobArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -91,19 +90,16 @@ impl ToolHandler for FileGlobTool {
         _ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let pattern = string_arg(arguments, "pattern")?.to_owned();
-        let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
-        let max_results = arguments
-            .get("max_results")
-            .and_then(Value::as_u64)
-            .map(|value| value.clamp(1, HARD_MAX_RESULTS as u64) as usize)
-            .unwrap_or(DEFAULT_MAX_RESULTS);
-        let include_dirs = arguments.get("include_dirs").and_then(Value::as_bool).unwrap_or(false);
-        let search_root =
-            crate::fs::resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
+        let args = parse_tool_input::<FileGlobArgs>(arguments)?;
+        let max_results = args.max_results.clamp(1, HARD_MAX_RESULTS as u64) as usize;
+        let search_root = crate::fs::resolve_agent_path(
+            self.workspace_root.as_deref(),
+            &self.extra_roots,
+            &args.path,
+        )?;
 
         let results = tokio::task::spawn_blocking(move || {
-            glob_blocking(&search_root, &pattern, max_results, include_dirs)
+            glob_blocking(&search_root, &args.pattern, max_results, args.include_dirs)
         })
         .await
         .map_err(|error| AgentError::ToolExecution(format!("file_glob task panicked: {error}")))?;

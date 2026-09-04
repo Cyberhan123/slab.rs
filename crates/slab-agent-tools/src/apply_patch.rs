@@ -8,10 +8,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
     AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver,
-    ToolOutputStream, protocol::TurnItem,
+    ToolOutputStream, parse_tool_input, protocol::TurnItem, typed_input_schema,
 };
 use slab_apply_patch::{
     AppliedPatchDelta, AppliedPatchFileChange, Hunk, PatchProgress, PatchProgressKind,
@@ -20,6 +22,13 @@ use slab_apply_patch::{
 };
 use slab_file::{FileSystemSandboxContext, FileSystemSandboxPolicy};
 use slab_utils::path::absolute::AbsolutePathBuf;
+
+/// Arguments for the `apply_patch` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ApplyPatchArgs {
+    /// Patch text in the `*** Begin Patch` dialect (optionally wrapped in an `apply_patch <<'EOF' … EOF` heredoc).
+    patch: String,
+}
 
 pub struct ApplyPatchTool {
     workspace_root: PathBuf,
@@ -51,16 +60,7 @@ impl ToolHandler for ApplyPatchTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "patch": {
-                    "type": "string",
-                    "description": "Patch text in the `*** Begin Patch` dialect (optionally wrapped in an `apply_patch <<'EOF' … EOF` heredoc)."
-                }
-            },
-            "required": ["patch"]
-        })
+        typed_input_schema::<ApplyPatchArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -90,10 +90,7 @@ impl ToolHandler for ApplyPatchTool {
         ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let patch = arguments
-            .get("patch")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AgentError::ToolExecution("missing 'patch' argument".into()))?;
+        let patch = parse_tool_input::<ApplyPatchArgs>(arguments)?.patch;
 
         // `workspace_root` may be relative (e.g. registration tests pass "."),
         // so absolutize it infallibly against the process cwd. `cwd` and the
@@ -123,7 +120,7 @@ impl ToolHandler for ApplyPatchTool {
         let mut stdout_sink: Vec<u8> = Vec::new();
         let mut stderr_sink: Vec<u8> = Vec::new();
         let outcome = apply_patch_engine(
-            patch,
+            &patch,
             &cwd,
             &mut stdout_sink,
             &mut stderr_sink,

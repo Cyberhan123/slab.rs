@@ -12,12 +12,27 @@
 //! never approval-gated (discovery is read-only metadata).
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput, typed_input_schema};
 
 /// Tool name. Mirrored as a literal in `slab-agent::turn_tool_call` (the
 /// dependency direction is reversed, so slab-agent cannot import this const).
 pub const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
+
+/// Arguments for the `tool_search` tool.
+///
+/// Parsed by the dispatch layer's `handle_tool_search` (in
+/// `slab-agent::turn_tool_call`), which intercepts the call before this
+/// crate's handler runs; the struct exists to declare the schema.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ToolSearchArgs {
+    /// Keyword(s) matched (case-insensitive) against tool names and descriptions. Empty lists all discoverable tools.
+    query: String,
+    /// Optional namespace filter, e.g. "mcp" or "plugin".
+    namespace: Option<String>,
+}
 
 /// Discover Deferred tools by keyword so they can be called this thread.
 pub struct ToolSearchTool;
@@ -47,20 +62,7 @@ impl ToolHandler for ToolSearchTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Keyword(s) matched (case-insensitive) against tool names and descriptions. Empty lists all discoverable tools."
-                },
-                "namespace": {
-                    "type": "string",
-                    "description": "Optional namespace filter, e.g. \"mcp\" or \"plugin\"."
-                }
-            },
-            "required": ["query"]
-        })
+        typed_input_schema::<ToolSearchArgs>()
     }
 
     async fn execute(
