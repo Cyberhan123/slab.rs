@@ -7,14 +7,14 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
-    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, ToolVisibility,
-    parse_tool_input, protocol::TurnItem, typed_input_schema,
+    AgentError, ToolCallRender, ToolContext, ToolOutput, ToolVisibility, TypedTool,
+    protocol::TurnItem, typed_input_schema,
 };
 use slab_mcp::{McpClient, McpToolSpec};
 
 /// Arguments for the `mcp_call` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct McpCallArgs {
+pub struct McpCallArgs {
     server_name: String,
     tool_name: String,
     #[serde(default = "default_arguments")]
@@ -36,7 +36,8 @@ impl McpCallTool {
 }
 
 #[async_trait]
-impl ToolHandler for McpCallTool {
+impl TypedTool for McpCallTool {
+    type Input = McpCallArgs;
     fn name(&self) -> &str {
         "mcp_call"
     }
@@ -80,9 +81,8 @@ impl ToolHandler for McpCallTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: McpCallArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<McpCallArgs>(arguments)?;
         let result = self
             .client
             .call_tool(&args.server_name, &args.tool_name, args.arguments)
@@ -107,7 +107,8 @@ impl McpListToolsTool {
 }
 
 #[async_trait]
-impl ToolHandler for McpListToolsTool {
+impl TypedTool for McpListToolsTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "mcp_list_tools"
     }
@@ -129,7 +130,7 @@ impl ToolHandler for McpListToolsTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        _arguments: &Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let tools = self
             .client
@@ -158,7 +159,8 @@ impl McpProxyTool {
 }
 
 #[async_trait]
-impl ToolHandler for McpProxyTool {
+impl TypedTool for McpProxyTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         &self.name
     }
@@ -208,11 +210,11 @@ impl ToolHandler for McpProxyTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let result = self
             .client
-            .call_tool(&self.spec.server_name, &self.spec.tool.name, arguments.clone())
+            .call_tool(&self.spec.server_name, &self.spec.tool.name, arguments)
             .await
             .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
         Ok(ToolOutput {
@@ -233,6 +235,7 @@ fn sanitize_name(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use slab_agent::ToolHandler;
     use std::sync::Arc;
 
     use serde_json::json;
@@ -252,9 +255,9 @@ mod tests {
         };
         let tool = McpProxyTool::new(Arc::new(McpClient::new()), spec);
 
-        assert_eq!(tool.name(), "mcp__team_server__search_web_v1");
-        assert_eq!(tool.description(), "Search the web");
-        assert_eq!(tool.parameters_schema()["properties"]["query"]["type"], "string");
+        assert_eq!(ToolHandler::name(&tool), "mcp__team_server__search_web_v1");
+        assert_eq!(ToolHandler::description(&tool), "Search the web");
+        assert_eq!(ToolHandler::parameters_schema(&tool,)["properties"]["query"]["type"], "string");
     }
 
     #[test]
@@ -265,8 +268,11 @@ mod tests {
         };
         let tool = McpProxyTool::new(Arc::new(McpClient::new()), spec);
 
-        assert_eq!(tool.description(), "Remote MCP tool proxy.");
-        assert_eq!(tool.parameters_schema(), json!({"type": "object", "properties": {}}));
+        assert_eq!(ToolHandler::description(&tool), "Remote MCP tool proxy.");
+        assert_eq!(
+            ToolHandler::parameters_schema(&tool,),
+            json!({"type": "object", "properties": {}})
+        );
     }
 
     #[test]
@@ -276,8 +282,8 @@ mod tests {
             tool: McpTool { name: "search".into(), description: None, input_schema: json!({}) },
         };
         let tool = McpProxyTool::new(Arc::new(McpClient::new()), spec);
-        assert_eq!(tool.visibility(), ToolVisibility::Deferred);
-        assert_eq!(tool.namespace().as_str(), "mcp");
+        assert_eq!(ToolHandler::visibility(&tool,), ToolVisibility::Deferred);
+        assert_eq!(ToolHandler::namespace(&tool,).as_str(), "mcp");
     }
 
     #[test]
@@ -307,7 +313,7 @@ mod tests {
             exit_code: None,
             duration_ms: None,
         };
-        match tool.render_turn_item(&render) {
+        match ToolHandler::render_turn_item(&tool, &render) {
             TurnItem::McpToolCall { server, tool, arguments, status, .. } => {
                 assert_eq!(server, "team server");
                 assert_eq!(tool, "search.web/v1");
@@ -321,9 +327,9 @@ mod tests {
     #[test]
     fn mcp_call_tool_schema_requires_server_and_tool_names() {
         let tool = McpCallTool::new(Arc::new(McpClient::new()));
-        let schema = tool.parameters_schema();
+        let schema = ToolHandler::parameters_schema(&tool);
 
-        assert_eq!(tool.name(), "mcp_call");
+        assert_eq!(ToolHandler::name(&tool), "mcp_call");
         assert_eq!(schema["required"], json!(["server_name", "tool_name"]));
         assert_eq!(schema["properties"]["arguments"]["default"], json!({}));
     }
@@ -332,10 +338,14 @@ mod tests {
     async fn mcp_list_tools_returns_json_array() {
         let tool = McpListToolsTool::new(Arc::new(McpClient::new()));
         let ctx = ToolContext::for_thread("thread").build();
-        let output = tool.execute(&ctx, &json!({})).await.expect("list tools output");
+        let output =
+            ToolHandler::execute(&tool, &ctx, &json!({})).await.expect("list tools output");
 
-        assert_eq!(tool.name(), "mcp_list_tools");
-        assert_eq!(tool.parameters_schema(), json!({"type": "object", "properties": {}}));
+        assert_eq!(ToolHandler::name(&tool), "mcp_list_tools");
+        assert_eq!(
+            ToolHandler::parameters_schema(&tool,),
+            json!({"type": "object", "properties": {}})
+        );
         assert_eq!(serde_json::from_str::<Value>(&output.content).expect("json"), json!([]));
     }
 }

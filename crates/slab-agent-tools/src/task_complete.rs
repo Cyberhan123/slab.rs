@@ -21,9 +21,7 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use slab_agent::{
-    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
-};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
 
 /// Tool name recognized by the agent turn loop as the structured-completion
 /// signal. Mirrored as a literal in `crates/slab-agent::turn_tool_call` because
@@ -43,7 +41,7 @@ impl TaskCompleteTool {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-struct TaskCompleteArgs {
+pub struct TaskCompleteArgs {
     /// Concise summary of what was accomplished; becomes the final answer text.
     summary: String,
     /// The final plan snapshot. Every item must be completed or completion is denied.
@@ -105,7 +103,8 @@ struct ArtifactRefInput {
 }
 
 #[async_trait]
-impl ToolHandler for TaskCompleteTool {
+impl TypedTool for TaskCompleteTool {
+    type Input = TaskCompleteArgs;
     fn name(&self) -> &str {
         TASK_COMPLETE_TOOL_NAME
     }
@@ -121,10 +120,8 @@ impl ToolHandler for TaskCompleteTool {
     async fn execute(
         &self,
         ctx: &ToolContext,
-        arguments: &Value,
+        args: TaskCompleteArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<TaskCompleteArgs>(arguments)?;
-
         let summary = args.summary.trim();
         if summary.is_empty() {
             return Err(AgentError::ToolExecution(
@@ -306,7 +303,8 @@ mod tests {
     #[tokio::test]
     async fn task_complete_succeeds_when_plan_fully_completed() {
         let tool = TaskCompleteTool::new();
-        let output = tool.execute(&ctx(), &completed_plan()).await.expect("plan is complete");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &completed_plan()).await.expect("plan is complete");
 
         let metadata = output.metadata.expect("metadata marker present");
         assert_eq!(metadata[TASK_COMPLETE_METADATA_KEY]["summary"], "shipped the fix");
@@ -329,7 +327,8 @@ mod tests {
                 { "step": "implement", "status": "in_progress" }
             ]
         });
-        let error = tool.execute(&ctx(), &args).await.expect_err("incomplete plan denied");
+        let error =
+            ToolHandler::execute(&tool, &ctx(), &args).await.expect_err("incomplete plan denied");
 
         assert!(matches!(error, AgentError::ToolExecution(_)));
         assert!(error.to_string().contains("1 plan item(s) are not completed"));
@@ -338,8 +337,7 @@ mod tests {
     #[tokio::test]
     async fn task_complete_denied_when_plan_empty() {
         let tool = TaskCompleteTool::new();
-        let error = tool
-            .execute(&ctx(), &json!({ "summary": "done", "plan": [] }))
+        let error = ToolHandler::execute(&tool, &ctx(), &json!({ "summary": "done", "plan": [] }))
             .await
             .expect_err("empty plan denied");
 
@@ -349,13 +347,13 @@ mod tests {
     #[tokio::test]
     async fn task_complete_denied_when_summary_blank() {
         let tool = TaskCompleteTool::new();
-        let error = tool
-            .execute(
-                &ctx(),
-                &json!({ "summary": "   ", "plan": [{ "step": "x", "status": "completed" }] }),
-            )
-            .await
-            .expect_err("blank summary denied");
+        let error = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({ "summary": "   ", "plan": [{ "step": "x", "status": "completed" }] }),
+        )
+        .await
+        .expect_err("blank summary denied");
 
         assert!(error.to_string().contains("non-empty summary"));
     }
@@ -373,7 +371,7 @@ mod tests {
                 { "path": "src/ok.rs", "kind": "image" }
             ]
         });
-        let output = tool.execute(&ctx(), &args).await.expect("plan complete");
+        let output = ToolHandler::execute(&tool, &ctx(), &args).await.expect("plan complete");
 
         let metadata = output.metadata.unwrap();
         let refs = metadata[TASK_COMPLETE_METADATA_KEY]["artifact_refs"].as_array().unwrap();
@@ -384,7 +382,7 @@ mod tests {
 
     #[test]
     fn task_complete_schema_requires_summary_and_plan() {
-        let schema = TaskCompleteTool::new().parameters_schema();
+        let schema = ToolHandler::parameters_schema(&TaskCompleteTool::new());
         let required = schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "summary"));
         assert!(required.iter().any(|v| v == "plan"));
@@ -392,10 +390,7 @@ mod tests {
         // optional enum advertises null alongside the values).
         let artifact_props = &schema["properties"]["artifact_refs"]["items"]["properties"];
         assert!(!required.iter().any(|v| v == "kind"));
-        assert_eq!(
-            artifact_props["kind"]["enum"],
-            json!(["file", "diff", "image", null])
-        );
+        assert_eq!(artifact_props["kind"]["enum"], json!(["file", "diff", "image", null]));
     }
 
     #[tokio::test]
@@ -404,8 +399,7 @@ mod tests {
         // resumed run finalizing on stale context) must be denied with the
         // recovery path instead of silently finalizing.
         let tool = TaskCompleteTool::new();
-        let error = tool
-            .execute(&empty_store_ctx(), &completed_plan())
+        let error = ToolHandler::execute(&tool, &empty_store_ctx(), &completed_plan())
             .await
             .expect_err("replay without an active plan denied");
 

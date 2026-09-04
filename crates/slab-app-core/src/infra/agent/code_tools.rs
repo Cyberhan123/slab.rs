@@ -4,9 +4,7 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{
-    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
-};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
 use slab_types::plugin::PluginLanguageServerTransport;
 
 use crate::domain::services::WorkspaceLspService;
@@ -22,7 +20,7 @@ impl CodeLspStatusTool {
 }
 
 #[derive(Debug, Deserialize)]
-struct CodeLspStatusArgs {
+pub(crate) struct CodeLspStatusArgs {
     /// Workspace language id such as typescript, rust, go, or python.
     language_id: Option<String>,
     /// Optional file path used to infer the language id when language_id is omitted.
@@ -64,7 +62,8 @@ impl JsonSchema for CodeLspStatusArgs {
 }
 
 #[async_trait]
-impl ToolHandler for CodeLspStatusTool {
+impl TypedTool for CodeLspStatusTool {
+    type Input = CodeLspStatusArgs;
     fn name(&self) -> &str {
         "code_lsp_status"
     }
@@ -80,9 +79,8 @@ impl ToolHandler for CodeLspStatusTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: CodeLspStatusArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<CodeLspStatusArgs>(arguments)?;
         let language_id = requested_language_id(&args)?;
         let workspace_root =
             self.workspace_lsp.workspace_root().map_err(to_tool_execution_error)?;

@@ -13,8 +13,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
-    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, parse_tool_input,
-    protocol::TurnItem, typed_input_schema, tool::default_tool_turn_item,
+    AgentError, ToolCallRender, ToolContext, ToolOutput, TypedTool, protocol::TurnItem,
+    tool::default_tool_turn_item, typed_input_schema,
 };
 
 use crate::domain::models::{
@@ -92,7 +92,7 @@ impl GenerateImageTool {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-struct GenerateImageArgs {
+pub(crate) struct GenerateImageArgs {
     /// Text description of the desired image.
     prompt: String,
     /// What to avoid in the generated image.
@@ -112,7 +112,8 @@ struct GenerateImageArgs {
 }
 
 #[async_trait]
-impl ToolHandler for GenerateImageTool {
+impl TypedTool for GenerateImageTool {
+    type Input = GenerateImageArgs;
     fn name(&self) -> &str {
         "generate_image"
     }
@@ -148,10 +149,8 @@ impl ToolHandler for GenerateImageTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: GenerateImageArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<GenerateImageArgs>(arguments)?;
-
         // Lazy-load: prepare the diffusion model BEFORE dispatching the
         // generation (no-op fast path when it is already resident).
         self.ensure_image_model_loaded().await?;

@@ -17,8 +17,8 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use slab_agent::{
-    AgentError, PluginToolPort, ToolContext, ToolHandler, ToolNamespace, ToolOutput, ToolRouter,
-    ToolVisibility,
+    AgentError, PluginToolPort, ToolContext, ToolNamespace, ToolOutput, ToolRouter, ToolVisibility,
+    TypedTool,
 };
 use slab_types::{
     PluginCapabilityKind, PluginManifest,
@@ -92,7 +92,8 @@ impl PluginCapabilityProxyTool {
 }
 
 #[async_trait]
-impl ToolHandler for PluginCapabilityProxyTool {
+impl TypedTool for PluginCapabilityProxyTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         &self.tool_name
     }
@@ -123,11 +124,11 @@ impl ToolHandler for PluginCapabilityProxyTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let content = self
             .port
-            .call_capability(&self.descriptor.plugin_id, &self.descriptor.capability_id, arguments)
+            .call_capability(&self.descriptor.plugin_id, &self.descriptor.capability_id, &arguments)
             .await?;
         // Stamp the host-inferred trust tier (not plugin-self-reported) so the
         // host observability layer can audit which isolation tier was applied.
@@ -313,7 +314,7 @@ mod tests {
         let proxy = PluginCapabilityProxyTool::new(Arc::clone(&port), descriptor);
 
         // Hyphens are sanitized to `_`, mirroring the MCP proxy naming.
-        assert_eq!(proxy.name(), "plugin__video_subtitle_translator__translate");
+        assert_eq!(ToolHandler::name(&proxy), "plugin__video_subtitle_translator__translate");
     }
 
     #[test]
@@ -328,7 +329,10 @@ mod tests {
         let proxy =
             PluginCapabilityProxyTool::new(Arc::new(CapturingPort::new(json!({}))), descriptor);
 
-        assert_eq!(proxy.parameters_schema(), json!({ "type": "object", "properties": {} }));
+        assert_eq!(
+            ToolHandler::parameters_schema(&proxy,),
+            json!({ "type": "object", "properties": {} })
+        );
     }
 
     #[test]
@@ -352,7 +356,9 @@ mod tests {
         let port_for_proxy: Arc<CapturingPort> = Arc::clone(&port);
         let proxy = PluginCapabilityProxyTool::new(port_for_proxy, descriptor);
 
-        let output = proxy.execute(&ctx(), &json!({ "text": "hello" })).await.expect("execute");
+        let output = ToolHandler::execute(&proxy, &ctx(), &json!({ "text": "hello" }))
+            .await
+            .expect("execute");
 
         assert_eq!(output.content, r#"{"translated":"hola"}"#);
         // The port received (plugin_id, capability_id, arguments) verbatim.
@@ -387,7 +393,8 @@ mod tests {
         };
         let proxy = PluginCapabilityProxyTool::new(Arc::new(ErrorPort), descriptor);
 
-        let error = proxy.execute(&ctx(), &json!({})).await.expect_err("should error");
+        let error =
+            ToolHandler::execute(&proxy, &ctx(), &json!({})).await.expect_err("should error");
         assert!(matches!(error, slab_agent::AgentError::ToolExecution(_)));
     }
 

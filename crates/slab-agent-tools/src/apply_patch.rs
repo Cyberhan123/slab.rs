@@ -12,8 +12,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
-    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver,
-    ToolOutputStream, parse_tool_input, protocol::TurnItem, typed_input_schema,
+    AgentError, ToolCallRender, ToolContext, ToolOutput, ToolOutputObserver, ToolOutputStream,
+    TypedTool, protocol::TurnItem, typed_input_schema,
 };
 use slab_apply_patch::{
     AppliedPatchDelta, AppliedPatchFileChange, Hunk, PatchProgress, PatchProgressKind,
@@ -25,7 +25,7 @@ use slab_utils::path::absolute::AbsolutePathBuf;
 
 /// Arguments for the `apply_patch` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct ApplyPatchArgs {
+pub struct ApplyPatchArgs {
     /// Patch text in the `*** Begin Patch` dialect (optionally wrapped in an `apply_patch <<'EOF' … EOF` heredoc).
     patch: String,
 }
@@ -41,7 +41,8 @@ impl ApplyPatchTool {
 }
 
 #[async_trait]
-impl ToolHandler for ApplyPatchTool {
+impl TypedTool for ApplyPatchTool {
+    type Input = ApplyPatchArgs;
     fn name(&self) -> &str {
         "apply_patch"
     }
@@ -88,9 +89,9 @@ impl ToolHandler for ApplyPatchTool {
     async fn execute(
         &self,
         ctx: &ToolContext,
-        arguments: &Value,
+        args: ApplyPatchArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let patch = parse_tool_input::<ApplyPatchArgs>(arguments)?.patch;
+        let patch = args.patch;
 
         // `workspace_root` may be relative (e.g. registration tests pass "."),
         // so absolutize it infallibly against the process cwd. `cwd` and the
@@ -349,7 +350,7 @@ mod tests {
             exit_code: None,
             duration_ms: None,
         };
-        match tool.render_turn_item(&render) {
+        match ToolHandler::render_turn_item(&tool, &render) {
             TurnItem::FileChange { changes, status, .. } => {
                 assert_eq!(status, "completed");
                 assert_eq!(changes.len(), 1);
@@ -391,7 +392,7 @@ mod tests {
             exit_code: None,
             duration_ms: None,
         };
-        match tool.render_turn_item(&render) {
+        match ToolHandler::render_turn_item(&tool, &render) {
             TurnItem::FileChange { changes, status, .. } => {
                 assert_eq!(status, "running");
                 assert_eq!(changes.len(), 3);
@@ -435,7 +436,7 @@ mod tests {
             exit_code: None,
             duration_ms: None,
         };
-        match tool.render_turn_item(&render) {
+        match ToolHandler::render_turn_item(&tool, &render) {
             TurnItem::FileChange { changes, .. } => {
                 assert_eq!(changes.len(), 1);
                 assert_eq!(changes[0]["path"].as_str(), Some("foo"));
@@ -474,7 +475,9 @@ mod tests {
 +three
 *** End Patch\n";
 
-        let output = tool.execute(&ctx(), &json!({ "patch": patch })).await.expect("patch output");
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({ "patch": patch }))
+            .await
+            .expect("patch output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert_eq!(value["result"], "ok");
         assert_eq!(value["modified"], json!([abs(&root, "a.txt")]));
@@ -496,7 +499,9 @@ mod tests {
 *** Delete File: old.txt
 *** End Patch\n";
 
-        let output = tool.execute(&ctx(), &json!({ "patch": patch })).await.expect("patch output");
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({ "patch": patch }))
+            .await
+            .expect("patch output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert_eq!(value["result"], "ok");
         assert_eq!(value["added"], json!([abs(&root, "new.txt")]));
@@ -521,9 +526,11 @@ mod tests {
 *** End Patch\n";
 
         // First application succeeds.
-        tool.execute(&ctx(), &json!({ "patch": patch })).await.expect("first apply");
+        ToolHandler::execute(&tool, &ctx(), &json!({ "patch": patch })).await.expect("first apply");
         // Second application can no longer find `two` (now `three`).
-        let output = tool.execute(&ctx(), &json!({ "patch": patch })).await.expect("patch output");
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({ "patch": patch }))
+            .await
+            .expect("patch output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert_eq!(value["result"], "error");
         assert!(
@@ -553,7 +560,9 @@ mod tests {
 +new
 *** End Patch\n";
 
-        let output = tool.execute(&ctx(), &json!({ "patch": patch })).await.expect("patch output");
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({ "patch": patch }))
+            .await
+            .expect("patch output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert_eq!(value["result"], "error");
         assert!(
@@ -575,7 +584,9 @@ mod tests {
         let root = temp_root("apply_patch_missing");
         let tool = ApplyPatchTool::new(root.clone());
 
-        let error = tool.execute(&ctx(), &json!({})).await.expect_err("missing patch rejected");
+        let error = ToolHandler::execute(&tool, &ctx(), &json!({}))
+            .await
+            .expect_err("missing patch rejected");
 
         assert_eq!(error.to_string(), "tool execution error: missing 'patch' argument");
         let _ = fs::remove_dir_all(root);

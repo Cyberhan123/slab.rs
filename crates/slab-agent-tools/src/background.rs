@@ -456,20 +456,18 @@ impl BackgroundTaskRegistry {
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use slab_agent::{
-    ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
-};
+use slab_agent::{ToolContext, ToolOutput, TypedTool, typed_input_schema};
 
 /// Arguments for the `task_status` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct TaskStatusArgs {
+pub struct TaskStatusArgs {
     /// Optional task id from the background spawn; omit to list all tasks.
     task_id: Option<String>,
 }
 
 /// Arguments for the `task_output` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct TaskOutputArgs {
+pub struct TaskOutputArgs {
     /// Task id from the background spawn.
     task_id: String,
     /// How many trailing bytes to read (default 16384, max 262144).
@@ -479,7 +477,7 @@ struct TaskOutputArgs {
 
 /// Arguments for the `task_stop` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct TaskStopArgs {
+pub struct TaskStopArgs {
     /// Task id from the background spawn.
     task_id: String,
 }
@@ -514,7 +512,8 @@ impl TaskStatusTool {
 }
 
 #[async_trait]
-impl ToolHandler for TaskStatusTool {
+impl TypedTool for TaskStatusTool {
+    type Input = TaskStatusArgs;
     fn name(&self) -> &str {
         "task_status"
     }
@@ -545,9 +544,8 @@ impl ToolHandler for TaskStatusTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &serde_json::Value,
+        args: TaskStatusArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<TaskStatusArgs>(arguments)?;
         let content = match args.task_id.as_deref() {
             Some(task_id) => {
                 let task = self.registry.snapshot(task_id).ok_or_else(|| {
@@ -575,7 +573,8 @@ impl TaskOutputTool {
 }
 
 #[async_trait]
-impl ToolHandler for TaskOutputTool {
+impl TypedTool for TaskOutputTool {
+    type Input = TaskOutputArgs;
     fn name(&self) -> &str {
         "task_output"
     }
@@ -605,12 +604,10 @@ impl ToolHandler for TaskOutputTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &serde_json::Value,
+        args: TaskOutputArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<TaskOutputArgs>(arguments)?;
         let tail_bytes = args.tail_bytes.map(|v| v as usize);
-        let (output, total_bytes) =
-            self.registry.read_output(&args.task_id, tail_bytes).await?;
+        let (output, total_bytes) = self.registry.read_output(&args.task_id, tail_bytes).await?;
         Ok(ToolOutput {
             content: serde_json::json!({
                 "task_id": args.task_id,
@@ -635,7 +632,8 @@ impl TaskStopTool {
 }
 
 #[async_trait]
-impl ToolHandler for TaskStopTool {
+impl TypedTool for TaskStopTool {
+    type Input = TaskStopArgs;
     fn name(&self) -> &str {
         "task_stop"
     }
@@ -665,9 +663,8 @@ impl ToolHandler for TaskStopTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &serde_json::Value,
+        args: TaskStopArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<TaskStopArgs>(arguments)?;
         let task = self.registry.stop(&args.task_id)?;
         Ok(ToolOutput {
             content: serde_json::json!({ "stopped": snapshot_json(&task) }).to_string(),

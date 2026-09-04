@@ -18,9 +18,7 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use slab_agent::{
-    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
-};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
 use slab_sandboxing::{SandboxDriver, spawn_sandboxed_option};
 
 /// Deterministic verification target. The command mapped to each variant is
@@ -211,7 +209,7 @@ enum VerifyTargetSchema {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-struct VerifyArgs {
+pub struct VerifyArgs {
     /// Which deterministic check to run.
     #[schemars(with = "VerifyTargetSchema")]
     target: String,
@@ -220,7 +218,8 @@ struct VerifyArgs {
 }
 
 #[async_trait]
-impl ToolHandler for VerifyTool {
+impl TypedTool for VerifyTool {
+    type Input = VerifyArgs;
     fn name(&self) -> &str {
         "verify"
     }
@@ -233,12 +232,7 @@ impl ToolHandler for VerifyTool {
         typed_input_schema::<VerifyArgs>()
     }
 
-    async fn execute(
-        &self,
-        ctx: &ToolContext,
-        arguments: &Value,
-    ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<VerifyArgs>(arguments)?;
+    async fn execute(&self, ctx: &ToolContext, args: VerifyArgs) -> Result<ToolOutput, AgentError> {
         // `target` stays a string: the runtime alias set ("build", "tests",
         // case variants) is wider than the schema's canonical enum, exactly
         // as before.
@@ -328,10 +322,10 @@ mod tests {
         });
         let verifier: Arc<dyn WorkspaceVerifier> = Arc::new(fake.clone());
         let tool = VerifyTool::new_with_verifier(verifier);
-        let output = tool
-            .execute(&ctx_with_workspace(), &json!({ "target": "lint" }))
-            .await
-            .expect("verify executes");
+        let output =
+            ToolHandler::execute(&tool, &ctx_with_workspace(), &json!({ "target": "lint" }))
+                .await
+                .expect("verify executes");
 
         let seen = fake.seen.lock().expect("lock").clone();
         assert_eq!(seen.len(), 1);
@@ -354,10 +348,13 @@ mod tests {
             summary: "error[E0599]: ...".to_owned(),
         }));
         let tool = VerifyTool::new_with_verifier(verifier);
-        let output = tool
-            .execute(&ctx_with_workspace(), &json!({ "target": "workspace_build" }))
-            .await
-            .expect("verify executes");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx_with_workspace(),
+            &json!({ "target": "workspace_build" }),
+        )
+        .await
+        .expect("verify executes");
 
         let value: Value = serde_json::from_str(&output.content).unwrap();
         assert_eq!(value["passed"], false);
@@ -372,10 +369,10 @@ mod tests {
             exit_code: Some(0),
             summary: String::new(),
         })));
-        let error = tool
-            .execute(&ctx_without_workspace(), &json!({ "target": "diff" }))
-            .await
-            .expect_err("workspace required");
+        let error =
+            ToolHandler::execute(&tool, &ctx_without_workspace(), &json!({ "target": "diff" }))
+                .await
+                .expect_err("workspace required");
 
         assert!(matches!(error, AgentError::ToolExecution(_)));
         assert!(error.to_string().contains("workspace"));
@@ -389,10 +386,10 @@ mod tests {
             exit_code: Some(0),
             summary: String::new(),
         })));
-        let error = tool
-            .execute(&ctx_with_workspace(), &json!({ "target": "rubify" }))
-            .await
-            .expect_err("unknown target rejected");
+        let error =
+            ToolHandler::execute(&tool, &ctx_with_workspace(), &json!({ "target": "rubify" }))
+                .await
+                .expect_err("unknown target rejected");
 
         assert!(error.to_string().contains("workspace_build, lint, test, diff"));
     }

@@ -10,9 +10,7 @@ use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{
-    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
-};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
 use slab_utils::string::{truncate_line_bytes, truncate_middle_bytes};
 
 const DEFAULT_MAX_RESULTS: usize = 200;
@@ -32,7 +30,7 @@ const RESPONSE_ENVELOPE_MARGIN_BYTES: usize = 1024;
 
 /// Arguments for the `grep` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct GrepArgs {
+pub struct GrepArgs {
     /// Regular expression to search for.
     pattern: String,
     /// Directory or file to search (default: workspace root or '.').
@@ -95,7 +93,8 @@ impl GrepTool {
 }
 
 #[async_trait]
-impl ToolHandler for GrepTool {
+impl TypedTool for GrepTool {
+    type Input = GrepArgs;
     fn name(&self) -> &str {
         "grep"
     }
@@ -127,12 +126,7 @@ impl ToolHandler for GrepTool {
         )
     }
 
-    async fn execute(
-        &self,
-        ctx: &ToolContext,
-        arguments: &Value,
-    ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<GrepArgs>(arguments)?;
+    async fn execute(&self, ctx: &ToolContext, args: GrepArgs) -> Result<ToolOutput, AgentError> {
         let max_results = args.max_results.clamp(1, HARD_MAX_RESULTS as u64) as usize;
         let context_lines = args.context_lines.min(MAX_CONTEXT_LINES as u64) as usize;
 
@@ -375,18 +369,18 @@ mod tests {
         fs::write(root.join("notes.txt"), "alpha\n").expect("write text file");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(
-                &ctx(),
-                &json!({
-                    "path": ".",
-                    "pattern": "alpha",
-                    "glob": "*.rs",
-                    "case_insensitive": true
-                }),
-            )
-            .await
-            .expect("grep output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({
+                "path": ".",
+                "pattern": "alpha",
+                "glob": "*.rs",
+                "case_insensitive": true
+            }),
+        )
+        .await
+        .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["total"], 1);
@@ -402,9 +396,11 @@ mod tests {
     fn grep_tool_describes_read_only_operation() {
         let tool = GrepTool::new(Some(PathBuf::from(".")));
 
-        let desc = tool
-            .describe_operation(&json!({"path": "src", "pattern": "fn execute"}))
-            .expect("descriptor");
+        let desc = ToolHandler::describe_operation(
+            &tool,
+            &json!({"path": "src", "pattern": "fn execute"}),
+        )
+        .expect("descriptor");
         assert_eq!(desc.category, slab_agent::OperationCategory::ReadOnly);
         assert_eq!(desc.subject, "src:fn execute");
     }
@@ -414,7 +410,9 @@ mod tests {
         let root = temp_root("missing_pattern");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let error = tool.execute(&ctx(), &json!({"path": "."})).await.expect_err("missing pattern");
+        let error = ToolHandler::execute(&tool, &ctx(), &json!({"path": "."}))
+            .await
+            .expect_err("missing pattern");
 
         assert_eq!(error.to_string(), "tool execution error: missing 'pattern' argument");
         let _ = fs::remove_dir_all(root);
@@ -425,19 +423,22 @@ mod tests {
         let root = temp_root("escape");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let parent_escape = tool
-            .execute(&ctx(), &json!({"path": "../outside/missing.txt", "pattern": "needle"}))
-            .await
-            .expect_err("parent escape rejected");
+        let parent_escape = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": "../outside/missing.txt", "pattern": "needle"}),
+        )
+        .await
+        .expect_err("parent escape rejected");
         assert!(parent_escape.to_string().contains("workspace path"));
 
-        let absolute_escape = tool
-            .execute(
-                &ctx(),
-                &json!({"path": root.join("file.txt").display().to_string(), "pattern": "needle"}),
-            )
-            .await
-            .expect_err("absolute path rejected");
+        let absolute_escape = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": root.join("file.txt").display().to_string(), "pattern": "needle"}),
+        )
+        .await
+        .expect_err("absolute path rejected");
         assert!(absolute_escape.to_string().contains("absolute path"));
 
         let _ = fs::remove_dir_all(root);
@@ -448,8 +449,9 @@ mod tests {
         let root = temp_root("invalid_regex");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let error =
-            tool.execute(&ctx(), &json!({"path": ".", "pattern": "["})).await.expect_err("regex");
+        let error = ToolHandler::execute(&tool, &ctx(), &json!({"path": ".", "pattern": "["}))
+            .await
+            .expect_err("regex");
 
         assert!(error.to_string().contains("invalid regex"));
         let _ = fs::remove_dir_all(root);
@@ -460,10 +462,13 @@ mod tests {
         let root = temp_root("invalid_glob");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let error = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "needle", "glob": "["}))
-            .await
-            .expect_err("invalid glob");
+        let error = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": ".", "pattern": "needle", "glob": "["}),
+        )
+        .await
+        .expect_err("invalid glob");
 
         assert!(error.to_string().contains("invalid glob"));
         let _ = fs::remove_dir_all(root);
@@ -476,10 +481,13 @@ mod tests {
         fs::write(&file, "needle\n").expect("write file");
         let tool = GrepTool::new(None);
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": file.display().to_string(), "pattern": "needle"}))
-            .await
-            .expect("grep output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": file.display().to_string(), "pattern": "needle"}),
+        )
+        .await
+        .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["total"], 1);
@@ -495,10 +503,10 @@ mod tests {
             .expect("write binary file");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "needle"}))
-            .await
-            .expect("grep output");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": ".", "pattern": "needle"}))
+                .await
+                .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["total"], 1);
@@ -522,10 +530,13 @@ mod tests {
         let tool = GrepTool::new(Some(root.clone()));
 
         // With the broad glob the ignored tree must still be excluded.
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "needle", "glob": "**/*"}))
-            .await
-            .expect("grep output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": ".", "pattern": "needle", "glob": "**/*"}),
+        )
+        .await
+        .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         let files: Vec<String> = value["matches"]
             .as_array()
@@ -537,10 +548,10 @@ mod tests {
         assert_eq!(value["total"], 1);
 
         // Without a glob the same gitignore filtering applies.
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "needle"}))
-            .await
-            .expect("grep output");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": ".", "pattern": "needle"}))
+                .await
+                .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert_eq!(value["total"], 1);
         assert!(value["matches"][0]["file"].as_str().expect("file").contains("src"));
@@ -549,7 +560,7 @@ mod tests {
 
     #[test]
     fn grep_tool_schema_matches_required_arguments() {
-        let schema = GrepTool::new(None).parameters_schema();
+        let schema = ToolHandler::parameters_schema(&GrepTool::new(None));
 
         assert_eq!(schema["properties"]["pattern"]["type"], "string");
         assert_eq!(schema["properties"]["path"]["default"], ".");
@@ -567,10 +578,10 @@ mod tests {
         fs::write(root.join("many.txt"), format!("{content}\n")).expect("write matches");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": "many.txt", "pattern": "hit"}))
-            .await
-            .expect("grep output");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": "many.txt", "pattern": "hit"}))
+                .await
+                .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["matches"].as_array().expect("matches").len(), DEFAULT_MAX_RESULTS);
@@ -586,18 +597,18 @@ mod tests {
         fs::write(root.join("notes.txt"), "before\nneedle\nafter\nneedle\n").expect("write file");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(
-                &ctx(),
-                &json!({
-                    "path": ".",
-                    "pattern": "needle",
-                    "context_lines": 1,
-                    "max_results": 1
-                }),
-            )
-            .await
-            .expect("grep output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({
+                "path": ".",
+                "pattern": "needle",
+                "context_lines": 1,
+                "max_results": 1
+            }),
+        )
+        .await
+        .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["total"], 1);
@@ -634,10 +645,10 @@ mod tests {
         fs::write(root.join("src").join("a.rs"), "fn main() { needle }\n").expect("write source");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "needle"}))
-            .await
-            .expect("grep output");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": ".", "pattern": "needle"}))
+                .await
+                .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert!(
@@ -668,10 +679,10 @@ mod tests {
         fs::write(git_dir.join("sample.txt"), "needle\n").expect("write file");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".git", "pattern": "needle"}))
-            .await
-            .expect("grep output");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": ".git", "pattern": "needle"}))
+                .await
+                .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["total"], 1, "explicit path into .git must still search");
@@ -686,10 +697,10 @@ mod tests {
         fs::write(root.join("minified.txt"), format!("{long_line}\n")).expect("write file");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "needle"}))
-            .await
-            .expect("grep output");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": ".", "pattern": "needle"}))
+                .await
+                .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         let text = value["matches"][0]["text"].as_str().expect("text");
@@ -714,10 +725,13 @@ mod tests {
         fs::write(root.join("fat.txt"), format!("{content}\n")).expect("write file");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "needle", "max_results": 60}))
-            .await
-            .expect("grep output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({"path": ".", "pattern": "needle", "max_results": 60}),
+        )
+        .await
+        .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert!(
@@ -748,10 +762,10 @@ mod tests {
             .expect("write b");
         let tool = GrepTool::new(Some(root.clone()));
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": ".", "pattern": "needle"}))
-            .await
-            .expect("grep output");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": ".", "pattern": "needle"}))
+                .await
+                .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         let mut hits: Vec<(String, u64, String)> = value["matches"]
@@ -791,10 +805,13 @@ mod tests {
             .workspace(slab_agent::WorkspaceRef { root: root.clone(), session_id: None })
             .build();
 
-        let output = tool
-            .execute(&ctx, &json!({"path": ".", "pattern": "needle", "max_results": 60}))
-            .await
-            .expect("grep output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx,
+            &json!({"path": ".", "pattern": "needle", "max_results": 60}),
+        )
+        .await
+        .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert!(value["omitted_matches"].as_u64().expect("omitted") > 0);

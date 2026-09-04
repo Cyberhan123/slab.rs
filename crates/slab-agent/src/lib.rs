@@ -88,5 +88,5 @@ pub use tool::{
     ToolContextBuilder, ToolDiscoveryState, ToolHandler, ToolName, ToolNamespace, ToolOutput,
     ToolOutputObserver, ToolOutputStream, ToolRouter, ToolVisibility, WorkspaceRef,
 };
-pub use typed_tool::{parse_tool_input, typed_input_schema};
 pub use turn::strip_think_blocks;
+pub use typed_tool::{TypedTool, parse_tool_input, typed_input_schema};

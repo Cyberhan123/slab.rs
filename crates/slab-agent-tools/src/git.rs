@@ -7,15 +7,13 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{
-    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
-};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
 use slab_git::GitRepository;
 use slab_sandboxing::SandboxDriver;
 
 /// Arguments for the `git_diff` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct GitDiffArgs {
+pub struct GitDiffArgs {
     /// Optional relative path to diff.
     path: Option<String>,
     /// Return staged changes when true.
@@ -25,7 +23,7 @@ struct GitDiffArgs {
 
 /// Arguments for the `git_commit` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct GitCommitArgs {
+pub struct GitCommitArgs {
     /// Commit message.
     message: String,
 }
@@ -42,7 +40,8 @@ impl GitStatusTool {
 }
 
 #[async_trait]
-impl ToolHandler for GitStatusTool {
+impl TypedTool for GitStatusTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         "git_status"
     }
@@ -65,7 +64,7 @@ impl ToolHandler for GitStatusTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        _arguments: &Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         let status =
             GitRepository::new_with_driver(&self.workspace_root, self.sandbox_driver.clone())
@@ -88,7 +87,8 @@ impl GitDiffTool {
 }
 
 #[async_trait]
-impl ToolHandler for GitDiffTool {
+impl TypedTool for GitDiffTool {
+    type Input = GitDiffArgs;
     fn name(&self) -> &str {
         "git_diff"
     }
@@ -109,9 +109,8 @@ impl ToolHandler for GitDiffTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: GitDiffArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<GitDiffArgs>(arguments)?;
         let diff =
             GitRepository::new_with_driver(&self.workspace_root, self.sandbox_driver.clone())
                 .diff(args.path.as_deref(), args.staged)
@@ -133,7 +132,8 @@ impl GitCommitTool {
 }
 
 #[async_trait]
-impl ToolHandler for GitCommitTool {
+impl TypedTool for GitCommitTool {
+    type Input = GitCommitArgs;
     fn name(&self) -> &str {
         "git_commit"
     }
@@ -161,9 +161,8 @@ impl ToolHandler for GitCommitTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: GitCommitArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<GitCommitArgs>(arguments)?;
         let result =
             GitRepository::new_with_driver(&self.workspace_root, self.sandbox_driver.clone())
                 .commit_all(&args.message)
@@ -187,6 +186,7 @@ fn to_tool_error(error: slab_git::GitError) -> AgentError {
 
 #[cfg(test)]
 mod tests {
+    use slab_agent::ToolHandler;
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -195,7 +195,7 @@ mod tests {
     };
 
     use serde_json::{Value, json};
-    use slab_agent::ToolHandler;
+    use slab_agent::TypedTool;
 
     use super::*;
 
@@ -207,19 +207,20 @@ mod tests {
     fn git_commit_describes_file_edit_operation() {
         let tool = GitCommitTool::new(PathBuf::from("."), None);
 
-        let desc =
-            tool.describe_operation(&json!({"message": "fix quoted path"})).expect("descriptor");
+        let desc = ToolHandler::describe_operation(&tool, &json!({"message": "fix quoted path"}))
+            .expect("descriptor");
 
         assert_eq!(desc.category, slab_agent::OperationCategory::FileEdit);
         assert_eq!(desc.subject, "git_commit: fix quoted path");
-        assert!(tool.describe_operation(&json!({"message": false})).is_none());
+        assert!(ToolHandler::describe_operation(&tool, &json!({"message": false})).is_none());
     }
 
     #[tokio::test]
     async fn git_commit_requires_message_before_touching_repository() {
         let tool = GitCommitTool::new(PathBuf::from("missing-workspace"), None);
 
-        let error = tool.execute(&ctx(), &json!({})).await.expect_err("missing message");
+        let error =
+            ToolHandler::execute(&tool, &ctx(), &json!({})).await.expect_err("missing message");
 
         assert_eq!(error.to_string(), "tool execution error: missing 'message' argument");
     }
@@ -229,14 +230,12 @@ mod tests {
         let root = temp_root("diff_paths");
         let tool = GitDiffTool::new(root.clone(), None);
 
-        let escape = tool
-            .execute(&ctx(), &json!({"path": "../outside.txt"}))
+        let escape = ToolHandler::execute(&tool, &ctx(), &json!({"path": "../outside.txt"}))
             .await
             .expect_err("parent escape rejected");
         assert!(escape.to_string().contains("invalid path"));
 
-        let internal = tool
-            .execute(&ctx(), &json!({"path": ".git/config"}))
+        let internal = ToolHandler::execute(&tool, &ctx(), &json!({"path": ".git/config"}))
             .await
             .expect_err("git internals rejected");
         assert!(internal.to_string().contains("Git internals cannot be edited"));
@@ -249,7 +248,7 @@ mod tests {
         let root = temp_root("status_non_repo");
         let tool = GitStatusTool::new(root.clone(), None);
 
-        let output = tool.execute(&ctx(), &json!({})).await.expect("status output");
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({})).await.expect("status output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert!(value["available"].is_boolean());
@@ -269,10 +268,10 @@ mod tests {
         fs::write(root.join("note.txt"), "hello\n").expect("write untracked file");
         let tool = GitDiffTool::new(root.clone(), None);
 
-        let output = tool
-            .execute(&ctx(), &json!({"path": "note.txt", "staged": false}))
-            .await
-            .expect("diff output");
+        let output =
+            ToolHandler::execute(&tool, &ctx(), &json!({"path": "note.txt", "staged": false}))
+                .await
+                .expect("diff output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["path"], "note.txt");

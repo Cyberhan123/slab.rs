@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput, typed_input_schema};
+use slab_agent::{AgentError, ToolContext, ToolOutput, TypedTool, typed_input_schema};
 
 /// Tool name. Mirrored as a literal in `slab-agent::turn_tool_call` (the
 /// dependency direction is reversed, so slab-agent cannot import this const).
@@ -51,7 +51,8 @@ impl Default for ToolSearchTool {
 }
 
 #[async_trait]
-impl ToolHandler for ToolSearchTool {
+impl TypedTool for ToolSearchTool {
+    type Input = serde_json::Value;
     fn name(&self) -> &str {
         TOOL_SEARCH_TOOL_NAME
     }
@@ -69,7 +70,7 @@ impl ToolHandler for ToolSearchTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        _arguments: &Value,
+        _arguments: serde_json::Value,
     ) -> Result<ToolOutput, AgentError> {
         // Intercepted by the dispatch layer (`handle_tool_search` in
         // `slab-agent::turn_tool_call`) before this runs. Reaching here means

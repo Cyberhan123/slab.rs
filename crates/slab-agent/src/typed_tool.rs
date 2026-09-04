@@ -1,4 +1,4 @@
-//! Strongly-typed tool argument helpers.
+//! Strongly-typed tool authoring: [`TypedTool`] plus shared helpers.
 //!
 //! A tool declares its argument shape once as a struct deriving
 //! `Deserialize` + `JsonSchema`; [`typed_input_schema`] renders the
@@ -7,12 +7,27 @@
 //! layer and tests already know. Schema and parsing stay derived from one
 //! type instead of drifting apart as a hand-written `json!` schema and a
 //! manual `Value` extraction would.
+//!
+//! The blanket `ToolHandler` impl below adapts every `TypedTool` to the
+//! router's dispatch trait, parsing the raw arguments once before the typed
+//! `execute` runs. The metadata methods deliberately keep the RAW arguments
+//! value: the dispatch layer calls them around execution (risk analysis,
+//! batch partitioning, rendering) where a full-struct parse would be
+//! all-or-nothing and would change behavior — e.g. `describe_operation`
+//! must still extract `command` from arguments whose other fields are
+//! invalid, and hooks may rewrite arguments between partitioning and
+//! execution.
 
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::error::AgentError;
+use crate::protocol::TurnItem;
+use crate::tool::{
+    ToolCallRender, ToolContext, ToolHandler, ToolNamespace, ToolOutput, ToolVisibility,
+    default_tool_turn_item,
+};
 
 /// JSON Schema for a typed tool input, normalized to the shape the previous
 /// hand-written schemas had: schemars' root meta keys (`$schema`, `title`,
@@ -75,6 +90,137 @@ pub fn parse_tool_input<T: DeserializeOwned>(arguments: &Value) -> Result<T, Age
     serde_json::from_value(arguments.clone()).map_err(input_parse_error)
 }
 
+/// An individual tool whose arguments are described by a strongly-typed
+/// input struct — the single source of truth for both the model-facing
+/// parameter schema and argument parsing.
+///
+/// Tools implement this instead of [`ToolHandler`]; the blanket impl below
+/// supplies the `ToolHandler` the [`crate::ToolRouter`] dispatches on.
+/// Dynamic proxies that carry a remote/plugin-authored schema (MCP, plugin
+/// capabilities) use `Input = serde_json::Value` and override
+/// [`TypedTool::parameters_schema`] with the stored schema.
+#[async_trait::async_trait]
+pub trait TypedTool: Send + Sync {
+    /// Parsed argument type; also drives the generated parameters schema.
+    type Input: JsonSchema + DeserializeOwned + Send + Sync;
+
+    /// Canonical tool name, matched against LLM tool-call names.
+    fn name(&self) -> &str;
+
+    /// Human-readable description shown to the model in the tool list.
+    fn description(&self) -> &str;
+
+    /// JSON Schema describing the tool's parameter object. Defaults to the
+    /// schema generated from [`Self::Input`]; dynamic proxies override to
+    /// return their remote-authored schema.
+    fn parameters_schema(&self) -> Value {
+        typed_input_schema::<Self::Input>()
+    }
+
+    /// Describe the operation this invocation performs, for the unified
+    /// policy engine. Returning `None` (the default) lets the kernel infer
+    /// the category from the tool name. Tools that carry a meaningful
+    /// subject (command / path / query) should override this.
+    fn describe_operation(
+        &self,
+        _arguments: &Value,
+    ) -> Option<slab_exec_policy::OperationDescriptor> {
+        None
+    }
+
+    /// Coarse operation category used for progressive tool exposure.
+    fn category(&self) -> slab_exec_policy::OperationCategory {
+        slab_exec_policy::OperationCategory::ReadOnly
+    }
+
+    /// Whether THIS invocation may run concurrently with other
+    /// concurrency-safe invocations in the same assistant tool batch.
+    fn is_concurrency_safe(&self, _arguments: &Value) -> bool {
+        false
+    }
+
+    /// When/how the tool appears in the model-facing tool list.
+    fn visibility(&self) -> ToolVisibility {
+        ToolVisibility::Direct
+    }
+
+    /// Namespace the tool belongs to.
+    fn namespace(&self) -> ToolNamespace {
+        ToolNamespace::builtin()
+    }
+
+    /// Build the harness [`TurnItem`] for a call to this tool.
+    fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+        default_tool_turn_item(render)
+    }
+
+    /// Execute the tool with the parsed input.
+    async fn execute(
+        &self,
+        ctx: &ToolContext,
+        input: Self::Input,
+    ) -> Result<ToolOutput, AgentError>;
+}
+
+/// Every [`TypedTool`] is a [`ToolHandler`]: the adapter parses the raw
+/// arguments once (through [`parse_tool_input`]) and forwards the metadata
+/// methods verbatim. `capability()` is intentionally not overridden — the
+/// `ToolHandler` default derives it from `category()`/`visibility()`/
+/// `namespace()`, which route through the forwards below.
+#[async_trait::async_trait]
+impl<T> ToolHandler for T
+where
+    T: TypedTool,
+{
+    fn name(&self) -> &str {
+        TypedTool::name(self)
+    }
+
+    fn description(&self) -> &str {
+        TypedTool::description(self)
+    }
+
+    fn parameters_schema(&self) -> Value {
+        TypedTool::parameters_schema(self)
+    }
+
+    fn describe_operation(
+        &self,
+        arguments: &Value,
+    ) -> Option<slab_exec_policy::OperationDescriptor> {
+        TypedTool::describe_operation(self, arguments)
+    }
+
+    fn category(&self) -> slab_exec_policy::OperationCategory {
+        TypedTool::category(self)
+    }
+
+    fn is_concurrency_safe(&self, arguments: &Value) -> bool {
+        TypedTool::is_concurrency_safe(self, arguments)
+    }
+
+    fn visibility(&self) -> ToolVisibility {
+        TypedTool::visibility(self)
+    }
+
+    fn namespace(&self) -> ToolNamespace {
+        TypedTool::namespace(self)
+    }
+
+    fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
+        TypedTool::render_turn_item(self, render)
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolContext,
+        arguments: &Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let input = parse_tool_input::<T::Input>(arguments)?;
+        TypedTool::execute(self, ctx, input).await
+    }
+}
+
 /// Map a serde parse failure to the tool-error convention: a missing
 /// required field reads as `missing '<field>' argument`; other failures
 /// surface the serde message.
@@ -96,6 +242,7 @@ fn input_parse_error(error: serde_json::Error) -> AgentError {
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
     use serde::Deserialize;
 
     use super::*;
@@ -155,7 +302,10 @@ mod tests {
     fn schema_of_empty_struct_is_empty_object() {
         // Hand-written no-arg tool schemas spell out the empty properties map;
         // tests pin that exact shape (e.g. mcp_list_tools).
-        assert_eq!(typed_input_schema::<EmptyArgs>(), serde_json::json!({"type": "object", "properties": {}}));
+        assert_eq!(
+            typed_input_schema::<EmptyArgs>(),
+            serde_json::json!({"type": "object", "properties": {}})
+        );
     }
 
     #[test]
@@ -163,7 +313,10 @@ mod tests {
         // schemars renders `serde_json::Value` as an empty schema; the provider
         // adapter only forwards object schemas, so normalize to the empty
         // object schema.
-        assert_eq!(typed_input_schema::<Value>(), serde_json::json!({"type": "object", "properties": {}}));
+        assert_eq!(
+            typed_input_schema::<Value>(),
+            serde_json::json!({"type": "object", "properties": {}})
+        );
     }
 
     #[test]
@@ -193,6 +346,64 @@ mod tests {
         assert!(matches!(
             error,
             AgentError::ToolExecution(message) if message.starts_with("invalid arguments: invalid type")
+        ));
+    }
+
+    // ── blanket ToolHandler adapter ──────────────────────────────────────────
+
+    struct SampleTypedTool;
+
+    #[async_trait]
+    impl TypedTool for SampleTypedTool {
+        type Input = SampleArgs;
+
+        fn name(&self) -> &str {
+            "sample"
+        }
+
+        fn description(&self) -> &str {
+            "sample typed tool"
+        }
+
+        async fn execute(
+            &self,
+            _ctx: &ToolContext,
+            input: Self::Input,
+        ) -> Result<ToolOutput, AgentError> {
+            Ok(ToolOutput {
+                content: format!("{}:{}:{}", input.command, input.count, input.flag),
+                metadata: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn blanket_handler_parses_and_forwards_typed_execute() {
+        let tool = SampleTypedTool;
+        let ctx = ToolContext::for_thread("t").build();
+        let output = ToolHandler::execute(&tool, &ctx, &serde_json::json!({"command": "ls"}))
+            .await
+            .expect("typed execute");
+        assert_eq!(output.content, "ls:2:false");
+
+        // Raw-argument metadata methods route through the adapter unchanged.
+        assert!(
+            ToolHandler::describe_operation(&tool, &serde_json::json!({"command": "ls"})).is_none()
+        );
+        assert!(!ToolHandler::is_concurrency_safe(&tool, &serde_json::json!({})));
+        assert_eq!(ToolHandler::parameters_schema(&tool), typed_input_schema::<SampleArgs>());
+        assert_eq!(ToolHandler::name(&tool), "sample");
+    }
+
+    #[tokio::test]
+    async fn blanket_handler_maps_parse_failure_before_execute() {
+        let tool = SampleTypedTool;
+        let ctx = ToolContext::for_thread("t").build();
+        let error =
+            ToolHandler::execute(&tool, &ctx, &serde_json::json!({})).await.expect_err("missing");
+        assert!(matches!(
+            error,
+            AgentError::ToolExecution(message) if message == "missing 'command' argument"
         ));
     }
 }

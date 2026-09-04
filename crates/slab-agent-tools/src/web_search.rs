@@ -7,8 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use slab_agent::{
-    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, parse_tool_input,
-    protocol::TurnItem, typed_input_schema,
+    AgentError, ToolCallRender, ToolContext, ToolOutput, TypedTool, protocol::TurnItem,
+    typed_input_schema,
 };
 use slab_config::secret_port::{EnvSecretAdapter, resolve_secret_or_plain};
 use slab_config::{
@@ -77,7 +77,7 @@ enum SortOrderSchema {
 
 /// Arguments for the `web_search` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct WebSearchArgs {
+pub struct WebSearchArgs {
     /// Search query text.
     query: String,
     /// Search provider. An explicit choice is used strictly; the default falls back through the other configured providers on failure. Defaults to agent.tools.websearch.default_provider.
@@ -121,9 +121,10 @@ where
 {
     match Option::<Value>::deserialize(deserializer)? {
         None | Some(Value::Null) => Ok(None),
-        Some(value) => value.as_u64().map(Some).ok_or_else(|| {
-            serde::de::Error::custom(format!("'{name}' must be an integer"))
-        }),
+        Some(value) => value
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom(format!("'{name}' must be an integer"))),
     }
 }
 
@@ -178,7 +179,8 @@ impl Default for WebSearchTool {
 }
 
 #[async_trait]
-impl ToolHandler for WebSearchTool {
+impl TypedTool for WebSearchTool {
+    type Input = WebSearchArgs;
     fn name(&self) -> &str {
         "web_search"
     }
@@ -217,9 +219,8 @@ impl ToolHandler for WebSearchTool {
     async fn execute(
         &self,
         _ctx: &ToolContext,
-        arguments: &Value,
+        args: WebSearchArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<WebSearchArgs>(arguments)?;
         let include_raw = args.include_raw;
         let request = WebSearchRequest::from_args(args, self.config.default_provider)?;
         let results = self.runner.search(&self.config, request.clone()).await?;
@@ -673,6 +674,7 @@ fn tool_error(error: impl std::fmt::Display) -> AgentError {
 
 #[cfg(test)]
 mod tests {
+    use slab_agent::ToolHandler;
     use std::sync::Mutex;
 
     use super::*;
@@ -707,7 +709,7 @@ mod tests {
 
     #[test]
     fn schema_includes_provider_enum() {
-        let schema = WebSearchTool::default().parameters_schema();
+        let schema = ToolHandler::parameters_schema(&WebSearchTool::default());
         let providers = schema["properties"]["provider"]["enum"].as_array().expect("provider enum");
 
         assert!(providers.contains(&Value::String("duckduckgo".to_owned())));
@@ -728,10 +730,13 @@ mod tests {
         let tool = WebSearchTool::new(config);
         // EXPLICIT provider: used strictly — the missing key must fail without
         // the fallback chain firing (and without touching the network).
-        let error = tool
-            .execute(&ctx(), &serde_json::json!({"query": "rust", "provider": "google"}))
-            .await
-            .expect_err("missing credentials should fail");
+        let error = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &serde_json::json!({"query": "rust", "provider": "google"}),
+        )
+        .await
+        .expect_err("missing credentials should fail");
 
         assert!(error.to_string().contains("missing api key"));
     }
@@ -743,20 +748,26 @@ mod tests {
             ..AgentWebSearchConfig::default()
         };
         google.providers.google.auth.api_key = Some("key".to_owned());
-        let error = WebSearchTool::new(google)
-            .execute(&ctx(), &serde_json::json!({"query": "rust", "provider": "google"}))
-            .await
-            .expect_err("missing cx should fail");
+        let error = ToolHandler::execute(
+            &WebSearchTool::new(google),
+            &ctx(),
+            &serde_json::json!({"query": "rust", "provider": "google"}),
+        )
+        .await
+        .expect_err("missing cx should fail");
         assert!(error.to_string().contains("agent.tools.websearch.providers.google.cx"));
 
         let searxng = AgentWebSearchConfig {
             default_provider: WebSearchProviderId::Searxng,
             ..AgentWebSearchConfig::default()
         };
-        let error = WebSearchTool::new(searxng)
-            .execute(&ctx(), &serde_json::json!({"query": "rust", "provider": "searxng"}))
-            .await
-            .expect_err("missing base url should fail");
+        let error = ToolHandler::execute(
+            &WebSearchTool::new(searxng),
+            &ctx(),
+            &serde_json::json!({"query": "rust", "provider": "searxng"}),
+        )
+        .await
+        .expect_err("missing base url should fail");
         assert!(error.to_string().contains("agent.tools.websearch.providers.searxng.base_url"));
     }
 
@@ -816,10 +827,13 @@ mod tests {
     async fn fake_runner_shapes_output_without_raw_by_default() {
         let runner = Arc::new(FakeRunner { requests: Mutex::new(Vec::new()) });
         let tool = WebSearchTool::with_runner(AgentWebSearchConfig::default(), runner);
-        let output = tool
-            .execute(&ctx(), &serde_json::json!({"query": "rust", "max_results": 1}))
-            .await
-            .expect("search output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &serde_json::json!({"query": "rust", "max_results": 1}),
+        )
+        .await
+        .expect("search output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["provider"], "duckduckgo");
@@ -832,10 +846,13 @@ mod tests {
     async fn fake_runner_includes_raw_when_requested() {
         let runner = Arc::new(FakeRunner { requests: Mutex::new(Vec::new()) });
         let tool = WebSearchTool::with_runner(AgentWebSearchConfig::default(), runner);
-        let output = tool
-            .execute(&ctx(), &serde_json::json!({"query": "rust", "include_raw": true}))
-            .await
-            .expect("search output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &serde_json::json!({"query": "rust", "include_raw": true}),
+        )
+        .await
+        .expect("search output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["results"][0]["raw"]["hidden"], true);
@@ -846,7 +863,8 @@ mod tests {
         let runner = Arc::new(FakeRunner { requests: Mutex::new(Vec::new()) });
         let tool = WebSearchTool::with_runner(AgentWebSearchConfig::default(), runner.clone());
 
-        tool.execute(
+        ToolHandler::execute(
+            &tool,
             &ctx(),
             &serde_json::json!({
                 "query": "rust",
@@ -923,7 +941,9 @@ mod tests {
         for (arguments, expected) in cases {
             let runner = Arc::new(FakeRunner { requests: Mutex::new(Vec::new()) });
             let tool = WebSearchTool::with_runner(AgentWebSearchConfig::default(), runner.clone());
-            let error = tool.execute(&ctx(), &arguments).await.expect_err("invalid arguments");
+            let error = ToolHandler::execute(&tool, &ctx(), &arguments)
+                .await
+                .expect_err("invalid arguments");
 
             assert!(error.to_string().contains(expected), "{error}");
             assert!(runner.requests.lock().expect("requests").is_empty());

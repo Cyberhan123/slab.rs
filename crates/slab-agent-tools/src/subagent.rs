@@ -6,8 +6,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
-    AgentConfig, AgentControl, AgentError, ModelPolicy, ToolContext, ToolHandler, ToolOutput,
-    parse_tool_input, typed_input_schema,
+    AgentConfig, AgentControl, AgentError, ModelPolicy, ToolContext, ToolOutput, TypedTool,
+    typed_input_schema,
 };
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
@@ -24,7 +24,7 @@ impl DelegateSubagentTool {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-struct DelegateSubagentArgs {
+pub struct DelegateSubagentArgs {
     /// The focused task for the child agent.
     task: String,
     /// Optional built-in agent type (e.g. "plan"). Resolves a tool constraint and system prompt from the agent registry; the call fails if the type is unknown.
@@ -45,7 +45,8 @@ struct DelegateSubagentArgs {
 }
 
 #[async_trait]
-impl ToolHandler for DelegateSubagentTool {
+impl TypedTool for DelegateSubagentTool {
+    type Input = DelegateSubagentArgs;
     fn name(&self) -> &str {
         "delegate_subagent"
     }
@@ -61,9 +62,8 @@ impl ToolHandler for DelegateSubagentTool {
     async fn execute(
         &self,
         ctx: &ToolContext,
-        arguments: &Value,
+        args: DelegateSubagentArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<DelegateSubagentArgs>(arguments)?;
         if args.task.trim().is_empty() {
             return Err(AgentError::ToolExecution("subagent task must not be blank".to_owned()));
         }
@@ -275,6 +275,7 @@ async fn write_subagent_artifact(
 
 #[cfg(test)]
 mod tests {
+    use slab_agent::ToolHandler;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -495,13 +496,13 @@ mod tests {
 
         // No workspace: the stripped completion flows into the parent tool
         // output verbatim.
-        let output = tool
-            .execute(
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({ "task": "summarize", "max_turns": 1 }),
-            )
-            .await
-            .expect("delegate");
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "summarize", "max_turns": 1 }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         assert_eq!(value["status"], "completed");
         assert_eq!(
@@ -514,15 +515,15 @@ mod tests {
             .join(format!("slab-agent-tools-subagent-think-{}", std::process::id()));
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
         tokio::fs::create_dir_all(&temp_dir).await.expect("temp workspace");
-        let output = tool
-            .execute(
-                &ToolContext::for_thread("parent")
-                    .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
-                    .build(),
-                &serde_json::json!({ "task": "summarize", "max_turns": 1 }),
-            )
-            .await
-            .expect("delegate");
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent")
+                .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
+                .build(),
+            &serde_json::json!({ "task": "summarize", "max_turns": 1 }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let artifact_ref = value["artifact_refs"][0].as_str().expect("artifact ref");
         let artifact =
@@ -549,17 +550,17 @@ mod tests {
         ));
         let tool = DelegateSubagentTool::new(control);
 
-        let output = tool
-            .execute(
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({
-                    "task": "summarize",
-                    "allowed_tools": ["read_file"],
-                    "max_turns": 1
-                }),
-            )
-            .await
-            .expect("delegate");
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({
+                "task": "summarize",
+                "allowed_tools": ["read_file"],
+                "max_turns": 1
+            }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let child_id = value["child_thread_id"].as_str().expect("child id");
         assert_eq!(value["status"], "completed");
@@ -596,20 +597,20 @@ mod tests {
         ));
         let tool = DelegateSubagentTool::new(control);
 
-        let output = tool
-            .execute(
-                &ToolContext::for_thread("parent")
-                    .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
-                    .build(),
-                &serde_json::json!({
-                    "task": "summarize",
-                    "workspace_scope": "src",
-                    "output_format": "Return JSON with a summary field.",
-                    "max_turns": 1
-                }),
-            )
-            .await
-            .expect("delegate");
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent")
+                .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
+                .build(),
+            &serde_json::json!({
+                "task": "summarize",
+                "workspace_scope": "src",
+                "output_format": "Return JSON with a summary field.",
+                "max_turns": 1
+            }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let artifact_ref = value["artifact_refs"][0].as_str().expect("artifact ref");
 
@@ -654,17 +655,17 @@ mod tests {
         ));
         let tool = DelegateSubagentTool::new(control);
 
-        let result = tool
-            .execute(
-                &ToolContext::for_thread("parent")
-                    .workspace(WorkspaceRef {
-                        root: PathBuf::from("C:/workspace/demo"),
-                        session_id: None,
-                    })
-                    .build(),
-                &serde_json::json!({"task": "summarize", "workspace_scope": "../outside"}),
-            )
-            .await;
+        let result = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent")
+                .workspace(WorkspaceRef {
+                    root: PathBuf::from("C:/workspace/demo"),
+                    session_id: None,
+                })
+                .build(),
+            &serde_json::json!({"task": "summarize", "workspace_scope": "../outside"}),
+        )
+        .await;
 
         let error = result.expect_err("scope escape rejected").to_string();
         assert!(error.contains("workspace_scope must stay inside the workspace"));
@@ -686,12 +687,12 @@ mod tests {
         ));
         let tool = DelegateSubagentTool::new(control);
 
-        let result = tool
-            .execute(
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({"task": "summarize"}),
-            )
-            .await;
+        let result = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({"task": "summarize"}),
+        )
+        .await;
 
         assert!(matches!(result, Err(AgentError::DepthLimitExceeded { current: 1, max: 0 })));
     }
@@ -740,7 +741,8 @@ mod tests {
     }
 
     #[async_trait]
-    impl ToolHandler for StubTool {
+    impl TypedTool for StubTool {
+        type Input = serde_json::Value;
         fn name(&self) -> &str {
             &self.tool_name
         }
@@ -749,14 +751,10 @@ mod tests {
             "stub"
         }
 
-        fn parameters_schema(&self) -> Value {
-            serde_json::json!({ "type": "object", "properties": {} })
-        }
-
         async fn execute(
             &self,
             _ctx: &ToolContext,
-            _arguments: &Value,
+            _arguments: serde_json::Value,
         ) -> Result<ToolOutput, AgentError> {
             Ok(ToolOutput { content: "stub".to_owned(), metadata: None })
         }
@@ -834,13 +832,13 @@ mod tests {
         );
         let tool = DelegateSubagentTool::new(control);
 
-        let output = tool
-            .execute(
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({ "task": "plan it", "agent_type": "plan" }),
-            )
-            .await
-            .expect("delegate");
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "plan it", "agent_type": "plan" }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let child_id = value["child_thread_id"].as_str().expect("child id");
 
@@ -868,7 +866,8 @@ mod tests {
         );
         let tool = DelegateSubagentTool::new(control);
 
-        tool.execute(
+        ToolHandler::execute(
+            &tool,
             &ToolContext::for_thread("parent").build(),
             &serde_json::json!({ "task": "plan it", "agent_type": "plan", "max_turns": 1 }),
         )
@@ -900,12 +899,12 @@ mod tests {
         );
         let tool = DelegateSubagentTool::new(control);
 
-        let result = tool
-            .execute(
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({ "task": "plan it", "agent_type": "missing" }),
-            )
-            .await;
+        let result = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "plan it", "agent_type": "missing" }),
+        )
+        .await;
 
         let error = result.expect_err("unknown agent_type rejected").to_string();
         assert!(error.contains("unknown agent_type: missing"), "{error}");
@@ -923,17 +922,17 @@ mod tests {
         );
         let tool = DelegateSubagentTool::new(control);
 
-        let output = tool
-            .execute(
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({
-                    "task": "plan it",
-                    "agent_type": "plan",
-                    "system_prompt": "custom prompt"
-                }),
-            )
-            .await
-            .expect("delegate");
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({
+                "task": "plan it",
+                "agent_type": "plan",
+                "system_prompt": "custom prompt"
+            }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let child_id = value["child_thread_id"].as_str().expect("child id");
 
@@ -956,17 +955,17 @@ mod tests {
         );
         let tool = DelegateSubagentTool::new(control);
 
-        let output = tool
-            .execute(
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({
-                    "task": "plan it",
-                    "agent_type": "plan",
-                    "model": "caller-model"
-                }),
-            )
-            .await
-            .expect("delegate");
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({
+                "task": "plan it",
+                "agent_type": "plan",
+                "model": "caller-model"
+            }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let child_id = value["child_thread_id"].as_str().expect("child id");
 
@@ -990,13 +989,13 @@ mod tests {
         );
         let tool = DelegateSubagentTool::new(control);
 
-        let output = tool
-            .execute(
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({ "task": "plan it", "agent_type": "plan" }),
-            )
-            .await
-            .expect("delegate");
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "plan it", "agent_type": "plan" }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let child_id = value["child_thread_id"].as_str().expect("child id");
 

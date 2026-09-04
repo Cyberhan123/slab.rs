@@ -12,8 +12,8 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use slab_agent::protocol::TurnItem;
 use slab_agent::{
-    AgentError, ToolCallRender, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver,
-    ToolOutputStream, parse_tool_input, typed_input_schema,
+    AgentError, ToolCallRender, ToolContext, ToolOutput, ToolOutputObserver, ToolOutputStream,
+    TypedTool, typed_input_schema,
 };
 use slab_sandboxing::{OutputSink, OutputStream, SandboxDriver};
 pub use slab_shell_command::ShellPolicy;
@@ -29,7 +29,7 @@ const CONTEXT_STREAM_HEAD_RATIO: f32 = 0.7;
 
 /// Arguments for the `shell` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct ShellArgs {
+pub struct ShellArgs {
     /// The shell command to execute.
     command: String,
     /// Maximum execution time in seconds (foreground only; background tasks have no timeout).
@@ -57,9 +57,8 @@ where
     Ok(env
         .into_iter()
         .flat_map(|env| {
-            env.into_iter().filter_map(|(key, value)| {
-                value.as_str().map(|value| (key, value.to_owned()))
-            })
+            env.into_iter()
+                .filter_map(|(key, value)| value.as_str().map(|value| (key, value.to_owned())))
         })
         .collect())
 }
@@ -114,7 +113,8 @@ impl Default for ShellTool {
 }
 
 #[async_trait]
-impl ToolHandler for ShellTool {
+impl TypedTool for ShellTool {
+    type Input = ShellArgs;
     fn name(&self) -> &str {
         "shell"
     }
@@ -155,12 +155,7 @@ impl ToolHandler for ShellTool {
         }
     }
 
-    async fn execute(
-        &self,
-        ctx: &ToolContext,
-        arguments: &Value,
-    ) -> Result<ToolOutput, AgentError> {
-        let args = parse_tool_input::<ShellArgs>(arguments)?;
+    async fn execute(&self, ctx: &ToolContext, args: ShellArgs) -> Result<ToolOutput, AgentError> {
         // Models sometimes pretty-print tool-call JSON with the command value
         // starting (or ending) on its own line, e.g. {"command": "\nls -la"}.
         // `bash -c $'\nls'` then treats the command as starting on line 2 and
@@ -372,7 +367,7 @@ mod tests {
             exit_code: None,
             duration_ms: None,
         };
-        match tool.render_turn_item(&render) {
+        match ToolHandler::render_turn_item(&tool, &render) {
             TurnItem::CommandExecution { command, cwd, status, aggregated_output, .. } => {
                 assert_eq!(command, "ls -la");
                 assert_eq!(cwd, "/ws");
@@ -426,7 +421,9 @@ mod tests {
             None,
         );
 
-        let output = tool.execute(&ctx, &json!({"command": "huge"})).await.expect("shell output");
+        let output = ToolHandler::execute(&tool, &ctx, &json!({"command": "huge"}))
+            .await
+            .expect("shell output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         let stdout_in_context = value["stdout"].as_str().expect("stdout");
@@ -472,7 +469,9 @@ mod tests {
             None,
         );
 
-        let output = tool.execute(&ctx(), &json!({"command": "huge"})).await.expect("shell output");
+        let output = ToolHandler::execute(&tool, &ctx(), &json!({"command": "huge"}))
+            .await
+            .expect("shell output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
         assert!(value["stdout_artifact"].is_null(), "no artifact without a workspace");
         assert!(value["stdout"].as_str().expect("stdout").len() < DEFAULT_OUTPUT_LIMIT_BYTES + 256);
@@ -496,20 +495,20 @@ mod tests {
             None,
         );
 
-        let output = tool
-            .execute(
-                &ctx(),
-                &json!({
-                    "command": "echo ok",
-                    "timeout_secs": 5,
-                    "env": {
-                        "TEXT": "value",
-                        "IGNORED": false
-                    }
-                }),
-            )
-            .await
-            .expect("shell output");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({
+                "command": "echo ok",
+                "timeout_secs": 5,
+                "env": {
+                    "TEXT": "value",
+                    "IGNORED": false
+                }
+            }),
+        )
+        .await
+        .expect("shell output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["stdout"], "ok");
@@ -528,11 +527,11 @@ mod tests {
     async fn shell_tool_rejects_missing_command_and_dangerous_command() {
         let tool = ShellTool::new(None, None, ShellLauncher::default(), None);
 
-        let missing = tool.execute(&ctx(), &json!({})).await.expect_err("missing command");
+        let missing =
+            ToolHandler::execute(&tool, &ctx(), &json!({})).await.expect_err("missing command");
         assert_eq!(missing.to_string(), "tool execution error: missing 'command' argument");
 
-        let dangerous = tool
-            .execute(&ctx(), &json!({"command": "rm -rf /"}))
+        let dangerous = ToolHandler::execute(&tool, &ctx(), &json!({"command": "rm -rf /"}))
             .await
             .expect_err("dangerous command");
         assert!(dangerous.to_string().contains("command blocked"));
@@ -559,7 +558,9 @@ mod tests {
             None,
         );
 
-        tool.execute(&ctx(), &json!({"command": "\n  echo trimmed  \n"})).await.expect("execute");
+        ToolHandler::execute(&tool, &ctx(), &json!({"command": "\n  echo trimmed  \n"}))
+            .await
+            .expect("execute");
 
         let command = seen.lock().unwrap().clone().expect("driver command");
         assert_eq!(command.argv.last().map(String::as_str), Some("echo trimmed"));
@@ -569,22 +570,24 @@ mod tests {
     async fn shell_tool_rejects_blank_command() {
         let tool = ShellTool::new(None, None, ShellLauncher::default(), None);
 
-        let blank = tool.execute(&ctx(), &json!({"command": "  \n "})).await.expect_err("blank");
+        let blank = ToolHandler::execute(&tool, &ctx(), &json!({"command": "  \n "}))
+            .await
+            .expect_err("blank");
         assert!(blank.to_string().contains("'command' is empty"));
     }
 
     #[test]
     fn shell_tool_describes_operation_as_shell_command() {
         let tool = ShellTool::new(None, None, ShellLauncher::default(), None);
-        let descriptor =
-            tool.describe_operation(&json!({"command": "cargo check"})).expect("descriptor");
+        let descriptor = ToolHandler::describe_operation(&tool, &json!({"command": "cargo check"}))
+            .expect("descriptor");
         assert_eq!(descriptor.category, slab_agent::OperationCategory::Shell);
         assert_eq!(descriptor.subject, "cargo check");
     }
 
     #[test]
     fn shell_tool_schema_marks_command_required() {
-        let schema = ShellTool::default().parameters_schema();
+        let schema = ToolHandler::parameters_schema(&ShellTool::default());
 
         assert_eq!(schema["properties"]["command"]["type"], "string");
         assert_eq!(schema["properties"]["env"]["additionalProperties"]["type"], "string");
@@ -617,7 +620,7 @@ mod tests {
             let mut ctx = ToolContext::for_thread("thread").build();
             ctx.output =
                 Some(Arc::new(ChannelObserver { sender: delta_tx }) as Arc<dyn ToolOutputObserver>);
-            tool.execute(&ctx, &args).await
+            ToolHandler::execute(&tool, &ctx, &args).await
         };
         let drain = async {
             while let Some(delta) = delta_rx.recv().await {
@@ -668,7 +671,7 @@ mod tests {
             let mut ctx = ToolContext::for_thread("thread").build();
             ctx.output =
                 Some(Arc::new(ChannelObserver { sender: delta_tx }) as Arc<dyn ToolOutputObserver>);
-            tool.execute(&ctx, &args).await
+            ToolHandler::execute(&tool, &ctx, &args).await
         };
         let drain = async {
             while let Some(delta) = delta_rx.recv().await {
@@ -702,10 +705,13 @@ mod tests {
         }
 
         let tool = ShellTool::new(Some(workspace), Some(driver), ShellLauncher::Auto, None);
-        let output = tool
-            .execute(&ctx(), &json!({ "command": "echo dev-null-marker 2>/dev/null" }))
-            .await
-            .expect("dev-null redirection run");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({ "command": "echo dev-null-marker 2>/dev/null" }),
+        )
+        .await
+        .expect("dev-null redirection run");
         let value: Value = serde_json::from_str(&output.content).expect("json");
         assert_eq!(value["exit_code"], 0, "stderr: {}", value["stderr"]);
         assert!(value["stdout"].as_str().unwrap_or("").contains("dev-null-marker"));
@@ -725,18 +731,21 @@ mod tests {
             .with_background(Arc::clone(&registry));
 
         // Phase 0 — control: the same executor in the foreground must work.
-        let output = tool
-            .execute(&ctx, &json!({ "command": "echo fg-control-marker" }))
-            .await
-            .expect("foreground control");
+        let output =
+            ToolHandler::execute(&tool, &ctx, &json!({ "command": "echo fg-control-marker" }))
+                .await
+                .expect("foreground control");
         eprintln!("FG CONTROL: {}", output.content);
 
         // Phase 1 — output contract: a self-terminating writer.
         let started = std::time::Instant::now();
-        let output = tool
-            .execute(&ctx, &json!({ "command": "echo bg-done-marker", "background": true }))
-            .await
-            .expect("background spawn");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx,
+            &json!({ "command": "echo bg-done-marker", "background": true }),
+        )
+        .await
+        .expect("background spawn");
         assert!(
             started.elapsed() < std::time::Duration::from_secs(5),
             "background spawn must return immediately, took {:?}",
@@ -753,8 +762,9 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         let mut writer_status = String::from("running");
         while std::time::Instant::now() < deadline {
-            let output =
-                status_tool.execute(&ctx, &json!({ "task_id": writer_id })).await.expect("status");
+            let output = ToolHandler::execute(&status_tool, &ctx, &json!({ "task_id": writer_id }))
+                .await
+                .expect("status");
             let value: Value = serde_json::from_str(&output.content).expect("json");
             writer_status = value["task"]["status"].as_str().unwrap_or("").to_owned();
             if writer_status != "running" {
@@ -778,8 +788,9 @@ mod tests {
         assert_ne!(writer_status, "running", "writer must terminate on its own");
 
         let output_tool = crate::background::TaskOutputTool::new(Arc::clone(&registry));
-        let output =
-            output_tool.execute(&ctx, &json!({ "task_id": writer_id })).await.expect("tail");
+        let output = ToolHandler::execute(&output_tool, &ctx, &json!({ "task_id": writer_id }))
+            .await
+            .expect("tail");
         let value: Value = serde_json::from_str(&output.content).expect("json");
         assert!(
             value["output"].as_str().unwrap_or("").contains("bg-done-marker"),
@@ -788,16 +799,20 @@ mod tests {
 
         // Phase 2 — residency + stop: a long runner survives the tool-call
         // return and dies on task_stop.
-        let output = tool
-            .execute(&ctx, &json!({ "command": "sleep 30", "background": true }))
-            .await
-            .expect("background spawn 2");
+        let output = ToolHandler::execute(
+            &tool,
+            &ctx,
+            &json!({ "command": "sleep 30", "background": true }),
+        )
+        .await
+        .expect("background spawn 2");
         let value: Value = serde_json::from_str(&output.content).expect("json");
         let sleeper_id = value["task_id"].as_str().expect("task id").to_owned();
 
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let output =
-            status_tool.execute(&ctx, &json!({ "task_id": sleeper_id })).await.expect("status 2");
+        let output = ToolHandler::execute(&status_tool, &ctx, &json!({ "task_id": sleeper_id }))
+            .await
+            .expect("status 2");
         let value: Value = serde_json::from_str(&output.content).expect("json");
         assert_eq!(
             value["task"]["status"], "running",
@@ -805,8 +820,9 @@ mod tests {
         );
 
         let stop_tool = crate::background::TaskStopTool::new(Arc::clone(&registry));
-        let output =
-            stop_tool.execute(&ctx, &json!({ "task_id": sleeper_id })).await.expect("stop");
+        let output = ToolHandler::execute(&stop_tool, &ctx, &json!({ "task_id": sleeper_id }))
+            .await
+            .expect("stop");
         let value: Value = serde_json::from_str(&output.content).expect("json");
         assert_eq!(value["stopped"]["status"], "stopped");
 
@@ -818,10 +834,13 @@ mod tests {
     #[tokio::test]
     async fn shell_background_without_registry_errors() {
         let tool = ShellTool::default();
-        let error = tool
-            .execute(&ctx(), &json!({ "command": "echo hi", "background": true }))
-            .await
-            .expect_err("no registry");
+        let error = ToolHandler::execute(
+            &tool,
+            &ctx(),
+            &json!({ "command": "echo hi", "background": true }),
+        )
+        .await
+        .expect_err("no registry");
         assert!(error.to_string().contains("not available"));
     }
 }
