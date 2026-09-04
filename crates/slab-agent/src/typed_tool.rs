@@ -45,7 +45,27 @@ pub fn typed_input_schema<T: JsonSchema>() -> Value {
         }
         map.insert("properties".to_owned(), serde_json::Map::new().into());
     }
-    Value::Object(map)
+    let mut schema = Value::Object(map);
+    strip_null_defaults(&mut schema);
+    schema
+}
+
+/// Drop `"default": null` entries anywhere in the schema. `#[serde(default)]`
+/// on an `Option` field (needed when the field also carries a custom
+/// deserializer) makes schemars emit that noise; `null` is already the
+/// implied default of every nullable property, so removing it keeps the
+/// schema free of meaningless keywords.
+fn strip_null_defaults(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.retain(|key, value| !(key == "default" && value.is_null()));
+            for value in map.values_mut() {
+                strip_null_defaults(value);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_null_defaults),
+        _ => {}
+    }
 }
 
 /// Deserialize tool arguments into a typed input, mapping a missing required
@@ -90,6 +110,10 @@ mod tests {
         #[serde(default)]
         flag: bool,
         label: Option<String>,
+        /// A field whose serde default (needed alongside a custom
+        /// deserializer) would otherwise leak `"default": null`.
+        #[serde(default)]
+        window: Option<u64>,
     }
 
     fn default_count() -> u32 {
@@ -118,8 +142,11 @@ mod tests {
         // … schemars range attributes emit minimum/maximum …
         assert_eq!(schema["properties"]["count"]["minimum"], 1);
         assert_eq!(schema["properties"]["count"]["maximum"], 3);
-        // … and a plain `Option` field stays optional without `default: null`.
+        // … and a plain `Option` field stays optional without `default: null` …
         assert!(schema["properties"]["label"].get("default").is_none());
+        // … including when `#[serde(default)]` is present for deserialize
+        // reasons (the null default is stripped everywhere).
+        assert!(schema["properties"]["window"].get("default").is_none());
         // Only fields without a default are required.
         assert_eq!(schema["required"], serde_json::json!(["command"]));
     }
