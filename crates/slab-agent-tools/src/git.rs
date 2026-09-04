@@ -4,10 +4,31 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
+};
 use slab_git::GitRepository;
 use slab_sandboxing::SandboxDriver;
+
+/// Arguments for the `git_diff` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GitDiffArgs {
+    /// Optional relative path to diff.
+    path: Option<String>,
+    /// Return staged changes when true.
+    #[serde(default)]
+    staged: bool,
+}
+
+/// Arguments for the `git_commit` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GitCommitArgs {
+    /// Commit message.
+    message: String,
+}
 
 pub struct GitStatusTool {
     workspace_root: PathBuf,
@@ -36,7 +57,9 @@ impl ToolHandler for GitStatusTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({ "type": "object", "properties": {} })
+        // No-arg tool: `Value` keeps any stray arguments tolerated at parse
+        // time (an empty struct would reject non-object calls).
+        typed_input_schema::<Value>()
     }
 
     async fn execute(
@@ -80,20 +103,7 @@ impl ToolHandler for GitDiffTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Optional relative path to diff."
-                },
-                "staged": {
-                    "type": "boolean",
-                    "description": "Return staged changes when true.",
-                    "default": false
-                }
-            }
-        })
+        typed_input_schema::<GitDiffArgs>()
     }
 
     async fn execute(
@@ -101,11 +111,10 @@ impl ToolHandler for GitDiffTool {
         _ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let path = arguments.get("path").and_then(Value::as_str);
-        let staged = arguments.get("staged").and_then(Value::as_bool).unwrap_or(false);
+        let args = parse_tool_input::<GitDiffArgs>(arguments)?;
         let diff =
             GitRepository::new_with_driver(&self.workspace_root, self.sandbox_driver.clone())
-                .diff(path, staged)
+                .diff(args.path.as_deref(), args.staged)
                 .await
                 .map_err(to_tool_error)?;
         Ok(json_output(&diff)?)
@@ -134,16 +143,7 @@ impl ToolHandler for GitCommitTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "description": "Commit message."
-                }
-            },
-            "required": ["message"]
-        })
+        typed_input_schema::<GitCommitArgs>()
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
@@ -163,13 +163,10 @@ impl ToolHandler for GitCommitTool {
         _ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let message = arguments
-            .get("message")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AgentError::ToolExecution("missing 'message' argument".into()))?;
+        let args = parse_tool_input::<GitCommitArgs>(arguments)?;
         let result =
             GitRepository::new_with_driver(&self.workspace_root, self.sandbox_driver.clone())
-                .commit_all(message)
+                .commit_all(&args.message)
                 .await
                 .map_err(to_tool_error)?;
         Ok(json_output(&result)?)

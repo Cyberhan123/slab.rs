@@ -8,14 +8,40 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{
+    AgentError, ToolContext, ToolHandler, ToolOutput, parse_tool_input, typed_input_schema,
+};
 use slab_file::watcher::{FileWatcher, WatchPath};
 
 /// Upper bound on the blocking wait. The model controls `timeout_ms`; without
 /// a cap a single 60s watch serialized its whole tool batch (the tool used to
 /// be concurrency-unsafe, so it ran ALONE in a serial batch).
 const FS_WATCH_MAX_TIMEOUT_MS: u64 = 30_000;
+
+/// Arguments for the `fs_watch` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct FsWatchArgs {
+    /// Path to watch (workspace-relative paths resolve against the workspace root).
+    path: String,
+    /// Watch subdirectories recursively.
+    #[serde(default = "default_recursive")]
+    recursive: bool,
+    /// How long to wait for an event (milliseconds); clamped to at most 30000.
+    #[serde(default = "default_timeout_ms")]
+    #[schemars(range(max = 30_000))]
+    timeout_ms: u64,
+}
+
+fn default_recursive() -> bool {
+    true
+}
+
+fn default_timeout_ms() -> u64 {
+    2000
+}
 
 /// Watch a path for file-system changes and return the list of changed paths.
 ///
@@ -72,27 +98,7 @@ impl ToolHandler for FsWatchTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Path to watch (workspace-relative paths resolve against the workspace root)."
-                },
-                "recursive": {
-                    "type": "boolean",
-                    "description": "Watch subdirectories recursively.",
-                    "default": true
-                },
-                "timeout_ms": {
-                    "type": "integer",
-                    "description": "How long to wait for an event (milliseconds); clamped to at most 30000.",
-                    "default": 2000,
-                    "maximum": 30000
-                }
-            },
-            "required": ["path"]
-        })
+        typed_input_schema::<FsWatchArgs>()
     }
 
     async fn execute(
@@ -100,23 +106,16 @@ impl ToolHandler for FsWatchTool {
         ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let path_str = arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AgentError::ToolExecution("missing 'path' argument".into()))?;
+        let args = parse_tool_input::<FsWatchArgs>(arguments)?;
 
-        let recursive = arguments.get("recursive").and_then(Value::as_bool).unwrap_or(true);
-        let timeout_ms = arguments
-            .get("timeout_ms")
-            .and_then(Value::as_u64)
-            .unwrap_or(2000)
-            .min(FS_WATCH_MAX_TIMEOUT_MS);
+        let recursive = args.recursive;
+        let timeout_ms = args.timeout_ms.min(FS_WATCH_MAX_TIMEOUT_MS);
 
         // Resolve against the active workspace so a relative path does not
         // silently land in the server process's CWD.
         let path = match ctx.workspace.as_ref() {
-            Some(workspace) => workspace.root.join(path_str),
-            None => PathBuf::from(path_str),
+            Some(workspace) => workspace.root.join(&args.path),
+            None => PathBuf::from(&args.path),
         };
         let watch_path = WatchPath { path, recursive };
 
