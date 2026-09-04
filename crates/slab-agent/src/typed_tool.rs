@@ -337,6 +337,7 @@ mod tests {
         assert_eq!(args.count, 2);
         assert!(!args.flag);
         assert_eq!(args.label, None);
+        assert_eq!(args.window, None);
     }
 
     #[test]

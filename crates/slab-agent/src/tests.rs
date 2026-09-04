@@ -18,7 +18,7 @@ use std::{
 use crate::{
     AgentControl, AgentControlLimits, AgentDefinition, AgentError, AgentHook, AgentThreadContext,
     HookEvent, HookOutcome, ModelPolicy, PlanRef, ToolCallRender, ToolConstraint, ToolContext,
-    ToolHandler, ToolOutput, ToolRouter, ToolVisibility, TypedTool, WorkspaceRef,
+    ToolOutput, ToolRouter, ToolVisibility, TypedTool, WorkspaceRef,
     compact::{CompactContext, CompactOutcome, CompactPort, SlidingWindowCompactPort},
     config::{AgentConfig, AgentToolChoice},
     port::{
@@ -3999,7 +3999,7 @@ async fn tool_router_returns_none_for_unregistered_tool() {
 
 #[tokio::test]
 async fn tool_router_overwrites_existing_tool() {
-    use crate::tool::{ToolContext, ToolHandler, ToolRouter};
+    use crate::tool::{ToolContext, ToolRouter};
 
     // Create a custom test tool that returns "custom"
     #[derive(Debug)]

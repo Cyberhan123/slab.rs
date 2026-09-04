@@ -194,6 +194,7 @@ fn to_tool_execution_error(error: crate::error::AppCoreError) -> AgentError {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use slab_agent::typed_input_schema;
 
     use super::*;
 
