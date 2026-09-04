@@ -250,16 +250,23 @@ pub struct FileChangeOutputDeltaParams {
 }
 
 /// `backgroundTask/updated` — a lifecycle transition of a resident background
-/// task (started via `shell background=true`): spawned/stopped from the
-/// registry, or terminated on its own (exited/failed).
+/// task (started via `shell background=true` or `delegate_subagent`):
+/// spawned/stopped from the registry, or terminated on its own
+/// (exited/failed/completed).
 #[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct BackgroundTaskUpdatedParams {
     pub thread_id: String,
     pub task_id: String,
-    /// `running` | `exited` | `stopped` | `failed`.
+    /// `running` | `exited` | `stopped` | `failed` | `completed`.
     pub status: String,
+    /// `shell` (default) | `subagent` — what kind of work the task tracks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Subagent tasks: truncated completion payload at the terminal event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

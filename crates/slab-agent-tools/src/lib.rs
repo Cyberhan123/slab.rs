@@ -24,6 +24,7 @@ pub mod mcp;
 pub mod plan;
 pub mod shell;
 pub mod subagent;
+pub mod subagent_tools;
 pub mod task_complete;
 pub mod tool_search;
 pub mod verify;
@@ -32,8 +33,9 @@ pub mod web_search;
 pub use apply_patch::ApplyPatchTool;
 pub use background::{
     BackgroundTaskEvent, BackgroundTaskEventSink, BackgroundTaskRegistry, BackgroundTaskSnapshot,
-    BackgroundTaskStatus, DEFAULT_OUTPUT_TAIL_BYTES, NoopBackgroundTaskEventSink, TaskOutputTool,
-    TaskStatusTool, TaskStopTool,
+    BackgroundTaskStatus, DEFAULT_OUTPUT_TAIL_BYTES, DetachedKill, DetachedOnTerminal,
+    DetachedTask, DetachedTaskOutcome, DetachedWait, NoopBackgroundTaskEventSink, TaskKind,
+    TaskOutputTool, TaskStatusTool, TaskStopTool,
 };
 pub use fs::{ListDirTool, ReadFileTool, WriteFileTool};
 pub use fs_watch::FsWatchTool;
@@ -49,7 +51,11 @@ pub use slab_shell_command::{
     ShellFamily, ShellLauncher, ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher,
     ShellRuleSet,
 };
-pub use subagent::DelegateSubagentTool;
+pub use subagent::{
+    DelegateSubagentTool, NoopSubagentTaskSink, SubagentFinishedEvent, SubagentSpawnedEvent,
+    SubagentTaskSink,
+};
+pub use subagent_tools::{SubagentMessageTool, SubagentStatusTool, SubagentStopTool};
 pub use task_complete::{TASK_COMPLETE_METADATA_KEY, TASK_COMPLETE_TOOL_NAME, TaskCompleteTool};
 pub use tool_search::{TOOL_SEARCH_TOOL_NAME, ToolSearchTool};
 pub use verify::{CommandWorkspaceVerifier, VerifyTarget, VerifyTool, WorkspaceVerifier};

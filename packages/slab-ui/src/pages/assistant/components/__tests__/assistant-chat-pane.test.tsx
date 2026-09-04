@@ -125,6 +125,7 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     abortReason: null,
     queuedTexts: [],
     backgroundTasks: [],
+    subagentTasksByTaskId: new Map(),
     onSteerSubmit: vi.fn(),
     onInterrupt: vi.fn(),
     ...overrides,

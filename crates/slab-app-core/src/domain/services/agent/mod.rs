@@ -131,6 +131,10 @@ pub(crate) struct AgentCore {
     /// Thread ids that already have a rollout persistence observer running.
     /// Guards `spawn_rollout_persistence` to one observer per thread.
     rollout_observers: Arc<DashSet<String>>,
+    /// Shared background-task registry (same `Arc` the tools use), so
+    /// interrupt/shutdown can cascade-stop subagent delegations owned by a
+    /// thread. All-`Arc` per the clone invariant above.
+    background: Arc<slab_agent_tools::BackgroundTaskRegistry>,
 }
 
 /// Persisted session state restored by the unified agent responses route.
@@ -143,6 +147,7 @@ pub struct RestoredAgentSession {
 }
 
 impl AgentCore {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         runtime: AgentRuntime,
         store: Arc<dyn AgentStorePort>,
@@ -151,6 +156,7 @@ impl AgentCore {
         rollout: Arc<slab_agent_rollout::RolloutFileStore>,
         reader: Arc<dyn RolloutConversationStore>,
         trace_dir: Option<PathBuf>,
+        background: Arc<slab_agent_tools::BackgroundTaskRegistry>,
     ) -> Self {
         Self {
             runtime,
@@ -161,6 +167,7 @@ impl AgentCore {
             reader,
             trace_dir,
             rollout_observers: Arc::new(DashSet::new()),
+            background,
         }
     }
 
@@ -220,7 +227,7 @@ impl AgentCore {
     /// (e.g. `send_input` resuming a thread) are no-ops. The observer runs for
     /// the process lifetime, capturing every finalized `TurnItem`, compaction
     /// marker, and allowed lifecycle event across all of the thread's runs.
-    fn ensure_rollout_persistence(&self, real_thread_id: &str) {
+    pub(crate) fn ensure_rollout_persistence(&self, real_thread_id: &str) {
         if self.rollout_observers.insert(real_thread_id.to_owned()) {
             rollout_persistence::spawn_rollout_persistence(
                 Arc::clone(&self.rollout),
@@ -229,6 +236,13 @@ impl AgentCore {
                 slab_agent_rollout::EventPersistenceMode::Limited,
             );
         }
+    }
+
+    /// Cascade-stop every RUNNING subagent delegation owned by `thread_id`
+    /// (interrupt/shutdown paths). Background SHELL tasks are deliberately
+    /// untouched — they are meant to outlive the run that started them.
+    pub(crate) fn stop_subagent_tasks_for(&self, thread_id: &str) -> Vec<String> {
+        self.background.stop_subagent_tasks_for_thread(thread_id)
     }
 
     /// Append a structured user message to an existing agent thread and run the

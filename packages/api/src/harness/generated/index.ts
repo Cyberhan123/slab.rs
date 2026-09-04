@@ -47,14 +47,23 @@ export type ApprovalScope = "run_once" | "always_in_workspace" | "always" | "den
 // ── BackgroundTaskUpdatedParams ──
 /**
  * `backgroundTask/updated` — a lifecycle transition of a resident background
- * task (started via `shell background=true`): spawned/stopped from the
- * registry, or terminated on its own (exited/failed).
+ * task (started via `shell background=true` or `delegate_subagent`):
+ * spawned/stopped from the registry, or terminated on its own
+ * (exited/failed/completed).
  */
 export type BackgroundTaskUpdatedParams = { threadId: string, taskId: string, 
 /**
- * `running` | `exited` | `stopped` | `failed`.
+ * `running` | `exited` | `stopped` | `failed` | `completed`.
  */
-status: string, exitCode?: number, pid?: number, command?: string, };
+status: string, 
+/**
+ * `shell` (default) | `subagent` — what kind of work the task tracks.
+ */
+kind?: string, 
+/**
+ * Subagent tasks: truncated completion payload at the terminal event.
+ */
+resultSummary?: string, exitCode?: number, pid?: number, command?: string, };
 
 // ── ByteRange ──
 /**

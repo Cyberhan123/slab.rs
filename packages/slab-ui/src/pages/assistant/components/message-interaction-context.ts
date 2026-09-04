@@ -13,6 +13,8 @@
 
 import { createContext, useContext } from "react"
 
+import type { SubagentTaskInfo } from "@slab/core/harness"
+
 export type ApprovalStatus = "pending" | "approved" | "denied"
 
 export interface MessageInteractionValue {
@@ -22,6 +24,8 @@ export interface MessageInteractionValue {
   userMessageTurnIndex: ReadonlyMap<string, number>
   /** Retract the user message with this id and everything after it. */
   rollbackToMessage: ((messageId: string) => void) | undefined
+  /** taskId → live subagent delegation state (drives the delegate tool card). */
+  subagentTasksByTaskId: ReadonlyMap<string, SubagentTaskInfo>
 }
 
 export interface LiveToolOutputValue {
@@ -35,6 +39,7 @@ export const MessageInteractionContext = createContext<MessageInteractionValue>(
   approvalStatusByItemId: new Map<string, ApprovalStatus>(),
   userMessageTurnIndex: new Map<string, number>(),
   rollbackToMessage: undefined,
+  subagentTasksByTaskId: new Map<string, SubagentTaskInfo>(),
 })
 
 export const LiveToolOutputContext = createContext<LiveToolOutputValue>({

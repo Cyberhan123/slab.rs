@@ -16,3 +16,4 @@ pub(crate) mod rollout_persistence;
 pub(crate) mod rollout_store;
 pub(crate) mod runtime;
 pub(crate) mod sleep_inhibitor_hook;
+pub(crate) mod subagent_bridge;

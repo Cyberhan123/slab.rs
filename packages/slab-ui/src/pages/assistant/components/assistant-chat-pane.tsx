@@ -41,6 +41,7 @@ import type {
     CompactionMarker,
     HarnessChatTransport,
     ModelLoadState,
+    SubagentTaskInfo,
     ThreadStatusString,
     TurnSendOptions,
 } from "@slab/core/harness"
@@ -104,6 +105,8 @@ export type AssistantChatPaneProps = {
     queuedTexts: readonly string[]
     /** Resident background tasks; RUNNING ones render a status Marker at the tail. */
     backgroundTasks: readonly BackgroundTaskInfo[]
+    /** taskId → live subagent delegation state (drives the delegate tool card). */
+    subagentTasksByTaskId: ReadonlyMap<string, SubagentTaskInfo>
     /** Steering send — submits while the turn runs queue at the iteration boundary. */
     onSteerSubmit: (text: string, options?: TurnSendOptions) => Promise<unknown>
     /**
@@ -163,6 +166,7 @@ export function AssistantChatPane({
     abortReason,
     queuedTexts,
     backgroundTasks,
+    subagentTasksByTaskId,
     onSteerSubmit,
     onInterrupt,
     onStartNewChat,
@@ -213,8 +217,9 @@ export function AssistantChatPane({
             approvalStatusByItemId,
             userMessageTurnIndex,
             rollbackToMessage: handleRollbackMessage,
+            subagentTasksByTaskId,
         }),
-        [approvalStatusByItemId, userMessageTurnIndex, handleRollbackMessage],
+        [approvalStatusByItemId, userMessageTurnIndex, handleRollbackMessage, subagentTasksByTaskId],
     )
     const liveToolOutputValue = useMemo(
         () => ({ liveOutputByItemId, livePatchByItemId }),

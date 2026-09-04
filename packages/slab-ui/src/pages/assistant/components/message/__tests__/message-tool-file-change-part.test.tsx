@@ -28,6 +28,7 @@ function emptyInteraction() {
     approvalStatusByItemId: new Map(),
     userMessageTurnIndex: new Map(),
     rollbackToMessage: undefined,
+          subagentTasksByTaskId: new Map(),
   }
 }
 

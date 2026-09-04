@@ -812,6 +812,63 @@ describe("ConversationController", () => {
     controller.dispose()
   })
 
+  it("routes subagent task notifications to the dedicated state and resyncs on terminal", async () => {
+    const { controller, socket } = await restoredController()
+
+    // Subagent-kind events must NOT pollute the shell background-task list.
+    socket.simMessage(
+      notification("backgroundTask/updated", {
+        threadId: "hthread-1",
+        taskId: "bg-sub-1",
+        status: "running",
+        kind: "subagent",
+        command: "summarize the repo",
+      }),
+    )
+    await flush()
+    expect(controller.getState().backgroundTasks).toEqual([])
+    expect(controller.getState().subagentTasksByTaskId.get("bg-sub-1")).toMatchObject({
+      taskId: "bg-sub-1",
+      status: "running",
+      command: "summarize the repo",
+    })
+
+    const reconnectSpy = vi.spyOn(controller, "reconnect").mockResolvedValue()
+
+    // A terminal transition stores the result summary and flags a history
+    // resync (the parent's follow-up output is not on the local stream).
+    socket.simMessage(
+      notification("backgroundTask/updated", {
+        threadId: "hthread-1",
+        taskId: "bg-sub-1",
+        status: "completed",
+        kind: "subagent",
+        resultSummary: "child result",
+      }),
+    )
+    await flush()
+    expect(controller.getState().subagentTasksByTaskId.get("bg-sub-1")).toMatchObject({
+      status: "completed",
+      resultSummary: "child result",
+    })
+    // The resync waits for the triggered run to settle — nothing yet.
+    expect(reconnectSpy).not.toHaveBeenCalled()
+
+    // The terminal thread status (the server-side auto-resumed parent
+    // finishing) consumes the flag and reconnects.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "completed",
+      }),
+    )
+    await flush()
+    expect(reconnectSpy).toHaveBeenCalledTimes(1)
+
+    reconnectSpy.mockRestore()
+    controller.dispose()
+  })
+
   it("keeps per-item map identities stable across unrelated commits", async () => {
     const { controller, socket } = await restoredController()
     const before = controller.getState()

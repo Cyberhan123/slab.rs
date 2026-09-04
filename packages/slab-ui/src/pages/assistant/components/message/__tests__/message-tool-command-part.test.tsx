@@ -90,6 +90,7 @@ async function renderPart(
           approvalStatusByItemId: ctx.approval ? new Map([["call-1", ctx.approval]]) : new Map(),
           userMessageTurnIndex: new Map(),
           rollbackToMessage: undefined,
+          subagentTasksByTaskId: new Map(),
         }}
       >
         <MessageToolCommandPart

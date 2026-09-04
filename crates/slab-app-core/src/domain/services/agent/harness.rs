@@ -112,15 +112,27 @@ impl HarnessService {
     /// clear the oneshot entries leak in the hub's map forever.
     pub async fn shutdown(&self, thread_id: &str) -> Result<(), AppCoreError> {
         self.0.events().clear_pending_approvals(thread_id);
+        // Cascade: background subagent delegations owned by this thread die
+        // with it (their kill closures only spawn the child interrupt — no
+        // blocking here). Background SHELL tasks survive by design.
+        let stopped = self.0.stop_subagent_tasks_for(thread_id);
+        if !stopped.is_empty() {
+            tracing::debug!(thread_id, count = stopped.len(), "cascade-stopped subagent tasks");
+        }
         self.0.runtime().shutdown(thread_id).await.map_err(AppCoreError::from)
     }
 
     /// Interrupt the currently running turn while keeping the thread resumable.
     ///
     /// Pending approvals are resolved as Rejected before the cancel for the
-    /// same leak reason as [`Self::shutdown`].
+    /// same leak reason as [`Self::shutdown`]. Background subagent
+    /// delegations owned by the thread are cascade-stopped as well.
     pub async fn interrupt(&self, thread_id: &str) -> Result<(), AppCoreError> {
         self.0.events().clear_pending_approvals(thread_id);
+        let stopped = self.0.stop_subagent_tasks_for(thread_id);
+        if !stopped.is_empty() {
+            tracing::debug!(thread_id, count = stopped.len(), "cascade-stopped subagent tasks");
+        }
         self.0.runtime().interrupt(thread_id).await.map_err(AppCoreError::from)
     }
 
