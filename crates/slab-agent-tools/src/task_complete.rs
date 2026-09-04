@@ -82,8 +82,10 @@ impl TaskPlanStatus {
     }
 }
 
-/// Schema-only hint for [`ArtifactRefInput::kind`]: the runtime keeps `kind`
-/// as a free-form string so unknown kinds are surfaced, not rejected.
+// Schema-only hint for `ArtifactRefInput::kind`: the runtime keeps `kind` as
+// a free-form string so unknown kinds are surfaced, not rejected. (Deliberate
+// plain comment — a doc comment would leak into the generated schema as a
+// description.)
 #[derive(JsonSchema)]
 #[schemars(inline)]
 #[serde(rename_all = "lowercase")]
@@ -97,7 +99,7 @@ enum ArtifactKindSchema {
 #[schemars(inline)]
 struct ArtifactRefInput {
     path: String,
-    #[schemars(with = "ArtifactKindSchema")]
+    #[schemars(with = "Option<ArtifactKindSchema>")]
     kind: Option<String>,
 }
 
@@ -385,6 +387,14 @@ mod tests {
         let required = schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "summary"));
         assert!(required.iter().any(|v| v == "plan"));
+        // The artifact kind stays optional with its enum hint intact (an
+        // optional enum advertises null alongside the values).
+        let artifact_props = &schema["properties"]["artifact_refs"]["items"]["properties"];
+        assert!(!required.iter().any(|v| v == "kind"));
+        assert_eq!(
+            artifact_props["kind"]["enum"],
+            json!(["file", "diff", "image", null])
+        );
     }
 
     #[tokio::test]
