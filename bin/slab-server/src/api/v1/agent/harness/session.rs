@@ -218,6 +218,11 @@ fn rewrite_thread_id(mut msg: EventMsg, harness_id: &str) -> EventMsg {
         EventMsg::FileChangeRequestApproval(p) => p.thread_id = tid.clone(),
         EventMsg::ContextCompacting(p) => p.thread_id = tid.clone(),
         EventMsg::ContextCompacted(p) => p.thread_id = tid.clone(),
+        // Background-task events carry the OWNING thread's real id (the
+        // registry attributes shell/subagent tasks to the thread that started
+        // them). Without this arm the notification reached the client with the
+        // real id and was silently dropped by the harness-id filter.
+        EventMsg::BackgroundTaskUpdated(p) => p.thread_id = tid.clone(),
         // Error carries no thread_id; leave unchanged.
         // `EventMsg` is `#[non_exhaustive]`: future slab-agent variants with no
         // known thread_id mapping pass through untouched.
@@ -328,6 +333,33 @@ mod tests {
         );
         match compacted {
             EventMsg::ContextCompacted(p) => assert_eq!(p.thread_id, "hthread-1"),
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    /// Regression: background-task events used to pass through with the REAL
+    /// thread id — the client dropped them via its harness-id filter, so
+    /// background task transitions were invisible on the WS.
+    #[test]
+    fn rewrite_thread_id_rewrites_background_task_events() {
+        let rewritten = rewrite_thread_id(
+            EventMsg::BackgroundTaskUpdated(slab_agent::protocol::BackgroundTaskUpdatedParams {
+                thread_id: "real-1".to_owned(),
+                task_id: "bg-1".to_owned(),
+                status: "running".to_owned(),
+                kind: Some("subagent".to_owned()),
+                result_summary: None,
+                exit_code: None,
+                pid: None,
+                command: Some("summarize".to_owned()),
+            }),
+            "hthread-1",
+        );
+        match rewritten {
+            EventMsg::BackgroundTaskUpdated(p) => {
+                assert_eq!(p.thread_id, "hthread-1");
+                assert_eq!(p.kind.as_deref(), Some("subagent"));
+            }
             other => panic!("unexpected variant: {other:?}"),
         }
     }

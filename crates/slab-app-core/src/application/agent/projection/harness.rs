@@ -108,6 +108,8 @@ mod tests {
                 thread_id: "t".to_owned(),
                 task_id: "bg-1".to_owned(),
                 status: "exited".to_owned(),
+                kind: Some("shell".to_owned()),
+                result_summary: None,
                 exit_code: Some(0),
                 pid: Some(4242),
                 command: Some("npm run dev".to_owned()),
@@ -117,6 +119,28 @@ mod tests {
         let json = serde_json::to_value(&n).unwrap();
         assert_eq!(json["params"]["taskId"], "bg-1");
         assert_eq!(json["params"]["status"], "exited");
+        assert_eq!(json["params"]["kind"], "shell");
         assert_eq!(json["params"]["pid"], 4242);
+    }
+
+    #[test]
+    fn subagent_background_task_event_lifts_with_result_summary() {
+        let event =
+            EventMsg::BackgroundTaskUpdated(slab_agent::protocol::BackgroundTaskUpdatedParams {
+                thread_id: "t".to_owned(),
+                task_id: "bg-2".to_owned(),
+                status: "completed".to_owned(),
+                kind: Some("subagent".to_owned()),
+                result_summary: Some("child result".to_owned()),
+                exit_code: None,
+                pid: None,
+                command: Some("summarize the repo".to_owned()),
+            });
+        let n = event_msg_to_notification(event).unwrap();
+        let json = serde_json::to_value(&n).unwrap();
+        assert_eq!(json["params"]["kind"], "subagent");
+        assert_eq!(json["params"]["resultSummary"], "child result");
+        // Optional-absent fields must not leak onto the wire.
+        assert!(json["params"].get("exitCode").is_none());
     }
 }

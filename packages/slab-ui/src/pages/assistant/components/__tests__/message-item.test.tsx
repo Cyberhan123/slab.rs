@@ -86,6 +86,9 @@ vi.mock("../message/message-tool-part", () => ({
   deriveState: () => "output-available",
   isApprovalPending: () => false,
   isToolActive: () => false,
+  ToolErrorText: ({ errorText }: { errorText?: string }) => (
+    <div data-testid="tool-error-text">{errorText}</div>
+  ),
   ToolPartRow: () => <div data-testid="tool-part-row" />,
 }))
 vi.mock("../message/message-tool-command-part", () => ({
@@ -109,6 +112,9 @@ vi.mock("../message/message-tool-plan-part", () => ({
 }))
 vi.mock("../message/message-tool-read-file-part", () => ({
   default: () => <div data-testid="tool-read-file-part" />,
+}))
+vi.mock("../message/message-tool-subagent-part", () => ({
+  default: () => <div data-testid="tool-subagent-part" />,
 }))
 
 function message(overrides: Partial<TMessage> = {}): TMessage {
@@ -177,6 +183,7 @@ describe("MessageItem", () => {
           approvalStatusByItemId: new Map(),
           userMessageTurnIndex: new Map([["mu1", 2]]),
           rollbackToMessage,
+          subagentTasksByTaskId: new Map(),
         }}
       >
         <MessageItem
@@ -197,6 +204,7 @@ describe("MessageItem", () => {
           approvalStatusByItemId: new Map(),
           userMessageTurnIndex: new Map([["mu0", 0]]),
           rollbackToMessage: vi.fn(),
+          subagentTasksByTaskId: new Map(),
         }}
       >
         <MessageItem
@@ -215,6 +223,7 @@ describe("MessageItem", () => {
           approvalStatusByItemId: new Map(),
           userMessageTurnIndex: new Map([["ma1", 2]]),
           rollbackToMessage: vi.fn(),
+          subagentTasksByTaskId: new Map(),
         }}
       >
         <MessageItem message={message({ id: "ma1", role: "assistant" })} />

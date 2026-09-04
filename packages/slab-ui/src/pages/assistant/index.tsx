@@ -92,6 +92,7 @@ function Assistant() {
         abortReason,
         queuedTexts,
         backgroundTasks,
+        subagentTasksByTaskId,
         sendSteering,
         interrupt,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
@@ -358,6 +359,7 @@ function Assistant() {
                     abortReason={abortReason}
                     queuedTexts={queuedTexts}
                     backgroundTasks={backgroundTasks}
+                    subagentTasksByTaskId={subagentTasksByTaskId}
                     onSteerSubmit={async (text, options) => {
                         const result = (await sendSteering(
                             {

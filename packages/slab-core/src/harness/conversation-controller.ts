@@ -106,6 +106,20 @@ export interface BackgroundTaskInfo {
     pid?: number | null
     command?: string | null
 }
+
+/**
+ * A background subagent delegation started via `delegate_subagent`, tracked
+ * from `backgroundTask/updated` notifications with `kind: "subagent"`. Drives
+ * the dedicated delegate tool-card live status; the full result arrives as a
+ * follow-up conversation message (server-side auto-resume), not on this
+ * notification.
+ */
+export interface SubagentTaskInfo {
+    taskId: string
+    status: "running" | "completed" | "stopped" | "failed"
+    resultSummary?: string | null
+    command?: string | null
+}
 /** `compacting` = in-progress (rendered as a Shimmer); `compacted` = done. */
 export type CompactionPhase = "compacting" | "compacted"
 
@@ -205,6 +219,8 @@ export interface ConversationState {
   queuedTexts: readonly string[]
   /** Resident background tasks (shell background=true), latest last. */
   backgroundTasks: readonly BackgroundTaskInfo[]
+  /** taskId → live subagent delegation state (drives the delegate tool card). */
+  subagentTasksByTaskId: ReadonlyMap<string, SubagentTaskInfo>
 }
 
 /** Options accepted by the {@link ConversationController} constructor. */
@@ -313,6 +329,7 @@ const EMPTY_SNAPSHOT: ConversationState = {
   queuedCount: 0,
   queuedTexts: [],
   backgroundTasks: [],
+  subagentTasksByTaskId: new Map(),
 }
 
 // ── Controller ──────────────────────────────────────────────────────────────
@@ -356,6 +373,7 @@ export class ConversationController {
   private abortReason: string | null = null
   private queuedTexts: string[] = []
   private backgroundTasks: BackgroundTaskInfo[] = []
+  private subagentTasks = new Map<string, SubagentTaskInfo>()
   /**
    * The live AI-SDK stream never replays user messages (the wire has no
    * `message/appended` notification), so when queued steering is drained or
@@ -430,6 +448,7 @@ export class ConversationController {
       this.error = null
       this.isHistoryLoading = false
       this.backgroundTasks = []
+      this.subagentTasks = new Map()
       this.restoreVersion += 1
       this.commit()
       return
@@ -483,7 +502,10 @@ export class ConversationController {
           messages.every((message, index) => message.id === prevMessageIds[index])
         if (!identicalReread) this.restoredMessages = messages
         // Background tasks are thread-scoped; a thread switch drops the list.
-        if (this.restoredThreadId !== thread.id) this.backgroundTasks = []
+        if (this.restoredThreadId !== thread.id) {
+          this.backgroundTasks = []
+          this.subagentTasks = new Map()
+        }
         this.userMessageTurnIndex = buildUserMessageTurnIndex(thread)
         this.restoredThreadId = thread.id
         this.historyCreatedAt = thread.createdAt
@@ -917,6 +939,7 @@ export class ConversationController {
       queuedCount: this.queuedTexts.length,
       queuedTexts: [...this.queuedTexts],
       backgroundTasks: this.backgroundTasks,
+      subagentTasksByTaskId: this.subagentTasks,
     }
     for (const listener of this.listeners) listener()
   }
@@ -1053,14 +1076,17 @@ export class ConversationController {
       return
     }
 
-    // Resident background task lifecycle (shell background=true): track the
-    // latest state per task. Terminal states stay listed — the timeline shows
-    // how tasks ended and the count is bounded by the registry.
+    // Resident background task lifecycle (shell background=true /
+    // delegate_subagent): track the latest state per task, split by kind.
+    // Terminal states stay listed — the timeline shows how tasks ended and the
+    // count is bounded by the registry.
     if (method === HARNESS_NOTIFICATION.BACKGROUND_TASK_UPDATED) {
       const params = (notification.params ?? {}) as {
         threadId?: string
         taskId?: string
         status?: string
+        kind?: string | null
+        resultSummary?: string | null
         exitCode?: number | null
         pid?: number | null
         command?: string | null
@@ -1070,6 +1096,25 @@ export class ConversationController {
       }
       const taskId = params.taskId
       if (taskId === undefined) return
+
+      if (params.kind === "subagent") {
+        // Subagent delegation: drives the dedicated tool-card live status. A
+        // terminal transition means the server-side bridge is (about to be)
+        // resuming the parent with the result — that follow-up output is not
+        // on the local AI-SDK stream, so a history resync is owed once the
+        // triggered run settles (terminal thread status consumes the flag).
+        const info: SubagentTaskInfo = {
+          taskId,
+          status: (params.status ?? "running") as SubagentTaskInfo["status"],
+          resultSummary: params.resultSummary ?? null,
+          command: params.command ?? null,
+        }
+        this.subagentTasks = new Map(this.subagentTasks).set(taskId, info)
+        if (info.status !== "running") this.pendingResync = true
+        this.commit()
+        return
+      }
+
       const info: BackgroundTaskInfo = {
         taskId,
         status: (params.status ?? "running") as BackgroundTaskInfo["status"],

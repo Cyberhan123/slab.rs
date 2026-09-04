@@ -100,6 +100,10 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     let background_tasks = Arc::new(slab_agent_tools::BackgroundTaskRegistry::new(Some(Arc::new(
         BackgroundEventBridge(Arc::clone(&event_hub)),
     ))));
+    // Subagent lifecycle bridge: attaches child rollout persistence and
+    // delivers background-delegation completions to the parent. Bound into
+    // the delegate tool below; the AgentCore is late-bound once it exists.
+    let subagent_bridge = Arc::new(super::subagent_bridge::SubagentBridge::new());
     let control = build_agent_control(
         ctx,
         Arc::clone(&store),
@@ -111,6 +115,7 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         Arc::clone(&rollout_store),
         trace_dir.clone(),
         Arc::clone(&background_tasks),
+        Arc::clone(&subagent_bridge),
     );
     let agent_runtime = AgentRuntime::new(control);
     let core = AgentCore::new(
@@ -122,7 +127,9 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         Arc::clone(&rollout_store)
             as Arc<dyn crate::domain::services::agent::RolloutConversationStore>,
         trace_dir,
+        Arc::clone(&background_tasks),
     );
+    subagent_bridge.set_core(Arc::new(core.clone()));
     let runtime = AgentRuntimeReloader::new(
         (*ctx.model_state).clone(),
         core.runtime(),
@@ -163,6 +170,8 @@ impl slab_agent_tools::BackgroundTaskEventSink for BackgroundEventBridge {
                 thread_id: event.thread_id.clone(),
                 task_id: event.task_id,
                 status: event.status.as_str().to_owned(),
+                kind: Some(event.kind.as_str().to_owned()),
+                result_summary: event.result_summary,
                 exit_code: event.exit_code,
                 pid: event.pid,
                 command: event.command,
@@ -193,6 +202,7 @@ fn build_agent_control(
     rollout_store: Arc<super::rollout_store::RolloutBackedAgentStore>,
     trace_dir: Option<PathBuf>,
     background_tasks: Arc<slab_agent_tools::BackgroundTaskRegistry>,
+    subagent_bridge: Arc<super::subagent_bridge::SubagentBridge>,
 ) -> Arc<AgentControl> {
     let llm = Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
     // memory_store / exec_db stay on the original SQL store (metadata +
@@ -234,7 +244,7 @@ fn build_agent_control(
         web_search_config,
         shell_launcher,
         shell_config.bash_path.clone(),
-        background_tasks,
+        Arc::clone(&background_tasks),
     );
     tool_router.register(Box::new(super::code_tools::CodeLspStatusTool::new(
         WorkspaceLspService::new(
@@ -394,8 +404,21 @@ fn build_agent_control(
         control
     };
     let control = Arc::new(control);
+    tool_router.register(Box::new(slab_agent_tools::DelegateSubagentTool::new(
+        Arc::clone(&control),
+        Arc::clone(&background_tasks),
+        Arc::clone(&subagent_bridge) as Arc<dyn slab_agent_tools::SubagentTaskSink>,
+    )));
+    // Background-subagent controls (same registry as the delegation itself).
+    tool_router.register(Box::new(slab_agent_tools::SubagentStatusTool::new(Arc::clone(
+        &background_tasks,
+    ))));
+    tool_router.register(Box::new(slab_agent_tools::SubagentMessageTool::new(
+        Arc::clone(&background_tasks),
+        Arc::clone(&control),
+    )));
     tool_router
-        .register(Box::new(slab_agent_tools::DelegateSubagentTool::new(Arc::clone(&control))));
+        .register(Box::new(slab_agent_tools::SubagentStopTool::new(Arc::clone(&background_tasks))));
     memory_pipeline.set_control(Arc::clone(&control));
     control
 }

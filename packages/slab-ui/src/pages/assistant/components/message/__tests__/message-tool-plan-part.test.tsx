@@ -21,6 +21,7 @@ async function renderPart(part: Partial<ToolPartLike>, toolCallId = "call-1") {
         approvalStatusByItemId: new Map(),
         userMessageTurnIndex: new Map(),
         rollbackToMessage: undefined,
+        subagentTasksByTaskId: new Map(),
       }}
     >
       <MessageToolPlanPart

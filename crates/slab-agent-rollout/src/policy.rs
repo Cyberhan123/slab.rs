@@ -98,6 +98,8 @@ mod tests {
             thread_id: "t".to_owned(),
             task_id: "bg-1".to_owned(),
             status: "stopped".to_owned(),
+            kind: None,
+            result_summary: None,
             exit_code: None,
             pid: None,
             command: None,

@@ -66,4 +66,21 @@ mod tests {
         assert!(body.contains("bytes omitted"), "truncation-marker guidance missing:\n{body}");
         assert!(body.contains("artifact"), "artifact-spill guidance missing:\n{body}");
     }
+
+    /// The async-delegation vocabulary must reach the model: background
+    /// default, the follow-up delivery, and the subagent_* control tools.
+    #[test]
+    fn rendered_prompt_guides_background_delegation_behavior() {
+        let env = crate::helper::build_environment();
+        let body =
+            SystemInstructionFragment::default().render_body(&env).expect("render system template");
+        assert!(body.contains("BACKGROUND"), "background-delegation guidance missing:\n{body}");
+        for tool in ["subagent_status", "subagent_message", "subagent_stop"] {
+            assert!(body.contains(tool), "{tool} guidance missing:\n{body}");
+        }
+        assert!(
+            body.contains("background=false"),
+            "inline-delegation escape hatch guidance missing:\n{body}"
+        );
+    }
 }

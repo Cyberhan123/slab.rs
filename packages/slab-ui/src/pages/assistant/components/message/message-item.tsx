@@ -30,6 +30,7 @@ import MessageToolGrepPart from "./message-tool-grep-part"
 import MessageToolListDirPart from "./message-tool-list-dir-part"
 import MessageToolPlanPart from "./message-tool-plan-part"
 import MessageToolReadFilePart from "./message-tool-read-file-part"
+import MessageToolSubagentPart from "./message-tool-subagent-part"
 
 type TMessagePart = {
     state?: string;
@@ -120,6 +121,7 @@ const messagePartComponents: MessagePartComponents<TMessagePart, TMessage> = {
         list_dir: MessageToolListDirPart,
         file_glob: MessageToolFileGlobPart,
         grep: MessageToolGrepPart,
+        delegate_subagent: MessageToolSubagentPart,
     },
 }
 

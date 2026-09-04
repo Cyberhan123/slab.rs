@@ -355,6 +355,7 @@ struct TestHarness {
     rollout: Arc<slab_agent_rollout::RolloutFileStore>,
     mock: Arc<HarnessMockStore>,
     events: Arc<AgentEventHub>,
+    background: Arc<slab_agent_tools::BackgroundTaskRegistry>,
     _dir: tempfile::TempDir,
 }
 
@@ -385,6 +386,7 @@ impl TestHarness {
             8,
         ));
         let runtime = AgentRuntime::new(control);
+        let background = Arc::new(slab_agent_tools::BackgroundTaskRegistry::default());
         let core = AgentCore::new(
             runtime,
             Arc::clone(&store_adapter) as Arc<dyn AgentStorePort>,
@@ -393,6 +395,7 @@ impl TestHarness {
             rollout.clone(),
             Arc::clone(&store_adapter) as Arc<dyn RolloutConversationStore>,
             None,
+            Arc::clone(&background),
         );
         let harness = HarnessService::new(core);
         Self {
@@ -401,6 +404,7 @@ impl TestHarness {
             rollout,
             mock,
             events: event_hub,
+            background,
             _dir: dir,
         }
     }
@@ -1020,4 +1024,64 @@ async fn process_slow_event(
         _ => {}
     }
     current_turn
+}
+
+// ── subagent cascade: interrupt stops owned background delegations ─────────
+
+#[tokio::test]
+async fn interrupt_cascade_stops_subagent_tasks_owned_by_the_thread() {
+    let compact: Arc<dyn CompactPort> = Arc::new(SkipCompact);
+    let th = TestHarness::build(compact).await;
+
+    // Two pending subagent delegations: one owned by "owner", one by another
+    // thread. The kill closures record whether they fired.
+    let fired = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let register = |registry: &Arc<slab_agent_tools::BackgroundTaskRegistry>, owner: &str| {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::mem::forget(tx);
+        let counter = Arc::clone(&fired);
+        let task_id = registry.alloc_task_id();
+        registry
+            .register_detached(
+                task_id.clone(),
+                slab_agent_tools::DetachedTask {
+                    thread_id: owner.to_owned(),
+                    command: "pending delegation".to_owned(),
+                    workspace_root: None,
+                    child_thread_id: Some(format!("child-{owner}")),
+                },
+                Box::pin(async move {
+                    rx.await.unwrap_or(slab_agent_tools::DetachedTaskOutcome::Status {
+                        status: slab_agent_tools::BackgroundTaskStatus::Failed,
+                        result: None,
+                    })
+                }),
+                Box::new(move || {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }),
+                Box::new(|_| {}),
+            )
+            .expect("register detached");
+        task_id
+    };
+    let owned = register(&th.background, "owner");
+    let other = register(&th.background, "someone-else");
+
+    // The interrupt targets a thread that does not exist in the control —
+    // the cascade runs BEFORE the control call and is registry-only, so it
+    // still stops the owned task (and the control error surfaces after).
+    let result = th.harness.interrupt("owner").await;
+    // ThreadNotFound is expected (no such live thread); the cascade already
+    // happened regardless.
+    assert!(result.is_err() || result.is_ok());
+
+    assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 1, "only the owned task is killed");
+    assert_eq!(
+        th.background.snapshot(&owned).unwrap().status,
+        slab_agent_tools::BackgroundTaskStatus::Stopped
+    );
+    assert_eq!(
+        th.background.snapshot(&other).unwrap().status,
+        slab_agent_tools::BackgroundTaskStatus::Running
+    );
 }
