@@ -12,10 +12,12 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
     AgentError, Plan, PlanCounts, PlanItem, PlanStatus, ToolContext, ToolHandler, ToolOutput,
+    parse_tool_input, typed_input_schema,
 };
 
 /// Metadata key under which `present_plan` stashes the plan snapshot so the
@@ -36,25 +38,33 @@ fn next_plan_id() -> String {
 
 // ── Shared argument shape ────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct PlanArgs {
-    #[serde(default)]
+    /// Optional short summary of what this plan is tracking.
     summary: Option<String>,
     #[serde(deserialize_with = "deserialize_items")]
+    #[schemars(length(min = 1))]
     items: Vec<PlanItemInput>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(inline)]
 struct PlanItemInput {
+    /// A concrete task or checkpoint.
     step: String,
     status: PlanStatus,
-    /// Lightweight dependencies (step references); not enforced, carried for rendering.
-    #[serde(default)]
+    /// Optional step references this step depends on (lightweight, not enforced).
     depends_on: Option<Vec<String>>,
-    /// Optional `verify:<target>:<passed|failed>` reference binding execution evidence.
-    #[serde(default)]
+    /// Optional verify:<target>:<passed|failed> reference binding execution evidence to this step.
     result_ref: Option<String>,
 }
+
+/// Schema-only shape for `present_plan`'s no-argument call: the schema
+/// declares a closed empty object, while execution keeps tolerating stray
+/// arguments (see [`PresentPlanTool::parameters_schema`]).
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PresentPlanArgs {}
 
 /// Tolerant deserializer for the plan `items` array. Smaller models sometimes
 /// emit the array as a JSON-encoded string (e.g. Qwen3.5-9B sends
@@ -152,41 +162,6 @@ fn build_plan(args: PlanArgs, plan_id: String) -> Result<Plan, AgentError> {
     })
 }
 
-/// Shared JSON schema for the `plan` / `update_plan` item array.
-fn items_schema() -> Value {
-    serde_json::json!({
-        "type": "array",
-        "minItems": 1,
-        "items": {
-            "type": "object",
-            "properties": {
-                "step": { "type": "string", "description": "A concrete task or checkpoint." },
-                "status": {
-                    "type": "string",
-                    "enum": ["pending", "in_progress", "completed", "blocked"]
-                },
-                "depends_on": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Optional step references this step depends on (lightweight, not enforced)."
-                },
-                "result_ref": {
-                    "type": "string",
-                    "description": "Optional verify:<target>:<passed|failed> reference binding execution evidence to this step."
-                }
-            },
-            "required": ["step", "status"]
-        }
-    })
-}
-
-fn summary_schema() -> Value {
-    serde_json::json!({
-        "type": "string",
-        "description": "Optional short summary of what this plan is tracking."
-    })
-}
-
 // ── plan ─────────────────────────────────────────────────────────────────────
 
 /// Create the structured execution plan (Plan interaction mode).
@@ -212,14 +187,7 @@ call update_plan to record progress."
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "summary": summary_schema(),
-                "items": items_schema()
-            },
-            "required": ["items"]
-        })
+        typed_input_schema::<PlanArgs>()
     }
 
     async fn execute(
@@ -227,8 +195,7 @@ call update_plan to record progress."
         ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let args: PlanArgs = serde_json::from_value(arguments.clone())
-            .map_err(|error| AgentError::ToolExecution(format!("invalid plan args: {error}")))?;
+        let args = parse_tool_input::<PlanArgs>(arguments)?;
         let plan = build_plan(args, next_plan_id())?;
         let snapshot = serde_json::to_value(&plan)
             .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
@@ -268,14 +235,7 @@ updated item list. Preserve the plan id across updates."
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "summary": summary_schema(),
-                "items": items_schema()
-            },
-            "required": ["items"]
-        })
+        typed_input_schema::<PlanArgs>()
     }
 
     async fn execute(
@@ -283,9 +243,7 @@ updated item list. Preserve the plan id across updates."
         ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let args: PlanArgs = serde_json::from_value(arguments.clone()).map_err(|error| {
-            AgentError::ToolExecution(format!("invalid update_plan args: {error}"))
-        })?;
+        let args = parse_tool_input::<PlanArgs>(arguments)?;
         // Preserve the existing plan id when a plan already exists; otherwise mint one.
         let plan_id = ctx
             .plan_store
@@ -334,11 +292,10 @@ mutation tools unlock for execution; if rejected, revise the plan and call prese
     }
 
     fn parameters_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        })
+        // The closed-empty-object schema is advisory; execution ignores any
+        // arguments, so parsing stays on the raw Value (not PresentPlanArgs,
+        // whose deny_unknown_fields would newly reject stray keys).
+        typed_input_schema::<PresentPlanArgs>()
     }
 
     async fn execute(
@@ -604,9 +561,10 @@ mod tests {
             item_props["status"]["enum"],
             json!(["pending", "in_progress", "completed", "blocked"])
         );
-        // The schema gap from the toy plan_update is fixed: both optional fields are declared.
-        assert_eq!(item_props["result_ref"]["type"], "string");
-        assert_eq!(item_props["depends_on"]["type"], "array");
+        // The schema gap from the toy plan_update is fixed: both optional fields are declared
+        // (optional = nullable in the generated schema).
+        assert_eq!(item_props["result_ref"]["type"], json!(["string", "null"]));
+        assert_eq!(item_props["depends_on"]["type"], json!(["array", "null"]));
     }
 
     #[tokio::test]

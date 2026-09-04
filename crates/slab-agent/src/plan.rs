@@ -12,6 +12,7 @@ use ts_rs::TS;
 
 /// Lifecycle status of a single plan step.
 #[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum PlanStatus {

@@ -15,12 +15,14 @@ use serde_json::Value;
 use crate::error::AgentError;
 
 /// JSON Schema for a typed tool input, normalized to the shape the previous
-/// hand-written schemas had: schemars' root `$schema`/`title` meta keys are
-/// stripped, a non-object result becomes the empty object schema (so the
-/// provider adapter keeps seeing an object schema), and an object schema
-/// without composition/`properties` gets an explicit empty `properties` map
-/// (schemars omits it for field-less structs; hand-written schemas spelled it
-/// out, and tests pin that shape).
+/// hand-written schemas had: schemars' root meta keys (`$schema`, `title`,
+/// and the struct doc comment leaking in as `description`) are stripped —
+/// the tool's prose lives on [`crate::ToolHandler::description`], not the
+/// parameter schema — a non-object result becomes the empty object schema
+/// (so the provider adapter keeps seeing an object schema), and an object
+/// schema without composition/`properties` gets an explicit empty
+/// `properties` map (schemars omits it for field-less structs; hand-written
+/// schemas spelled it out, and tests pin that shape).
 pub fn typed_input_schema<T: JsonSchema>() -> Value {
     let schema = serde_json::to_value(schemars::schema_for!(T))
         .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
@@ -29,6 +31,7 @@ pub fn typed_input_schema<T: JsonSchema>() -> Value {
     };
     map.remove("$schema");
     map.remove("title");
+    map.remove("description");
     let is_object = matches!(map.get("type"), Some(Value::String(t)) if t == "object");
     if !map.contains_key("properties")
         && !map.contains_key("anyOf")

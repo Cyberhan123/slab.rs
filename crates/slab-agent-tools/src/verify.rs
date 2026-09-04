@@ -200,6 +200,7 @@ impl Default for VerifyTool {
 /// runtime `from_str` accepts a wider alias set ("build", "tests",
 /// case variants); the schema advertises only the canonical four.
 #[derive(JsonSchema)]
+#[schemars(inline)]
 #[serde(rename_all = "snake_case")]
 enum VerifyTargetSchema {
     WorkspaceBuild,

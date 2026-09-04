@@ -58,6 +58,7 @@ struct TaskCompleteArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(inline)]
 struct TaskPlanItemInput {
     step: String,
     status: TaskPlanStatus,
@@ -66,6 +67,7 @@ struct TaskPlanItemInput {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(inline)]
 #[serde(rename_all = "snake_case")]
 enum TaskPlanStatus {
     Pending,
@@ -83,6 +85,7 @@ impl TaskPlanStatus {
 /// Schema-only hint for [`ArtifactRefInput::kind`]: the runtime keeps `kind`
 /// as a free-form string so unknown kinds are surfaced, not rejected.
 #[derive(JsonSchema)]
+#[schemars(inline)]
 #[serde(rename_all = "lowercase")]
 enum ArtifactKindSchema {
     File,
@@ -91,6 +94,7 @@ enum ArtifactKindSchema {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(inline)]
 struct ArtifactRefInput {
     path: String,
     #[schemars(with = "ArtifactKindSchema")]
