@@ -203,9 +203,14 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
             "abort",
             () => {
               if (finished) return
-              // Best-effort interrupt; finish the stream regardless so the UI
-              // does not hang waiting for a terminal notification.
-              this.client.turnInterrupt({ threadId, turnId: "0" }).catch(() => {})
+              // Local stream teardown only — do NOT send `turn/interrupt` here.
+              // The Stop control already routes the authoritative interrupt
+              // through ConversationController.interrupt (both wired in the
+              // Sender's onStop), and this abort listener also fires for
+              // UNMOUNT aborts (pane remounts on restore-version bumps) where
+              // the server turn must keep running. A duplicate interrupt here
+              // raced the teardown's terminal-status SQL write and could
+              // strand the thread row on "interrupting" forever.
               if (!state.finished) {
                 writer.write({ finishReason: "stop", type: "finish" })
               }

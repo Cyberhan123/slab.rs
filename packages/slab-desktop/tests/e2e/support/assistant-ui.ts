@@ -12,6 +12,7 @@ import {
   type AgentThreadMessageResponse,
   type ChatToolCall,
 } from "./e2e-runtime"
+import { registerDiagnosticsPage } from "./e2e-failure-diagnostics"
 
 type AssistantUiState = {
   currentSessionId?: string
@@ -35,6 +36,9 @@ export async function openAssistant(
   sessionId?: string
 ): Promise<void> {
   attachBrowserConsoleCapture(page, sessionId ?? "assistant")
+  // Failure diagnostics: the afterEach snapshot dumps this page's bubble/
+  // composer state when a test fails (see e2e-failure-diagnostics.ts).
+  registerDiagnosticsPage(page)
   if (sessionId) {
     // `?session=` deep link pins this page to a specific session, bypassing the
     // shared `zustand:assistant-ui` "current session" (which is global per
@@ -95,8 +99,32 @@ function attachBrowserConsoleCapture(page: Page, label: string): void {
   page.on("pageerror", (error) => write("pageerror", error.message))
 }
 
-export async function sendAssistantMessage(page: Page, message: string): Promise<void> {  const composer = await waitForComposerReady(page)
-  await composer.fill(message)
+export async function sendAssistantMessage(page: Page, message: string): Promise<void> {
+  const composer = await waitForComposerReady(page)
+  // The composer can remount between the ready-wait and the fill (the
+  // new-chat landing swaps to the detail view once its submit navigates; a
+  // restore-version bump remounts the pane). A fill resolved against the
+  // OLD composer throws "element was detached" — re-resolve and retry the
+  // FILL only (bounded); the send click stays single-shot so a retried fill
+  // can never double-send.
+  let lastFillError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await composer.fill(message)
+      lastFillError = null
+      break
+    } catch (error) {
+      lastFillError = error
+      const text = error instanceof Error ? error.message : String(error)
+      if (!/detached|not attached/i.test(text)) {
+        throw error
+      }
+    }
+  }
+  if (lastFillError) {
+    throw lastFillError
+  }
   await page.getByTestId("assistant-send-button").click()
 }
 
@@ -253,8 +281,35 @@ export async function togglePlanMode(page: Page): Promise<void> {
   await page.getByRole("menuitem", { name: "/plan" }).click()
 }
 
+/** Open the header model picker (tagged `header-model-trigger`; the assistant
+ * header config threads `testId: "header-model"` through HeaderSelect) and
+ * click the option for `modelId` (`header-model-option-<id>`; options render
+ * in a Radix portal, so the locator resolves only while the popover is open).
+ * The trigger's label mirrors the selection — asserted so a click that never
+ * registered fails HERE, not as a silently-wrong model 300s later. */
+export async function selectHeaderModel(page: Page, modelId: string, expectedLabel: string): Promise<void> {
+  const trigger = page.getByTestId("header-model-trigger")
+  await trigger.click()
+  await page.getByTestId(`header-model-option-${modelId}`).click()
+  await eventually("header model trigger shows the picked label", async () => {
+    const text = (await trigger.textContent()) ?? ""
+    return text.includes(expectedLabel) ? true : null
+  })
+}
+
+/** On the new-chat landing, point the embedded Sender's workspace selector at
+ * the CURRENT workspace. The landing defaults to 全局 (global) — legitimate
+ * product behavior, but submitting with it CLOSES the active workspace
+ * server-side (`refresh_workspace(None)` retires apply_patch/git tools), which
+ * in the SHARED e2e stack breaks every concurrently running file that needs
+ * workspace-bound tools. */
+export async function selectCurrentWorkspaceOnLanding(page: Page): Promise<void> {
+  await page.locator('[data-testid="workspace-selector"] > button').click()
+  await page.getByTestId("workspace-selector-item-current").click()
+}
+
 export async function expectAssistantPageText(page: Page, text: string): Promise<void> {
-  const needle = visibleNeedle(text)
+  const needle = visibleNeedle(text).toLowerCase()
   // Assistant message bubbles are tagged `assistant-message-assistant` on
   // MessageRow (message-item.tsx). The DOM text is markdown-rendered
   // (AssistantMarkdown), so it can differ from the raw prompt by markdown
@@ -262,8 +317,10 @@ export async function expectAssistantPageText(page: Page, text: string): Promise
   // underscores intact, but `visibleNeedle` strips `_`. Matching the stripped
   // needle against raw DOM text therefore misses prompts that contain
   // `_`/`*`/`#`/`>`/`[`/`]`. Normalize the DOM text the same way before
-  // comparing. Only assistant bubbles are scanned so the needle is not matched
-  // against the user's own bubble.
+  // comparing, case-insensitively: a model that opens its reply with the
+  // marker capitalizes it ("Assistant-second-…" vs "assistant-second-…").
+  // Only assistant bubbles are scanned so the needle is not matched against
+  // the user's own bubble.
   await eventually(
     `assistant page text '${needle}'`,
     async () => {
@@ -272,7 +329,7 @@ export async function expectAssistantPageText(page: Page, text: string): Promise
       for (let index = 0; index < count; index += 1) {
         // eslint-disable-next-line no-await-in-loop
         const raw = await messages.nth(index).textContent()
-        if (raw && normalizeVisibleText(raw).includes(needle)) {
+        if (raw && normalizeVisibleText(raw).toLowerCase().includes(needle)) {
           return true
         }
       }

@@ -19,7 +19,14 @@ export default defineConfig({
     // workspace.test.ts opens/migrates the SHARED server's global workspace,
     // which would derail concurrent agent/apply-patch turns (their tools resolve
     // against the workspace root). It is also a known flake; run it on its own.
-    exclude: ["**/node_modules/**", "tests/e2e/workspace.test.ts"],
+    // subagent-scripted.test.ts needs its OWN scripted stack
+    // (`vitest.e2e.subagent.config.ts`, SLAB_E2E_MODE=1, no model) — its
+    // beforeAll injects a provided-context key this suite never provides.
+    exclude: [
+      "**/node_modules/**",
+      "tests/e2e/workspace.test.ts",
+      "tests/e2e/subagent-scripted.test.ts",
+    ],
     environment: "node",
     globalSetup: [fileURLToPath(new URL("./tests/e2e/support/e2e-global-setup.ts", import.meta.url))],
     setupFiles: [

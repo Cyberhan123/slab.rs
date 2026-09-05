@@ -546,6 +546,14 @@ impl AgentStorePort for RolloutBackedAgentStore {
         self.sqlx.update_thread_status(id, status, completion_text).await
     }
 
+    async fn mark_thread_interrupting(
+        &self,
+        id: &str,
+        completion_text: Option<&str>,
+    ) -> Result<(), AgentError> {
+        self.sqlx.mark_thread_interrupting(id, completion_text).await
+    }
+
     async fn archive_thread(&self, id: &str, archived_at: Option<&str>) -> Result<(), AgentError> {
         self.sqlx.archive_thread(id, archived_at).await
     }

@@ -1,10 +1,13 @@
 import type { Vitest } from "vitest/node"
 
 import {
+  bootstrapCloudModel,
   bootstrapLocalModel,
   cleanupE2eEnvironment,
   createE2eEnvironment,
+  e2eLlmMode,
   startE2eRuntime,
+  type E2eLlmMode,
   type E2eRuntime,
   type ManagedProcess,
 } from "./e2e-runtime"
@@ -63,6 +66,7 @@ export type E2eRuntimeEndpoints = Pick<
   | "uiPort"
   | "workspaceRoot"
 > & {
+  llmMode: E2eLlmMode
   modelId: string
   selectedVariantId: string
 }
@@ -71,23 +75,32 @@ const MODEL_ID = "Qwen3.5-9B"
 const SELECTED_VARIANT_ID = "Q8_0"
 
 /**
- * Boots the shared e2e stack (slab-server + slab-runtime + Vite) and loads the
- * local model ONCE for the whole suite, then exposes the endpoints to every
- * test file. Returns the teardown that stops the stack when the suite ends.
+ * Boots the shared e2e stack (slab-server + slab-runtime + Vite) and prepares
+ * the LLM backend ONCE for the whole suite, then exposes the endpoints to
+ * every test file. Two modes (`SLAB_E2E_LLM`): `local` (default) imports +
+ * loads the pinned Qwen pack; `cloud` loads no local model at all — the
+ * user's app_home `providers` registry is merged into the generated settings
+ * (see `readAppHomeProviders`) and the curated GLM flagship is selected for
+ * the assistant. Returns the teardown that stops the stack when the suite
+ * ends.
  */
 export default async function e2eGlobalSetup(vitest: Vitest) {
   const runtime = await createE2eEnvironment()
   const dev: ManagedProcess = await startE2eRuntime(runtime)
-  const model = await bootstrapLocalModel(runtime.serverBaseUrl, {
-    modelId: MODEL_ID,
-    selectedVariantId: SELECTED_VARIANT_ID,
-  })
+  const model =
+    e2eLlmMode === "cloud"
+      ? await bootstrapCloudModel(runtime.serverBaseUrl)
+      : await bootstrapLocalModel(runtime.serverBaseUrl, {
+          modelId: MODEL_ID,
+          selectedVariantId: SELECTED_VARIANT_ID,
+        })
 
   vitest.provide("e2e-runtime", {
     databasePath: runtime.databasePath,
     databaseUrl: runtime.databaseUrl,
     e2eRootDir: runtime.e2eRootDir,
     logsDir: runtime.logsDir,
+    llmMode: runtime.llmMode,
     modelConfigDir: runtime.modelConfigDir,
     modelId: model.id,
     pluginsDir: runtime.pluginsDir,

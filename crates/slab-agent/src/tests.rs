@@ -572,11 +572,14 @@ impl TypedTool for ToolSearchStubTool {
     }
 }
 
-// LLM that records the visible tool names per call. Call 1 emits a `tool_search`
-// tool call with the given query; call 2 returns a plain final answer.
+// LLM that records the visible tool names per call, plus the tool-result
+// message contents it was shown (for asserting tool_search result payloads).
+// Call 1 emits a `tool_search` tool call with the given query; call 2 returns
+// a plain final answer.
 struct ToolSearchLlm {
     query: String,
     calls: Arc<Mutex<Vec<Vec<String>>>>,
+    tool_results: Arc<Mutex<Vec<String>>>,
 }
 
 #[async_trait]
@@ -584,7 +587,7 @@ impl LlmPort for ToolSearchLlm {
     async fn chat_completion(
         &self,
         _model: &str,
-        _messages: &[ConversationMessage],
+        messages: &[ConversationMessage],
         tools: &[ToolSpec],
         _config: &AgentConfig,
         _trace_context: &AgentTraceContext,
@@ -593,6 +596,9 @@ impl LlmPort for ToolSearchLlm {
         calls.push(tools.iter().map(|t| t.name.clone()).collect());
         let call_index = calls.len();
         drop(calls);
+        for message in messages.iter().filter(|message| message.role == "tool") {
+            self.tool_results.lock().unwrap().push(message.rendered_text());
+        }
         if call_index == 1 {
             Ok(LlmResponse {
                 content: None,
@@ -1350,8 +1356,21 @@ async fn smoke_echo_tool_agent_completes() {
 /// it with a [`ToolSearchLlm`] that calls `tool_search` with `query` on turn 1,
 /// and return the per-turn captured visible-tool-name lists.
 async fn run_tool_search_agent(query: &str) -> Vec<Vec<String>> {
+    run_tool_search_agent_with_results(query).await.0
+}
+
+/// [`run_tool_search_agent`] that also returns the tool-result contents the
+/// LLM saw (the `tool_search` result payload), as `(tool_names, tool_results)`.
+async fn run_tool_search_agent_with_results(
+    query: &str,
+) -> (Vec<Vec<String>>, Arc<Mutex<Vec<String>>>) {
     let calls: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
-    let llm = Arc::new(ToolSearchLlm { query: query.to_owned(), calls: Arc::clone(&calls) });
+    let tool_results: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(ToolSearchLlm {
+        query: query.to_owned(),
+        calls: Arc::clone(&calls),
+        tool_results: Arc::clone(&tool_results),
+    });
     let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
     let notify = Arc::new(NoopNotify);
     let router = ToolRouter::new();
@@ -1386,7 +1405,7 @@ async fn run_tool_search_agent(query: &str) -> Vec<Vec<String>> {
     })
     .await;
 
-    calls.lock().unwrap().clone()
+    (calls.lock().unwrap().clone(), tool_results)
 }
 
 #[tokio::test]
@@ -1418,6 +1437,23 @@ async fn tool_search_no_match_returns_empty_and_does_not_inject() {
         "deferred tool should stay hidden after a non-matching search, got {:?}",
         calls[1]
     );
+}
+
+/// A query matching a tool already in the BASE list must report it as
+/// `already_available` instead of an empty array — models probe tool_search
+/// before calling a named tool, and "no results" for an existing tool made
+/// them refuse the task outright (observed with GLM searching for
+/// `apply_patch`, a Direct tool the search never indexed).
+#[tokio::test]
+async fn tool_search_reports_base_list_hits_as_already_available() {
+    let (calls, tool_results) = run_tool_search_agent_with_results("tool_search").await;
+    assert!(calls.len() >= 2, "expected at least 2 LLM calls, got {calls:?}");
+    let results = tool_results.lock().unwrap();
+    let payload = results
+        .iter()
+        .find(|content| content.contains("already_available"))
+        .unwrap_or_else(|| panic!("no tool_search result carried already_available: {results:?}"));
+    assert!(payload.contains("\"tool_search\""), "base hit should name the tool: {payload}");
 }
 
 // ── present_plan approval gate (Plan → Default mode flip) ────────────────────

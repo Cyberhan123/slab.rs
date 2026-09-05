@@ -79,6 +79,7 @@ export function useAssistantHeader({
         onChange: onModelPickerChange,
         options: groups,
         placeholder: t("common.fields.selectModel"),
+        testId: "header-model",
         value: selectedModelId,
       }
     },

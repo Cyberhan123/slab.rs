@@ -94,45 +94,57 @@ describe("rollout persistence e2e", () => {
 
   // ② compact — verifies the `Compacted` row is written and compact's
   // `await_durable` fenced the observer before its conversation read.
-  it("writes a Compacted row after a manual /compact", async () => {
-    const testEnv = requireEnv()
-    const session = await createSession(testEnv.serverBaseUrl, `rollout-compact-${Date.now()}`)
-    await openAssistant(page, testEnv.uiBaseUrl, session.id)
+  // LOCAL STACK ONLY: the keep window is `context_window × 60%` from the
+  // model catalog spec (compact.rs `effective_limits`) — at the pinned local
+  // 16,384 that is 9,830 tokens, crossed by the ~10.2k-token filler below.
+  // The curated GLM cloud models record 128k–1M windows (60% = 76.8k–600k
+  // tokens ≈ 300KB–2.4MB of filler): padding past that would send megabytes
+  // through the paid API and dwarf the suite's budget for a bookkeeping
+  // assertion that is model-independent. Cloud runs (`SLAB_E2E_LLM=cloud`)
+  // therefore skip this case; the other three rollout cases run everywhere.
+  it.skipIf(process.env.SLAB_E2E_LLM === "cloud")(
+    "writes a Compacted row after a manual /compact",
+    async () => {
+      const testEnv = requireEnv()
+      const session = await createSession(testEnv.serverBaseUrl, `rollout-compact-${Date.now()}`)
+      await openAssistant(page, testEnv.uiBaseUrl, session.id)
 
-    // Manual compact still SKIPS a minimal history: the keep window is
-    // `context_length × 60%` (= 9,830 tokens at the pinned 16384), and anything
-    // inside it is kept verbatim — a tiny one-turn conversation is entirely
-    // "recent", so nothing is summarized and no Compacted row is written.
-    // Pad the first turn PAST the keep window so the manual compact has
-    // older-than-window content to summarize. The estimator is chars/4 (105
-    // chars per sentence ⇒ ~26.25 tokens/repeat), so repeat(390) ≈ 10.2k
-    // tokens: above the 9,830 keep window (the filler message falls out of the
-    // trailing window → summarized) while the calibrated macro estimate stays
-    // below the 13.1k mid-turn auto-compact threshold and the real prompt fits
-    // the pinned 16,384 n_ctx.
-    const marker = `SLAB_ROLLOUT_COMPACT_${Date.now()}`
-    const filler = (
-      "The quick brown fox jumps over the lazy dog while the rollout compaction e2e fills the context window. "
-    ).repeat(390)
-    const prompt = `Reply with only the token ${marker}.\n\n${filler}`
-    await sendAssistantMessage(page, prompt)
-    await waitForCompletedAssistantReply(testEnv.serverBaseUrl, session.id, prompt, 900_000)
-    const shortPrompt = `Reply with only the token ${marker}_END.`
-    await sendAssistantMessage(page, shortPrompt)
-    await waitForCompletedAssistantReply(testEnv.serverBaseUrl, session.id, shortPrompt, 900_000)
+      // Manual compact still SKIPS a minimal history: the keep window is
+      // `context_length × 60%` (= 9,830 tokens at the pinned 16384), and anything
+      // inside it is kept verbatim — a tiny one-turn conversation is entirely
+      // "recent", so nothing is summarized and no Compacted row is written.
+      // Pad the first turn PAST the keep window so the manual compact has
+      // older-than-window content to summarize. The estimator is chars/4 (105
+      // chars per sentence ⇒ ~26.25 tokens/repeat), so repeat(390) ≈ 10.2k
+      // tokens: above the 9,830 keep window (the filler message falls out of the
+      // trailing window → summarized) while the calibrated macro estimate stays
+      // below the 13.1k mid-turn auto-compact threshold and the real prompt fits
+      // the pinned 16,384 n_ctx.
+      const marker = `SLAB_ROLLOUT_COMPACT_${Date.now()}`
+      const filler = (
+        "The quick brown fox jumps over the lazy dog while the rollout compaction e2e fills the context window. "
+      ).repeat(390)
+      const prompt = `Reply with only the token ${marker}.\n\n${filler}`
+      await sendAssistantMessage(page, prompt)
+      await waitForCompletedAssistantReply(testEnv.serverBaseUrl, session.id, prompt, 900_000)
+      const shortPrompt = `Reply with only the token ${marker}_END.`
+      await sendAssistantMessage(page, shortPrompt)
+      await waitForCompletedAssistantReply(testEnv.serverBaseUrl, session.id, shortPrompt, 900_000)
 
-    const threadId = (await restoreSession(testEnv.serverBaseUrl, session.id)).thread?.id ?? ""
+      const threadId = (await restoreSession(testEnv.serverBaseUrl, session.id)).thread?.id ?? ""
 
-    // `/compact` is intercepted by the sender before reaching the model.
-    await sendAssistantMessage(page, "/compact")
-    await page
-      .locator('[data-testid^="assistant-compact-marker-manual:"]')
-      .first()
-      .waitFor({ state: "visible", timeout: 120_000 })
-    await waitForComposerReady(page)
+      // `/compact` is intercepted by the sender before reaching the model.
+      await sendAssistantMessage(page, "/compact")
+      await page
+        .locator('[data-testid^="assistant-compact-marker-manual:"]')
+        .first()
+        .waitFor({ state: "visible", timeout: 120_000 })
+      await waitForComposerReady(page)
 
-    expect(readRolloutLines(testEnv.sessionStateDir, threadId).some(isCompacted)).toBe(true)
-  }, 900_000)
+      expect(readRolloutLines(testEnv.sessionStateDir, threadId).some(isCompacted)).toBe(true)
+      },
+      900_000
+    )
 
   // ③a fork — verifies `fork_thread`'s `await_durable` copied the parent history
   // (incl. turn 0) into the child rollout file.

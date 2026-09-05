@@ -31,7 +31,7 @@ export type ChatToolCall = Schema["ChatToolCall"]
 export type SessionResponse = Schema["SessionResponse"]
 type TaskResponse = Schema["TaskResponse"]
 type UiStateValueResponse = Schema["UiStateValueResponse"]
-type UnifiedModelResponse = Schema["UnifiedModelResponse"]
+export type UnifiedModelResponse = Schema["UnifiedModelResponse"]
 
 type JsonRequestInit = Omit<RequestInit, "body"> & {
   json?: unknown
@@ -47,6 +47,20 @@ type ManagedChild = {
   label: string
 }
 
+/** LLM backend the shared e2e stack drives. `local` (default) imports + loads
+ * the pinned Qwen pack; `cloud` (`SLAB_E2E_LLM=cloud`) skips the local model
+ * entirely — no pack import, no load — and points the assistant at a curated
+ * cloud model sourced from the user's app_home `providers` registry (merged
+ * into the generated settings by `readAppHomeProviders`). */
+export type E2eLlmMode = "local" | "cloud"
+
+export const e2eLlmMode: E2eLlmMode = process.env.SLAB_E2E_LLM === "cloud" ? "cloud" : "local"
+
+/** Curated GLM flagship the cloud stack selects (see
+ * `crates/slab-cloud-provider/src/activation.rs` — the strongest tool-calling
+ * GLM; the catalog activates as soon as a big_model/zai provider is saved). */
+export const CLOUD_MODEL_REMOTE_ID = "glm-5.3"
+
 export type E2eRuntime = {
   databasePath: string
   databaseUrl: string
@@ -55,6 +69,7 @@ export type E2eRuntime = {
    * dev-process log sink writes to. Lives OUTSIDE `rootDir` so the teardown
    * `rmSync(rootDir)` (and mid-run crashes) never destroy the server trace. */
   logsDir: string
+  llmMode: E2eLlmMode
   modelConfigDir: string
   pluginsDir: string
   repoRoot: string
@@ -142,10 +157,16 @@ export async function createE2eEnvironment(): Promise<E2eRuntime> {
   }
 
   writeFileSync(join(workspaceRoot, "README.md"), "# Slab E2E Workspace\n", "utf8")
+  // Real cloud providers (registry incl. API keys) sourced from the user's
+  // app_home settings — inert for local runs (nothing selects a cloud model)
+  // and the only way a cloud-mode stack can reach the real provider: the
+  // `--settings-path` document is isolated from app_home by design.
+  const appHomeProviders = readAppHomeProviders()
   writeSettingsDocument(settingsPath, {
     databaseUrl: sqliteUrlForPath(databasePath),
     modelConfigDir,
     pluginsDir,
+    providers: appHomeProviders,
     serverBind,
     sessionStateDir,
   })
@@ -153,6 +174,7 @@ export async function createE2eEnvironment(): Promise<E2eRuntime> {
     databaseUrl: sqliteUrlForPath(databasePath),
     modelConfigDir,
     pluginsDir,
+    providers: appHomeProviders,
     serverBind,
     sessionStateDir,
   })
@@ -162,6 +184,7 @@ export async function createE2eEnvironment(): Promise<E2eRuntime> {
     databaseUrl: sqliteUrlForPath(databasePath),
     e2eRootDir: persistentE2eRootDir,
     logsDir,
+    llmMode: e2eLlmMode,
     modelConfigDir,
     pluginsDir,
     repoRoot,
@@ -527,6 +550,34 @@ export async function bootstrapLocalModel(
   return model
 }
 
+/** Cloud counterpart of [`bootstrapLocalModel`] for `SLAB_E2E_LLM=cloud`:
+ * no pack import and no model load — the curated catalog rows appear as soon
+ * as the server applies the merged providers registry. Waits for the GLM
+ * flagship entry (provider-id agnostic), selects it for the assistant (the
+ * same `zustand:header-ui` slot the UI picker writes), and returns it. */
+export async function bootstrapCloudModel(baseUrl: string): Promise<UnifiedModelResponse> {
+  await completeSetup(baseUrl)
+
+  const model = await eventually(
+    `curated cloud catalog exposes ${CLOUD_MODEL_REMOTE_ID}`,
+    async () => {
+      const models = await requestJson<UnifiedModelResponse[]>(
+        baseUrl,
+        "/v1/models?capability=chat_generation"
+      )
+      return (
+        models.find(
+          (entry) => entry.kind === "cloud" && entry.spec.remote_model_id === CLOUD_MODEL_REMOTE_ID
+        ) ?? null
+      )
+    },
+    60_000
+  )
+
+  await selectAssistantModel(baseUrl, model.id)
+  return model
+}
+
 export async function importLocalModelPack(
   baseUrl: string,
   modelId: LocalModelBootstrapOptions["modelId"]
@@ -801,6 +852,7 @@ function writeSettingsDocument(
     databaseUrl: string
     modelConfigDir: string
     pluginsDir: string
+    providers?: Record<string, unknown>
     serverBind: string
     sessionStateDir: string
   }
@@ -811,6 +863,7 @@ function writeSettingsDocument(
       {
         $schema: setupSchemaUrl,
         schema_version: 2,
+        ...(options.providers ? { providers: options.providers } : {}),
         agent: {
           debug: e2eAgentDebug,
           hooks: {
@@ -945,6 +998,50 @@ async function assertTcpPortAvailableOnHost(port: number, label: string, host: s
 function sqliteUrlForPath(path: string): string {
   const normalized = path.replaceAll("\\", "/")
   return normalized.startsWith("/") ? `sqlite://${normalized}?mode=rwc` : `sqlite:///${normalized}?mode=rwc`
+}
+
+/** Tauri app-data dir (identifier `cn.cyberhan.slab`, see
+ * bin/slab-app/src-tauri/tauri.conf.json) resolved per-platform the way the
+ * desktop shell does. Only used to source the user's real `providers`
+ * registry for cloud-mode e2e runs. */
+function appHomeDir(): string | undefined {
+  if (process.platform === "win32") {
+    return process.env.APPDATA ? join(process.env.APPDATA, "cn.cyberhan.slab") : undefined
+  }
+  const home = process.env.HOME ?? ""
+  if (!home) {
+    return undefined
+  }
+  if (process.platform === "darwin") {
+    return join(home, "Library", "Application Support", "cn.cyberhan.slab")
+  }
+  return join(process.env.XDG_DATA_HOME || join(home, ".local", "share"), "cn.cyberhan.slab")
+}
+
+/** Best-effort read of the app_home settings document's `providers` section
+ * (the user's real cloud providers incl. API keys). Cloud-mode e2e merges
+ * this into the generated run settings so the ephemeral stack can reach the
+ * real provider; the key never enters env vars, the repo, or logs (the run
+ * dir is wiped by teardown). Returns undefined when no app_home settings or
+ * no providers section exists; never throws — local runs must not depend on
+ * it. */
+function readAppHomeProviders(): Record<string, unknown> | undefined {
+  const dir = appHomeDir()
+  if (!dir) {
+    return undefined
+  }
+  try {
+    const document = JSON.parse(
+      readFileSync(join(dir, "settings.json"), "utf8")
+    ) as Record<string, unknown>
+    const { providers } = document
+    if (providers && typeof providers === "object" && !Array.isArray(providers)) {
+      return providers as Record<string, unknown>
+    }
+  } catch {
+    // No app_home settings.json (or unreadable/invalid) — nothing to merge.
+  }
+  return undefined
 }
 
 function spawnSlabServer(

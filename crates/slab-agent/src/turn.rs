@@ -792,7 +792,9 @@ fn is_external_tool_name(name: &str) -> bool {
     matches!(name, "web_search" | "mcp_call" | "mcp_list_tools") || name.starts_with("mcp__")
 }
 
-fn allowed_tool_specs(context: &TurnExecutionContext<'_>) -> Result<Vec<ToolSpec>, AgentError> {
+pub(crate) fn allowed_tool_specs(
+    context: &TurnExecutionContext<'_>,
+) -> Result<Vec<ToolSpec>, AgentError> {
     // Visibility (Direct/Deferred/Hidden) + category-exposure projection.
     // Computed fresh each turn from the live per-thread permission mode, so a
     // mid-thread mode/permission flip is reflected immediately. `injected_deferred`

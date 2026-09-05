@@ -186,22 +186,24 @@ async fn handle_tool_search(
     let namespace = args.get("namespace").and_then(serde_json::Value::as_str);
     let q = query.to_ascii_lowercase();
 
+    let matches_query = |spec: &crate::port::ToolSpec| -> bool {
+        if namespace.is_some_and(|ns| {
+            crate::tool::ToolName::parse_wire(&spec.name).namespace.as_str() != ns
+        }) {
+            return false;
+        }
+        if q.is_empty() {
+            return true;
+        }
+        spec.name.to_ascii_lowercase().contains(&q)
+            || spec.description.to_ascii_lowercase().contains(&q)
+    };
+
     let matched: Vec<_> = context
         .tools
         .deferred_tool_specs()
         .into_iter()
-        .filter(|spec| {
-            if namespace.is_some_and(|ns| {
-                crate::tool::ToolName::parse_wire(&spec.name).namespace.as_str() != ns
-            }) {
-                return false;
-            }
-            if q.is_empty() {
-                return true;
-            }
-            spec.name.to_ascii_lowercase().contains(&q)
-                || spec.description.to_ascii_lowercase().contains(&q)
-        })
+        .filter(|spec| matches_query(spec))
         .collect();
 
     // Inject every hit so it becomes visible/callable on subsequent turns.
@@ -209,16 +211,35 @@ async fn handle_tool_search(
         context.tool_discovery.inject(&spec.name);
     }
 
-    let summarized: Vec<serde_json::Value> = matched
-        .iter()
-        .map(|spec| {
-            serde_json::json!({
-                "name": spec.name,
-                "description": spec.description,
-                "parameters": crate::tool_schema::process_tool_schema(&spec.parameters_schema),
-            })
-        })
-        .collect();
+    let summarize = |spec: &crate::port::ToolSpec, already_available: bool| {
+        let mut value = serde_json::json!({
+            "name": spec.name,
+            "description": spec.description,
+            "parameters": crate::tool_schema::process_tool_schema(&spec.parameters_schema),
+        });
+        if already_available {
+            value["already_available"] = serde_json::Value::Bool(true);
+        }
+        value
+    };
+    let mut summarized: Vec<serde_json::Value> =
+        matched.iter().map(|spec| summarize(spec, false)).collect();
+
+    // A query that matches a tool ALREADY in the base list must not read as
+    // "does not exist": models routinely probe tool_search before calling a
+    // named tool, and an empty result for an available tool made them refuse
+    // the task outright (observed with GLM searching for `apply_patch`).
+    // Report base-list hits as `already_available` — nothing to inject.
+    if !q.is_empty()
+        && let Ok(base_specs) = crate::turn::allowed_tool_specs(context)
+    {
+        for spec in base_specs.iter().filter(|spec| matches_query(spec)) {
+            if !matched.iter().any(|deferred| deferred.name == spec.name) {
+                summarized.push(summarize(spec, true));
+            }
+        }
+    }
+
     let content = serde_json::to_string(&serde_json::Value::Array(summarized))
         .unwrap_or_else(|_| "[]".to_owned());
 

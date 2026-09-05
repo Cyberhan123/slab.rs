@@ -278,6 +278,16 @@ impl TypedTool for DelegateSubagentTool {
             Box::pin(async move {
                 let data = match control.wait_for_terminal_snapshot(&child_id).await {
                     Ok(snapshot) => {
+                        // Diagnostic anchor: a NON-terminal status here (e.g.
+                        // `Interrupting` from the bounded persisted-snapshot
+                        // wait) is defensively mapped to `Failed` by
+                        // `map_registry_status` — the registry outcome and the
+                        // notify decision key off this line.
+                        tracing::info!(
+                            child_thread_id = %snapshot.id,
+                            status = ?snapshot.status,
+                            "subagent watcher resolved terminal snapshot"
+                        );
                         // The snapshot's completion_text is LLM-grade (reasoning
                         // embedded as `<think>` blocks for the next chat-template
                         // round); the parent conversation and the persisted

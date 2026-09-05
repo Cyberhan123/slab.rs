@@ -61,6 +61,13 @@ function WorkspaceModeSync() {
   // session; honor it instead of bouncing `/` to `/workspace` (which would
   // drop the query). Lets concurrent e2e browsers each bind their own session.
   const hasSessionDeepLink = searchParams.has("session");
+  // The redirect must key on the INITIAL load's deep link, not the live one:
+  // an in-app navigation to the landing (the new-chat button) drops the
+  // query, and re-checking the live params would then fire the legacy
+  // `/` → `/workspace` redirect under the user's feet — bouncing them off
+  // the landing mid-compose. Only a FRESH full load at `/` without a deep
+  // link redirects (the original intent).
+  const initialSessionDeepLinkRef = useRef(hasSessionDeepLink);
   const workspaceQueryClient = useQueryClient();
   const initialPathRef = useRef(location.pathname);
   const redirectedWorkspaceRootRef = useRef<string | null>(null);
@@ -96,12 +103,12 @@ function WorkspaceModeSync() {
       workspace &&
       redirectedWorkspaceRootRef.current !== workspace.rootPath &&
       workspace.rootPath !== assistantPinnedWorkspaceRoot &&
-      !hasSessionDeepLink
+      !initialSessionDeepLinkRef.current
     ) {
       redirectedWorkspaceRootRef.current = workspace.rootPath;
       navigate("/workspace", { replace: true });
     }
-  }, [assistantPinnedWorkspaceRoot, hasSessionDeepLink, navigate, workspace]);
+  }, [assistantPinnedWorkspaceRoot, navigate, workspace]);
 
   useEffect(() => {
     if (!workspace) {

@@ -304,6 +304,25 @@ pub trait AgentStorePort: Send + Sync {
         completion_text: Option<&str>,
     ) -> Result<(), AgentError>;
 
+    /// Mark a thread `Interrupting` WITHOUT ever overwriting a terminal status.
+    ///
+    /// [`AgentControl::interrupt`] fans out notifications before its store
+    /// write, so the write can commit AFTER the cancelling teardown's own
+    /// terminal write (SQLite serializes the two single-statement
+    /// transactions in commit order). An unguarded late write strands the row
+    /// on `interrupting` forever — the in-memory state machine is already
+    /// terminal, so nothing repairs it. Hosts back this with an atomic
+    /// `... WHERE status IN (transient)` guard; the default falls back to the
+    /// unguarded update for test doubles whose status lattice already
+    /// rejects the transition.
+    async fn mark_thread_interrupting(
+        &self,
+        id: &str,
+        completion_text: Option<&str>,
+    ) -> Result<(), AgentError> {
+        self.update_thread_status(id, ThreadStatus::Interrupting, completion_text).await
+    }
+
     /// Mark a thread archived (`Some`) or restore it (`None`).
     ///
     /// Hosts that do not support archiving can keep this default no-op.

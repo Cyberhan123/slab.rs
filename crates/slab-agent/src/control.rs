@@ -855,6 +855,17 @@ impl AgentControl {
         };
         drop(guard);
 
+        let pre_status = state.status();
+        // Diagnostic anchor for interrupt-race post-mortems: the ONLY writer of
+        // `Interrupting` is this transition, so a row that settles on
+        // `interrupting` always traces back here. The pre-status distinguishes
+        // a fresh (re-spawned) state machine from the original run.
+        tracing::info!(
+            thread_id,
+            pre_status = ?pre_status,
+            has_task = cancellation.is_some(),
+            "interrupt(): accepting Interrupting transition"
+        );
         state.transition(ThreadStatus::Interrupting)?;
         if let Some(cancellation) = cancellation {
             cancellation.cancel();
@@ -871,10 +882,12 @@ impl AgentControl {
             reason: None,
         });
         self.notify.on_event_msg(thread_id, &status_msg).await;
-        self.store
-            .update_thread_status(thread_id, ThreadStatus::Interrupting, Some("interrupting"))
-            .await
-            .ok();
+        // Guarded write: this runs AFTER the notify fan-out, so a concurrent
+        // teardown may already have committed the terminal status (the state
+        // machine's `current == next` short-circuit also accepts a repeat
+        // Interrupting). Overwriting that terminal row would strand it on
+        // `interrupting` forever — the guard makes the write a no-op instead.
+        self.store.mark_thread_interrupting(thread_id, Some("interrupting")).await.ok();
         Ok(())
     }
 
@@ -995,6 +1008,15 @@ impl AgentControl {
 
         let thread_id = thread.id.clone();
         let state = Arc::clone(&thread.state);
+        // Diagnostic anchor: every run start (fresh spawn AND resume) funnels
+        // through here — a thread re-spawned after an interrupt shows as a
+        // second entry with the same id in the log timeline.
+        tracing::info!(
+            thread_id,
+            starting_turn_index,
+            emit_new,
+            "start_thread(): spawning run task"
+        );
 
         let llm = Arc::clone(&self.llm);
         let store = Arc::clone(&self.store);
@@ -1091,6 +1113,10 @@ impl AgentControl {
         // return the latest snapshot even if non-terminal — callers prefer a
         // stale answer over hanging.
         let mut last_snapshot: Option<crate::port::ThreadSnapshot> = None;
+        // Diagnostic: the observed persisted status on each CHANGE (a stable
+        // status logs once) — post-mortem contrast against the lifecycle
+        // writers' log lines.
+        let mut observed: Option<crate::port::ThreadStatus> = None;
         match tokio::time::timeout(TERMINAL_SNAPSHOT_TIMEOUT, async {
             loop {
                 let snapshot = self
@@ -1098,6 +1124,14 @@ impl AgentControl {
                     .get_thread(thread_id)
                     .await?
                     .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+                if observed != Some(snapshot.status) {
+                    observed = Some(snapshot.status);
+                    tracing::info!(
+                        thread_id,
+                        status = ?snapshot.status,
+                        "persisted-snapshot poll observed status"
+                    );
+                }
                 if is_terminal_status(snapshot.status) {
                     return Ok(snapshot);
                 }

@@ -53,6 +53,10 @@ export type HeaderSelectConfig = {
   loading?: boolean
   disabled?: boolean
   emptyLabel?: string
+  /** Stable e2e hook: when set, the trigger is tagged `<testId>-trigger` and
+   * each option `<testId>-option-<option.id>`. Only pages that need picker
+   * automation set it (e.g. the assistant passes `header-model`). */
+  testId?: string
 }
 
 export type HeaderSearchConfig = {
@@ -80,15 +84,22 @@ export const HEADER_SELECT_KEYS = {
 function HeaderSelectGroup({
   groupLabel,
   options,
+  testId,
 }: {
   groupLabel: string
   options: HeaderSelectOption[]
+  testId?: string
 }) {
   return (
     <SelectGroup>
       <SelectLabel>{groupLabel}</SelectLabel>
       {options.map((option) => (
-        <SelectItem key={option.id} value={option.id} disabled={option.disabled}>
+        <SelectItem
+          key={option.id}
+          value={option.id}
+          disabled={option.disabled}
+          data-testid={testId ? `${testId}-option-${option.id}` : undefined}
+        >
           {option.label}
         </SelectItem>
       ))}
@@ -118,6 +129,7 @@ function HeaderSelect({ select }: { select: HeaderSelectConfig }) {
         size="sm"
         variant="default"
         title={selectedOption?.label ?? placeholder}
+        data-testid={select.testId ? `${select.testId}-trigger` : undefined}
         className="[app-region:no-drag] hidden h-8 max-w-[18rem] shrink-0 border-border/30 bg-glass-bg-strong pl-3 pr-2.5 text-label font-semibold text-foreground/70 lg:flex"
       >
         <span className="size-2 shrink-0 rounded-full bg-brand-gold" />
@@ -142,6 +154,7 @@ function HeaderSelect({ select }: { select: HeaderSelectConfig }) {
                 key={option.id}
                 groupLabel={children.groupLabel}
                 options={children.options}
+                testId={select.testId}
               />
             )
           })
@@ -151,6 +164,7 @@ function HeaderSelect({ select }: { select: HeaderSelectConfig }) {
           <HeaderSelectGroup
             groupLabel={select.groupLabel ?? t("layouts.header.select.options")}
             options={select.options}
+            testId={select.testId}
           />
         )}
       </SelectContent>

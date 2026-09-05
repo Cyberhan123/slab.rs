@@ -198,12 +198,49 @@ impl AgentStorePort for SqlxStore {
         .await
         .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
         let rows = result.rows_affected();
+        // Diagnostic anchor: EVERY status write, contrasted against the
+        // persisted-snapshot poll lines in post-mortems.
+        tracing::info!(thread_id = %id, %status, rows_affected = rows, "update_thread_status");
         if rows != 1 {
             tracing::warn!(
                 thread_id = %id,
                 status = %status,
                 rows_affected = rows,
                 "update_thread_status matched no row"
+            );
+        }
+        Ok(())
+    }
+
+    async fn mark_thread_interrupting(
+        &self,
+        id: &str,
+        completion_text: Option<&str>,
+    ) -> Result<(), slab_agent::AgentError> {
+        // Atomic terminal-status guard: the transient write only lands while
+        // the row is still in a transient status. A late duplicate interrupt
+        // (client double-send, or this call's notify fan-out losing the race
+        // against the cancelling teardown's terminal write) becomes a no-op
+        // instead of stranding the row on `interrupting` forever.
+        let result = sqlx::query(
+            "UPDATE agent_threads SET status = 'interrupting', completion_text = ?1, \
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+             WHERE id = ?2 AND status IN ('pending', 'running', 'interrupting')",
+        )
+        .bind(completion_text)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+        let rows = result.rows_affected();
+        tracing::info!(thread_id = %id, rows_affected = rows, "mark_thread_interrupting");
+        if rows != 1 {
+            // Expected for late duplicates hitting an already-terminal row —
+            // info, not warn, so a benign race does not pollute post-mortems.
+            tracing::info!(
+                thread_id = %id,
+                rows_affected = rows,
+                "mark_thread_interrupting skipped: row already terminal or missing"
             );
         }
         Ok(())
@@ -285,6 +322,38 @@ mod tests {
             .await
             .expect("list");
         assert_eq!(shown.len(), 1, "archived thread visible when include_archived");
+    }
+
+    /// The interrupt write is terminal-status guarded: a late duplicate (or an
+    /// interrupt whose notify fan-out lost the race to its own teardown's
+    /// terminal write) must never overwrite the terminal row back to
+    /// `interrupting` — that strands the thread on a transient status forever
+    /// because nothing repairs a terminal state machine.
+    #[tokio::test]
+    async fn mark_thread_interrupting_never_overwrites_terminal_status() {
+        let store = seeded_store().await;
+
+        // Transient row: the interrupt write lands.
+        store
+            .mark_thread_interrupting("thread-1", Some("interrupting"))
+            .await
+            .expect("guarded write");
+        let snap = store.get_thread("thread-1").await.expect("get").expect("present");
+        assert_eq!(snap.status, ThreadStatus::Interrupting);
+        assert_eq!(snap.completion_text.as_deref(), Some("interrupting"));
+
+        // Terminal row: the same write becomes a no-op.
+        store
+            .update_thread_status("thread-1", ThreadStatus::Interrupted, Some("interrupted"))
+            .await
+            .expect("finalize");
+        store
+            .mark_thread_interrupting("thread-1", Some("interrupting"))
+            .await
+            .expect("guarded write on terminal row");
+        let snap = store.get_thread("thread-1").await.expect("get").expect("present");
+        assert_eq!(snap.status, ThreadStatus::Interrupted, "terminal status must survive");
+        assert_eq!(snap.completion_text.as_deref(), Some("interrupted"));
     }
 
     async fn seeded_store() -> SqlxStore {
