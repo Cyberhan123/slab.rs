@@ -47,12 +47,14 @@ export type E2eRuntimeEndpoints = Pick<
   | "databasePath"
   | "databaseUrl"
   | "e2eRootDir"
+  | "logsDir"
   | "modelConfigDir"
   | "pluginsDir"
   | "repoRoot"
   | "rootDir"
   | "serverBaseUrl"
   | "serverBind"
+  | "serverLogPath"
   | "serverPort"
   | "sessionStateDir"
   | "settingsOverlayPath"
@@ -85,6 +87,7 @@ export default async function e2eGlobalSetup(vitest: Vitest) {
     databasePath: runtime.databasePath,
     databaseUrl: runtime.databaseUrl,
     e2eRootDir: runtime.e2eRootDir,
+    logsDir: runtime.logsDir,
     modelConfigDir: runtime.modelConfigDir,
     modelId: model.id,
     pluginsDir: runtime.pluginsDir,
@@ -93,6 +96,7 @@ export default async function e2eGlobalSetup(vitest: Vitest) {
     selectedVariantId: SELECTED_VARIANT_ID,
     serverBaseUrl: runtime.serverBaseUrl,
     serverBind: runtime.serverBind,
+    serverLogPath: runtime.serverLogPath,
     serverPort: runtime.serverPort,
     sessionStateDir: runtime.sessionStateDir,
     settingsOverlayPath: runtime.settingsOverlayPath,

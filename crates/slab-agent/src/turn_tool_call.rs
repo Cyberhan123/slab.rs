@@ -992,6 +992,12 @@ async fn handle_tool_call(
     };
     let (run_result, drain_grace_exceeded) =
         tokio::join!(run, async { drain_within_grace(drain).await });
+    tracing::info!(
+        tool = %tool_call.name,
+        item_id = %item_id,
+        drain_exceeded = drain_grace_exceeded,
+        "tool call run+drain join resolved"
+    );
     if drain_grace_exceeded {
         warn!(
             tool = %tool_call.name,
@@ -1248,7 +1254,14 @@ async fn run_tool_without_approval(
             run.tool_context,
             run.effective_args,
         ) => result,
-        _ = run.context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+        _ = run.context.cancellation.cancelled() => {
+            tracing::info!(
+                tool = %run.tool_call.name,
+                call_id = %run.call_id,
+                "tool execute cancelled; unwinding"
+            );
+            return Err(AgentError::Interrupted);
+        }
     })
 }
 

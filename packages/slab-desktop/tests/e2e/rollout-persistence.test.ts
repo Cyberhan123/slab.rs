@@ -100,15 +100,20 @@ describe("rollout persistence e2e", () => {
     await openAssistant(page, testEnv.uiBaseUrl, session.id)
 
     // Manual compact still SKIPS a minimal history: the keep window is
-    // `context_length × 60%` (~9.8k tokens at the pinned 16384), and anything
+    // `context_length × 60%` (= 9,830 tokens at the pinned 16384), and anything
     // inside it is kept verbatim — a tiny one-turn conversation is entirely
     // "recent", so nothing is summarized and no Compacted row is written.
-    // Pad the first turn past the keep window (~9k tokens of filler + marker)
-    // so the manual compact has older-than-window content to summarize.
+    // Pad the first turn PAST the keep window so the manual compact has
+    // older-than-window content to summarize. The estimator is chars/4 (105
+    // chars per sentence ⇒ ~26.25 tokens/repeat), so repeat(390) ≈ 10.2k
+    // tokens: above the 9,830 keep window (the filler message falls out of the
+    // trailing window → summarized) while the calibrated macro estimate stays
+    // below the 13.1k mid-turn auto-compact threshold and the real prompt fits
+    // the pinned 16,384 n_ctx.
     const marker = `SLAB_ROLLOUT_COMPACT_${Date.now()}`
     const filler = (
       "The quick brown fox jumps over the lazy dog while the rollout compaction e2e fills the context window. "
-    ).repeat(180)
+    ).repeat(390)
     const prompt = `Reply with only the token ${marker}.\n\n${filler}`
     await sendAssistantMessage(page, prompt)
     await waitForCompletedAssistantReply(testEnv.serverBaseUrl, session.id, prompt, 900_000)

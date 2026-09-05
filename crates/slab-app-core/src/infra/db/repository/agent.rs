@@ -69,6 +69,13 @@ impl TryFrom<AgentThreadRow> for ThreadSnapshot {
 #[async_trait]
 impl AgentStorePort for SqlxStore {
     async fn upsert_thread(&self, snapshot: &ThreadSnapshot) -> Result<(), slab_agent::AgentError> {
+        // ON CONFLICT deliberately does NOT touch `status` / `completion_text`
+        // / `updated_at`: those columns are owned by the lifecycle writers
+        // (`update_thread_status`, driven by the thread state machine). A
+        // resume/reconstruction path upserting a snapshot it read (or built)
+        // before a terminal transition would otherwise clobber the row back to
+        // a transient status — e.g. an interrupt cascade racing a re-spawn
+        // stranded the thread on "interrupting" forever while clients polled.
         sqlx::query(
             "INSERT INTO agent_threads \
              (id, session_id, parent_id, depth, status, role_name, config_json, \
@@ -78,12 +85,9 @@ impl AgentStorePort for SqlxStore {
                session_id=excluded.session_id, \
                parent_id=excluded.parent_id, \
                depth=excluded.depth, \
-               status=excluded.status, \
                role_name=excluded.role_name, \
                config_json=excluded.config_json, \
-               completion_text=excluded.completion_text, \
                created_at=agent_threads.created_at, \
-               updated_at=excluded.updated_at, \
                archived_at=excluded.archived_at",
         )
         .bind(&snapshot.id)
@@ -182,7 +186,7 @@ impl AgentStorePort for SqlxStore {
         status: ThreadStatus,
         completion_text: Option<&str>,
     ) -> Result<(), slab_agent::AgentError> {
-        sqlx::query(
+        let result = sqlx::query(
             "UPDATE agent_threads SET status = ?1, completion_text = ?2, \
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
              WHERE id = ?3",
@@ -193,6 +197,15 @@ impl AgentStorePort for SqlxStore {
         .execute(&self.pool)
         .await
         .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+        let rows = result.rows_affected();
+        if rows != 1 {
+            tracing::warn!(
+                thread_id = %id,
+                status = %status,
+                rows_affected = rows,
+                "update_thread_status matched no row"
+            );
+        }
         Ok(())
     }
 

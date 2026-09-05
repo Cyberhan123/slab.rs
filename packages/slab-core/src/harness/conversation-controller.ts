@@ -398,7 +398,7 @@ export class ConversationController {
   readonly client: HarnessClient
 
   private readonly sessionId: string | undefined
-  private readonly model: string
+  private model: string
 
   /** Snapshot cache — rebuilt only on state changes so the reference is stable. */
   private snapshot: ConversationState = EMPTY_SNAPSHOT
@@ -458,6 +458,17 @@ export class ConversationController {
 
   /** Current immutable snapshot (reference-stable until the next change). */
   readonly getState = (): ConversationState => this.snapshot
+
+  /**
+   * Update the model used by programmatic sends (`send`/`sendSteering` — the
+   * `turn/start` model when the caller passes no explicit one). The React hook
+   * calls this whenever the selected model changes so steering a running turn
+   * uses the real selection instead of the constructor fallback (a fabricated
+   * id the server rejects with "model … not found", silently losing the input).
+   */
+  readonly setModel = (model: string): void => {
+    this.model = model
+  }
 
   /** External-store subscription. Bound per instance; reference-stable. */
   readonly subscribe = (listener: () => void): (() => void) => {

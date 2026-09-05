@@ -6,14 +6,19 @@ import {
 import { createServer } from "node:net"
 import {
   chmodSync,
+  createReadStream,
+  createWriteStream,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
+  type WriteStream,
 } from "node:fs"
-import { delimiter, dirname, join, resolve } from "node:path"
+import { basename, delimiter, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { setTimeout as delay } from "node:timers/promises"
 
@@ -46,12 +51,18 @@ export type E2eRuntime = {
   databasePath: string
   databaseUrl: string
   e2eRootDir: string
+  /** Per-run dir (under `persistentE2eRootDir/logs/<run-basename>`) that the
+   * dev-process log sink writes to. Lives OUTSIDE `rootDir` so the teardown
+   * `rmSync(rootDir)` (and mid-run crashes) never destroy the server trace. */
+  logsDir: string
   modelConfigDir: string
   pluginsDir: string
   repoRoot: string
   rootDir: string
   serverBaseUrl: string
   serverBind: string
+  /** Stdout+stderr of the slab-server child, mirrored to `logsDir`/slab-server.log. */
+  serverLogPath: string
   serverPort: number
   sessionStateDir: string
   settingsOverlayPath: string
@@ -74,6 +85,16 @@ const supportDir = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(supportDir, "../../..")
 const repoRoot = resolve(packageRoot, "../..")
 const persistentE2eRootDir = join(repoRoot, ".slab", "e2e")
+/** Server-log level for the stack. `info` already brackets every turn phase
+ * (LLM stream start/done, tool-call parse, approval required/resolved, shell
+ * ladder, thread completed); bump to `debug` for single-file deep dives. */
+const e2eLogLevel = process.env.SLAB_E2E_LOG_LEVEL ?? "info"
+/** When "1", the settings document enables `agent.debug` so the agent trace
+ * sink mirrors full `agent_llm_request` payloads (messages + tool schemas) into
+ * server stdout — shows exactly what the model received. */
+const e2eAgentDebug = process.env.SLAB_E2E_AGENT_DEBUG === "1"
+const serverLogLabel = "slab-server"
+const keptLogRunDirs = 5
 const runtimeLibDir = join(repoRoot, "bin/slab-app/src-tauri/resources/libs")
 const modelPackDir = join(repoRoot, "models", "dist")
 const processStartSkewMs = 1_000
@@ -96,6 +117,9 @@ export async function createE2eEnvironment(): Promise<E2eRuntime> {
 
   mkdirSync(persistentE2eRootDir, { recursive: true })
   const rootDir = mkdtempSync(join(persistentE2eRootDir, "run-"))
+  const logsDir = join(persistentE2eRootDir, "logs", basename(rootDir))
+  mkdirSync(logsDir, { recursive: true })
+  pruneOldLogRunDirs()
   const settingsDir = join(rootDir, "config")
   const modelConfigDir = join(settingsDir, "models")
   const pluginsDir = join(rootDir, "plugins")
@@ -137,12 +161,14 @@ export async function createE2eEnvironment(): Promise<E2eRuntime> {
     databasePath,
     databaseUrl: sqliteUrlForPath(databasePath),
     e2eRootDir: persistentE2eRootDir,
+    logsDir,
     modelConfigDir,
     pluginsDir,
     repoRoot,
     rootDir,
     serverBaseUrl,
     serverBind,
+    serverLogPath: join(logsDir, `${serverLogLabel}.log`),
     serverPort,
     sessionStateDir,
     settingsOverlayPath,
@@ -154,6 +180,96 @@ export async function createE2eEnvironment(): Promise<E2eRuntime> {
 }
 
 let sidecarBuildPromise: Promise<void> | undefined
+
+/** Logs dir of the run this vitest worker is testing against; set by the
+ * failure-diagnostics setup file (which reads the injected endpoints) so UI
+ * helpers can mirror browser console output without threading the runtime
+ * through every call site. Undefined when no context was provided. */
+let diagnosticsLogsDir: string | undefined
+
+export function setDiagnosticsLogsDir(logsDir: string | undefined): void {
+  diagnosticsLogsDir = logsDir
+}
+
+export function getDiagnosticsLogsDir(): string | undefined {
+  return diagnosticsLogsDir
+}
+
+/** Keeps only the newest `keptLogRunDirs` run-log dirs under
+ * `.slab/e2e/logs/` so post-mortem traces persist across teardowns without
+ * growing unboundedly. */
+function pruneOldLogRunDirs(): void {
+  const logsRoot = join(persistentE2eRootDir, "logs")
+  let names: string[]
+  try {
+    names = readdirSync(logsRoot)
+  } catch {
+    return
+  }
+
+  const dated = names
+    .map((name) => {
+      try {
+        return { name, mtimeMs: statSync(join(logsRoot, name)).mtimeMs }
+      } catch {
+        return null
+      }
+    })
+    .filter((entry): entry is { name: string; mtimeMs: number } => entry !== null)
+    .toSorted((left, right) => right.mtimeMs - left.mtimeMs)
+
+  for (const stale of dated.slice(keptLogRunDirs)) {
+    rmSync(join(logsRoot, stale.name), { force: true, recursive: true })
+  }
+}
+
+/** Best-effort bounded tail reader: returns up to `maxBytes` from the end of
+ * `path` without loading the whole (potentially very large) log into memory. */
+export async function readFileTail(path: string, maxBytes: number): Promise<string> {
+  const { size } = statSync(path)
+  const start = Math.max(0, size - maxBytes)
+  const stream = createReadStream(path, { encoding: "utf8", start })
+  let text = ""
+  stream.on("data", (chunk: string) => {
+    text += chunk
+  })
+  await new Promise<void>((resolveDone, reject) => {
+    stream.once("end", () => resolveDone())
+    stream.once("error", reject)
+  })
+  return text
+}
+
+/** Append-only mirror of a dev child's stdio to `logsDir/<label>.log`. The
+ * in-memory ring buffer (for `formatDevLogs`) is kept separately. */
+type DevLogSink = {
+  write: (label: string, chunk: Buffer | string) => void
+  close: () => Promise<void>
+}
+
+function createDevLogSink(logsDir: string): DevLogSink {
+  const streams = new Map<string, WriteStream>()
+  return {
+    write(label, chunk) {
+      let stream = streams.get(label)
+      if (!stream) {
+        stream = createWriteStream(join(logsDir, `${label}.log`), { flags: "a" })
+        streams.set(label, stream)
+      }
+      stream.write(chunk)
+    },
+    close() {
+      const pending = [...streams.values()].map(
+        (stream) =>
+          new Promise<void>((resolveClosed) => {
+            stream.end(() => resolveClosed())
+          })
+      )
+      streams.clear()
+      return Promise.all(pending).then(() => undefined)
+    },
+  }
+}
 
 /**
  * Ensure the three sidecar binaries the fullstack e2e stack needs exist in
@@ -218,7 +334,7 @@ export async function startE2eRuntime(
     SLAB_CORS_ORIGINS: `${testEnv.uiBaseUrl},http://localhost:${testEnv.uiPort}`,
     SLAB_DATABASE_URL: testEnv.databaseUrl,
     SLAB_ENABLE_SWAGGER: "true",
-    SLAB_LOG: "info",
+    SLAB_LOG: e2eLogLevel,
     SLAB_MODEL_CONFIG_DIR: testEnv.modelConfigDir,
     SLAB_PLUGINS_DIR: testEnv.pluginsDir,
     SLAB_SESSION_STATE_DIR: testEnv.sessionStateDir,
@@ -232,15 +348,17 @@ export async function startE2eRuntime(
   delete commonEnv.RUSTC_WRAPPER
   delete commonEnv.SLAB_E2E_MODE
 
+  const logSink = createDevLogSink(testEnv.logsDir)
   const children: ManagedChild[] = []
   const server = spawnSlabServer(testEnv, commonEnv)
-  children.push({ child: server, label: "slab-server" })
-  rememberOutput("slab-server", server, logs)
+  children.push({ child: server, label: serverLogLabel })
+  rememberOutput(serverLogLabel, server, logs, logSink)
 
   const processHandle = {
     logs,
     stop: async () => {
       await stopManagedChildren(children, logs, testEnv.repoRoot, startedAt)
+      await logSink.close()
     },
   }
 
@@ -270,7 +388,7 @@ export async function startE2eRuntime(
       stdio: "pipe",
     })
     children.push({ child: vite, label: "desktop-vite" })
-    rememberOutput("desktop-vite", vite, logs)
+    rememberOutput("desktop-vite", vite, logs, logSink)
 
     await waitForHttpOk(testEnv.uiBaseUrl, "desktop dev UI", vite, logs, uiReadinessTimeoutMs)
     return processHandle
@@ -309,7 +427,7 @@ export async function startScriptedE2eRuntime(
     SLAB_DATABASE_URL: testEnv.databaseUrl,
     SLAB_E2E_MODE: "1",
     SLAB_ENABLE_SWAGGER: "true",
-    SLAB_LOG: "info",
+    SLAB_LOG: e2eLogLevel,
     SLAB_MODEL_CONFIG_DIR: testEnv.modelConfigDir,
     SLAB_PLUGINS_DIR: testEnv.pluginsDir,
     SLAB_SESSION_STATE_DIR: testEnv.sessionStateDir,
@@ -322,15 +440,17 @@ export async function startScriptedE2eRuntime(
   prependToPath(commonEnv, dirname(cargoShimPath))
   delete commonEnv.RUSTC_WRAPPER
 
+  const logSink = createDevLogSink(testEnv.logsDir)
   const children: ManagedChild[] = []
   const server = spawnSlabServer(testEnv, commonEnv)
-  children.push({ child: server, label: "slab-server" })
-  rememberOutput("slab-server", server, logs)
+  children.push({ child: server, label: serverLogLabel })
+  rememberOutput(serverLogLabel, server, logs, logSink)
 
   const processHandle = {
     logs,
     stop: async () => {
       await stopManagedChildren(children, logs, testEnv.repoRoot, startedAt)
+      await logSink.close()
     },
   }
 
@@ -360,7 +480,7 @@ export async function startScriptedE2eRuntime(
       stdio: "pipe",
     })
     children.push({ child: vite, label: "desktop-vite" })
-    rememberOutput("desktop-vite", vite, logs)
+    rememberOutput("desktop-vite", vite, logs, logSink)
 
     await waitForHttpOk(testEnv.uiBaseUrl, "desktop dev UI (scripted)", vite, logs, uiReadinessTimeoutMs)
     return processHandle
@@ -692,7 +812,7 @@ function writeSettingsDocument(
         $schema: setupSchemaUrl,
         schema_version: 2,
         agent: {
-          debug: false,
+          debug: e2eAgentDebug,
           hooks: {
             enabled: false,
             scripts: [],
@@ -718,7 +838,7 @@ function writeSettingsDocument(
         },
         logging: {
           json: false,
-          level: "info",
+          level: e2eLogLevel,
         },
         models: {
           config_dir: options.modelConfigDir,
@@ -849,7 +969,7 @@ function spawnSlabServer(
     "--lib-dir",
     runtimeLibDir,
     "--log",
-    "info",
+    e2eLogLevel,
     "--shutdown-on-stdin-close",
   ]
   const exe = join(
@@ -883,8 +1003,16 @@ function spawnSlabServer(
   })
 }
 
-function rememberOutput(label: string, child: ChildProcessWithoutNullStreams, logs: string[]): void {
+function rememberOutput(
+  label: string,
+  child: ChildProcessWithoutNullStreams,
+  logs: string[],
+  sink?: DevLogSink
+): void {
   const remember = (chunk: Buffer | string) => {
+    if (sink) {
+      sink.write(label, chunk)
+    }
     for (const line of String(chunk).split(/\r?\n/)) {
       if (!line.trim()) {
         continue

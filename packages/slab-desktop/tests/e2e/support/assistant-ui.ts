@@ -1,8 +1,11 @@
+import { appendFileSync } from "node:fs"
+import { join } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 
 import type { Locator, Page } from "playwright"
 import {
   eventually,
+  getDiagnosticsLogsDir,
   getPersistedUiState,
   restoreSession,
   type AgentSessionRestored,
@@ -31,6 +34,7 @@ export async function openAssistant(
   uiBaseUrl: string,
   sessionId?: string
 ): Promise<void> {
+  attachBrowserConsoleCapture(page, sessionId ?? "assistant")
   if (sessionId) {
     // `?session=` deep link pins this page to a specific session, bypassing the
     // shared `zustand:assistant-ui` "current session" (which is global per
@@ -57,8 +61,41 @@ export async function openAssistant(
   await waitForComposerReady(page)
 }
 
-export async function sendAssistantMessage(page: Page, message: string): Promise<void> {
-  const composer = await waitForComposerReady(page)
+/** Mirror the page's console output (warn/error/log, page errors) into
+ * `<logsDir>/browser-console.log`, prefixed with `label` (the session id).
+ * Frontend-side evidence for approval delivery / remount debugging; no-op
+ * when the diagnostics setup file did not publish a logs dir. Best-effort —
+ * diagnostics must never fail a test. */
+function attachBrowserConsoleCapture(page: Page, label: string): void {
+  const logsDir = getDiagnosticsLogsDir()
+  if (!logsDir) {
+    return
+  }
+  const target = join(logsDir, "browser-console.log")
+
+  const write = (kind: string, text: string) => {
+    try {
+      const timestamp = new Date().toISOString()
+      appendFileSync(
+        target,
+        `${timestamp} [${label}] [${kind}] ${text.replaceAll("\n", "\n    ")}\n`,
+        "utf8"
+      )
+    } catch {
+      // Best-effort diagnostics.
+    }
+  }
+
+  page.on("console", (message) => {
+    if (message.type() === "debug") {
+      return
+    }
+    write(message.type(), message.text())
+  })
+  page.on("pageerror", (error) => write("pageerror", error.message))
+}
+
+export async function sendAssistantMessage(page: Page, message: string): Promise<void> {  const composer = await waitForComposerReady(page)
   await composer.fill(message)
   await page.getByTestId("assistant-send-button").click()
 }
@@ -182,15 +219,29 @@ export async function denyToolCall(page: Page): Promise<void> {
 /** Select a per-message permission mode from the composer's dedicated permission
  * button (left of Send). `full_control` short-circuits the engine to `Allow` and
  * surfaces no approval banner. The trigger is tagged
- * `assistant-permission-mode-trigger`; items `assistant-permission-mode-<mode>`. */
+ * `assistant-permission-mode-trigger`; items `assistant-permission-mode-<mode>`.
+ * The trigger's label mirrors the selection — asserted so a click that never
+ * registered (menu race, pane remount resetting the composer state) fails HERE,
+ * not as a silent default-mode turn 300s later. */
 export async function selectPermissionMode(
   page: Page,
   mode: "request_approval" | "approve_for_me" | "full_control" | "custom"
 ): Promise<void> {
-  await page.getByTestId("assistant-permission-mode-trigger").click()
+  const expectedLabel = {
+    request_approval: "Request approval",
+    approve_for_me: "Approve for me",
+    full_control: "Full control",
+    custom: "Custom",
+  }[mode]
+  const trigger = page.getByTestId("assistant-permission-mode-trigger")
+  await trigger.click()
   await page.getByTestId(`assistant-permission-mode-${mode}`).click()
   // The item `preventDefault`s to keep the popover open; dismiss before composing.
   await page.keyboard.press("Escape")
+  await eventually(`permission mode trigger shows '${expectedLabel}'`, async () => {
+    const text = (await trigger.textContent()) ?? ""
+    return text.includes(expectedLabel) ? true : null
+  })
 }
 
 /** Toggle plan mode on/off via the `/plan` command in the composer's Commands

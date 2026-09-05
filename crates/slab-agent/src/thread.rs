@@ -688,6 +688,7 @@ impl AgentThread {
         plan_store.clear(&thread_id).await;
 
         if interrupted {
+            tracing::info!(thread_id, "interrupted teardown starting");
             // Protocol completeness FIRST: synthesize failed tool results for
             // the trailing assistant tool-request (interrupted mid-batch) so
             // the rollout never replays a dangling tool_calls tail — strict
@@ -737,6 +738,7 @@ impl AgentThread {
                 last_turn_usage.clone(),
             )
             .await;
+            tracing::info!(thread_id, "interrupted teardown: finalizing status");
             self.finalize_status(
                 ThreadStatus::Interrupted,
                 Some("interrupted"),
@@ -744,6 +746,7 @@ impl AgentThread {
                 store.as_ref(),
             )
             .await?;
+            tracing::info!(thread_id, "interrupted teardown: status finalized");
             record_json(
                 trace.as_ref(),
                 &trace_context,
@@ -988,7 +991,37 @@ impl AgentThread {
             reason: reason.map(str::to_owned),
         });
         notify.on_event_msg(&self.id, &msg).await;
-        store.update_thread_status(&self.id, status, reason).await.ok();
+        // Terminal-status persistence is load-bearing: clients poll the SQL
+        // row (agent-history) to observe the end of a run, and concurrent
+        // teardowns (e.g. an interrupt cascading a child stop) can transiently
+        // contend on SQLite's single-writer lock. The old `.ok()` swallow let
+        // such a failure strand the thread on its transient status forever.
+        // Retry briefly; a run must not fail over its own bookkeeping.
+        let mut last_error = None;
+        for attempt in 0..5u32 {
+            match store.update_thread_status(&self.id, status, reason).await {
+                Ok(()) => {
+                    last_error = None;
+                    break;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        attempt,
+                        error = %error,
+                        "terminal thread status write failed; retrying"
+                    );
+                    last_error = Some(error);
+                    tokio::time::sleep(std::time::Duration::from_millis(u64::from(attempt) * 200))
+                        .await;
+                }
+            }
+        }
+        if let Some(error) = last_error {
+            tracing::error!(
+                error = %error,
+                "terminal thread status persistence failed after retries"
+            );
+        }
         Ok(())
     }
 

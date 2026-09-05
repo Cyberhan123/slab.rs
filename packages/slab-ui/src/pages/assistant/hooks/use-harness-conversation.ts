@@ -49,6 +49,15 @@ export function useHarnessConversation(
   // (pristine state); the previous one is disposed by the cleanup below.
   const controller = useMemo(() => new ConversationController({ sessionId }), [sessionId])
 
+  // Keep the controller's programmatic-send model in sync with the selected
+  // model (steering + non-transport sends) — otherwise they fall back to the
+  // controller's fabricated default id, which the server rejects, losing the
+  // input. Mirrors the transport memo below: switching the model must never
+  // rebuild the conversation state.
+  useEffect(() => {
+    controller.setModel(model)
+  }, [controller, model])
+
   useEffect(() => {
     controller.start()
     return () => {

@@ -98,13 +98,27 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
   async sendMessages(options: {
     messages: UI_MESSAGE[]
     abortSignal?: AbortSignal
-    /** Carries `effort` from `sendMessage({ metadata })`. */
-    requestMetadata?: unknown
+    /** Carries `effort`/`permissionMode`/`agentType` from
+     * `sendMessage({ metadata })` — the AI SDK hands the per-request metadata
+     * to custom transports under `metadata` (ChatRequestOptions), NOT
+     * `requestMetadata` (that key exists only on HttpChatTransport's
+     * `prepareSendMessagesRequest`). */
+    metadata?: unknown
   }): Promise<ReadableStream<UIMessageChunk>> {
     const input = buildTurnInput(options.messages)
-    const effort = readEffort(options.requestMetadata)
-    const permissionMode = readPermissionMode(options.requestMetadata)
-    const agentType = readAgentType(options.requestMetadata)
+    // The per-request composer metadata (effort/permissionMode/agentType)
+    // arrives either as the ChatRequestOptions `metadata` (sendMessage's
+    // second argument) or attached to the submitted user message — the
+    // one-argument `sendMessage({ text, metadata })` form stores it on the
+    // MESSAGE only. Prefer the request-level value, fall back to the newest
+    // user message's.
+    const lastUserMetadata = [...options.messages]
+      .reverse()
+      .find((message) => message.role === "user")?.metadata
+    const metadata = options.metadata ?? lastUserMetadata
+    const effort = readEffort(metadata)
+    const permissionMode = readPermissionMode(metadata)
+    const agentType = readAgentType(metadata)
 
     return createUIMessageStream({
       execute: async ({ writer }) => {

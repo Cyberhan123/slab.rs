@@ -22,6 +22,9 @@ export default defineConfig({
     exclude: ["**/node_modules/**", "tests/e2e/workspace.test.ts"],
     environment: "node",
     globalSetup: [fileURLToPath(new URL("./tests/e2e/support/e2e-global-setup.ts", import.meta.url))],
+    setupFiles: [
+      fileURLToPath(new URL("./tests/e2e/support/e2e-failure-diagnostics.ts", import.meta.url)),
+    ],
     fileParallelism: true,
     maxWorkers: concurrency,
     minWorkers: 1,

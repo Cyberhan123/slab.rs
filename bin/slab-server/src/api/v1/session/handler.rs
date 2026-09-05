@@ -158,7 +158,17 @@ async fn get_session_agent_history(
     Path(params): Path<SessionIdPath>,
 ) -> Result<Json<AgentHistoryResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(service.restore_session_snapshot(&params.id).await?.into()))
+    let snapshot = service.restore_session_snapshot(&params.id).await?;
+    // Poll observability: clients wait on this endpoint for terminal thread
+    // status (interrupt/complete); logging the served value makes a stale
+    // read visible next to the persistence-side logs.
+    tracing::debug!(
+        session_id = %params.id,
+        thread_id = snapshot.thread.as_ref().map(|t| t.id.clone()),
+        status = ?snapshot.thread.as_ref().map(|t| t.status),
+        "agent-history served"
+    );
+    Ok(Json(snapshot.into()))
 }
 
 #[cfg(test)]

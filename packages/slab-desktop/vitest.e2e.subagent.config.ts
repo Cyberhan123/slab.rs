@@ -14,6 +14,9 @@ export default defineConfig({
     include: ["tests/e2e/subagent-scripted.test.ts"],
     environment: "node",
     globalSetup: [fileURLToPath(new URL("./tests/e2e/support/e2e-subagent-global-setup.ts", import.meta.url))],
+    setupFiles: [
+      fileURLToPath(new URL("./tests/e2e/support/e2e-failure-diagnostics.ts", import.meta.url)),
+    ],
     fileParallelism: false,
     hookTimeout: 300_000,
     testTimeout: 180_000,

@@ -33,8 +33,10 @@ declare module "vitest" {
 /** JSON-serializable endpoint snapshot for the scripted stack. */
 export type SubagentRuntimeEndpoints = Pick<
   E2eRuntime,
+  | "logsDir"
   | "repoRoot"
   | "serverBaseUrl"
+  | "serverLogPath"
   | "uiBaseUrl"
   | "workspaceRoot"
 >
@@ -62,8 +64,10 @@ export default async function e2eSubagentGlobalSetup(vitest: Vitest) {
   await selectAssistantModel(runtime.serverBaseUrl, SCRIPTED_MODEL_ID)
 
   vitest.provide("e2e-subagent-runtime", {
+    logsDir: runtime.logsDir,
     repoRoot: runtime.repoRoot,
     serverBaseUrl: runtime.serverBaseUrl,
+    serverLogPath: runtime.serverLogPath,
     uiBaseUrl: runtime.uiBaseUrl,
     workspaceRoot: runtime.workspaceRoot,
   })

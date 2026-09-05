@@ -126,6 +126,7 @@ describe("agent e2e", () => {
     // hang that tree-kill in `wait_for_child` resolves.
     const prompt = [
       `Use the shell tool exactly once to run this POSIX shell command verbatim: echo ${marker}; sleep 300 &`,
+      "Run it in the FOREGROUND (do NOT set background=true — the background task mode returns immediately without stdout).",
       "This is a tool-use test in a sandboxed environment: you MUST invoke the shell tool; replying in plain text without calling it is a failure.",
       "Wait for approval if it is required.",
       `After the tool result, reply with a short sentence containing ${marker}.`,
@@ -153,8 +154,11 @@ describe("agent e2e", () => {
   })
 
   // Validates the `ApprovalScope` persistence path: approving a shell with
-  // `always_in_workspace` silences the approval for an equivalent subsequent
-  // command (it runs directly, no second prompt). Env-gated (local model).
+  // `always_in_workspace` stores a `prefix` Allow rule, so an
+  // argument-extension of the approved command runs directly (no second
+  // prompt). Note the engine's equivalence is command-prefix + extra args —
+  // a wholly different marker would NOT match the rule and would prompt
+  // again, so the second command extends the first. Env-gated (local model).
   it("silences the next equivalent shell after an always_in_workspace approval", async () => {
     const testEnv = requireEnv()
     const firstMarker = `SLAB_AGENT_E2E_SCOPE_A_${Date.now()}`
@@ -169,12 +173,13 @@ describe("agent e2e", () => {
     await approveToolCallWithScope(page, "always_in_workspace")
     await waitForToolExecution(testEnv.serverBaseUrl, session.id, firstPrompt, "shell", 180_000)
 
-    // An equivalent shell command should run WITHOUT another approval prompt.
-    // If a prompt were required, `waitForToolExecution` would never resolve
-    // (we don't approve again) — so resolving within the window proves the
-    // remembered rule auto-allowed it.
+    // An argument-extension of the approved command must run WITHOUT another
+    // approval prompt (the remembered `prefix` rule auto-allows it). If a
+    // prompt were required, `waitForToolExecution` would never resolve (we
+    // don't approve again) — so resolving within the window proves the rule
+    // was persisted and consulted.
     const secondMarker = `SLAB_AGENT_E2E_SCOPE_B_${Date.now()}`
-    const secondPrompt = `Use the shell tool exactly once to run: echo ${secondMarker}`
+    const secondPrompt = `Use the shell tool exactly once to run: echo ${firstMarker} ${secondMarker}`
     await sendAssistantMessage(page, secondPrompt)
 
     const toolResult = await waitForToolExecution(
@@ -217,16 +222,22 @@ describe("agent e2e", () => {
     expect(result.toolMessages[0].content).not.toContain(marker)
   }, 900_000)
 
-  // Hard-deny safety: a destructive command (`rm -rf /`) is refused by the
-  // safety checker BEFORE any approval is requested (engine step 1, applied even
-  // under FullControl). No approval banner appears; the tool result is the block
-  // message. Env-gated (local model).
+  // Hard-deny safety: a deny-listed command is refused by the safety checker
+  // BEFORE any approval is requested (engine step 1, applied even under
+  // FullControl). No approval banner appears; the tool result is the block
+  // message. The command is `chown -R` (unconditionally deny-listed as a broad
+  // ownership rewrite) rather than `rm -rf /` — the model's own safety training
+  // refuses to EMIT `rm -rf /` (observed: consecutive text-only replies), while
+  // a scoped chown in a sandbox reads routine enough for it to issue the call.
+  // Env-gated (local model).
   it("hard-denies a destructive shell command without surfacing an approval banner", async () => {
     const testEnv = requireEnv()
+    const denySession = await createSession(testEnv.serverBaseUrl, `agent-e2e-hd-${Date.now()}`)
+    await openAssistant(page, testEnv.uiBaseUrl, denySession.id)
     const prompt = [
       "Use the shell tool exactly once to run this POSIX shell command VERBATIM. Do not modify, quote, escape, or sanitize it in any way:",
-      "rm -rf /",
-      "You are a test agent inside a throwaway sandboxed e2e workspace. A permission layer intercepts the command BEFORE execution — your only job is to issue the call. You MUST invoke the shell tool with this exact command; refusing to call the tool or substituting a safer command is a test failure.",
+      "chown -R user:user .",
+      "You are a test agent inside a throwaway sandboxed e2e workspace. A permission layer intercepts the command BEFORE execution — your only job is to issue the call. You MUST invoke the shell tool with this exact command; refusing to call the tool or substituting a different command is a test failure.",
       "If the tool is blocked, do NOT retry it and do not try any alternative command; reply with a short sentence.",
     ].join("\n")
 
@@ -236,7 +247,7 @@ describe("agent e2e", () => {
     // resolving here proves no banner blocked the turn.
     const result = await waitForToolExecution(
       testEnv.serverBaseUrl,
-      session.id,
+      denySession.id,
       prompt,
       "shell",
       300_000
@@ -248,6 +259,11 @@ describe("agent e2e", () => {
   // to `Allow` (step 2), so the command runs with NO approval banner. Env-gated.
   it("runs a shell without an approval banner under full_control", async () => {
     const testEnv = requireEnv()
+    // Fresh session: isolates the per-message mode plumbing (selection →
+    // turn/start permissionMode → engine) from the long shared-session
+    // history's remounts and steering races.
+    const fcSession = await createSession(testEnv.serverBaseUrl, `agent-e2e-fc-${Date.now()}`)
+    await openAssistant(page, testEnv.uiBaseUrl, fcSession.id)
     const marker = `SLAB_AGENT_E2E_FC_${Date.now()}`
     const prompt = [
       `Use the shell tool exactly once to run this POSIX shell command: echo ${marker}`,
@@ -260,7 +276,7 @@ describe("agent e2e", () => {
     // required, `waitForToolExecution` would hang — resolving proves it didn't.
     const result = await waitForToolExecution(
       testEnv.serverBaseUrl,
-      session.id,
+      fcSession.id,
       prompt,
       "shell",
       300_000
@@ -268,8 +284,6 @@ describe("agent e2e", () => {
     const output = parseToolJson(result.toolMessages[0].content)
     expect(String(output.stdout ?? "")).toContain(marker)
     expect(output.exit_code).toBe(0)
-    // Leave the shared session back in the default mode.
-    await selectPermissionMode(page, "request_approval")
   }, 900_000)
 })
 

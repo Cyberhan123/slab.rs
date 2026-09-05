@@ -675,6 +675,39 @@ describe("ConversationController", () => {
     controller.dispose()
   })
 
+  it("setModel steers with the current model instead of the constructor default", async () => {
+    const { controller, socket } = await restoredController()
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "running",
+      }),
+    )
+    await flush()
+
+    // The React hook syncs the selected model via setModel; without it the
+    // steering send would carry the fabricated "slab-llama" default, which the
+    // real-model server rejects ("model … not found"), silently losing the
+    // input.
+    controller.setModel("Qwen3.5-9B")
+    const sendPromise = controller.sendSteering({
+      id: "steer-model",
+      role: "user",
+      parts: [{ type: "text", text: "steer with the real model" }],
+    })
+    await flush()
+    const turnReq = socket.sent
+      .map((raw) => JSON.parse(raw))
+      .find((m) => m.method === "turn/start")
+    expect(turnReq?.params?.model).toBe("Qwen3.5-9B")
+    socket.simMessage(
+      rpcResponse(turnReq.id, { turn: { id: "0", status: "queued" }, queued: true }),
+    )
+    await sendPromise
+    controller.dispose()
+  })
+
   it("send/sendSteering/interrupt stay callable through destructured references", async () => {
     const { controller, socket } = await restoredController()
 

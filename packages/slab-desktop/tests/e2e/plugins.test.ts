@@ -24,7 +24,7 @@ describe("plugins e2e", () => {
 
   beforeAll(async () => {
     env = inject("e2e-runtime")
-    pluginPackPath = writeE2ePluginPack(env.rootDir)
+    pluginPackPath = writeE2ePluginPack(env.rootDir, env.serverBaseUrl)
 
     await completeSetup(env.serverBaseUrl)
 
@@ -85,17 +85,38 @@ describe("plugins e2e", () => {
     await page.getByTestId(`plugin-view-${pluginId}`).waitFor({ state: "visible", timeout: 60_000 })
     const pluginFrame = await waitForPluginFrame(page, browserEvents)
 
-    const modelsStatus = await eventually("plugin bridge rejects browser API", async () => {
+    // Browser plugin iframe isolation: the plugin UI is served by slab-server
+    // in a sandboxed iframe (opaque origin — no allow-same-origin), so its
+    // direct fetches to the Slab API (the SDK's browser transport) are
+    // CORS-blocked. Reading the models list from inside the iframe must fail.
+    const modelsStatus = await eventually("sandboxed plugin iframe cannot read the models API", async () => {
       const text = await pluginFrame.getByTestId("plugin-models-status").textContent()
-      return text?.includes("desktop plugin WebView host") ? text : null
+      return text && text !== "models pending" ? text : null
     })
-    expect(modelsStatus).toContain("desktop plugin WebView host")
+    expect(modelsStatus.startsWith("models ok")).toBe(false)
 
-    const deniedStatus = await eventually("plugin bridge rejects unauthorized API", async () => {
+    // The legacy bridge request must likewise not hand out API access from the
+    // iframe (CORS-blocked opaque origin → fetch rejects).
+    const deniedStatus = await eventually("sandboxed plugin iframe cannot use the API bridge", async () => {
       const text = await pluginFrame.getByTestId("plugin-denied-status").textContent()
-      return text?.includes("desktop plugin WebView host") ? text : null
+      return text && text !== "denied pending" ? text : null
     })
-    expect(deniedStatus).toContain("desktop plugin WebView host")
+    expect(deniedStatus.startsWith("denied error")).toBe(true)
+
+    // The bridge endpoint itself refuses non-desktop callers outright — the
+    // Slab API bridge is desktop-WebView-host-only by contract (403 body).
+    const bridgeResponse = await fetch(
+      `${testEnv.serverBaseUrl}/v1/plugins/${pluginId}/api-request`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }
+    )
+    expect(bridgeResponse.status).toBe(403)
+    expect(await bridgeResponse.text()).toContain(
+      "only available through the desktop plugin WebView host"
+    )
 
     await page.goto(`${testEnv.uiBaseUrl}/plugins`, {
       waitUntil: "domcontentloaded",
@@ -144,7 +165,7 @@ async function waitForPluginFrame(page: Page, browserEvents: string[]): Promise<
   return pluginFrame
 }
 
-function writeE2ePluginPack(rootDir: string): string {
+function writeE2ePluginPack(rootDir: string, apiBaseUrl: string): string {
   const htmlPath = "ui/index.html"
   const scriptPath = "ui/app.js"
   const html = `<!doctype html>
@@ -165,66 +186,35 @@ function writeE2ePluginPack(rootDir: string): string {
 `
   const script = `"use strict";
 
-const HOST_SOURCE = "slab-plugin-host";
-const SDK_SOURCE = "slab-plugin-sdk";
-let nextRequestId = 0;
-const pending = new Map();
-
-window.addEventListener("message", (event) => {
-  const message = event.data;
-  if (!message || message.source !== HOST_SOURCE || message.type !== "api.response") {
-    return;
-  }
-
-  const handlers = pending.get(message.id);
-  if (!handlers) {
-    return;
-  }
-  pending.delete(message.id);
-
-  if (message.ok) {
-    handlers.resolve(message.response);
-    return;
-  }
-  handlers.reject(new Error(message.error || "Plugin API request failed"));
-});
-
-function requestSlabApi(method, path, body = null) {
-  const id = String(++nextRequestId);
-  const request = { method, path, headers: {}, body };
-  return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    window.parent.postMessage({ source: SDK_SOURCE, type: "api.request", id, request }, "*");
-    window.setTimeout(() => {
-      if (!pending.has(id)) {
-        return;
-      }
-      pending.delete(id);
-      reject(new Error("Timed out waiting for plugin API response"));
-    }, 15000);
-  });
-}
+// Mirrors the plugin SDK's browser transport (plain fetch against the
+// slab-server base URL). The iframe runs sandboxed without
+// allow-same-origin, so its origin is opaque and the server's CORS policy
+// (which allows only the app origin) rejects these requests — the statuses
+// below settle to "… error Failed to fetch" unless that isolation regresses.
+const API_BASE = ${JSON.stringify(apiBaseUrl)};
 
 async function main() {
   const modelsStatus = document.querySelector("[data-testid='plugin-models-status']");
   const deniedStatus = document.querySelector("[data-testid='plugin-denied-status']");
 
   try {
-    const response = await requestSlabApi("GET", "/v1/models");
-    if (response.status !== 200) {
-      throw new Error("GET /v1/models returned " + response.status);
-    }
-    const models = JSON.parse(response.body || "[]");
-    modelsStatus.textContent = "models ok " + models.length;
+    const response = await fetch(API_BASE + "/v1/models", { method: "GET" });
+    const body = await response.text();
+    modelsStatus.textContent = "models ok " + response.status + " " + body.slice(0, 60);
   } catch (error) {
     modelsStatus.textContent = "models error " + (error && error.message ? error.message : String(error));
   }
 
   try {
-    await requestSlabApi("POST", "/v1/audio/transcriptions");
-    deniedStatus.textContent = "denied missing";
+    const response = await fetch(API_BASE + "/v1/plugins/${pluginId}/api-request", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    const body = await response.text();
+    deniedStatus.textContent = "denied " + response.status + " " + body.slice(0, 120);
   } catch (error) {
-    deniedStatus.textContent = "denied ok " + (error && error.message ? error.message : String(error));
+    deniedStatus.textContent = "denied error " + (error && error.message ? error.message : String(error));
   }
 }
 

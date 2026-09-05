@@ -164,10 +164,18 @@ pub(crate) async fn turn_start(
     }
 
     // Apply the per-session permission mode (if any) to the real thread id.
+    // Logged because a mode that never arrives here is invisible everywhere
+    // downstream (the engine falls back to the thread's previous mode).
     if let Some(mode) = params.permission_mode {
         let real_id = session.real_id_for(&params.thread_id);
         let runtime_mode =
             slab_app_core::infra::agent::exec_policy::permission_mode_from_proto(mode);
+        tracing::info!(
+            harness_thread_id = %params.thread_id,
+            real_thread_id = %real_id,
+            mode = ?runtime_mode,
+            "turn/start applying permission mode"
+        );
         session.service().set_thread_mode(&real_id, runtime_mode).await;
     }
 
