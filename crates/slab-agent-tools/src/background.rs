@@ -329,23 +329,39 @@ impl BackgroundTaskRegistry {
     }
 
     /// Capacity gate + slot insertion + terminal pruning (shared by
-    /// `register` and `register_detached`).
+    /// `register` and `register_detached`). Emits the RUNNING lifecycle event
+    /// so clients can render live state (the delegate card's running phase,
+    /// the shell task markers) BEFORE the terminal transition — previously
+    /// only terminal events reached the wire.
     fn register_slot(&self, task_id: String, slot: TaskSlot) -> Result<(), AgentError> {
-        let mut tasks = self.tasks.lock().unwrap_or_else(|p| p.into_inner());
-        let running = tasks
-            .values()
-            .filter(|slot| {
-                *slot.status.lock().unwrap_or_else(|p| p.into_inner())
-                    == BackgroundTaskStatus::Running
-            })
-            .count();
-        if running >= MAX_RUNNING_TASKS {
-            return Err(AgentError::ToolExecution(format!(
-                "background task limit reached ({MAX_RUNNING_TASKS} running); stop a task first"
-            )));
+        let running_event = BackgroundTaskEvent {
+            task_id: task_id.clone(),
+            thread_id: slot.thread_id.clone(),
+            kind: slot.kind,
+            status: BackgroundTaskStatus::Running,
+            exit_code: None,
+            pid: slot.pid,
+            command: Some(slot.command.clone()),
+            result_summary: None,
+        };
+        {
+            let mut tasks = self.tasks.lock().unwrap_or_else(|p| p.into_inner());
+            let running = tasks
+                .values()
+                .filter(|slot| {
+                    *slot.status.lock().unwrap_or_else(|p| p.into_inner())
+                        == BackgroundTaskStatus::Running
+                })
+                .count();
+            if running >= MAX_RUNNING_TASKS {
+                return Err(AgentError::ToolExecution(format!(
+                    "background task limit reached ({MAX_RUNNING_TASKS} running); stop a task first"
+                )));
+            }
+            tasks.insert(task_id, slot);
+            Self::prune_terminal(&mut tasks);
         }
-        tasks.insert(task_id, slot);
-        Self::prune_terminal(&mut tasks);
+        self.emit(running_event);
         Ok(())
     }
 
@@ -1011,8 +1027,17 @@ mod tests {
         assert_eq!(final_snapshot.result.as_deref(), Some("child result"));
 
         let events = sink.events.lock().unwrap().clone();
-        let terminal =
-            events.iter().find(|event| event.task_id == task_id).expect("terminal event");
+        // Registration now announces the RUNNING transition first (clients
+        // render live state from it), then the terminal event lands.
+        let running_event = events
+            .iter()
+            .find(|event| event.task_id == task_id && event.status == BackgroundTaskStatus::Running)
+            .expect("running event");
+        assert_eq!(running_event.kind, TaskKind::Subagent);
+        let terminal = events
+            .iter()
+            .find(|event| event.task_id == task_id && event.status.is_terminal())
+            .expect("terminal event");
         assert_eq!(terminal.kind, TaskKind::Subagent);
         assert_eq!(terminal.status, BackgroundTaskStatus::Completed);
         assert_eq!(terminal.result_summary.as_deref(), Some("child result"));

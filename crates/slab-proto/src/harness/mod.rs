@@ -73,6 +73,9 @@ pub mod method {
     // Resident background task lifecycle (shell background=true), emitted from
     // the background task registry via `EventMsg` (projected like item events).
     pub const BACKGROUND_TASK_UPDATED: &str = "backgroundTask/updated";
+    // Delegated-subagent child activity, re-keyed to the parent thread by the
+    // app-core subagent bridge relay (projected like item events).
+    pub const SUBAGENT_CHILD_EVENT: &str = "subagent/childEvent";
     pub const ERROR: &str = "error";
     pub const ACCOUNT_UPDATED: &str = "account/updated";
     pub const ACCOUNT_LOGIN_COMPLETED: &str = "account/loginCompleted";

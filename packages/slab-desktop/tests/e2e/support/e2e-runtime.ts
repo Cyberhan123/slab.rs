@@ -280,6 +280,96 @@ export async function startE2eRuntime(
   }
 }
 
+/**
+ * Scripted-LMM variant of the stack for the subagent delegation suite: same
+ * server/Vite topology as [`startE2eRuntime`] but booted with
+ * `SLAB_E2E_MODE=1` so the debug-build `ServerLlmAdapter` returns canned
+ * prompt-keyed responses (parent turns follow `subagent-e2e/…` markers, child
+ * turns the fixed objective/steering/notification prefixes). The LlmPort
+ * short-circuits before any runtime model is consulted, so NO model is
+ * imported/loaded — the harness accepts the client-sent model id as-is.
+ */
+export async function startScriptedE2eRuntime(
+  testEnv: E2eRuntime
+): Promise<ManagedProcess> {
+  await ensureSidecarBinariesBuilt(testEnv.repoRoot)
+  await assertTcpPortAvailable(testEnv.serverPort, "slab-server (scripted)")
+  await assertTcpPortAvailable(testEnv.uiPort, "desktop Vite (scripted)")
+
+  const logs: string[] = []
+  const startedAt = new Date(Date.now() - processStartSkewMs)
+  const cargoShimPath = installCargoShim(testEnv.rootDir)
+  const commonEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    BROWSER: "none",
+    CARGO: cargoShimPath,
+    NO_COLOR: "1",
+    SLAB_BIND: testEnv.serverBind,
+    SLAB_CORS_ORIGINS: `${testEnv.uiBaseUrl},http://localhost:${testEnv.uiPort}`,
+    SLAB_DATABASE_URL: testEnv.databaseUrl,
+    SLAB_E2E_MODE: "1",
+    SLAB_ENABLE_SWAGGER: "true",
+    SLAB_LOG: "info",
+    SLAB_MODEL_CONFIG_DIR: testEnv.modelConfigDir,
+    SLAB_PLUGINS_DIR: testEnv.pluginsDir,
+    SLAB_SESSION_STATE_DIR: testEnv.sessionStateDir,
+    SLAB_SETTINGS_OVERLAY_PATH: testEnv.settingsOverlayPath,
+    SLAB_SETTINGS_PATH: testEnv.settingsPath,
+    SLAB_WORKSPACE_ROOT: testEnv.workspaceRoot,
+    VITE_API_BASE_URL: testEnv.uiBaseUrl,
+    VITE_API_PROXY_TARGET: testEnv.serverBaseUrl,
+  }
+  prependToPath(commonEnv, dirname(cargoShimPath))
+  delete commonEnv.RUSTC_WRAPPER
+
+  const children: ManagedChild[] = []
+  const server = spawnSlabServer(testEnv, commonEnv)
+  children.push({ child: server, label: "slab-server" })
+  rememberOutput("slab-server", server, logs)
+
+  const processHandle = {
+    logs,
+    stop: async () => {
+      await stopManagedChildren(children, logs, testEnv.repoRoot, startedAt)
+    },
+  }
+
+  try {
+    await waitForHttpOk(
+      `${testEnv.serverBaseUrl}/health`,
+      "slab-server health (scripted)",
+      server,
+      logs,
+      120_000
+    )
+
+    const vite = spawn("bun", [
+      "run",
+      "--cwd",
+      "packages/slab-desktop",
+      "dev",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(testEnv.uiPort),
+      "--strictPort",
+      "true",
+    ], {
+      cwd: testEnv.repoRoot,
+      env: commonEnv,
+      stdio: "pipe",
+    })
+    children.push({ child: vite, label: "desktop-vite" })
+    rememberOutput("desktop-vite", vite, logs)
+
+    await waitForHttpOk(testEnv.uiBaseUrl, "desktop dev UI (scripted)", vite, logs, uiReadinessTimeoutMs)
+    return processHandle
+  } catch (error) {
+    await processHandle.stop().catch(() => {})
+    throw error
+  }
+}
+
 export async function completeSetup(baseUrl: string): Promise<void> {
   await requestJson<Schema["SetupStatusResponse"]>(baseUrl, "/v1/setup/complete", {
     json: { initialized: true } satisfies Schema["CompleteSetupRequest"],

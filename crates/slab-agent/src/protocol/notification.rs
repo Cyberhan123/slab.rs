@@ -276,6 +276,30 @@ pub struct BackgroundTaskUpdatedParams {
     pub command: Option<String>,
 }
 
+/// `subagent/childEvent` — a relayed child-agent turn item, re-published on
+/// the PARENT channel by the app-core subagent bridge so harness clients can
+/// render live child activity inside the delegate card. The inner item ids
+/// stay child-scoped: they render card-locally and never enter the parent
+/// thread's item registry, so no id namespacing is needed in v1.
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SubagentChildEventParams {
+    /// PARENT thread id (real id server-side; rewritten to the harness id on
+    /// the wire like every other thread-keyed notification).
+    pub thread_id: String,
+    /// Child agent thread id (real; opaque correlation key client-side —
+    /// matches the `child_thread_id` in the `delegate_subagent` tool output
+    /// envelope).
+    pub child_thread_id: String,
+    /// `started` | `completed`.
+    pub phase: String,
+    /// The child turn the item belongs to (scopes `started`/`completed` pairs).
+    pub turn_id: String,
+    /// The child turn item (tool call / message), payload unchanged.
+    pub item: TurnItem,
+}
+
 // ---- approvals ----
 
 #[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]

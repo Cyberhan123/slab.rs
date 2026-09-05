@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises"
+
 import type { Locator, Page } from "playwright"
 import {
   eventually,
@@ -324,6 +326,134 @@ export async function expectPlanChip(page: Page, visible: boolean): Promise<void
       const isVisible = await chip.first().isVisible()
       return isVisible === visible ? true : null
     },
+    60_000
+  )
+}
+
+/** Expand every collapsed delegate-subagent tool row. The card body
+ * (`tool-detail-subagent`) lives inside a Radix `CollapsibleContent`, which
+ * UNMOUNTS closed content — the detail div is not in the DOM until the row's
+ * trigger is clicked. The collapsed line reads `Agent: <task>` (see
+ * `tool-summaries.ts`), other tool rows use different labels. */
+export async function expandSubagentToolRows(page: Page): Promise<void> {
+  const triggers = page.getByRole("button", { name: /Agent:/ })
+  const count = await triggers.count()
+  for (let index = 0; index < count; index += 1) {
+    const trigger = triggers.nth(index)
+    // eslint-disable-next-line no-await-in-loop
+    const expanded = await trigger.getAttribute("aria-expanded")
+    if (expanded !== "true") {
+      // eslint-disable-next-line no-await-in-loop
+      await trigger.click().catch(() => {})
+    }
+  }
+}
+
+/** Wait until some delegate-subagent card (tagged `tool-detail-subagent`,
+ * message-tool-subagent-part.tsx) renders `status: <status>` in its detail
+ * body. Expands the delegate rows first — the body unmounts while collapsed. */
+export async function waitForSubagentCardStatus(
+  page: Page,
+  status: string,
+  timeoutMs = 60_000
+): Promise<void> {
+  await eventually(
+    `subagent card status '${status}'`,
+    async () => {
+      await expandSubagentToolRows(page)
+      const cards = page.locator('[data-testid="tool-detail-subagent"]')
+      const count = await cards.count()
+      for (let index = 0; index < count; index += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const raw = await cards.nth(index).textContent()
+        if (raw && raw.includes(`status: ${status}`)) {
+          return true
+        }
+      }
+      return null
+    },
+    timeoutMs
+  )
+}
+
+/** Wait until some tool row shows the given live state on its collapsed line
+ * (`span[data-tool-state]`, message-tool-row.tsx) — e.g. `input-available`
+ * while the delegation runs, `output-available` once it completes. */
+export async function waitForSubagentToolState(
+  page: Page,
+  state: string,
+  timeoutMs = 60_000
+): Promise<void> {
+  await eventually(
+    `subagent tool state '${state}'`,
+    async () => (await page.locator(`[data-tool-state="${state}"]`).count()) > 0,
+    timeoutMs
+  )
+}
+
+/** Wait until the session history contains a user message starting with
+ * `prefix` (e.g. the `[subagent task finished]` notification the server-side
+ * bridge injects to auto-resume the parent) and return it. */
+export async function waitForUserMessageWithPrefix(
+  baseUrl: string,
+  sessionId: string,
+  prefix: string,
+  timeoutMs = 60_000
+): Promise<AgentThreadMessageResponse> {
+  return eventually(
+    `user message with prefix '${prefix}'`,
+    async () => {
+      const restore = await restoreSession(baseUrl, sessionId)
+      const message = restore.messages.find(
+        (item: AgentThreadMessageResponse) =>
+          item.role === "user" && typeof item.content === "string" && item.content.startsWith(prefix)
+      )
+      return message ?? null
+    },
+    timeoutMs,
+    1_000
+  )
+}
+
+/** Negative assertion: no user message starting with `prefix` may appear
+ * within `windowMs`. Fails fast (with the offending message) if one lands. */
+export async function assertNoUserMessageWithPrefixWithin(
+  baseUrl: string,
+  sessionId: string,
+  prefix: string,
+  windowMs: number
+): Promise<void> {
+  const deadline = Date.now() + windowMs
+  while (Date.now() < deadline) {
+    // eslint-disable-next-line no-await-in-loop
+    const restore = await restoreSession(baseUrl, sessionId)
+    const offender = restore.messages.find(
+      (item: AgentThreadMessageResponse) =>
+        item.role === "user" && typeof item.content === "string" && item.content.startsWith(prefix)
+    )
+    if (offender) {
+      throw new Error(`Unexpected user message with prefix '${prefix}': ${offender.content}`)
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await delay(1_000)
+  }
+}
+
+/** Click the composer's Stop control (the send button flips to
+ * `data-mode="stop"` while a turn is generating) and wait for it to flip back,
+ * i.e. the interrupt went through. */
+export async function clickStopButton(page: Page): Promise<void> {
+  await eventually(
+    "stop button clickable",
+    async () =>
+      (await page.getByTestId("assistant-send-button").getAttribute("data-mode")) === "stop",
+    60_000
+  )
+  await page.getByTestId("assistant-send-button").click()
+  await eventually(
+    "send button restored",
+    async () =>
+      (await page.getByTestId("assistant-send-button").getAttribute("data-mode")) !== "stop",
     60_000
   )
 }

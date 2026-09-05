@@ -56,7 +56,8 @@ impl LlmPort for ServerLlmAdapter {
     ) -> Result<LlmResponse, AgentError> {
         #[cfg(any(test, debug_assertions))]
         {
-            if e2e_llm_enabled() {
+            if e2e_mode_enabled() {
+                e2e_apply_slow_delay(messages).await;
                 let response = e2e_llm_response(messages, tools);
                 record_llm_response(trace_context, "e2e_chat_response_normalized", &response);
                 return Ok(response);
@@ -102,7 +103,7 @@ impl LlmPort for ServerLlmAdapter {
     ) -> Result<LlmResponse, AgentError> {
         #[cfg(any(test, debug_assertions))]
         {
-            if e2e_llm_enabled() {
+            if e2e_mode_enabled() {
                 let response = e2e_llm_response_streaming(messages, tools, observer).await?;
                 record_llm_response(trace_context, "e2e_chat_response_normalized", &response);
                 return Ok(response);
@@ -148,7 +149,7 @@ impl LlmPort for ServerLlmAdapter {
 }
 
 #[cfg(any(test, debug_assertions))]
-fn e2e_llm_enabled() -> bool {
+pub fn e2e_mode_enabled() -> bool {
     match std::env::var("SLAB_E2E_MODE") {
         Ok(value) => {
             let value = value.trim();
@@ -164,6 +165,7 @@ async fn e2e_llm_response_streaming(
     tools: &[ToolSpec],
     observer: &mut dyn LlmStreamObserver,
 ) -> Result<LlmResponse, AgentError> {
+    e2e_apply_slow_delay(messages).await;
     let mut response = e2e_llm_response(messages, tools);
     if response.tool_calls.is_empty()
         && let Some(content) = response.content.as_deref()
@@ -178,6 +180,15 @@ async fn e2e_llm_response_streaming(
 #[cfg(any(test, debug_assertions))]
 fn e2e_llm_response(messages: &[ConversationMessage], tools: &[ToolSpec]) -> LlmResponse {
     let (prompt, has_tool_result_after_prompt) = e2e_latest_user_context(messages);
+
+    // Subagent delegation track: child turns are keyed by the fixed prefixes
+    // the delegation machinery produces (objective / steering / completion
+    // notification); parent turns by `subagent-e2e/…` markers the tests
+    // control. Falls through to the legacy plan loop / echo behavior below.
+    if let Some(response) = e2e_subagent_response(&prompt, has_tool_result_after_prompt, tools) {
+        return response;
+    }
+
     let normalized_prompt = prompt.to_ascii_lowercase();
     let wants_plan_loop = normalized_prompt.contains("tool loop")
         || normalized_prompt.contains("plan_update")
@@ -238,6 +249,190 @@ fn e2e_latest_user_context(messages: &[ConversationMessage]) -> (String, bool) {
 #[cfg(any(test, debug_assertions))]
 fn e2e_tool_available(tools: &[ToolSpec], tool_name: &str) -> bool {
     tools.iter().any(|tool| tool.name == tool_name)
+}
+
+/// Pause the scripted response when the prompt asks for a slow turn, so
+/// stop/interrupt/steering races become deterministic. The parent honors the
+/// explicit `subagent-e2e/slow/<ms>` marker; child objective turns also honor
+/// `slow=<ms>` embedded in the delegated task text (that text shows up
+/// verbatim in the parent prompt too — the parent must not sleep).
+#[cfg(any(test, debug_assertions))]
+async fn e2e_apply_slow_delay(messages: &[ConversationMessage]) {
+    let delay_ms = e2e_slow_ms(&e2e_latest_user_context(messages).0);
+    if delay_ms > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+    }
+}
+
+/// Deterministic response track for the background-subagent e2e suite.
+/// Returns `None` when the prompt carries no subagent marker, letting the
+/// legacy plan-loop / echo branches handle it.
+#[cfg(any(test, debug_assertions))]
+fn e2e_subagent_response(
+    prompt: &str,
+    has_tool_result_after_prompt: bool,
+    tools: &[ToolSpec],
+) -> Option<LlmResponse> {
+    // Child steering turn — guidance the parent injected mid-flight.
+    if prompt.starts_with("[steering from parent agent]") {
+        let needle = e2e_parse_marker(prompt, "needle2").unwrap_or_else(|| "unmarked".to_owned());
+        return Some(e2e_text_response(format!("SUBAGENT_STEERING_ACK {needle}")));
+    }
+
+    // Child objective turn — the delegation's fixed first user message
+    // (`render_child_task`).
+    if prompt.starts_with("Objective:") {
+        let needle =
+            e2e_parse_marker(prompt, "needle").unwrap_or_else(|| "generic-child-done".to_owned());
+        return Some(e2e_text_response(format!("SUBAGENT_RESULT {needle}")));
+    }
+
+    // Parent turn resumed by the completion notification (`render_notification`).
+    if prompt.starts_with("[subagent task finished] task_id=") {
+        let task_id = e2e_parse_marker(prompt, "task_id").unwrap_or_else(|| "unknown".to_owned());
+        return Some(e2e_text_response(format!(
+            "E2E parent resumed after subagent task {task_id} finished."
+        )));
+    }
+
+    let carries_marker = prompt.contains("subagent-e2e/delegate")
+        || prompt.contains("subagent-e2e/steer")
+        || prompt.contains("subagent-e2e/stop")
+        || prompt.contains("subagent-e2e/shell-sleep/");
+
+    // Parent follow-up once the delegated/steering tool result is in — close
+    // the turn so the background work can proceed server-side.
+    if carries_marker && has_tool_result_after_prompt {
+        return Some(e2e_text_response("E2E delegated in the background; continuing.".to_owned()));
+    }
+
+    if !carries_marker || has_tool_result_after_prompt {
+        // Only the plain slow marker below applies to unmarked prompts.
+        return e2e_slow_marker_response(prompt);
+    }
+
+    if prompt.contains("subagent-e2e/delegate") && e2e_tool_available(tools, "delegate_subagent") {
+        let task = e2e_parse_quoted(prompt, "task")
+            .unwrap_or_else(|| "e2e delegated task needle=SUBAGENT_NEEDLE".to_owned());
+        return Some(e2e_tool_call_response(
+            "e2e-delegate",
+            "delegate_subagent",
+            serde_json::json!({ "task": task, "background": true }),
+        ));
+    }
+
+    if prompt.contains("subagent-e2e/steer") && e2e_tool_available(tools, "subagent_message") {
+        let task_id = e2e_parse_marker(prompt, "task_id").unwrap_or_else(|| "unknown".to_owned());
+        let message = e2e_parse_quoted(prompt, "message")
+            .unwrap_or_else(|| "e2e steering message".to_owned());
+        return Some(e2e_tool_call_response(
+            "e2e-steer",
+            "subagent_message",
+            serde_json::json!({ "task_id": task_id, "message": message }),
+        ));
+    }
+
+    if prompt.contains("subagent-e2e/stop") && e2e_tool_available(tools, "subagent_stop") {
+        let task_id = e2e_parse_marker(prompt, "task_id").unwrap_or_else(|| "unknown".to_owned());
+        return Some(e2e_tool_call_response(
+            "e2e-stop",
+            "subagent_stop",
+            serde_json::json!({ "task_id": task_id }),
+        ));
+    }
+
+    if prompt.contains("subagent-e2e/shell-sleep/") && e2e_tool_available(tools, "shell") {
+        let sleep_ms = e2e_parse_marker_ms(prompt, "subagent-e2e/shell-sleep/").unwrap_or(30_000);
+        return Some(e2e_tool_call_response(
+            "e2e-shell-sleep",
+            "shell",
+            serde_json::json!({ "command": format!("sleep {}", sleep_ms / 1000) }),
+        ));
+    }
+
+    None
+}
+
+/// Plain delayed reply that keeps the turn busy (e.g. so Stop can be clicked
+/// mid-flight). The delay itself is applied by [`e2e_apply_slow_delay`].
+#[cfg(any(test, debug_assertions))]
+fn e2e_slow_marker_response(prompt: &str) -> Option<LlmResponse> {
+    let sleep_ms = e2e_parse_marker_ms(prompt, "subagent-e2e/slow/")?;
+    Some(e2e_text_response(format!("E2E slow reply after {sleep_ms}ms.")))
+}
+
+#[cfg(any(test, debug_assertions))]
+fn e2e_text_response(content: String) -> LlmResponse {
+    LlmResponse {
+        content: Some(content),
+        content_already_streamed: false,
+        tool_calls: Vec::new(),
+        finish_reason: Some("stop".to_owned()),
+        usage: None,
+    }
+}
+
+#[cfg(any(test, debug_assertions))]
+fn e2e_tool_call_response(id: &str, name: &str, arguments: serde_json::Value) -> LlmResponse {
+    LlmResponse {
+        content: None,
+        content_already_streamed: false,
+        tool_calls: vec![ParsedToolCall {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            arguments: arguments.to_string(),
+        }],
+        finish_reason: Some("tool_calls".to_owned()),
+        usage: None,
+    }
+}
+
+/// Find `key=<TOKEN>` where `<TOKEN>` is the following run of non-whitespace.
+#[cfg(any(test, debug_assertions))]
+fn e2e_parse_marker(prompt: &str, key: &str) -> Option<String> {
+    let pattern = format!("{key}=");
+    prompt
+        .find(&pattern)
+        .map(|start| {
+            prompt[start + pattern.len()..]
+                .chars()
+                .take_while(|c| !c.is_whitespace())
+                .collect::<String>()
+        })
+        .filter(|token| !token.is_empty())
+}
+
+/// Find `key="..."` (plain double-quoted value; the marker grammar the e2e
+/// prompts use needs no escape handling).
+#[cfg(any(test, debug_assertions))]
+fn e2e_parse_quoted(prompt: &str, key: &str) -> Option<String> {
+    let pattern = format!("{key}=\"");
+    let start = prompt.find(&pattern)? + pattern.len();
+    let rest = &prompt[start..];
+    let end = rest.find('"')?;
+    let value = &rest[..end];
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+/// Parent-side explicit slow marker (`subagent-e2e/slow/<ms>`) and — for child
+/// objective turns only — the `slow=<ms>` embedded in the delegated task text.
+#[cfg(any(test, debug_assertions))]
+fn e2e_slow_ms(prompt: &str) -> u64 {
+    const MAX_SLOW_MS: u64 = 120_000;
+    let requested = e2e_parse_marker_ms(prompt, "subagent-e2e/slow/")
+        .or_else(|| {
+            prompt.starts_with("Objective:").then(|| e2e_parse_marker_ms(prompt, "slow=")).flatten()
+        })
+        .unwrap_or(0);
+    requested.min(MAX_SLOW_MS)
+}
+
+/// Parse the ASCII digits immediately following `prefix` as milliseconds.
+#[cfg(any(test, debug_assertions))]
+fn e2e_parse_marker_ms(prompt: &str, prefix: &str) -> Option<u64> {
+    let start = prompt.find(prefix)? + prefix.len();
+    let digits: String = prompt[start..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
 }
 
 /// Derive a stable kv-cache session key for the agent path.
@@ -615,6 +810,165 @@ mod tests {
         assert_eq!(response.content.as_deref(), Some("E2E loop complete after plan tool output."));
         assert!(response.tool_calls.is_empty());
         assert_eq!(response.finish_reason.as_deref(), Some("stop"));
+    }
+
+    fn subagent_spec(name: &str) -> ToolSpec {
+        ToolSpec {
+            name: name.to_owned(),
+            description: "subagent e2e tool".to_owned(),
+            parameters_schema: serde_json::json!({ "type": "object" }),
+        }
+    }
+
+    #[test]
+    fn e2e_child_objective_turn_returns_needle() {
+        let response = e2e_llm_response(
+            &[text_message(
+                "user",
+                "Objective:\ncount needles needle=ALPHA_1 slow=20000\n\nConstraints:\n- Work only on this delegated task.",
+            )],
+            &[],
+        );
+
+        assert_eq!(response.content.as_deref(), Some("SUBAGENT_RESULT ALPHA_1"));
+        assert!(response.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn e2e_child_objective_turn_falls_back_without_needle() {
+        let response = e2e_llm_response(
+            &[text_message(
+                "user",
+                "Objective:\ndo the thing\n\nConstraints:\n- Work only on this delegated task.",
+            )],
+            &[],
+        );
+
+        assert_eq!(response.content.as_deref(), Some("SUBAGENT_RESULT generic-child-done"));
+    }
+
+    #[test]
+    fn e2e_child_steering_turn_returns_needle2() {
+        let response = e2e_llm_response(
+            &[text_message("user", "[steering from parent agent]\nalso cover needle2=BETA_2")],
+            &[],
+        );
+
+        assert_eq!(response.content.as_deref(), Some("SUBAGENT_STEERING_ACK BETA_2"));
+    }
+
+    #[test]
+    fn e2e_parent_delegate_emits_structured_tool_call() {
+        let response = e2e_llm_response(
+            &[text_message(
+                "user",
+                "subagent-e2e/delegate task=\"count widgets needle=GAMMA_3 slow=20000\"",
+            )],
+            &[subagent_spec("delegate_subagent")],
+        );
+
+        assert_eq!(response.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(response.tool_calls.len(), 1);
+        let call = &response.tool_calls[0];
+        assert_eq!(call.name, "delegate_subagent");
+        let arguments: serde_json::Value =
+            serde_json::from_str(&call.arguments).expect("arguments are valid JSON");
+        assert_eq!(arguments["task"], "count widgets needle=GAMMA_3 slow=20000");
+        assert_eq!(arguments["background"], true);
+    }
+
+    #[test]
+    fn e2e_parent_delegate_closing_text_after_tool_result() {
+        let response = e2e_llm_response(
+            &[
+                text_message("user", "subagent-e2e/delegate task=\"count widgets needle=GAMMA_3\""),
+                text_message("tool", "{\"background\":true,\"status\":\"running\"}"),
+            ],
+            &[subagent_spec("delegate_subagent")],
+        );
+
+        assert_eq!(
+            response.content.as_deref(),
+            Some("E2E delegated in the background; continuing.")
+        );
+        assert!(response.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn e2e_parent_notification_turn_summarizes() {
+        let response = e2e_llm_response(
+            &[text_message(
+                "user",
+                "[subagent task finished] task_id=bg-x-1 status=completed\nTask: count widgets\nResult: SUBAGENT_RESULT GAMMA_3",
+            )],
+            &[],
+        );
+
+        let content = response.content.as_deref().expect("text response");
+        assert!(content.contains("bg-x-1"), "content mentions the finished task id: {content}");
+        assert!(response.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn e2e_parent_steer_and_stop_tool_calls() {
+        let steer = e2e_llm_response(
+            &[text_message(
+                "user",
+                "subagent-e2e/steer task_id=bg-7 message=\"also cover needle2=DELTA_4\"",
+            )],
+            &[subagent_spec("subagent_message")],
+        );
+        assert_eq!(steer.tool_calls.len(), 1);
+        assert_eq!(steer.tool_calls[0].name, "subagent_message");
+        let arguments: serde_json::Value =
+            serde_json::from_str(&steer.tool_calls[0].arguments).expect("steer arguments JSON");
+        assert_eq!(arguments["task_id"], "bg-7");
+        assert_eq!(arguments["message"], "also cover needle2=DELTA_4");
+
+        let stop = e2e_llm_response(
+            &[text_message("user", "subagent-e2e/stop task_id=bg-7")],
+            &[subagent_spec("subagent_stop")],
+        );
+        assert_eq!(stop.tool_calls.len(), 1);
+        assert_eq!(stop.tool_calls[0].name, "subagent_stop");
+        let arguments: serde_json::Value =
+            serde_json::from_str(&stop.tool_calls[0].arguments).expect("stop arguments JSON");
+        assert_eq!(arguments["task_id"], "bg-7");
+    }
+
+    #[test]
+    fn e2e_shell_sleep_tool_call_uses_posix_sleep() {
+        let response = e2e_llm_response(
+            &[text_message("user", "subagent-e2e/shell-sleep/30000 now")],
+            &[subagent_spec("shell")],
+        );
+
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "shell");
+        let arguments: serde_json::Value =
+            serde_json::from_str(&response.tool_calls[0].arguments).expect("shell arguments JSON");
+        assert_eq!(arguments["command"], "sleep 30");
+    }
+
+    #[test]
+    fn e2e_slow_marker_returns_plain_delayed_text() {
+        let response =
+            e2e_llm_response(&[text_message("user", "hold subagent-e2e/slow/4000")], &[]);
+
+        assert_eq!(response.content.as_deref(), Some("E2E slow reply after 4000ms."));
+    }
+
+    #[test]
+    fn e2e_slow_ms_applies_to_parent_marker_and_child_objective_only() {
+        // Parent honors the explicit slow marker.
+        assert_eq!(e2e_slow_ms("please subagent-e2e/slow/5000"), 5_000);
+        // Child objective turns honor the task-embedded `slow=` value…
+        assert_eq!(e2e_slow_ms("Objective:\nprobe slow=20000\n\nConstraints:"), 20_000);
+        // …but the parent must NOT sleep on the same text embedded in the
+        // delegate args (the task shows up verbatim in the parent prompt).
+        assert_eq!(e2e_slow_ms("subagent-e2e/delegate task=\"probe slow=90000\""), 0);
+        // Clamped to a sane ceiling.
+        assert_eq!(e2e_slow_ms("subagent-e2e/slow/9999999"), 120_000);
     }
 
     #[test]

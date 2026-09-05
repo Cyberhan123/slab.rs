@@ -22,6 +22,8 @@ const DEFAULT_SUBAGENT_TURNS: u32 = 8;
 pub struct SubagentSpawnedEvent {
     pub parent_thread_id: String,
     pub child_thread_id: String,
+    /// Whether the parent auto-resume is suppressed for this delegation.
+    pub no_resume: bool,
 }
 
 /// A subagent reached a natural terminal state (explicit stops are NOT
@@ -35,6 +37,9 @@ pub struct SubagentFinishedEvent {
     pub status: BackgroundTaskStatus,
     pub completion_text: Option<String>,
     pub artifact_refs: Vec<String>,
+    /// Whether the parent auto-resume was suppressed for this delegation
+    /// (mirrors the spawned event; the host skips the follow-up delivery).
+    pub no_resume: bool,
 }
 
 /// Host seam for subagent lifecycle events. Sync on purpose — called from
@@ -116,6 +121,12 @@ pub struct DelegateSubagentArgs {
     #[serde(default)]
     #[schemars(default = "default_background")]
     background: Option<bool>,
+    /// Suppress the parent auto-resume when this delegation finishes (the
+    /// result stays queryable via subagent_status / the artifact). Orthogonal
+    /// to `background`.
+    #[serde(default)]
+    #[schemars(default = "default_no_resume")]
+    no_resume: Option<bool>,
 }
 
 /// Schema-only default for `background`: absence means `true` at runtime
@@ -123,6 +134,12 @@ pub struct DelegateSubagentArgs {
 /// changing deserialization.
 fn default_background() -> Option<bool> {
     Some(true)
+}
+
+/// Schema-only default for `no_resume`: absence means `false` at runtime
+/// (`unwrap_or(false)`).
+fn default_no_resume() -> Option<bool> {
+    Some(false)
 }
 
 #[async_trait]
@@ -228,9 +245,11 @@ impl TypedTool for DelegateSubagentTool {
         // Both modes report the spawn (rollout persistence attach) and go
         // through the registry (status visibility + cascade stop) — the
         // inline mode just additionally parks on the watcher's oneshot.
+        let no_resume = args.no_resume.unwrap_or(false);
         self.sink.on_subagent_spawned(SubagentSpawnedEvent {
             parent_thread_id: ctx.thread_id.clone(),
             child_thread_id: child_thread_id.clone(),
+            no_resume,
         });
 
         let workspace_root: Option<PathBuf> =
@@ -300,9 +319,17 @@ impl TypedTool for DelegateSubagentTool {
 
         let kill: DetachedKill = {
             let control = Arc::clone(&self.control);
+            let registry = Arc::clone(&self.registry);
             let child_id = child_thread_id.clone();
             Box::new(move || {
                 tokio::spawn(async move {
+                    // Grandchildren FIRST: the child-owned delegations must be
+                    // cascade-stopped before the child itself is interrupted.
+                    let stopped = registry.stop_subagent_tasks_for_thread(&child_id);
+                    if !stopped.is_empty() {
+                        tracing::debug!(child = %child_id, count = stopped.len(),
+                            "cascade-stopped grandchild delegations");
+                    }
                     if let Err(error) = control.interrupt(&child_id).await {
                         tracing::warn!(%error, "failed to interrupt subagent {child_id}");
                     }
@@ -334,6 +361,7 @@ impl TypedTool for DelegateSubagentTool {
                 status: snapshot.status,
                 completion_text,
                 artifact_refs,
+                no_resume,
             });
         });
 
@@ -511,7 +539,7 @@ mod tests {
 
     use slab_agent::port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-        ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec,
+        ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec,
     };
     use slab_agent::{
         AgentControlLimits, AgentDefinition, AgentRegistry, ToolConstraint, ToolContext,
@@ -760,12 +788,12 @@ mod tests {
         // No workspace: the stripped completion flows into the parent tool
         // output verbatim.
         let output = ToolHandler::execute(
-            &tool, 
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({ "task": "summarize", "max_turns": 1, "background": false }),
-            )
-            .await
-            .expect("delegate");
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "summarize", "max_turns": 1, "background": false }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         assert_eq!(value["status"], "completed");
         assert_eq!(
@@ -779,14 +807,14 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
         tokio::fs::create_dir_all(&temp_dir).await.expect("temp workspace");
         let output = ToolHandler::execute(
-            &tool, 
-                &ToolContext::for_thread("parent")
-                    .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
-                    .build(),
-                &serde_json::json!({ "task": "summarize", "max_turns": 1, "background": false }),
-            )
-            .await
-            .expect("delegate");
+            &tool,
+            &ToolContext::for_thread("parent")
+                .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
+                .build(),
+            &serde_json::json!({ "task": "summarize", "max_turns": 1, "background": false }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let artifact_ref = value["artifact_refs"][0].as_str().expect("artifact ref");
         let artifact =
@@ -814,17 +842,17 @@ mod tests {
         let tool = delegate_tool(control);
 
         let output = ToolHandler::execute(
-            &tool, 
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({
-                    "task": "summarize",
-                    "allowed_tools": ["read_file"],
-                    "max_turns": 1,
-                    "background": false
-                }),
-            )
-            .await
-            .expect("delegate");
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({
+                "task": "summarize",
+                "allowed_tools": ["read_file"],
+                "max_turns": 1,
+                "background": false
+            }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let child_id = value["child_thread_id"].as_str().expect("child id");
         assert_eq!(value["status"], "completed");
@@ -862,20 +890,20 @@ mod tests {
         let tool = delegate_tool(control);
 
         let output = ToolHandler::execute(
-            &tool, 
-                &ToolContext::for_thread("parent")
-                    .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
-                    .build(),
-                &serde_json::json!({
-                    "task": "summarize",
-                    "workspace_scope": "src",
-                    "output_format": "Return JSON with a summary field.",
-                    "max_turns": 1,
-                    "background": false
-                }),
-            )
-            .await
-            .expect("delegate");
+            &tool,
+            &ToolContext::for_thread("parent")
+                .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
+                .build(),
+            &serde_json::json!({
+                "task": "summarize",
+                "workspace_scope": "src",
+                "output_format": "Return JSON with a summary field.",
+                "max_turns": 1,
+                "background": false
+            }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let artifact_ref = value["artifact_refs"][0].as_str().expect("artifact ref");
 
@@ -1098,12 +1126,12 @@ mod tests {
         let tool = delegate_tool(control);
 
         let output = ToolHandler::execute(
-            &tool, 
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({ "task": "plan it", "agent_type": "plan", "background": false }),
-            )
-            .await
-            .expect("delegate");
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "plan it", "agent_type": "plan", "background": false }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let child_id = value["child_thread_id"].as_str().expect("child id");
 
@@ -1188,17 +1216,17 @@ mod tests {
         let tool = delegate_tool(control);
 
         let output = ToolHandler::execute(
-            &tool, 
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({
-                    "task": "plan it",
-                    "agent_type": "plan",
-                    "system_prompt": "custom prompt",
-                    "background": false
-                }),
-            )
-            .await
-            .expect("delegate");
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({
+                "task": "plan it",
+                "agent_type": "plan",
+                "system_prompt": "custom prompt",
+                "background": false
+            }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let child_id = value["child_thread_id"].as_str().expect("child id");
 
@@ -1222,17 +1250,17 @@ mod tests {
         let tool = delegate_tool(control);
 
         let output = ToolHandler::execute(
-            &tool, 
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({
-                    "task": "plan it",
-                    "agent_type": "plan",
-                    "model": "caller-model",
-                    "background": false
-                }),
-            )
-            .await
-            .expect("delegate");
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({
+                "task": "plan it",
+                "agent_type": "plan",
+                "model": "caller-model",
+                "background": false
+            }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let child_id = value["child_thread_id"].as_str().expect("child id");
 
@@ -1257,12 +1285,12 @@ mod tests {
         let tool = delegate_tool(control);
 
         let output = ToolHandler::execute(
-            &tool, 
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({ "task": "plan it", "agent_type": "plan", "background": false }),
-            )
-            .await
-            .expect("delegate");
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "plan it", "agent_type": "plan", "background": false }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let child_id = value["child_thread_id"].as_str().expect("child id");
 
@@ -1297,12 +1325,12 @@ mod tests {
         // the child. The child here finishes nearly instantly — the contract
         // under test is the immediate return SHAPE plus eventual tracking.
         let output = ToolHandler::execute(
-            &tool, 
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({ "task": "summarize", "max_turns": 1 }),
-            )
-            .await
-            .expect("delegate");
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "summarize", "max_turns": 1 }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         assert_eq!(value["background"], true);
         assert_eq!(value["status"], "running");
@@ -1346,12 +1374,12 @@ mod tests {
         let tool = delegate_tool(control);
 
         let output = ToolHandler::execute(
-            &tool, 
-                &ToolContext::for_thread("parent").build(),
-                &serde_json::json!({ "task": "summarize", "background": false }),
-            )
-            .await
-            .expect("delegate");
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "summarize", "background": false }),
+        )
+        .await
+        .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         // Inline shape: the legacy fields, no background envelope.
         assert!(value.get("background").is_none());
@@ -1374,9 +1402,222 @@ mod tests {
         let tool = delegate_tool(control);
         // Default (omitted) is background → parallel-safe.
         assert!(ToolHandler::is_concurrency_safe(&tool, &serde_json::json!({ "task": "x" })));
-        assert!(ToolHandler::is_concurrency_safe(&tool, &serde_json::json!({ "task": "x", "background": true })));
-        assert!(
-            !ToolHandler::is_concurrency_safe(&tool, &serde_json::json!({ "task": "x", "background": false }))
+        assert!(ToolHandler::is_concurrency_safe(
+            &tool,
+            &serde_json::json!({ "task": "x", "background": true })
+        ));
+        assert!(!ToolHandler::is_concurrency_safe(
+            &tool,
+            &serde_json::json!({ "task": "x", "background": false })
+        ));
+    }
+
+    // ---- grandchild cascade + no_resume (B2/B3) ----
+
+    /// LLM double for the grandchild-cascade test: the child's first turn
+    /// delegates a grandchild in the background; every later call (the
+    /// child's follow-up turn AND the grandchild's own turn) parks forever,
+    /// so both threads stay Running until an interrupt cancels the parked
+    /// LLM future (the turn loop selects on the cancellation token).
+    struct DelegatingLlm {
+        delegated: std::sync::atomic::AtomicBool,
+    }
+
+    #[async_trait]
+    impl LlmPort for DelegatingLlm {
+        async fn chat_completion(
+            &self,
+            _model: &str,
+            messages: &[ConversationMessage],
+            _tools: &[ToolSpec],
+            _config: &AgentConfig,
+            _trace_context: &AgentTraceContext,
+        ) -> Result<LlmResponse, AgentError> {
+            if messages.iter().any(|message| message.rendered_text().contains("grandchild work")) {
+                // Grandchild turn: park until the cascade interrupt cancels us.
+                std::future::pending::<()>().await;
+                return Err(AgentError::Interrupted);
+            }
+            if !self.delegated.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                // Child turn 1: delegate the grandchild in the background.
+                return Ok(LlmResponse {
+                    content: None,
+                    content_already_streamed: false,
+                    tool_calls: vec![ParsedToolCall {
+                        id: "call-grandchild".to_owned(),
+                        name: "delegate_subagent".to_owned(),
+                        arguments: serde_json::json!({ "task": "grandchild work", "max_turns": 1 })
+                            .to_string(),
+                    }],
+                    finish_reason: Some("tool_calls".to_owned()),
+                    usage: None,
+                });
+            }
+            // Child follow-up turn: park until the cascade interrupt cancels us.
+            std::future::pending::<()>().await;
+            Err(AgentError::Interrupted)
+        }
+    }
+
+    #[tokio::test]
+    async fn stopping_a_child_task_cascades_to_grandchildren() {
+        let store = Arc::new(MemoryStore::default());
+        // Depth headroom: parent (0) → child (1) → grandchild (2).
+        store.insert_parent(2);
+        let notify = Arc::new(NoopNotify);
+        let llm = Arc::new(DelegatingLlm { delegated: std::sync::atomic::AtomicBool::new(false) });
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        let router = Arc::new(ToolRouter::new());
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::clone(&llm) as Arc<dyn LlmPort>,
+            store.clone(),
+            notify.clone(),
+            notify,
+            Arc::clone(&router),
+            AgentControlLimits { max_threads: 8, max_depth: 4 },
+            Vec::new(),
+        ));
+        // The child delegates THROUGH the router — same control, same
+        // registry — so the grandchild lands in the shared registry as a
+        // task owned by the child thread.
+        router.register(Box::new(DelegateSubagentTool::new(
+            Arc::clone(&control),
+            Arc::clone(&registry),
+            Arc::new(NoopSubagentTaskSink),
+        )));
+        let tool = DelegateSubagentTool::new(
+            Arc::clone(&control),
+            Arc::clone(&registry),
+            Arc::new(NoopSubagentTaskSink),
         );
+
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "child work" }),
+        )
+        .await
+        .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        let child_task_id = value["task_id"].as_str().expect("task id").to_owned();
+        let child_thread_id = value["child_thread_id"].as_str().expect("child id").to_owned();
+
+        // Wait for the child's own delegation: a second Subagent task owned
+        // by the child thread, pointing at a grandchild thread.
+        wait_until(|| {
+            registry
+                .list()
+                .iter()
+                .any(|task| task.thread_id == child_thread_id && task.child_thread_id.is_some())
+        })
+        .await;
+        let grandchild_task = registry
+            .list()
+            .into_iter()
+            .find(|task| task.thread_id == child_thread_id && task.child_thread_id.is_some())
+            .expect("grandchild task");
+        let grandchild_task_id = grandchild_task.task_id.clone();
+        let grandchild_thread_id =
+            grandchild_task.child_thread_id.clone().expect("grandchild thread id");
+
+        // Stop the CHILD task: its kill closure must cascade-stop the
+        // grandchild delegation before interrupting the child itself.
+        let stopped_child = registry.stop(&child_task_id).expect("stop child task");
+        assert_eq!(stopped_child.status, BackgroundTaskStatus::Stopped);
+
+        wait_until(|| {
+            registry
+                .snapshot(&grandchild_task_id)
+                .is_some_and(|task| task.status == BackgroundTaskStatus::Stopped)
+        })
+        .await;
+        wait_until(|| {
+            matches!(
+                store
+                    .threads
+                    .lock()
+                    .unwrap()
+                    .get(&grandchild_thread_id)
+                    .map(|thread| thread.status),
+                Some(ThreadStatus::Interrupted)
+            )
+        })
+        .await;
+        // The child itself was interrupted too.
+        wait_until(|| {
+            matches!(
+                store.threads.lock().unwrap().get(&child_thread_id).map(|thread| thread.status),
+                Some(ThreadStatus::Interrupted)
+            )
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn delegate_no_resume_flags_both_lifecycle_events() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(FinalLlm),
+            store.clone(),
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ));
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        let sink = Arc::new(RecordingSink::default());
+        let tool = DelegateSubagentTool::new(control, Arc::clone(&registry), sink.clone());
+
+        ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "summarize", "background": false, "no_resume": true }),
+        )
+        .await
+        .expect("delegate");
+
+        wait_until(|| sink.finished.lock().unwrap().len() == 1).await;
+        let finished = sink.finished.lock().unwrap();
+        assert!(finished[0].no_resume);
+        let spawned = sink.spawned.lock().unwrap();
+        assert_eq!(spawned.len(), 1);
+        assert!(spawned[0].no_resume);
+    }
+
+    #[tokio::test]
+    async fn delegate_without_no_resume_defaults_to_resuming() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(FinalLlm),
+            store.clone(),
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ));
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        let sink = Arc::new(RecordingSink::default());
+        let tool = DelegateSubagentTool::new(control, Arc::clone(&registry), sink.clone());
+
+        ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "summarize", "background": false }),
+        )
+        .await
+        .expect("delegate");
+
+        wait_until(|| sink.finished.lock().unwrap().len() == 1).await;
+        let finished = sink.finished.lock().unwrap();
+        assert!(!finished[0].no_resume);
+        let spawned = sink.spawned.lock().unwrap();
+        assert_eq!(spawned.len(), 1);
+        assert!(!spawned[0].no_resume);
     }
 }

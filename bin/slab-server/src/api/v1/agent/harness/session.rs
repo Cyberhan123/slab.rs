@@ -223,6 +223,11 @@ fn rewrite_thread_id(mut msg: EventMsg, harness_id: &str) -> EventMsg {
         // them). Without this arm the notification reached the client with the
         // real id and was silently dropped by the harness-id filter.
         EventMsg::BackgroundTaskUpdated(p) => p.thread_id = tid.clone(),
+        // Relayed child events are re-keyed to the PARENT thread by the
+        // subagent bridge: rewrite only the outer routing id. The inner
+        // `child_thread_id` and item payload stay real — the client correlates
+        // them against the delegate tool output envelope.
+        EventMsg::SubagentChildEvent(p) => p.thread_id = tid.clone(),
         // Error carries no thread_id; leave unchanged.
         // `EventMsg` is `#[non_exhaustive]`: future slab-agent variants with no
         // known thread_id mapping pass through untouched.
@@ -359,6 +364,38 @@ mod tests {
             EventMsg::BackgroundTaskUpdated(p) => {
                 assert_eq!(p.thread_id, "hthread-1");
                 assert_eq!(p.kind.as_deref(), Some("subagent"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    /// Relayed child events route on the PARENT's harness id while their inner
+    /// correlation ids stay real.
+    #[test]
+    fn rewrite_thread_id_rewrites_subagent_child_event_outer_id_only() {
+        let rewritten = rewrite_thread_id(
+            EventMsg::SubagentChildEvent(slab_agent::protocol::SubagentChildEventParams {
+                thread_id: "real-parent".to_owned(),
+                child_thread_id: "real-child".to_owned(),
+                phase: "completed".to_owned(),
+                turn_id: "tu-1".to_owned(),
+                item: slab_agent::protocol::TurnItem::ToolCall {
+                    id: "item-1".to_owned(),
+                    tool: "read_file".to_owned(),
+                    arguments: serde_json::json!({ "path": "README.md" }),
+                    status: "completed".to_owned(),
+                    result: None,
+                    error: None,
+                    duration_ms: None,
+                },
+            }),
+            "hthread-1",
+        );
+        match rewritten {
+            EventMsg::SubagentChildEvent(p) => {
+                assert_eq!(p.thread_id, "hthread-1");
+                assert_eq!(p.child_thread_id, "real-child");
+                assert_eq!(p.turn_id, "tu-1");
             }
             other => panic!("unexpected variant: {other:?}"),
         }

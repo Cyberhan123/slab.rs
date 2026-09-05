@@ -190,6 +190,16 @@ async fn ensure_turn_model_loaded(
     session: &HarnessSession,
     params: &TurnStartParams,
 ) -> Result<(), String> {
+    // Scripted e2e stack: the LlmPort short-circuits before any runtime model
+    // is consulted, so skip the load gate entirely (the client-sent model id
+    // is accepted as-is).
+    #[cfg(any(test, debug_assertions))]
+    {
+        if slab_app_core::infra::agent::adapter::e2e_mode_enabled() {
+            return Ok(());
+        }
+    }
+
     let Some(model_id) = params.model.as_deref().map(str::trim).filter(|id| !id.is_empty()) else {
         return Ok(());
     };

@@ -36,6 +36,7 @@ pub fn event_msg_to_notification(msg: EventMsg) -> Option<ServerNotification> {
         }
         EventMsg::FileChangeOutputDelta(p) => Some(ServerNotification::FileChangeOutputDelta(p)),
         EventMsg::BackgroundTaskUpdated(p) => Some(ServerNotification::BackgroundTaskUpdated(p)),
+        EventMsg::SubagentChildEvent(p) => Some(ServerNotification::SubagentChildEvent(p)),
         EventMsg::CommandExecutionRequestApproval(p) => {
             Some(ServerNotification::CommandExecutionRequestApproval(p))
         }
@@ -142,5 +143,32 @@ mod tests {
         assert_eq!(json["params"]["resultSummary"], "child result");
         // Optional-absent fields must not leak onto the wire.
         assert!(json["params"].get("exitCode").is_none());
+    }
+
+    #[test]
+    fn subagent_child_event_lifts_to_notification() {
+        let event = EventMsg::SubagentChildEvent(slab_agent::protocol::SubagentChildEventParams {
+            thread_id: "parent".to_owned(),
+            child_thread_id: "child".to_owned(),
+            phase: "started".to_owned(),
+            turn_id: "tu-1".to_owned(),
+            item: slab_agent::protocol::TurnItem::ToolCall {
+                id: "item-1".to_owned(),
+                tool: "read_file".to_owned(),
+                arguments: serde_json::json!({ "path": "README.md" }),
+                status: "in_progress".to_owned(),
+                result: None,
+                error: None,
+                duration_ms: None,
+            },
+        });
+        let n = event_msg_to_notification(event).unwrap();
+        assert_eq!(n.method(), "subagent/childEvent");
+        let json = serde_json::to_value(&n).unwrap();
+        assert_eq!(json["method"], "subagent/childEvent");
+        assert_eq!(json["params"]["threadId"], "parent");
+        assert_eq!(json["params"]["childThreadId"], "child");
+        assert_eq!(json["params"]["phase"], "started");
+        assert_eq!(json["params"]["item"]["tool"], "read_file");
     }
 }

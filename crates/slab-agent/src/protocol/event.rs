@@ -73,6 +73,12 @@ pub enum EventMsg {
     /// from the turn — may fire after the run that started the task ended.
     BackgroundTaskUpdated(BackgroundTaskUpdatedParams),
 
+    /// A delegated subagent's turn item, re-keyed to the PARENT thread by the
+    /// app-core subagent bridge relay so harness clients can render live child
+    /// activity inside the delegate card. Only `ItemStarted`/`ItemCompleted`
+    /// payloads are relayed; deltas/approvals stay child-local.
+    SubagentChildEvent(SubagentChildEventParams),
+
     CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams),
     FileChangeRequestApproval(FileChangeRequestApprovalParams),
 

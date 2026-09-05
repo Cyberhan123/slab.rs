@@ -120,6 +120,19 @@ export interface SubagentTaskInfo {
     resultSummary?: string | null
     command?: string | null
 }
+
+/**
+ * One relayed child-agent turn item (`subagent/childEvent`) rendered in the
+ * delegate card's activity list. Item ids are child-scoped and never enter the
+ * parent thread's item registry, so they cannot collide with parent items.
+ */
+export interface SubagentChildItem {
+    /** Child-scope item id (`started` → `completed` upserts by this key). */
+    id: string
+    phase: "started" | "completed"
+    /** Minimal display label: tool name / command / item kind. */
+    label: string
+}
 /** `compacting` = in-progress (rendered as a Shimmer); `compacted` = done. */
 export type CompactionPhase = "compacting" | "compacted"
 
@@ -156,6 +169,42 @@ const TERMINAL_THREAD_STATUSES: ReadonlySet<ThreadStatusString> = new Set([
   "errored",
   "shutdown",
 ])
+
+/** Cap on relayed child items kept per child (the card renders the tail). */
+const MAX_SUBAGENT_CHILD_ITEMS = 50
+
+/**
+ * Wire shape of the inner `item` on `subagent/childEvent` — the camelCase
+ * `TurnItem` union with only the label-relevant fields (see
+ * `SubagentChildEventParams` in `@slab/api/harness`).
+ */
+interface SubagentChildEventItem {
+  id?: string
+  type?: string
+  command?: string
+  tool?: string
+  server?: string
+}
+
+/** Minimal display label for a relayed child turn item. */
+function subagentChildItemLabel(item: SubagentChildEventItem | undefined): string {
+  switch (item?.type) {
+    case "commandExecution":
+      return `command: ${item.command ?? ""}`
+    case "toolCall":
+      return `tool: ${item.tool ?? "unknown"}`
+    case "mcpToolCall":
+      return `mcp: ${item.server ?? "server"}/${item.tool ?? "unknown"}`
+    case "agentMessage":
+      return "agent message"
+    case "reasoning":
+      return "reasoning"
+    case "fileChange":
+      return "file change"
+    default:
+      return item?.type ?? "item"
+  }
+}
 
 /** Immutable snapshot exposed via {@link ConversationController.getState}. */
 export interface ConversationState {
@@ -221,6 +270,8 @@ export interface ConversationState {
   backgroundTasks: readonly BackgroundTaskInfo[]
   /** taskId → live subagent delegation state (drives the delegate tool card). */
   subagentTasksByTaskId: ReadonlyMap<string, SubagentTaskInfo>
+  /** childThreadId → relayed child turn items (live child activity in the card). */
+  subagentChildItemsByChildId: ReadonlyMap<string, readonly SubagentChildItem[]>
 }
 
 /** Options accepted by the {@link ConversationController} constructor. */
@@ -330,6 +381,7 @@ const EMPTY_SNAPSHOT: ConversationState = {
   queuedTexts: [],
   backgroundTasks: [],
   subagentTasksByTaskId: new Map(),
+  subagentChildItemsByChildId: new Map(),
 }
 
 // ── Controller ──────────────────────────────────────────────────────────────
@@ -374,6 +426,7 @@ export class ConversationController {
   private queuedTexts: string[] = []
   private backgroundTasks: BackgroundTaskInfo[] = []
   private subagentTasks = new Map<string, SubagentTaskInfo>()
+  private subagentChildItems = new Map<string, SubagentChildItem[]>()
   /**
    * The live AI-SDK stream never replays user messages (the wire has no
    * `message/appended` notification), so when queued steering is drained or
@@ -449,6 +502,7 @@ export class ConversationController {
       this.isHistoryLoading = false
       this.backgroundTasks = []
       this.subagentTasks = new Map()
+      this.subagentChildItems = new Map()
       this.restoreVersion += 1
       this.commit()
       return
@@ -488,7 +542,16 @@ export class ConversationController {
         .catch(() => {})
 
       try {
-        const { thread } = await this.client.threadResume({})
+        // A resync must resume the SAME thread the controller is bound to.
+        // `threadResume({})` without a threadId asks the server for the
+        // session's most-recent root thread AND mints a fresh harness id for
+        // it — the mismatched id then reads as a thread switch (wiping the
+        // background-task/subagent maps) and diverges from the live fan-out's
+        // rewrite id (every later notification gets filtered out). Only the
+        // first restore intentionally discovers the thread id-less.
+        const { thread } = await this.client.threadResume(
+          this.client.currentThreadId ? { threadId: this.client.currentThreadId } : {},
+        )
         const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
         this.client.currentThreadId = thread.id
         this.client.lastTurnIndex = computeLastTurnIndex(thread)
@@ -502,9 +565,14 @@ export class ConversationController {
           messages.every((message, index) => message.id === prevMessageIds[index])
         if (!identicalReread) this.restoredMessages = messages
         // Background tasks are thread-scoped; a thread switch drops the list.
-        if (this.restoredThreadId !== thread.id) {
+        // A null `restoredThreadId` means the thread was created by the first
+        // `turn/start` (fresh session — never restored) and this resume binds
+        // that SAME thread, not a switch: clearing there would wipe the live
+        // subagent/background maps right after a delegation completed.
+        if (this.restoredThreadId !== null && this.restoredThreadId !== thread.id) {
           this.backgroundTasks = []
           this.subagentTasks = new Map()
+          this.subagentChildItems = new Map()
         }
         this.userMessageTurnIndex = buildUserMessageTurnIndex(thread)
         this.restoredThreadId = thread.id
@@ -940,6 +1008,7 @@ export class ConversationController {
       queuedTexts: [...this.queuedTexts],
       backgroundTasks: this.backgroundTasks,
       subagentTasksByTaskId: this.subagentTasks,
+      subagentChildItemsByChildId: this.subagentChildItems,
     }
     for (const listener of this.listeners) listener()
   }
@@ -1072,6 +1141,47 @@ export class ConversationController {
             : m,
         )
       }
+      this.commit()
+      return
+    }
+
+    // Relayed child-agent activity (`subagent/childEvent`): accumulate per
+    // child thread so the delegate card can render live child activity.
+    // Routing-only state — deliberately NEVER sets `pendingResync` (child work
+    // is out-of-band; the parent's own terminal transition owns the resync).
+    if (method === HARNESS_NOTIFICATION.SUBAGENT_CHILD_EVENT) {
+      const params = (notification.params ?? {}) as {
+        threadId?: string
+        childThreadId?: string
+        phase?: string
+        item?: SubagentChildEventItem
+      }
+      if (params.threadId !== undefined && params.threadId !== this.client.currentThreadId) {
+        return
+      }
+      const childThreadId = params.childThreadId
+      const itemId = params.item?.id
+      if (childThreadId === undefined || itemId === undefined) return
+
+      const entry: SubagentChildItem = {
+        id: itemId,
+        phase: params.phase === "completed" ? "completed" : "started",
+        label: subagentChildItemLabel(params.item),
+      }
+      const existing = this.subagentChildItems.get(childThreadId) ?? []
+      const index = existing.findIndex((candidate) => candidate.id === entry.id)
+      const next = [...existing]
+      if (index >= 0) {
+        next[index] = entry
+      } else {
+        next.push(entry)
+      }
+      // Bound the activity list: a long-lived child can produce many items and
+      // the card renders the tail anyway.
+      this.subagentChildItems = new Map(this.subagentChildItems).set(
+        childThreadId,
+        next.slice(-MAX_SUBAGENT_CHILD_ITEMS),
+      )
       this.commit()
       return
     }

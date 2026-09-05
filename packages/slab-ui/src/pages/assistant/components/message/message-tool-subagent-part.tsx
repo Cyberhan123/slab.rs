@@ -42,7 +42,8 @@ function liveState(status: string | undefined): ToolState | null {
 
 function MessageToolSubagentPart(props: MessagePartRenderProps<TMessagePart, TMessage>) {
   const { part, kind, name, toolCallId } = props
-  const { approvalStatusByItemId, subagentTasksByTaskId } = useMessageInteraction()
+  const { approvalStatusByItemId, subagentTasksByTaskId, subagentChildItemsByChildId } =
+    useMessageInteraction()
   if (kind !== "tool") return null
 
   const p = part as ToolPartLike
@@ -60,6 +61,11 @@ function MessageToolSubagentPart(props: MessagePartRenderProps<TMessagePart, TMe
   const taskId = str(envelope?.task_id)
   const isBackground = envelope?.background === true || taskId !== undefined
   const task = taskId ? subagentTasksByTaskId.get(taskId) : undefined
+  // Relayed child activity (`subagent/childEvent`) correlates by the real
+  // child thread id from the delegation envelope.
+  const childThreadId = str(envelope?.child_thread_id)
+  const childItems =
+    isBackground && childThreadId ? subagentChildItemsByChildId.get(childThreadId) : undefined
 
   // Live state wins over the part state for background delegations: the part
   // is finalized but the delegation may still be running (or have failed).
@@ -93,6 +99,28 @@ function MessageToolSubagentPart(props: MessagePartRenderProps<TMessagePart, TMe
             {maxTurns !== undefined ? <span>max_turns: {maxTurns}</span> : null}
             {taskId ? <span>task: {taskId}</span> : null}
           </DetailMeta>
+          {childItems && childItems.length > 0 ? (
+            <div className="space-y-1" data-testid="tool-detail-subagent-activity">
+              {childItems.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="flex items-center gap-2 text-xs text-muted-foreground"
+                >
+                  <span
+                    aria-hidden
+                    className={
+                      entry.phase === "completed"
+                        ? "text-emerald-500"
+                        : "animate-pulse text-muted-foreground/70"
+                    }
+                  >
+                    {entry.phase === "completed" ? "✓" : "•"}
+                  </span>
+                  <span className="truncate">{entry.label}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
           {task?.resultSummary ? (
             <div className="rounded-md bg-muted/40 p-2 text-xs whitespace-pre-wrap">
               {task.resultSummary}

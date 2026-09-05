@@ -19,7 +19,7 @@ use slab_agent::protocol::{
     CommandExecutionRequestApprovalParams, ContextCompactedParams, ContextCompactingParams,
     FileChangeOutputDeltaParams, FileChangeRequestApprovalParams, ItemCompletedParams,
     ItemStartedParams, ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams,
-    ThreadStatusChangedParams, TurnCompletedParams, TurnStartedParams,
+    SubagentChildEventParams, ThreadStatusChangedParams, TurnCompletedParams, TurnStartedParams,
 };
 
 // ---- error / account ----
@@ -169,6 +169,8 @@ pub enum ServerNotification {
     FileChangeOutputDelta(FileChangeOutputDeltaParams),
     #[serde(rename = "backgroundTask/updated")]
     BackgroundTaskUpdated(BackgroundTaskUpdatedParams),
+    #[serde(rename = "subagent/childEvent")]
+    SubagentChildEvent(SubagentChildEventParams),
     #[serde(rename = "item/commandExecution/requestApproval")]
     CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams),
     #[serde(rename = "item/fileChange/requestApproval")]
@@ -202,6 +204,7 @@ impl ServerNotification {
             }
             Self::FileChangeOutputDelta(_) => crate::harness::method::ITEM_FILE_CHANGE_OUTPUT_DELTA,
             Self::BackgroundTaskUpdated(_) => crate::harness::method::BACKGROUND_TASK_UPDATED,
+            Self::SubagentChildEvent(_) => crate::harness::method::SUBAGENT_CHILD_EVENT,
             Self::CommandExecutionRequestApproval(_) => {
                 crate::harness::method::ITEM_COMMAND_EXECUTION_REQUEST_APPROVAL
             }

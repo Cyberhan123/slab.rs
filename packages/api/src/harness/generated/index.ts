@@ -403,7 +403,7 @@ export type ServerInfo = { name: string, version: string, };
 /**
  * Union of every server → client notification, discriminated by `method`.
  */
-export type ServerNotification = { "method": "thread/statusChanged", "params": ThreadStatusChangedParams } | { "method": "turn/started", "params": TurnStartedParams } | { "method": "turn/completed", "params": TurnCompletedParams } | { "method": "context/compacting", "params": ContextCompactingParams } | { "method": "context/compacted", "params": ContextCompactedParams } | { "method": "item/started", "params": ItemStartedParams } | { "method": "item/completed", "params": ItemCompletedParams } | { "method": "item/agentMessage/delta", "params": AgentMessageDeltaParams } | { "method": "item/reasoning/textDelta", "params": ReasoningTextDeltaParams } | { "method": "item/reasoning/summaryTextDelta", "params": ReasoningSummaryTextDeltaParams } | { "method": "item/commandExecution/outputDelta", "params": CommandExecutionOutputDeltaParams } | { "method": "item/fileChange/outputDelta", "params": FileChangeOutputDeltaParams } | { "method": "backgroundTask/updated", "params": BackgroundTaskUpdatedParams } | { "method": "item/commandExecution/requestApproval", "params": CommandExecutionRequestApprovalParams } | { "method": "item/fileChange/requestApproval", "params": FileChangeRequestApprovalParams } | { "method": "error", "params": ErrorParams } | { "method": "account/updated", "params": AccountUpdatedParams } | { "method": "account/loginCompleted", "params": AccountLoginCompletedParams };
+export type ServerNotification = { "method": "thread/statusChanged", "params": ThreadStatusChangedParams } | { "method": "turn/started", "params": TurnStartedParams } | { "method": "turn/completed", "params": TurnCompletedParams } | { "method": "context/compacting", "params": ContextCompactingParams } | { "method": "context/compacted", "params": ContextCompactedParams } | { "method": "item/started", "params": ItemStartedParams } | { "method": "item/completed", "params": ItemCompletedParams } | { "method": "item/agentMessage/delta", "params": AgentMessageDeltaParams } | { "method": "item/reasoning/textDelta", "params": ReasoningTextDeltaParams } | { "method": "item/reasoning/summaryTextDelta", "params": ReasoningSummaryTextDeltaParams } | { "method": "item/commandExecution/outputDelta", "params": CommandExecutionOutputDeltaParams } | { "method": "item/fileChange/outputDelta", "params": FileChangeOutputDeltaParams } | { "method": "backgroundTask/updated", "params": BackgroundTaskUpdatedParams } | { "method": "subagent/childEvent", "params": SubagentChildEventParams } | { "method": "item/commandExecution/requestApproval", "params": CommandExecutionRequestApprovalParams } | { "method": "item/fileChange/requestApproval", "params": FileChangeRequestApprovalParams } | { "method": "error", "params": ErrorParams } | { "method": "account/updated", "params": AccountUpdatedParams } | { "method": "account/loginCompleted", "params": AccountLoginCompletedParams };
 
 // ── ShutdownParams ──
 export type ShutdownParams = { threadId: string, };
@@ -428,6 +428,39 @@ export type SkillsListResult = { data: Array<SkillInfo>, };
  * Where a skill was discovered (workspace `.agents/skills` vs global app-home).
  */
 export type SkillSource = "workspace" | "global";
+
+// ── SubagentChildEventParams ──
+/**
+ * `subagent/childEvent` — a relayed child-agent turn item, re-published on
+ * the PARENT channel by the app-core subagent bridge so harness clients can
+ * render live child activity inside the delegate card. The inner item ids
+ * stay child-scoped: they render card-locally and never enter the parent
+ * thread's item registry, so no id namespacing is needed in v1.
+ */
+export type SubagentChildEventParams = { 
+/**
+ * PARENT thread id (real id server-side; rewritten to the harness id on
+ * the wire like every other thread-keyed notification).
+ */
+threadId: string, 
+/**
+ * Child agent thread id (real; opaque correlation key client-side —
+ * matches the `child_thread_id` in the `delegate_subagent` tool output
+ * envelope).
+ */
+childThreadId: string, 
+/**
+ * `started` | `completed`.
+ */
+phase: string, 
+/**
+ * The child turn the item belongs to (scopes `started`/`completed` pairs).
+ */
+turnId: string, 
+/**
+ * The child turn item (tool call / message), payload unchanged.
+ */
+item: TurnItem, };
 
 // ── TextElement ──
 /**

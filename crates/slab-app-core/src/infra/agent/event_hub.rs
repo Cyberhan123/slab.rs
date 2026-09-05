@@ -283,6 +283,15 @@ impl AgentEventHub {
         self.channel(thread_id).send_msg(msg);
     }
 
+    /// Broadcast an event to `thread_id`'s UI channel ONLY, bypassing the
+    /// persistence routing [`AgentNotifyPort::on_event_msg`] performs. Used by
+    /// the subagent bridge to re-publish RELAYED child events onto the parent
+    /// channel: the child-side observer already persists them on the child's
+    /// own channel, and a second copy would double-write the parent rollout.
+    pub fn broadcast_event_msg(&self, thread_id: &str, msg: EventMsg) {
+        self.broadcast_msg(thread_id, msg);
+    }
+
     /// Route a persistence-grade event into the DEDICATED
     /// UNBOUNDED persistence channel. Called from `on_event_msg` IN ADDITION to
     /// the UI broadcast.

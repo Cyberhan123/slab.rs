@@ -41,6 +41,9 @@ export const HARNESS_NOTIFICATION = {
   // Resident background task lifecycle (shell background=true), emitted from
   // the background task registry via `EventMsg` (projected like item events).
   BACKGROUND_TASK_UPDATED: "backgroundTask/updated",
+  // Delegated-subagent child activity, re-keyed to the parent thread by the
+  // app-core subagent bridge relay (projected like item events).
+  SUBAGENT_CHILD_EVENT: "subagent/childEvent",
   ERROR: "error",
   ACCOUNT_UPDATED: "account/updated",
   ACCOUNT_LOGIN_COMPLETED: "account/loginCompleted",

@@ -869,6 +869,134 @@ describe("ConversationController", () => {
     controller.dispose()
   })
 
+  it("resync resumes the SAME thread and keeps the subagent map", async () => {
+    const { controller, socket } = await restoredController()
+
+    // A running then terminal subagent transition stores the task and flags
+    // the resync (consumed by the terminal thread status below).
+    socket.simMessage(
+      notification("backgroundTask/updated", {
+        threadId: "hthread-1",
+        taskId: "bg-sub-9",
+        status: "running",
+        kind: "subagent",
+      }),
+    )
+    socket.simMessage(
+      notification("backgroundTask/updated", {
+        threadId: "hthread-1",
+        taskId: "bg-sub-9",
+        status: "completed",
+        kind: "subagent",
+      }),
+    )
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "completed",
+      }),
+    )
+    await flush()
+
+    // The real reconnect fires: its thread/resume request MUST carry the
+    // bound thread id — an id-less resume makes the server mint a fresh
+    // harness id, which reads as a thread switch (wiping the subagent map)
+    // and diverges from the live fan-out's rewrite id.
+    const resumeReq = await vi.waitFor(() => {
+      const request = FakeWebSocket.last!.sent
+        .map((frame) => JSON.parse(frame))
+        .findLast(
+          (frame) => frame.method === "thread/resume" && frame.id !== undefined,
+        )
+      expect(request).toBeDefined()
+      return request as { id: number; params?: { threadId?: string } }
+    })
+    expect(resumeReq.params?.threadId).toBe("hthread-1")
+
+    FakeWebSocket.last!.simMessage(rpcResponse(resumeReq.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() =>
+      expect(controller.getState().subagentTasksByTaskId.get("bg-sub-9")).toMatchObject({
+        status: "completed",
+      }),
+    )
+    controller.dispose()
+  })
+
+  it("accumulates relayed subagent child events per child without resync", async () => {
+    const { controller, socket } = await restoredController()
+    const reconnectSpy = vi.spyOn(controller, "reconnect").mockResolvedValue()
+
+    socket.simMessage(
+      notification("subagent/childEvent", {
+        threadId: "hthread-1",
+        childThreadId: "child-a",
+        phase: "started",
+        turnId: "tu-1",
+        item: { id: "item-1", type: "commandExecution", command: "rg needle" },
+      }),
+    )
+    await flush()
+    expect(controller.getState().subagentChildItemsByChildId.get("child-a")).toEqual([
+      { id: "item-1", phase: "started", label: "command: rg needle" },
+    ])
+
+    // The completed phase upserts by item id — no duplicate row.
+    socket.simMessage(
+      notification("subagent/childEvent", {
+        threadId: "hthread-1",
+        childThreadId: "child-a",
+        phase: "completed",
+        turnId: "tu-1",
+        item: { id: "item-1", type: "commandExecution", command: "rg needle" },
+      }),
+    )
+    // A second item appends; other children accumulate separately.
+    socket.simMessage(
+      notification("subagent/childEvent", {
+        threadId: "hthread-1",
+        childThreadId: "child-a",
+        phase: "started",
+        turnId: "tu-1",
+        item: { id: "item-2", type: "toolCall", tool: "read_file" },
+      }),
+    )
+    await flush()
+    expect(controller.getState().subagentChildItemsByChildId.get("child-a")).toEqual([
+      { id: "item-1", phase: "completed", label: "command: rg needle" },
+      { id: "item-2", phase: "started", label: "tool: read_file" },
+    ])
+
+    // Other threads' children are ignored entirely.
+    socket.simMessage(
+      notification("subagent/childEvent", {
+        threadId: "other-thread",
+        childThreadId: "child-b",
+        phase: "started",
+        turnId: "tu-9",
+        item: { id: "item-9", type: "agentMessage" },
+      }),
+    )
+    await flush()
+    expect(controller.getState().subagentChildItemsByChildId.has("child-b")).toBe(false)
+
+    // Child activity is routing-only state — it NEVER flags a resync: a
+    // terminal thread status with no pending resync flag does not reconnect.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "completed",
+      }),
+    )
+    await flush()
+    expect(reconnectSpy).not.toHaveBeenCalled()
+    expect(controller.getState().backgroundTasks).toEqual([])
+    expect(controller.getState().subagentTasksByTaskId.size).toBe(0)
+
+    reconnectSpy.mockRestore()
+    controller.dispose()
+  })
+
   it("keeps per-item map identities stable across unrelated commits", async () => {
     const { controller, socket } = await restoredController()
     const before = controller.getState()

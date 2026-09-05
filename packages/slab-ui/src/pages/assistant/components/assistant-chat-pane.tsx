@@ -41,6 +41,7 @@ import type {
     CompactionMarker,
     HarnessChatTransport,
     ModelLoadState,
+    SubagentChildItem,
     SubagentTaskInfo,
     ThreadStatusString,
     TurnSendOptions,
@@ -107,6 +108,8 @@ export type AssistantChatPaneProps = {
     backgroundTasks: readonly BackgroundTaskInfo[]
     /** taskId → live subagent delegation state (drives the delegate tool card). */
     subagentTasksByTaskId: ReadonlyMap<string, SubagentTaskInfo>
+    /** childThreadId → relayed child turn items (live child activity in the card). */
+    subagentChildItemsByChildId: ReadonlyMap<string, readonly SubagentChildItem[]>
     /** Steering send — submits while the turn runs queue at the iteration boundary. */
     onSteerSubmit: (text: string, options?: TurnSendOptions) => Promise<unknown>
     /**
@@ -167,6 +170,7 @@ export function AssistantChatPane({
     queuedTexts,
     backgroundTasks,
     subagentTasksByTaskId,
+    subagentChildItemsByChildId,
     onSteerSubmit,
     onInterrupt,
     onStartNewChat,
@@ -218,8 +222,15 @@ export function AssistantChatPane({
             userMessageTurnIndex,
             rollbackToMessage: handleRollbackMessage,
             subagentTasksByTaskId,
+            subagentChildItemsByChildId,
         }),
-        [approvalStatusByItemId, userMessageTurnIndex, handleRollbackMessage, subagentTasksByTaskId],
+        [
+            approvalStatusByItemId,
+            userMessageTurnIndex,
+            handleRollbackMessage,
+            subagentTasksByTaskId,
+            subagentChildItemsByChildId,
+        ],
     )
     const liveToolOutputValue = useMemo(
         () => ({ liveOutputByItemId, livePatchByItemId }),

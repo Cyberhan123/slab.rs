@@ -16,9 +16,13 @@ export default defineConfig(async () => ({
       name: 'load-vscode-css-as-string',
       enforce: 'pre',
       async resolveId(this, source, importer, options) {
-        const resolved = (await this.resolve(source, importer, options))!
+        const resolved = await this.resolve(source, importer, options)
+        // `this.resolve` returns null for URLs that are not modules at all
+        // (e.g. the app's `/health` readiness probe) — pass those through
+        // instead of crashing the transform middleware, which 500s the request
+        // AND pops the vite error overlay over the page.
         if (
-          resolved.id.match(
+          resolved?.id.match(
             /node_modules\/(@codingame\/monaco-vscode|vscode|monaco-editor).*\.css$/
           )
         ) {
@@ -91,6 +95,14 @@ export default defineConfig(async () => ({
           target: apiProxyTarget,
           changeOrigin: true,
           ws: true,
+        },
+        // The desktop boot gate (`waitForApiServer`) probes `/health` on the
+        // API base URL — same origin as the page under the dev proxy — so the
+        // probe must be forwarded too (otherwise it lands on the vite
+        // transform middleware instead of slab-server).
+        "/health": {
+          target: apiProxyTarget,
+          changeOrigin: true,
         },
       }
       : undefined,
