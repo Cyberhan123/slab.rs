@@ -17,6 +17,13 @@ use crate::background::{
 
 const DEFAULT_SUBAGENT_TURNS: u32 = 8;
 
+/// Cap for inlining a child result alongside its artifact. Results at or under
+/// this bound flow into the parent notification / registry summary verbatim;
+/// larger results live in the artifact alone. The notification renderer in
+/// slab-app-core truncates at the same bound, so the two crates share this
+/// single constant (app-core imports it — the dependency only runs that way).
+pub const MAX_NOTIFICATION_RESULT_CHARS: usize = 8_000;
+
 /// A subagent was spawned (both background and inline delegations report
 /// this — the host uses it to attach rollout persistence to the child).
 pub struct SubagentSpawnedEvent {
@@ -287,8 +294,18 @@ impl TypedTool for DelegateSubagentTool {
                             tracing::warn!(%error, "failed to write subagent artifact");
                             Vec::new()
                         });
-                        let completion_text =
-                            if artifact_refs.is_empty() { completion_text } else { None };
+                        // The artifact is the durable record, but a bounded
+                        // result is ALSO inlined so the parent notification,
+                        // the registry summary, and `subagent_status` all
+                        // carry it without a follow-up file read. Only a
+                        // runaway result is dropped to the artifact alone.
+                        // Applied BEFORE `SubagentTerminalData` is built so
+                        // the inline output, the registry result, and the
+                        // sink event all see the same value.
+                        let completion_text = completion_text.filter(|text| {
+                            artifact_refs.is_empty()
+                                || text.chars().count() <= MAX_NOTIFICATION_RESULT_CHARS
+                        });
                         SubagentTerminalData {
                             child_thread_id: snapshot.id,
                             status: snapshot.status,
@@ -907,7 +924,9 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let artifact_ref = value["artifact_refs"][0].as_str().expect("artifact ref");
 
-        assert_eq!(value["completion_text"], serde_json::Value::Null);
+        // A bounded result is inlined ALONGSIDE the artifact — the parent
+        // (and every summary surface) sees the text without a file read.
+        assert_eq!(value["completion_text"], "child result");
         assert!(artifact_ref.starts_with(".slab/artifacts/"));
         assert!(artifact_ref.ends_with("/result.json"));
 
@@ -928,6 +947,76 @@ mod tests {
         assert!(child_prompt.contains("Objective:\nsummarize"));
         assert!(child_prompt.contains("workspace-relative scope: src"));
         assert!(child_prompt.contains("Required output format:"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    /// LLM double whose final answer exceeds the notification inline bound.
+    struct RunawayLlm;
+
+    #[async_trait]
+    impl LlmPort for RunawayLlm {
+        async fn chat_completion(
+            &self,
+            _model: &str,
+            _messages: &[ConversationMessage],
+            _tools: &[ToolSpec],
+            _config: &AgentConfig,
+            _trace_context: &AgentTraceContext,
+        ) -> Result<LlmResponse, AgentError> {
+            Ok(LlmResponse {
+                content: Some("x".repeat(MAX_NOTIFICATION_RESULT_CHARS + 100)),
+                content_already_streamed: false,
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".to_owned()),
+                usage: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn delegate_subagent_drops_runaway_result_to_artifact_alone() {
+        let temp_dir = std::env::temp_dir()
+            .join(format!("slab-agent-tools-subagent-runaway-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        tokio::fs::create_dir_all(&temp_dir).await.expect("temp workspace");
+
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(RunawayLlm),
+            store,
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ));
+        let tool = delegate_tool(control);
+
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent")
+                .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
+                .build(),
+            &serde_json::json!({ "task": "summarize", "max_turns": 1, "background": false }),
+        )
+        .await
+        .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+
+        // Over the bound the text is dropped: the artifact is the only
+        // carrier, keeping the parent's context bounded by design.
+        assert_eq!(value["completion_text"], serde_json::Value::Null);
+        let artifact_ref = value["artifact_refs"][0].as_str().expect("artifact ref");
+        let artifact =
+            tokio::fs::read_to_string(temp_dir.join(artifact_ref)).await.expect("artifact content");
+        let artifact: serde_json::Value = serde_json::from_str(&artifact).expect("artifact json");
+        assert_eq!(
+            artifact["completion_text"].as_str().map(str::len),
+            Some(MAX_NOTIFICATION_RESULT_CHARS + 100)
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

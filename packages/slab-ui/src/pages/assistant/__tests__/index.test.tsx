@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { MemoryRouter, useLocation } from "react-router-dom"
 
+import type { ConversationState } from "@slab/core/harness"
+
 import { HeaderProvider } from "@slab/ui/layouts/header-provider"
 import Header from "@slab/ui/layouts/header"
 import { SlabProvider } from "@slab/ui/provider/slab-provider"
@@ -46,15 +48,39 @@ const mocks = vi.hoisted(() => {
   const harnessConversation = {
     activeConversation: undefined as string | undefined,
     error: null as string | null,
+    actionError: null,
     isHistoryLoading: false,
     restoredMessages: [] as UIMessage[],
     restoredThreadId: null as string | null,
     restoreVersion: 1,
+    historyCreatedAt: null as number | null,
     transport: {},
     approvals: [] as Array<Record<string, unknown>>,
     approvalStatusByItemId: new Map<string, "pending" | "approved" | "denied">(),
     liveOutputByItemId: new Map<string, string>(),
+    livePatchByItemId: new Map<string, string[]>(),
+    modelLoad: null,
+    turnUsage: null,
     commands: [] as Array<Record<string, unknown>>,
+    compactionMarkers: [] as Array<Record<string, unknown>>,
+    isCompacting: false,
+    isForking: false,
+    isRollingBack: false,
+    userMessageTurnIndex: new Map<string, number>(),
+    planMode: false,
+    threadStatus: null as string | null,
+    abortReason: null,
+    queuedCount: 0,
+    queuedTexts: [] as string[],
+    backgroundTasks: [] as Array<Record<string, unknown>>,
+    subagentTasksByTaskId: new Map<string, Record<string, unknown>>(),
+    subagentChildItemsByChildId: new Map<string, Array<Record<string, unknown>>>(),
+    compactThread: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    forkThread: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    rollbackFromTurn: vi.fn<(turnIndex: number) => void>(),
+    setPlanMode: vi.fn<(enabled: boolean) => void>(),
+    sendSteering: vi.fn<() => Promise<unknown>>().mockResolvedValue({ queued: true }),
+    interrupt: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     resolveApproval: vi.fn<
       (itemId: string, approved: boolean, scope: "run_once" | "always_in_workspace" | "always" | "deny") => Promise<void>
     >(),
@@ -99,6 +125,11 @@ vi.mock("@ai-sdk/react", () => ({
     }
   }),
 }))
+
+// Drift guard: the hand-written mock must track the FULL ConversationState
+// shape — a field missing here reads `undefined` inside components with no
+// type error to flag it (this exact file silently lagged 15+ fields behind).
+export const conversationStateDriftGuard: ConversationState = mocks.harnessConversation
 
 vi.mock("../hooks/use-harness-conversation", () => ({
   useHarnessConversation: vi.fn(() => mocks.harnessConversation),

@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ConversationState } from '@slab/core/harness';
+
 import AssistantPage from '@slab/ui/pages/assistant';
 import { renderDesktopScene } from '../test-utils';
 
@@ -88,6 +90,11 @@ vi.mock('@ai-sdk/react', () => ({
     stop: mocks.stop,
   })),
 }));
+
+// Drift guard: the hand-written mock must track the FULL ConversationState
+// shape — a field missing here reads `undefined` inside components with no
+// type error to flag it.
+export const conversationStateDriftGuard: ConversationState = mocks.harnessConversation;
 
 vi.mock('@slab/ui/pages/assistant/hooks/use-harness-conversation', () => ({
   useHarnessConversation: vi.fn(() => mocks.harnessConversation),

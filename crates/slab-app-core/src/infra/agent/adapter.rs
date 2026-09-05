@@ -314,11 +314,14 @@ fn e2e_subagent_response(
     if prompt.contains("subagent-e2e/delegate") && e2e_tool_available(tools, "delegate_subagent") {
         let task = e2e_parse_quoted(prompt, "task")
             .unwrap_or_else(|| "e2e delegated task needle=SUBAGENT_NEEDLE".to_owned());
-        return Some(e2e_tool_call_response(
-            "e2e-delegate",
-            "delegate_subagent",
-            serde_json::json!({ "task": task, "background": true }),
-        ));
+        let mut arguments = serde_json::json!({ "task": task, "background": true });
+        // `no_resume=1` opts the delegation out of the parent follow-up (and
+        // the stall watchdog) — scenario 7 and the watchdog-immune variant of
+        // scenario 5 use it.
+        if e2e_parse_marker(prompt, "no_resume").as_deref() == Some("1") {
+            arguments["no_resume"] = serde_json::json!(true);
+        }
+        return Some(e2e_tool_call_response("e2e-delegate", "delegate_subagent", arguments));
     }
 
     if prompt.contains("subagent-e2e/steer") && e2e_tool_available(tools, "subagent_message") {
@@ -875,6 +878,32 @@ mod tests {
             serde_json::from_str(&call.arguments).expect("arguments are valid JSON");
         assert_eq!(arguments["task"], "count widgets needle=GAMMA_3 slow=20000");
         assert_eq!(arguments["background"], true);
+    }
+
+    #[test]
+    fn e2e_parent_delegate_passes_no_resume_when_marked() {
+        let response = e2e_llm_response(
+            &[text_message(
+                "user",
+                "subagent-e2e/delegate no_resume=1 task=\"count widgets needle=EPSILON_5\"",
+            )],
+            &[subagent_spec("delegate_subagent")],
+        );
+
+        assert_eq!(response.tool_calls.len(), 1);
+        let arguments: serde_json::Value =
+            serde_json::from_str(&response.tool_calls[0].arguments).expect("arguments JSON");
+        assert_eq!(arguments["task"], "count widgets needle=EPSILON_5");
+        assert_eq!(arguments["no_resume"], true);
+
+        // Unmarked delegations leave the flag absent (runtime default false).
+        let plain = e2e_llm_response(
+            &[text_message("user", "subagent-e2e/delegate task=\"count widgets\"")],
+            &[subagent_spec("delegate_subagent")],
+        );
+        let arguments: serde_json::Value =
+            serde_json::from_str(&plain.tool_calls[0].arguments).expect("arguments JSON");
+        assert!(arguments.get("no_resume").is_none());
     }
 
     #[test]

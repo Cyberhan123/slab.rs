@@ -20,6 +20,7 @@ export { turnItemsToMessages } from "./turn-items"
 export { buildTurnInput } from "./turn-input"
 export {
   ConversationController,
+  EMPTY_SNAPSHOT,
   MAX_RESTORE_ATTEMPTS,
   RESTORE_BACKOFF_MS,
   buildUserMessageTurnIndex,

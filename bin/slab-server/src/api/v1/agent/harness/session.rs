@@ -121,6 +121,17 @@ impl HarnessSession {
         self.bindings().get(harness_id).and_then(|binding| binding.real_id.clone())
     }
 
+    /// Reverse lookup: the harness id already bound to `real_id` on this
+    /// connection, if any. Lets a repeated no-arg `thread/resume` reuse the
+    /// caller's existing binding instead of minting a fresh id (a fresh id
+    /// makes clients misread the same thread as a switch). Invariant: at
+    /// most one binding per real id — every establish path mints a distinct
+    /// harness id for a distinct real thread, and re-establishing the same
+    /// pair overwrites in place.
+    pub(crate) fn harness_id_for_real(&self, real_id: &str) -> Option<String> {
+        reuse_bound_harness_id(&self.bindings(), real_id)
+    }
+
     pub(crate) fn bind(&self, harness_id: &str, real_id: String) {
         self.bindings().insert(harness_id.to_owned(), ThreadBinding { real_id: Some(real_id) });
     }
@@ -288,6 +299,20 @@ fn dedupe_fanout(tasks: &HashMap<String, JoinHandle<()>>, real_id: &str) -> Fano
     }
 }
 
+/// Reverse lookup over the binding table: the harness id already bound to
+/// `real_id`, if any. Empty bindings (`bind_empty`, pre-first-turn) never
+/// match. Invariant: at most one binding per real id, so the find is
+/// deterministic.
+fn reuse_bound_harness_id(
+    bindings: &HashMap<String, ThreadBinding>,
+    real_id: &str,
+) -> Option<String> {
+    bindings
+        .iter()
+        .find(|(_, binding)| binding.real_id.as_deref() == Some(real_id))
+        .map(|(harness_id, _)| harness_id.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use slab_agent::protocol::{ContextCompactedParams, ContextCompactingParams, ErrorEvent};
@@ -295,6 +320,27 @@ mod tests {
     use tokio::sync::mpsc;
 
     use super::*;
+
+    /// A repeated no-arg `thread/resume` must resolve to the SAME harness id
+    /// this connection already bound (clients misread a fresh id as a thread
+    /// switch). Empty bindings and foreign real ids never match.
+    #[test]
+    fn reuse_bound_harness_id_finds_existing_binding_only() {
+        let mut bindings = HashMap::new();
+        bindings
+            .insert("hthread-1".to_owned(), ThreadBinding { real_id: Some("real-1".to_owned()) });
+        bindings.insert("hthread-2".to_owned(), ThreadBinding::default());
+        // A client that passed the real id directly gets a self-mapped
+        // binding — reusing it is equally idempotent.
+        bindings.insert("real-9".to_owned(), ThreadBinding { real_id: Some("real-9".to_owned()) });
+
+        assert_eq!(reuse_bound_harness_id(&bindings, "real-1").as_deref(), Some("hthread-1"));
+        assert_eq!(reuse_bound_harness_id(&bindings, "real-9").as_deref(), Some("real-9"));
+        // bind_empty slots (no real thread yet) must not match anything.
+        assert_eq!(reuse_bound_harness_id(&bindings, "hthread-2"), None);
+        // Unknown real id → caller mints a fresh harness id.
+        assert_eq!(reuse_bound_harness_id(&bindings, "real-x"), None);
+    }
 
     #[test]
     fn error_event_pushes_error_notification_with_thread_and_code() {

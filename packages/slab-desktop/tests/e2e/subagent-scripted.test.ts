@@ -17,6 +17,9 @@
  *   4. subagent_stop cancels without a completion notification
  *   5. interrupting the parent cascades a stop to the child
  *   6. UI card flips running → completed end-to-end
+ *   7. no_resume suppresses the parent follow-up (result stays queryable)
+ *   8. the stall watchdog notices a silent child (short window via
+ *      SLAB_E2E_STALL_MS, set by the global setup)
  */
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
@@ -50,6 +53,7 @@ const endpoints = inject("e2e-subagent-runtime") as SubagentRuntimeEndpoints
 const baseUrl = endpoints.serverBaseUrl
 
 const NOTIFICATION_PREFIX = "[subagent task finished]"
+const STALL_PREFIX = "[subagent task stalled]"
 
 let browser: Browser
 let session: SessionResponse
@@ -216,6 +220,10 @@ describe("subagent delegation (scripted LLM)", () => {
       )
       expect(notification.content).toContain("status=completed")
       expect(notification.content).toContain(needle)
+      // Bounded results are INLINED alongside the artifact reference — the
+      // parent (and the card summary) see the text without a file read.
+      expect(notification.content).toContain("Result: SUBAGENT_RESULT")
+      expect(notification.content).toMatch(/Result artifact: \.slab\/artifacts\//)
 
       // …which auto-resumes the parent for a follow-up assistant turn.
       await eventually("parent resumed after the notification", async () => {
@@ -232,10 +240,9 @@ describe("subagent delegation (scripted LLM)", () => {
         return after?.content.includes("E2E parent resumed") ? after : null
       }, 90_000, 1_000)
 
-      // The card flips to completed. (The result itself lives in the child's
-      // artifact — the artifact branch drops `completion_text` from both the
-      // notification and the registry summary — so the needle is asserted on
-      // the notification's Task line above, not the card body.)
+      // The card flips to completed. Bounded results are inlined since the
+      // notification-carry change, so the card summary also shows the
+      // child's answer text.
       await waitForSubagentCardStatus(page, "completed")
       await waitForSubagentToolState(page, "output-available")
     },
@@ -272,10 +279,9 @@ describe("subagent delegation (scripted LLM)", () => {
       const steerResult = parseToolJson(steered.toolMessages[0].content)
       expect(steerResult.queued).toBe(true)
 
-      // The completion notification only references the child's RESULT
-      // ARTIFACT (the artifact branch drops `completion_text` from the
-      // event), so the steering's effect is asserted on the artifact: the
-      // child's final answer is the steering ack carrying the steered needle.
+      // The steering's effect is asserted on the artifact (the child's final
+      // answer is the steering ack carrying the steered needle) — the
+      // artifact is the durable full record of the child's answer.
       const childThreadId = String(
         parseToolJson(delegated.toolMessages[0].content).child_thread_id,
       )
@@ -349,7 +355,12 @@ describe("subagent delegation (scripted LLM)", () => {
       // This stack is fully owned by the suite: full_control is safe here.
       await selectPermissionMode(page, "full_control")
 
-      const delegatePrompt = `subagent-e2e/delegate task="probe needle=${needle} slow=90000"`
+      // `no_resume=1` keeps this delegation out of the stall watchdog's
+      // scope (its 90s silent child would otherwise trip the suite-wide
+      // short stall window used by scenario 8) — the cascade stop itself is
+      // independent of the notification path, so the assertions below are
+      // unaffected.
+      const delegatePrompt = `subagent-e2e/delegate no_resume=1 task="probe needle=${needle} slow=90000"`
       await sendAssistantMessage(page, delegatePrompt)
       const delegated = await waitForToolExecution(
         baseUrl,
@@ -393,11 +404,139 @@ describe("subagent delegation (scripted LLM)", () => {
       await waitForSubagentCardStatus(page, "running")
       await waitForSubagentToolState(page, "input-available")
 
-      // Once it finishes: completed card with the task id meta line. (The
-      // child's answer text goes to the artifact, not the card summary.)
+      // Once it finishes: completed card with the task id meta line, the
+      // relayed child activity, and the inlined result summary.
       await waitForSubagentCardStatus(page, "completed", 90_000)
       await waitForSubagentToolState(page, "output-available")
       await expectSubagentCardText(page, `task: ${String(envelope.task_id)}`)
+      // The relayed child turn items render in the dedicated activity region
+      // (Radix collapsible content must be expanded — see
+      // `expandSubagentToolRows` inside `expectSubagentCardText`).
+      await eventually("subagent activity region shows child items", async () => {
+        await expandSubagentToolRows(page)
+        const activity = page.locator('[data-testid="tool-detail-subagent-activity"]')
+        const count = await activity.count()
+        for (let index = 0; index < count; index += 1) {
+          // eslint-disable-next-line no-await-in-loop
+          const text = (await activity.nth(index).textContent()) ?? ""
+          if (text.trim().length > 0) return true
+        }
+        return null
+      }, 60_000)
+      // The terminal backgroundTask event carries the truncated completion
+      // text — the card's resultSummary box renders it (only the child's
+      // answer text reaches this div, so the prefix pins the P1.1 fix).
+      await expectSubagentCardText(page, "SUBAGENT_RESULT")
+    },
+    180_000
+  )
+
+  it(
+    "7. no_resume suppresses the parent follow-up but keeps the result queryable",
+    async () => {
+      const needle = needleFor("S7")
+      const delegatePrompt =
+        `subagent-e2e/delegate no_resume=1 task="quiet probe needle=${needle} slow=10000"`
+
+      await sendAssistantMessage(page, delegatePrompt)
+      const delegated = await waitForToolExecution(
+        baseUrl,
+        session.id,
+        delegatePrompt,
+        "delegate_subagent",
+        90_000
+      )
+      const envelope = parseToolJson(delegated.toolMessages[0].content)
+      const childThreadId = String(envelope.child_thread_id)
+
+      // The child still runs to completion (the card tracks it as usual)…
+      await waitForSubagentCardStatus(page, "running")
+      await waitForSubagentCardStatus(page, "completed", 90_000)
+
+      // …but the parent is NEVER resumed: no completion notification arrives…
+      await assertNoUserMessageWithPrefixWithin(
+        baseUrl,
+        session.id,
+        NOTIFICATION_PREFIX,
+        15_000
+      )
+      // …and no auto-resume turn happened either.
+      const restore = await restoreSession(baseUrl, session.id)
+      expect(
+        restore.messages.some(
+          (message) =>
+            message.role === "assistant" &&
+            message.content.includes("E2E parent resumed"),
+        ),
+      ).toBe(false)
+
+      // The result stays queryable: the artifact carries the child's answer.
+      const artifactPath = join(
+        endpoints.workspaceRoot,
+        ".slab",
+        "artifacts",
+        childThreadId,
+        "result.json",
+      )
+      const artifact = await eventually("no_resume artifact written", async () => {
+        const raw = await readFile(artifactPath, "utf8").catch(() => null)
+        return raw?.includes(needle) ? raw : null
+      }, 60_000, 1_000)
+      expect(artifact).toContain(needle)
+    },
+    180_000
+  )
+
+  it(
+    "8. the stall watchdog notices a silent child once, then the child finishes",
+    async () => {
+      const needle = needleFor("S8")
+      // The child parks inside its first LLM call (silent, no open items) for
+      // 30s; the global setup shortens the stall window to 18s via
+      // SLAB_E2E_STALL_MS, so the watchdog fires mid-run.
+      const delegatePrompt = `subagent-e2e/delegate task="stall probe needle=${needle} slow=30000"`
+
+      await sendAssistantMessage(page, delegatePrompt)
+      const delegated = await waitForToolExecution(
+        baseUrl,
+        session.id,
+        delegatePrompt,
+        "delegate_subagent",
+        90_000
+      )
+      const envelope = parseToolJson(delegated.toolMessages[0].content)
+      const childThreadId = String(envelope.child_thread_id)
+
+      // The stall notice reaches the parent as a user message (assert by
+      // user-message prefix — the parent's echo reply repeats the notice
+      // text as an assistant message, so substring searches double-count).
+      const stall = await waitForUserMessageWithPrefix(
+        baseUrl,
+        session.id,
+        STALL_PREFIX,
+        90_000
+      )
+      expect(stall.content).toContain(childThreadId)
+
+      // One-shot: exactly one stall notice across the whole run.
+      const restore = await restoreSession(baseUrl, session.id)
+      expect(
+        restore.messages.filter(
+          (message) =>
+            message.role === "user" && message.content.startsWith(STALL_PREFIX),
+        ),
+      ).toHaveLength(1)
+
+      // The child was never interrupted: it completes normally and the
+      // ordinary finished notification still arrives.
+      await waitForSubagentCardStatus(page, "completed", 90_000)
+      const notification = await waitForUserMessageWithPrefix(
+        baseUrl,
+        session.id,
+        NOTIFICATION_PREFIX,
+        90_000
+      )
+      expect(notification.content).toContain("status=completed")
     },
     180_000
   )

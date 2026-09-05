@@ -1,7 +1,7 @@
 //! Tool-call execution for a single agent turn.
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use futures::future::join_all;
@@ -41,6 +41,22 @@ const TASK_COMPLETE_TOOL_NAME: &str = "task.complete";
 /// Metadata key the `task.complete` tool places its completion marker under.
 /// Mirrors `slab_agent_tools::TASK_COMPLETE_METADATA_KEY`.
 const TASK_COMPLETE_METADATA_KEY: &str = "task_complete";
+
+/// Bound for the display-only output drain after a tool call settles. The
+/// channel's last sender can live inside detached pipe-reader tasks of a
+/// cancelled shell run (they end at pipe EOF, which on the cancellation path
+/// depends on a fire-and-forget tree kill — see slab-sandboxing's driver).
+/// Without a bound, one lingering sender holds the turn — and with it the
+/// `Interrupting → Interrupted` transition — for the survivor's lifetime.
+/// Mirrors `READ_DRAIN_GRACE` in slab-sandboxing's driver.
+const TOOL_OUTPUT_DRAIN_GRACE: Duration = Duration::from_secs(5);
+
+/// Run the display-only delta drain bounded by [`TOOL_OUTPUT_DRAIN_GRACE`].
+/// Returns `true` when the grace window expired (pending display deltas are
+/// dropped — the finalized result still arrives via `item/completed`).
+async fn drain_within_grace<F: std::future::Future<Output = ()>>(drain: F) -> bool {
+    tokio::time::timeout(TOOL_OUTPUT_DRAIN_GRACE, drain).await.is_err()
+}
 
 /// Tool name for on-demand Deferred-tool discovery. Mirrors
 /// `slab_agent_tools::TOOL_SEARCH_TOOL_NAME`; duplicated here because
@@ -974,7 +990,15 @@ async fn handle_tool_call(
             }
         }
     };
-    let (run_result, ()) = tokio::join!(run, drain);
+    let (run_result, drain_grace_exceeded) =
+        tokio::join!(run, async { drain_within_grace(drain).await });
+    if drain_grace_exceeded {
+        warn!(
+            tool = %tool_call.name,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "tool output drain exceeded the grace window; dropping pending display deltas"
+        );
+    }
     let (tool_output, call_status) = run_result?;
     let duration_ms = started.elapsed().as_millis() as u64;
     // Best-effort: surface the shell exit code on the completed item.
@@ -1417,6 +1441,30 @@ mod tests {
             name: name.to_owned(),
             arguments: "{}".to_owned(),
         }
+    }
+
+    /// The cancelled-shell shape: a detached task holds the output channel's
+    /// sender past the tool future's drop, so the drain's channel never
+    /// closes. The grace bound (not the channel) must end the drain — without
+    /// it the turn (and the `Interrupting → Interrupted` transition) would
+    /// wait for the sender's lifetime.
+    #[tokio::test(start_paused = true)]
+    async fn drain_grace_bounds_a_never_closing_output_channel() {
+        // Never-finishing drain → the grace window expires (paused clock
+        // fast-forwards through the timeout).
+        assert!(drain_within_grace(std::future::pending::<()>()).await);
+
+        // A promptly-closing channel drains within the grace window.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        drop(tx);
+        assert!(
+            !drain_within_grace(async {
+                while let Some(delta) = rx.recv().await {
+                    std::mem::drop(delta);
+                }
+            })
+            .await
+        );
     }
 
     #[test]

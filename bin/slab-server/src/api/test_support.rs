@@ -50,6 +50,15 @@ impl TestServer {
     }
 
     pub(crate) async fn new_with(options: TestServerOptions) -> Self {
+        // Hermetic "no workspace open" preconditions: the CWD-ancestor
+        // fallback in `workspace_root_from_config` would otherwise resolve
+        // the repo checkout cargo-test executes from (its `.git`/`.slab`
+        // marker counts as a workspace). Must run BEFORE the AppState is
+        // constructed — the initial workspace slot is derived by the same
+        // function. Production keeps the fallback enabled.
+        slab_app_core::domain::services::WorkspaceService::set_cwd_workspace_fallback_enabled(
+            false,
+        );
         let temp_dir = tempfile::tempdir().expect("test server temp dir");
         let root = temp_dir.path();
         let settings_dir = root.join("config");

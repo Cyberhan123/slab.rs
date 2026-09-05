@@ -1,6 +1,8 @@
 import { page } from 'vitest/browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ConversationState } from '@slab/core/harness';
+
 import AssistantPage from '@slab/ui/pages/assistant';
 import type { AssistantConversationItem } from '@slab/ui/pages/assistant/hooks/use-assistant-sessions';
 import {
@@ -86,6 +88,11 @@ const { mockUseAssistantLocale } = vi.hoisted(() => ({
 const { mockUseMarkdownTheme } = vi.hoisted(() => ({
   mockUseMarkdownTheme: vi.fn<() => unknown>(),
 }));
+
+// Drift guard: the hand-written mock above must track the FULL
+// ConversationState shape — a field missing there reads `undefined` inside
+// components with no type error to flag it.
+export const conversationStateDriftGuard: ConversationState = mocks.harnessConversation;
 
 vi.mock('@slab/ui/pages/assistant/hooks/use-harness-conversation', () => ({
   useHarnessConversation: vi.fn(() => mocks.harnessConversation),

@@ -353,7 +353,14 @@ const approvalStatusCache = new WeakMap<
   Map<string, ApprovalStatus>
 >()
 
-const EMPTY_SNAPSHOT: ConversationState = {
+/**
+ * Seed snapshot for a pristine controller — also exported for tests that
+ * mock `useHarnessConversation`: spreading it (plus the action mocks) and
+ * `satisfies`-ing the state type keeps mock objects from silently drifting
+ * behind the real state shape (a missing field reads `undefined` in
+ * components with no type error to flag it).
+ */
+export const EMPTY_SNAPSHOT: ConversationState = {
   restoredMessages: [],
   restoredThreadId: null,
   activeConversation: undefined,

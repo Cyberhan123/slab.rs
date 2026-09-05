@@ -241,6 +241,11 @@ pub struct ThreadStartResult {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct ThreadResumeParams {
+    /// Resume a specific thread. When omitted, the server resumes the
+    /// session's most-recent root thread. Idempotent per connection: a
+    /// repeated resume resolving to a thread this connection already bound
+    /// reuses that binding's id (callers must not treat the response id as
+    /// "new"); a fresh connection mints a new id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
@@ -214,12 +215,31 @@ pub fn workspace_root_from_ancestors(start: &Path) -> Option<PathBuf> {
     start.ancestors().find(|candidate| has_workspace_marker(candidate)).map(Path::to_path_buf)
 }
 
+/// Test-only switch for the CWD-ancestor fallback arm of
+/// [`workspace_root_from_config`]: in-process tests that assert "no
+/// workspace open" semantics must not inherit whatever checkout the test
+/// runner executes from (cargo test runs inside the repo, which carries a
+/// `.git`/`.slab` marker). Production never flips this (default `true`).
+static CWD_WORKSPACE_FALLBACK_ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// See [`CWD_WORKSPACE_FALLBACK_ENABLED`]. `#[doc(hidden)]`: not part of the
+/// public API surface — exposed for the in-process server test harness.
+#[doc(hidden)]
+pub(crate) fn set_cwd_workspace_fallback_enabled(enabled: bool) {
+    CWD_WORKSPACE_FALLBACK_ENABLED.store(enabled, Ordering::Release);
+}
+
 pub fn workspace_root_from_config(config: &AppConfig) -> Option<PathBuf> {
     config
         .workspace_root
         .clone()
         .or_else(|| workspace_root_from_settings_path(&config.settings_path))
-        .or_else(|| std::env::current_dir().ok().as_deref().and_then(workspace_root_from_ancestors))
+        .or_else(|| {
+            if !CWD_WORKSPACE_FALLBACK_ENABLED.load(Ordering::Acquire) {
+                return None;
+            }
+            std::env::current_dir().ok().as_deref().and_then(workspace_root_from_ancestors)
+        })
 }
 
 fn normalize_language_id(language_id: &str) -> String {

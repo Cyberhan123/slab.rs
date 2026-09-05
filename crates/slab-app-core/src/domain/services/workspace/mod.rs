@@ -84,6 +84,17 @@ impl WorkspaceService {
         lsp::workspace_root_from_config(config)
     }
 
+    /// `#[doc(hidden)]` test hook — disables the CWD-ancestor fallback arm of
+    /// [`WorkspaceService::workspace_root_from_config`] for this process, so
+    /// in-process tests asserting "no workspace open" semantics stay hermetic
+    /// regardless of the directory the test runner executes from. Call BEFORE
+    /// building an [`crate::context::AppState`] (the initial workspace slot is
+    /// derived from the same function).
+    #[doc(hidden)]
+    pub fn set_cwd_workspace_fallback_enabled(enabled: bool) {
+        lsp::set_cwd_workspace_fallback_enabled(enabled);
+    }
+
     pub fn ensure_workspace_settings(root: impl AsRef<Path>) -> Result<PathBuf, AppCoreError> {
         let root = root.as_ref();
         let slab_dir = root.join(SLAB_DIR_NAME);

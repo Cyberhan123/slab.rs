@@ -514,7 +514,17 @@ pub(crate) async fn thread_resume(
                 .map_err(|e| e.to_string())?;
             let snapshot =
                 restored.thread.ok_or_else(|| "no thread to resume for session".to_owned())?;
-            (session.mint_thread_id(), snapshot)
+            // Reuse this connection's existing binding for the same real
+            // thread when present: a repeated no-arg resume (e.g. a client
+            // resync on a live socket) then returns the SAME harness id, so
+            // clients do not misread the thread as switched. A fresh
+            // connection (empty bindings) still mints a new id.
+            (
+                session
+                    .harness_id_for_real(&snapshot.id)
+                    .unwrap_or_else(|| session.mint_thread_id()),
+                snapshot,
+            )
         }
     };
     // `bind` + `spawn_event_fanout` are run centrally by the establish_op

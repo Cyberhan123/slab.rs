@@ -526,7 +526,15 @@ export type ThreadListParams = { cursor?: string, limit?: number, modelProviders
 export type ThreadListResult = { data: Array<Thread>, nextCursor?: string, };
 
 // ── ThreadResumeParams ──
-export type ThreadResumeParams = { threadId?: string, path?: string, };
+export type ThreadResumeParams = { 
+/**
+ * Resume a specific thread. When omitted, the server resumes the
+ * session's most-recent root thread. Idempotent per connection: a
+ * repeated resume resolving to a thread this connection already bound
+ * reuses that binding's id (callers must not treat the response id as
+ * "new"); a fresh connection mints a new id.
+ */
+threadId?: string, path?: string, };
 
 // ── ThreadResumeResult ──
 export type ThreadResumeResult = { thread: Thread, };

@@ -8,7 +8,7 @@
 //! late-bound via [`OnceLock`] (same pattern as the memory pipeline's
 //! `set_control`).
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -16,7 +16,8 @@ use slab_agent::protocol::{
     EventMsg, ItemCompletedParams, ItemStartedParams, SubagentChildEventParams,
 };
 use slab_agent_tools::{
-    BackgroundTaskStatus, SubagentFinishedEvent, SubagentSpawnedEvent, SubagentTaskSink,
+    BackgroundTaskStatus, MAX_NOTIFICATION_RESULT_CHARS, SubagentFinishedEvent,
+    SubagentSpawnedEvent, SubagentTaskSink,
 };
 use slab_types::{ConversationMessage, ConversationMessageContent};
 use tokio::sync::broadcast;
@@ -24,15 +25,12 @@ use tokio::sync::broadcast;
 use crate::domain::services::agent::AgentCore;
 use crate::infra::agent::event_hub::AgentEventHub;
 
-/// Cap the completion text embedded in the parent notification. Generous by
-/// design (the parent agent consumes the result directly), but bounded so a
-/// runaway child cannot flood the parent's context.
-const MAX_NOTIFICATION_RESULT_CHARS: usize = 8_000;
-
 /// Default stall threshold before a silent background delegation is reported
 /// to the parent (notice-only, one-shot). Generous on purpose: a silent long
 /// tool call (e.g. a plain `sleep` with no output) emits no events and would
-/// false-positive under a tighter window — see [`SubagentWatchdog`].
+/// false-positive under a tighter window — see [`SubagentWatchdog`]. The
+/// e2e scripted stack shortens this via `SLAB_E2E_STALL_MS` (see
+/// [`stall_warn_after`]).
 const SUBAGENT_STALL_WARN_AFTER: Duration = Duration::from_secs(5 * 60);
 
 pub(crate) struct SubagentBridge {
@@ -88,7 +86,7 @@ impl SubagentTaskSink for SubagentBridge {
             let child_thread_id = event.child_thread_id.clone();
             let notify_core = Arc::clone(core);
             let notice_parent = event.parent_thread_id.clone();
-            tokio::spawn(SubagentWatchdog { stall_after: SUBAGENT_STALL_WARN_AFTER }.run(
+            tokio::spawn(SubagentWatchdog { stall_after: stall_warn_after() }.run(
                 hub,
                 child_thread_id,
                 move |notice| {
@@ -252,10 +250,12 @@ async fn relay_child_events(
 /// refreshes the activity watermark.
 ///
 /// False-positive surface: a silent long-running tool (e.g. `sleep 300` with
-/// no output deltas) emits no events, so a child may be reported stalled while
-/// legitimately busy. The 5-minute default + notice-only + one-shot semantics
-/// make that an acceptable v1 trade-off; a future refinement could refresh the
-/// watermark while an `ItemStarted` is open.
+/// no output deltas) emits no events between its `ItemStarted`/`ItemCompleted`
+/// pair. The elapsed branch therefore treats an OPEN item as activity (slow
+/// tick: refresh the watermark, do not fire) — only a silent child with
+/// nothing in flight is reported stalled. An item that never completes keeps
+/// this watchdog quiet indefinitely, which is bounded by the child's terminal
+/// status breaking the loop.
 pub(crate) struct SubagentWatchdog {
     stall_after: Duration,
 }
@@ -268,6 +268,9 @@ impl SubagentWatchdog {
         let subscription = hub.subscribe_event_msgs(&child_thread_id);
         let mut receiver = subscription.receiver;
         let mut watermark = tokio::time::Instant::now();
+        // Items whose `ItemStarted` has no matching `ItemCompleted` yet —
+        // visible in-flight work, not silence.
+        let mut open_items: HashSet<String> = HashSet::new();
         // `N` is `FnOnce` — `take()` makes the at-most-once call explicit.
         let mut notify = Some(notify);
 
@@ -276,10 +279,19 @@ impl SubagentWatchdog {
             match tokio::time::timeout_at(deadline, receiver.recv()).await {
                 Ok(Ok(envelope)) => {
                     watermark = tokio::time::Instant::now();
-                    if let EventMsg::ThreadStatusChanged(p) = envelope.msg
-                        && is_terminal_thread_status(&p.status)
-                    {
-                        break;
+                    match envelope.msg {
+                        EventMsg::ItemStarted(p) => {
+                            open_items.insert(p.item.id().to_owned());
+                        }
+                        EventMsg::ItemCompleted(p) => {
+                            open_items.remove(p.item.id());
+                        }
+                        EventMsg::ThreadStatusChanged(p)
+                            if is_terminal_thread_status(&p.status) =>
+                        {
+                            break;
+                        }
+                        _ => {}
                     }
                 }
                 Ok(Err(broadcast::error::RecvError::Lagged(_))) => {
@@ -288,6 +300,14 @@ impl SubagentWatchdog {
                 }
                 Ok(Err(broadcast::error::RecvError::Closed)) => break,
                 Err(_elapsed) => {
+                    // Slow tick: an open item is visible progress — refresh
+                    // the watermark instead of firing. The one-shot notice
+                    // only lands when the child is silent with nothing in
+                    // flight.
+                    if !open_items.is_empty() {
+                        watermark = tokio::time::Instant::now();
+                        continue;
+                    }
                     if let Some(notify) = notify.take() {
                         notify(render_stall_notice(&child_thread_id, self.stall_after));
                     }
@@ -300,12 +320,30 @@ impl SubagentWatchdog {
     }
 }
 
+/// Effective stall threshold: the 5-minute default, shortened by the e2e
+/// scripted stack via `SLAB_E2E_STALL_MS` (milliseconds). Debug/test builds
+/// only — this is an e2e escape hatch, not a production knob.
+fn stall_warn_after() -> Duration {
+    #[cfg(any(test, debug_assertions))]
+    if let Some(millis) =
+        std::env::var("SLAB_E2E_STALL_MS").ok().and_then(|value| value.parse::<u64>().ok())
+    {
+        return Duration::from_millis(millis.max(1));
+    }
+    SUBAGENT_STALL_WARN_AFTER
+}
+
 /// Render the stall notice. Deliberately NOT the `[subagent task finished]`
 /// prefix — a stalled child has no result to hand over.
 fn render_stall_notice(child_thread_id: &str, after: Duration) -> String {
+    let secs = after.as_secs();
+    let window = if secs >= 60 {
+        format!("{} minutes", (secs / 60).max(1))
+    } else {
+        format!("{secs} seconds")
+    };
     format!(
-        "[subagent task stalled] child_thread_id={child_thread_id} no activity for {} minutes; it may be stuck on a long tool call. Use subagent_status to inspect or subagent_stop to cancel.",
-        (after.as_secs() / 60).max(1)
+        "[subagent task stalled] child_thread_id={child_thread_id} no activity for {window}; it may be stuck on a long tool call. Use subagent_status to inspect or subagent_stop to cancel."
     )
 }
 
@@ -327,23 +365,24 @@ fn render_notification(event: &SubagentFinishedEvent) -> String {
     if event.status == BackgroundTaskStatus::Completed {
         text.push_str("\nThe delegated subagent finished; act on its result or continue the outstanding work.");
     }
-    match (&event.completion_text, event.artifact_refs.as_slice()) {
-        (Some(completion), _) if !completion.is_empty() => {
-            text.push_str("\nResult: ");
-            if completion.chars().count() > MAX_NOTIFICATION_RESULT_CHARS {
-                let truncated: String =
-                    completion.chars().take(MAX_NOTIFICATION_RESULT_CHARS).collect();
-                text.push_str(&truncated);
-                text.push_str("\n(result truncated — full text in the artifact)");
-            } else {
-                text.push_str(completion);
-            }
+    // Text and artifact reference are NOT mutually exclusive: a bounded
+    // result is inlined (the parent consumes it directly) AND the artifact
+    // line still points at the durable full record. Only a dropped runaway
+    // result (over the inline bound, artifact-only) skips the Result line.
+    if let Some(completion) = event.completion_text.as_deref().filter(|text| !text.is_empty()) {
+        text.push_str("\nResult: ");
+        if completion.chars().count() > MAX_NOTIFICATION_RESULT_CHARS {
+            let truncated: String =
+                completion.chars().take(MAX_NOTIFICATION_RESULT_CHARS).collect();
+            text.push_str(&truncated);
+            text.push_str("\n(result truncated)");
+        } else {
+            text.push_str(completion);
         }
-        (_, refs) if !refs.is_empty() => {
-            text.push_str("\nResult artifact: ");
-            text.push_str(&refs.join(", "));
-        }
-        _ => {}
+    }
+    if !event.artifact_refs.is_empty() {
+        text.push_str("\nResult artifact: ");
+        text.push_str(&event.artifact_refs.join(", "));
     }
     text
 }
@@ -374,17 +413,31 @@ mod tests {
     }
 
     #[test]
-    fn notification_prefers_artifact_reference_when_text_spilled() {
+    fn notification_falls_back_to_artifact_reference_when_text_dropped() {
+        // Runaway results are dropped upstream (artifact-only): the notice
+        // then carries just the artifact reference.
         let text = render_notification(&finished(None, &[".slab/artifacts/child/result.json"]));
         assert!(text.contains("Result artifact: .slab/artifacts/child/result.json"));
         assert!(!text.contains("Result: \n"));
     }
 
     #[test]
+    fn notification_renders_inline_text_and_artifact_reference_together() {
+        // A bounded result is inlined AND the artifact line still points at
+        // the durable record — the parent sees both without a file read.
+        let text = render_notification(&finished(
+            Some("all good"),
+            &[".slab/artifacts/child/result.json"],
+        ));
+        assert!(text.contains("Result: all good"));
+        assert!(text.contains("Result artifact: .slab/artifacts/child/result.json"));
+    }
+
+    #[test]
     fn notification_truncates_runaway_results() {
         let long = "x".repeat(MAX_NOTIFICATION_RESULT_CHARS + 100);
         let text = render_notification(&finished(Some(&long), &[]));
-        assert!(text.contains("(result truncated — full text in the artifact)"));
+        assert!(text.contains("(result truncated)"));
     }
 
     #[test]
@@ -581,6 +634,9 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
 
             // Activity every 50ms across three stall windows: no notice.
+            // (The started items never complete here, so both suppression
+            // mechanisms are in play: each event refreshes the watermark AND
+            // the open items would slow-tick it — either suffices.)
             for index in 0..6 {
                 hub.broadcast_event_msg(CHILD, item_started(&format!("item-{index}")));
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -593,6 +649,57 @@ mod tests {
             let deadline = std::time::Instant::now() + Duration::from_secs(2);
             while !watchdog.is_finished() && std::time::Instant::now() < deadline {
                 hub.broadcast_event_msg(CHILD, thread_status(AgentThreadStatus::Shutdown));
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            tokio::time::timeout(Duration::from_secs(2), watchdog)
+                .await
+                .expect("watchdog exits on terminal")
+                .expect("watchdog task ok");
+        }
+
+        /// The refinement under test: an OPEN item with zero subsequent
+        /// events is visible in-flight work — the watchdog slow-ticks
+        /// (refreshes the watermark) instead of firing. Once the item
+        /// completes and the child goes truly silent, the notice fires.
+        #[tokio::test]
+        async fn watchdog_slow_ticks_while_an_item_is_open_then_fires_after_it_closes() {
+            let hub = Arc::new(AgentEventHub::new());
+            let notices: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+            let recorder = Arc::clone(&notices);
+            let watchdog =
+                tokio::spawn(SubagentWatchdog { stall_after: Duration::from_millis(100) }.run(
+                    Arc::clone(&hub),
+                    CHILD.to_owned(),
+                    move |notice| {
+                        recorder.lock().unwrap_or_else(|p| p.into_inner()).push(notice);
+                    },
+                ));
+            tokio::time::sleep(Duration::from_millis(25)).await;
+
+            // One started item, then NOTHING across several stall windows.
+            hub.broadcast_event_msg(CHILD, item_started("item-1"));
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            assert!(
+                notices.lock().unwrap_or_else(|p| p.into_inner()).is_empty(),
+                "an open item is in-flight work, not a stall"
+            );
+
+            // Item completes; the child goes truly silent → the notice fires.
+            hub.broadcast_event_msg(CHILD, item_completed("item-1"));
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if !notices.lock().unwrap_or_else(|p| p.into_inner()).is_empty() {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("stall notice fires once the open item closes");
+
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            while !watchdog.is_finished() && std::time::Instant::now() < deadline {
+                hub.broadcast_event_msg(CHILD, thread_status(AgentThreadStatus::Completed));
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
             tokio::time::timeout(Duration::from_secs(2), watchdog)

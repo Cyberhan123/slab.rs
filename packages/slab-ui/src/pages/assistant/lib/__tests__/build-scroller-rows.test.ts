@@ -140,6 +140,35 @@ describe('buildScrollerRows', () => {
 
     expect(rows.some((r) => r.kind === 'queuedInput')).toBe(false)
   })
+
+  // Shell background tasks surface in the list WHILE RUNNING (the Running
+  // backgroundTask/updated event arrives at register time — pin the tail
+  // marker row so the live visibility contract cannot silently regress).
+  it('renders a running shell background task as a tail marker row', () => {
+    const rows = buildScrollerRows([msg('m1')], [], {
+      showHistoryMarker: false,
+      backgroundTasks: [
+        { taskId: 'sh-1', status: 'running', pid: 4242, command: 'sleep 30' },
+      ],
+    })
+
+    expect(rows.map((r) => r.kind)).toEqual(['message', 'backgroundTask'])
+    expect(rows.at(-1)).toMatchObject({
+      kind: 'backgroundTask',
+      id: '__background_task_sh-1',
+      task: { taskId: 'sh-1', status: 'running', command: 'sleep 30', pid: 4242 },
+    })
+  })
+
+  it('drops the row once the task leaves the running state', () => {
+    for (const status of ['exited', 'stopped', 'failed'] as const) {
+      const rows = buildScrollerRows([msg('m1')], [], {
+        showHistoryMarker: false,
+        backgroundTasks: [{ taskId: 'sh-1', status, exitCode: 0, command: 'sleep 30' }],
+      })
+      expect(rows.some((r) => r.kind === 'backgroundTask')).toBe(false)
+    }
+  })
 })
 
 describe('formatMarkerDate', () => {

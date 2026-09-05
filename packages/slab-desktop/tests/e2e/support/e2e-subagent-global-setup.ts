@@ -48,6 +48,13 @@ export type SubagentRuntimeEndpoints = Pick<
 const SCRIPTED_MODEL_ID = "slab-llama"
 
 export default async function e2eSubagentGlobalSetup(vitest: Vitest) {
+  // Scenario 8 drives the stall watchdog: shorten the 5-minute default to
+  // 18s. The window is chosen against the suite's timings — scenario 3's
+  // child is silent for 12s (must NOT trip) while scenario 8's is silent for
+  // 30s (must); scenario 5's 90s child is watchdog-exempt via no_resume=1.
+  // Set BEFORE the runtime boots (it spreads process.env into the server
+  // environment); debug/test-gated server-side, so it is inert in release.
+  process.env.SLAB_E2E_STALL_MS = process.env.SLAB_E2E_STALL_MS ?? "18000"
   const runtime = await createE2eEnvironment()
   const dev: ManagedProcess = await startScriptedE2eRuntime(runtime)
 
