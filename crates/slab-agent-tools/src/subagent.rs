@@ -17,6 +17,13 @@ use crate::background::{
 
 const DEFAULT_SUBAGENT_TURNS: u32 = 8;
 
+/// Hard upper bound for a child's `max_turns`: a delegation is a focused
+/// task, not a competing main agent — 100 turns already buys an unbounded
+/// run from the parent's perspective, and an unclamped model-supplied value
+/// (the schema range is advisory only) would burn tokens long after any
+/// interest in the result is gone.
+const MAX_SUBAGENT_TURNS_CAP: u32 = 100;
+
 /// Cap for inlining a child result alongside its artifact. Results at or under
 /// this bound flow into the parent notification / registry summary verbatim;
 /// larger results live in the artifact alone. The notification renderer in
@@ -252,7 +259,11 @@ impl TypedTool for DelegateSubagentTool {
                 child_config.allowed_tools = filtered;
             }
         }
-        child_config.max_turns = args.max_turns.unwrap_or(DEFAULT_SUBAGENT_TURNS).max(1);
+        // Clamp the model-supplied turn budget to the cap; the clamp is
+        // echoed in the tool result so the model knows the effective bound.
+        let max_turns_clamped = args.max_turns.is_some_and(|turns| turns > MAX_SUBAGENT_TURNS_CAP);
+        child_config.max_turns =
+            args.max_turns.unwrap_or(DEFAULT_SUBAGENT_TURNS).clamp(1, MAX_SUBAGENT_TURNS_CAP);
         child_config.transient = true;
 
         let messages = vec![ConversationMessage {
@@ -350,6 +361,27 @@ impl TypedTool for DelegateSubagentTool {
                             artifact_refs.is_empty()
                                 || text.chars().count() <= MAX_NOTIFICATION_RESULT_CHARS
                         });
+                        // Without an artifact there is nowhere for an oversized
+                        // result to live — truncate to the inline bound with an
+                        // explicit marker instead of inlining an unbounded child
+                        // output into the parent context.
+                        let completion_text = if artifact_refs.is_empty() {
+                            completion_text.map(|text| {
+                                if text.chars().count() <= MAX_NOTIFICATION_RESULT_CHARS {
+                                    text
+                                } else {
+                                    let truncated: String =
+                                        text.chars().take(MAX_NOTIFICATION_RESULT_CHARS).collect();
+                                    format!(
+                                        "{truncated}\n(result truncated at {} chars: no \
+                                         workspace artifact is available to hold the full output)",
+                                        MAX_NOTIFICATION_RESULT_CHARS
+                                    )
+                                }
+                            })
+                        } else {
+                            completion_text
+                        };
                         SubagentTerminalData {
                             child_thread_id: snapshot.id,
                             status: snapshot.status,
@@ -486,33 +518,39 @@ impl TypedTool for DelegateSubagentTool {
         }
 
         if args.background.unwrap_or(true) {
-            return Ok(ToolOutput {
-                content: serde_json::json!({
-                    "background": true,
-                    "task_id": task_id,
-                    "child_thread_id": child_thread_id,
-                    "status": "running",
-                    "hint": "Delegated in the background. The result will arrive as a follow-up message when the subagent finishes; use subagent_status to check progress, subagent_message to steer it, or subagent_stop to cancel."
-                })
-                .to_string(),
-                metadata: None,
+            let mut value = serde_json::json!({
+                "background": true,
+                "task_id": task_id,
+                "child_thread_id": child_thread_id,
+                "status": "running",
+                "hint": "Delegated in the background. The result will arrive as a follow-up message when the subagent finishes; use subagent_status to check progress, subagent_message to steer it, or subagent_stop to cancel."
             });
+            if max_turns_clamped {
+                value["max_turns_note"] = format!(
+                    "requested max_turns exceeded the cap; clamped to {MAX_SUBAGENT_TURNS_CAP}"
+                )
+                .into();
+            }
+            return Ok(ToolOutput { content: value.to_string(), metadata: None });
         }
 
         // Inline mode: park until the watcher published the terminal data.
         let data = filled_rx.await.map_err(|_| {
             AgentError::ToolExecution("subagent watcher terminated without a result".to_owned())
         })?;
-        Ok(ToolOutput {
-            content: serde_json::json!({
-                "child_thread_id": data.child_thread_id,
-                "status": data.status,
-                "completion_text": data.completion_text,
-                "artifact_refs": data.artifact_refs,
-            })
-            .to_string(),
-            metadata: None,
-        })
+        let mut value = serde_json::json!({
+            "child_thread_id": data.child_thread_id,
+            "status": data.status,
+            "completion_text": data.completion_text,
+            "artifact_refs": data.artifact_refs,
+        });
+        if max_turns_clamped {
+            value["max_turns_note"] = format!(
+                "requested max_turns exceeded the cap; clamped to {MAX_SUBAGENT_TURNS_CAP}"
+            )
+            .into();
+        }
+        Ok(ToolOutput { content: value.to_string(), metadata: None })
     }
 }
 
@@ -1274,6 +1312,92 @@ mod tests {
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    /// Without a workspace there is no artifact to hold an oversized result:
+    /// the inline copy is truncated at the bound with an explicit marker
+    /// instead of flowing into the parent context unbounded.
+    #[tokio::test]
+    async fn runaway_result_without_workspace_is_truncated() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(RunawayLlm),
+            store.clone(),
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ));
+        let tool = delegate_tool(control);
+
+        // NOTE: no `.workspace(...)` on the tool context — no artifact path.
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "summarize", "max_turns": 1, "background": false }),
+        )
+        .await
+        .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+
+        let text = value["completion_text"].as_str().expect("truncated copy is inlined");
+        assert!(
+            text.contains("result truncated"),
+            "the truncation is explicit, not silent: {text:?}"
+        );
+        assert!(
+            text.chars().count()
+                <= MAX_NOTIFICATION_RESULT_CHARS
+                    + "\n(result truncated at 0000 chars: no workspace artifact is available to hold the full output)".chars().count(),
+            "the inline copy stays at the bound: {}",
+            text.chars().count()
+        );
+    }
+
+    /// The model-supplied `max_turns` is clamped to the cap and the clamp is
+    /// echoed in the tool result.
+    #[tokio::test]
+    async fn max_turns_is_clamped_to_the_cap() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(FinalLlm),
+            store.clone(),
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ));
+        let tool = delegate_tool(control);
+
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({
+                "task": "summarize",
+                "max_turns": 100_000,
+                "background": false
+            }),
+        )
+        .await
+        .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        assert!(
+            value["max_turns_note"].as_str().is_some_and(|note| note.contains("clamped to 100")),
+            "the clamp is echoed to the model: {}",
+            value["max_turns_note"]
+        );
+
+        let child_id = value["child_thread_id"].as_str().expect("child id");
+        let child = store.get_thread(child_id).await.expect("thread").expect("child");
+        let child_config: AgentConfig =
+            serde_json::from_str(&child.config_json).expect("child config");
+        assert_eq!(child_config.max_turns, 100);
     }
 
     #[tokio::test]
