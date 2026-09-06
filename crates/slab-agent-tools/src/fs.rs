@@ -133,7 +133,8 @@ impl TypedTool for ReadFileTool {
                 return Err(AgentError::ToolExecution(format!(
                     "[file.too_large] read_file: '{}' is {} bytes (inline limit {} bytes); \
                          re-read with an explicit start_line/end_line window \
-                         (max {MAX_LINES} lines per call) or use grep to locate the content",
+                         (max {MAX_LINES} lines per call), or use grep / file_glob \
+                         to locate the relevant section first",
                     path.display(),
                     total_bytes,
                     MAX_INLINE_READ_BYTES
@@ -444,23 +445,25 @@ impl TypedTool for ListDirTool {
     }
 }
 
-fn to_tool_error(error: slab_file::FileSystemError) -> AgentError {
-    AgentError::ToolExecution(error.to_string())
-}
-
 pub(crate) fn resolve_agent_path(
     workspace_root: Option<&std::path::Path>,
     extra_roots: &[PathBuf],
     path: &str,
 ) -> Result<PathBuf, AgentError> {
+    // Route resolution failures through the coded mapper (same as the
+    // read/write/list errors) — a bare `to_string()` leaks the OS-localized
+    // io message on the Io variant.
+    let map_error = |error: slab_file::FileSystemError| {
+        crate::error::file_system_tool_error("resolve path", &PathBuf::from(path), error)
+    };
     let path_buf = PathBuf::from(path);
     if path_buf.is_absolute() {
         if path_is_under_extra_root(&path_buf, extra_roots) {
             return Ok(path_buf);
         }
-        return slab_file::resolve_path(workspace_root, path).map_err(to_tool_error);
+        return slab_file::resolve_path(workspace_root, path).map_err(map_error);
     }
-    slab_file::resolve_path(workspace_root, path).map_err(to_tool_error)
+    slab_file::resolve_path(workspace_root, path).map_err(map_error)
 }
 
 fn path_is_under_extra_root(path: &std::path::Path, extra_roots: &[PathBuf]) -> bool {
@@ -808,6 +811,7 @@ mod tests {
         assert!(rendered.contains("[file.too_large]"), "{rendered}");
         assert!(rendered.contains("start_line/end_line"), "{rendered}");
         assert!(rendered.contains("grep"), "{rendered}");
+        assert!(rendered.contains("file_glob"), "{rendered}");
 
         // A window wider than MAX_LINES is rejected with a narrowing hint.
         let error =
@@ -815,6 +819,23 @@ mod tests {
                 .await
                 .expect_err("oversized read with a too-wide window");
         assert!(error.to_string().contains("narrow the window"), "{}", error);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// list_dir failures go through the coded io mapper — a stable English
+    /// `[io.*]` code, never the OS-localized message.
+    #[tokio::test]
+    async fn list_dir_missing_path_errors_with_io_code() {
+        let root = temp_root("list_dir_coded");
+        let tool = ListDirTool::new(Some(root.clone()));
+
+        let error = ToolHandler::execute(&tool, &ctx(), &json!({"path": "missing-dir"}))
+            .await
+            .expect_err("missing directory");
+        let rendered = error.to_string();
+        assert!(rendered.contains("[io."), "coded io error, got: {rendered}");
+        assert!(rendered.contains("not found"), "{rendered}");
 
         let _ = fs::remove_dir_all(root);
     }
