@@ -138,6 +138,15 @@ pub fn normalize_relative_path(raw: &str) -> Result<String, FileSystemError> {
         .map_err(|_| FileSystemError::InvalidPath(raw.to_string()))
 }
 
+/// Resolve `path` against `workspace_root`, keeping the result inside the root.
+///
+/// **Degraded mode — `workspace_root: None`:** confinement is disabled
+/// entirely; the path is returned AS-IS (absolute paths are NOT rejected
+/// either), and relative paths resolve against the *process* working
+/// directory by the OS. Callers that still want an anchor in that mode
+/// should use the sandbox-context resolvers (`resolve_sandbox_path_for_read`
+/// / `resolve_sandbox_path_for_write`), which substitute the context's `cwd`
+/// when no workspace root is bound.
 pub fn resolve_path(workspace_root: Option<&Path>, path: &str) -> Result<PathBuf, FileSystemError> {
     let path_buf = PathBuf::from(path);
     let Some(root) = workspace_root else {

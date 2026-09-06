@@ -411,6 +411,40 @@ impl AgentThread {
             hook_observation_messages(start_effects.observations),
         );
 
+        // Startup consistency guard: the system prompt must not steer the
+        // model at workspace-bound tools the router never registered (no
+        // workspace root → apply_patch/git_* drop out; the plan prompt names
+        // git_* unconditionally). Warn and strip the guidance — a prompt/tool
+        // drift must not fail the run.
+        let missing_workspace_tools: Vec<&str> = WORKSPACE_BOUND_TOOL_NAMES
+            .iter()
+            .copied()
+            .filter(|name| tools.get(name).is_none())
+            .collect();
+        if !missing_workspace_tools.is_empty() {
+            for message in messages.iter_mut() {
+                if message.role != "system" {
+                    continue;
+                }
+                let ConversationMessageContent::Text(text) = &message.content else {
+                    continue;
+                };
+                let (cleaned, stripped) =
+                    strip_missing_tool_guidance(text, &missing_workspace_tools);
+                if stripped.is_empty() {
+                    continue;
+                }
+                for tool in &stripped {
+                    warn!(
+                        thread_id,
+                        tool = tool.as_str(),
+                        "system prompt names a tool missing from the router; stripping its guidance"
+                    );
+                }
+                message.content = ConversationMessageContent::Text(cleaned);
+            }
+        }
+
         if let Some(new_count) = emit_new {
             let start = messages.len().saturating_sub(new_count);
             for message in messages.iter().skip(start) {
@@ -1394,6 +1428,105 @@ fn hook_observation_messages(observations: Vec<String>) -> Vec<ConversationMessa
         .collect()
 }
 
+/// Workspace-bound tool names: `register_all_tools` only registers these when
+/// a workspace root exists, so a system prompt naming one while the router
+/// lacks it is steering the model at a tool it cannot call (e.g. the plan
+/// prompt lists `git_status`/`git_diff` unconditionally, and the main prompt
+/// gates only `apply_patch`).
+const WORKSPACE_BOUND_TOOL_NAMES: [&str; 4] =
+    ["apply_patch", "git_status", "git_diff", "git_commit"];
+
+fn is_word_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// Whether `text` mentions `tool` as a standalone token: a backticked
+/// `` `tool` `` or a word-bounded bare occurrence (`git_status_tool` or
+/// `my_apply_patch` do not count; `(git_status,` does).
+fn mentions_tool(text: &str, tool: &str) -> bool {
+    if text.contains(&format!("`{tool}`")) {
+        return true;
+    }
+    let mut rest = text;
+    while let Some(at) = rest.find(tool) {
+        let end = at + tool.len();
+        let before_ok = rest[..at].chars().next_back().is_none_or(|c| !is_word_char(c));
+        let after_ok = rest[end..].chars().next().is_none_or(|c| !is_word_char(c));
+        if before_ok && after_ok {
+            return true;
+        }
+        rest = &rest[end..];
+    }
+    false
+}
+
+/// Remove every mention of `tool` from `line` (backticked first, then bare
+/// word-bounded), keeping the sentence otherwise intact.
+fn remove_tool_mentions(line: &str, tool: &str) -> String {
+    let without_backticked = line.replace(&format!("`{tool}`"), "");
+    let mut out = String::with_capacity(without_backticked.len());
+    let mut rest = without_backticked.as_str();
+    while let Some(at) = rest.find(tool) {
+        let end = at + tool.len();
+        let before_ok = out.chars().next_back().is_none_or(|c| !is_word_char(c));
+        let after_ok = rest[end..].chars().next().is_none_or(|c| !is_word_char(c));
+        if before_ok && after_ok {
+            out.push_str(&rest[..at]);
+        } else {
+            out.push_str(&rest[..end]);
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Tidy the separators a mention removal leaves behind (`", ,"`, `"(,"`,
+/// `", )"`, a doubled space) so inline lists stay well-formed.
+fn tidy_separators(line: &str) -> String {
+    line.replace(", ,", ",")
+        .replace("(,", "(")
+        .replace(", )", ")")
+        .replace("  ", " ")
+        .trim_end()
+        .to_owned()
+}
+
+/// Startup consistency guard for system-prompt text: strip guidance that
+/// directs the model at workspace-bound tools missing from the router. A
+/// guidance bullet mentioning a missing tool is dropped whole — the bullet
+/// exists to steer usage of that tool (current templates: the apply_patch
+/// line); any other line (e.g. the plan prompt's inline
+/// "(read_file, …, git_status, git_diff)" list) gets only the mention excised
+/// so the rest of the sentence survives. Returns the cleaned text and the
+/// tools whose guidance was removed, for the caller's warn log.
+fn strip_missing_tool_guidance(text: &str, missing: &[&str]) -> (String, Vec<String>) {
+    let mentioned: Vec<&str> =
+        missing.iter().copied().filter(|tool| mentions_tool(text, tool)).collect();
+    if mentioned.is_empty() {
+        return (text.to_owned(), Vec::new());
+    }
+    let mut cleaned_lines: Vec<String> = Vec::new();
+    for line in text.split('\n') {
+        if !mentioned.iter().any(|tool| mentions_tool(line, tool)) {
+            cleaned_lines.push(line.to_owned());
+            continue;
+        }
+        if line.trim_start().starts_with("- ") {
+            continue;
+        }
+        let mut cleaned = line.to_owned();
+        for tool in &mentioned {
+            cleaned = remove_tool_mentions(&cleaned, tool);
+        }
+        let cleaned = tidy_separators(&cleaned);
+        if !cleaned.trim().is_empty() {
+            cleaned_lines.push(cleaned);
+        }
+    }
+    (cleaned_lines.join("\n"), mentioned.iter().map(|tool| tool.to_string()).collect())
+}
+
 #[cfg(test)]
 mod merge_tests {
     use super::*;
@@ -1537,5 +1670,123 @@ mod merge_tests {
             1,
             "user message with a wrapper-looking prefix is kept"
         );
+    }
+}
+
+#[cfg(test)]
+mod prompt_tool_guard_tests {
+    use super::*;
+
+    /// Minimal registered tool stub — occupies a name in the router.
+    struct StubTool(&'static str);
+
+    #[async_trait::async_trait]
+    impl crate::TypedTool for StubTool {
+        type Input = serde_json::Value;
+
+        fn name(&self) -> &str {
+            self.0
+        }
+
+        fn description(&self) -> &str {
+            "stub"
+        }
+
+        async fn execute(
+            &self,
+            _ctx: &crate::tool::ToolContext,
+            _arguments: serde_json::Value,
+        ) -> Result<crate::tool::ToolOutput, crate::error::AgentError> {
+            Ok(crate::tool::ToolOutput { content: String::new(), metadata: None })
+        }
+    }
+
+    /// The workspace-bound names missing from the router — exactly what the
+    /// run() call site computes before stripping.
+    fn missing_from(router: &crate::ToolRouter) -> Vec<&'static str> {
+        WORKSPACE_BOUND_TOOL_NAMES
+            .iter()
+            .copied()
+            .filter(|name| router.get(name).is_none())
+            .collect()
+    }
+
+    const MAIN_PROMPT: &str = "# Tool use\n\n- Prefer `apply_patch` for single-file edits; fall back to other means only if it does not work well.\n- Use `plan` to lay out a multi-step task before executing it.";
+
+    const PLAN_PROMPT: &str = "You are a planning agent. Work only with the read-only tools (read_file, grep, glob, ls, git_status, git_diff) and the plan tools (plan, update_plan, present_plan).\n\nFollow the sequence exactly.";
+
+    // Router WITHOUT the workspace-bound tools (the `register_all_tools(None)`
+    // shape): the apply_patch guidance bullet must disappear while the rest of
+    // the prompt survives verbatim. `stripped` lists the tools actually
+    // mentioned in the text (MAIN_PROMPT names only apply_patch).
+    #[test]
+    fn missing_tool_guidance_bullet_is_dropped() {
+        let router = crate::ToolRouter::new();
+        let missing = missing_from(&router);
+        assert_eq!(missing, WORKSPACE_BOUND_TOOL_NAMES, "all four are missing on an empty router");
+
+        let (cleaned, stripped) = strip_missing_tool_guidance(MAIN_PROMPT, &missing);
+        assert_eq!(stripped, vec!["apply_patch"]);
+        assert!(!cleaned.contains("apply_patch"), "guidance bullet must be gone:\n{cleaned}");
+        assert!(
+            cleaned.contains("- Use `plan` to lay out a multi-step task"),
+            "unrelated bullet kept"
+        );
+        assert!(cleaned.starts_with("# Tool use"), "heading kept");
+    }
+
+    // Router WITH apply_patch registered: the prompt's guidance for it stays
+    // (nothing it mentions is missing anymore).
+    #[test]
+    fn registered_tool_guidance_is_kept() {
+        let router = crate::ToolRouter::new();
+        router.register(Box::new(StubTool("apply_patch")));
+        let missing = missing_from(&router);
+        assert_eq!(missing, vec!["git_status", "git_diff", "git_commit"]);
+
+        let (cleaned, stripped) = strip_missing_tool_guidance(MAIN_PROMPT, &missing);
+        assert!(stripped.is_empty(), "MAIN_PROMPT mentions nothing missing: {stripped:?}");
+        assert_eq!(cleaned, MAIN_PROMPT, "registered tool's guidance is untouched");
+    }
+
+    // The plan prompt's inline tool LIST (not a bullet): the missing names are
+    // excised while the sentence and the remaining tools survive.
+    #[test]
+    fn inline_list_mention_is_excised_not_the_sentence() {
+        let router = crate::ToolRouter::new();
+        router.register(Box::new(StubTool("apply_patch")));
+        let missing = missing_from(&router);
+
+        let (cleaned, stripped) = strip_missing_tool_guidance(PLAN_PROMPT, &missing);
+        assert_eq!(stripped, vec!["git_status", "git_diff"]);
+        assert!(
+            !cleaned.contains("git_status") && !cleaned.contains("git_diff"),
+            "missing names excised:\n{cleaned}"
+        );
+        assert!(
+            cleaned.contains("(read_file, grep, glob, ls)"),
+            "list stays well-formed:\n{cleaned}"
+        );
+        assert!(cleaned.contains("plan tools (plan, update_plan, present_plan)"), "rest intact");
+        assert!(cleaned.contains("Follow the sequence exactly."), "later lines untouched");
+    }
+
+    // Nothing missing → the text is returned unchanged (byte-identical).
+    #[test]
+    fn fully_stocked_router_never_touches_the_prompt() {
+        let missing: Vec<&str> = Vec::new();
+        let (cleaned, stripped) = strip_missing_tool_guidance(PLAN_PROMPT, &missing);
+        assert!(stripped.is_empty());
+        assert_eq!(cleaned, PLAN_PROMPT);
+    }
+
+    // Word boundaries: `git_status_tool` and `my_apply_patch` are different
+    // tool names and must NOT count as mentions of the workspace-bound ones.
+    #[test]
+    fn word_boundaries_are_respected() {
+        assert!(!mentions_tool("use git_status_tool for this", "git_status"));
+        assert!(!mentions_tool("call my_apply_patch instead", "apply_patch"));
+        assert!(mentions_tool("use git_status for this", "git_status"));
+        assert!(mentions_tool("call `apply_patch` now", "apply_patch"));
     }
 }
