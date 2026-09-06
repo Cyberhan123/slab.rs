@@ -229,8 +229,28 @@ impl TypedTool for DelegateSubagentTool {
                 .unwrap_or_else(default_system_prompt),
         });
         if let Some(allowed_tools) = args.allowed_tools {
-            child_config.allowed_tools =
+            let requested: Vec<String> =
                 allowed_tools.into_iter().filter(|tool| !tool.trim().is_empty()).collect();
+            // The caller-supplied allow-list INTERSECTS the parent's: a
+            // restricted parent (e.g. a read-only consolidation agent) must not
+            // be able to delegate a child wielding tools it cannot use itself.
+            // An EMPTY parent list means unrestricted (`AgentConfig`
+            // semantics), so the request passes through unchanged.
+            if child_config.allowed_tools.is_empty() {
+                child_config.allowed_tools = requested;
+            } else {
+                let parent_list = child_config.allowed_tools.clone();
+                let filtered: Vec<String> =
+                    requested.iter().filter(|tool| parent_list.contains(tool)).cloned().collect();
+                if filtered.is_empty() {
+                    return Err(AgentError::ToolExecution(format!(
+                        "delegate_subagent: none of the requested tools {requested:?} are in the \
+                         parent agent's allow-list {parent_list:?}; a child cannot receive tools \
+                         the parent itself cannot use"
+                    )));
+                }
+                child_config.allowed_tools = filtered;
+            }
         }
         child_config.max_turns = args.max_turns.unwrap_or(DEFAULT_SUBAGENT_TURNS).max(1);
         child_config.transient = true;
@@ -645,7 +665,25 @@ mod tests {
 
     impl MemoryStore {
         fn insert_parent(&self, max_depth: u32) {
-            let config = AgentConfig { model: "mock".into(), max_depth, ..AgentConfig::default() };
+            self.insert_parent_with_config(AgentConfig {
+                model: "mock".into(),
+                max_depth,
+                ..AgentConfig::default()
+            });
+        }
+
+        /// A RESTRICTED parent: an explicit `allowed_tools` list (empty means
+        /// unrestricted — `AgentConfig` semantics).
+        fn insert_restricted_parent(&self, allowed_tools: &[&str]) {
+            self.insert_parent_with_config(AgentConfig {
+                model: "mock".into(),
+                max_depth: 4,
+                allowed_tools: allowed_tools.iter().map(|tool| tool.to_string()).collect(),
+                ..AgentConfig::default()
+            });
+        }
+
+        fn insert_parent_with_config(&self, config: AgentConfig) {
             let now = "2026-01-01T00:00:00Z".to_owned();
             self.threads.lock().unwrap().insert(
                 "parent".to_owned(),
@@ -893,6 +931,87 @@ mod tests {
         assert!(child_config.transient);
         assert_eq!(child_config.allowed_tools, vec!["read_file"]);
         assert_eq!(child_config.max_turns, 1);
+    }
+
+    /// The caller-supplied allow-list INTERSECTS a restricted parent's list —
+    /// a read-only parent cannot delegate a child with `shell`/`write_file`.
+    #[tokio::test]
+    async fn delegate_subagent_intersects_allowed_tools_with_parent_restriction() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_restricted_parent(&["read_file", "grep"]);
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(FinalLlm),
+            store.clone(),
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ));
+        let tool = delegate_tool(control);
+
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({
+                "task": "summarize",
+                "allowed_tools": ["shell", "read_file", "write_file"],
+                "max_turns": 1,
+                "background": false
+            }),
+        )
+        .await
+        .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        let child_id = value["child_thread_id"].as_str().expect("child id");
+        let child = store.get_thread(child_id).await.expect("thread").expect("child");
+        let child_config: AgentConfig =
+            serde_json::from_str(&child.config_json).expect("child config");
+        // Requested order preserved; only the parent-permitted entry survives.
+        assert_eq!(child_config.allowed_tools, vec!["read_file"]);
+    }
+
+    /// A request whose every entry is outside the parent's allow-list is a
+    /// hard error — an empty intersection would otherwise mean "no tools" and
+    /// silently waste a child run.
+    #[tokio::test]
+    async fn delegate_subagent_rejects_fully_blocked_tool_request() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_restricted_parent(&["read_file"]);
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(FinalLlm),
+            store.clone(),
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ));
+        let tool = delegate_tool(control);
+
+        let error = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({
+                "task": "summarize",
+                "allowed_tools": ["shell", "write_file"],
+                "max_turns": 1,
+                "background": false
+            }),
+        )
+        .await
+        .expect_err("fully-blocked request must error");
+        match error {
+            AgentError::ToolExecution(message) => {
+                assert!(
+                    message.contains("allow-list"),
+                    "error explains the intersection: {message}"
+                );
+            }
+            other => panic!("expected ToolExecution, got: {other:?}"),
+        }
     }
 
     #[tokio::test]
