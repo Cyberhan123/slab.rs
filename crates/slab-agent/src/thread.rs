@@ -29,7 +29,9 @@ use crate::{
         ThreadStatusChangedParams, Turn, TurnAbortedParams, TurnCompletedParams, TurnStartedParams,
         TurnStateChangedParams, TurnUsage,
     },
-    repetition_guard::{RepetitionDetected, RepetitionGuard},
+    repetition_guard::{
+        REPETITION_TERMINATION_STRIKE, RepetitionDetected, RepetitionGuard, ToolCallSignature,
+    },
     risk::ToolRiskAnalyzer,
     state::ThreadStateMachine,
     tool::{AgentThreadContext, ToolDiscoveryState, ToolRouter},
@@ -647,15 +649,58 @@ impl AgentThread {
                                 break 'turns;
                             }
                         }
-                        if let Some(detected) = repetition_guard.observe(&signatures) {
+                        // Loop guard: track side-effectful signatures (MCP
+                        // proxies follow their handler's declared concurrency
+                        // safety — see `tracks_for_repetition`).
+                        let tracked_signatures: Vec<ToolCallSignature> = signatures
+                            .iter()
+                            .filter(|signature| tracks_for_repetition(signature, &tools))
+                            .cloned()
+                            .collect();
+                        if let Some(detected) = repetition_guard.observe(&tracked_signatures) {
                             self.record_repetition_detected(
                                 trace.as_ref(),
                                 &trace_context,
                                 &thread_id,
                                 &detected,
                             );
-                            termination_reason = Some(TerminationReason::RepetitionDetected);
-                            break 'turns;
+                            if detected.strike >= REPETITION_TERMINATION_STRIKE {
+                                termination_reason = Some(TerminationReason::RepetitionDetected);
+                                break 'turns;
+                            }
+                            // First strike: warn, not kill. Inject a
+                            // developer-role message telling the model to
+                            // change strategy and clear the window — the next
+                            // detection (a fresh full threshold of repetitions)
+                            // terminates the run.
+                            repetition_guard.clear_window();
+                            warn!(
+                                thread_id,
+                                tool = detected.signature.tool_name(),
+                                hit_count = detected.hit_count,
+                                "repetition guard first strike: injected a strategy-change warning"
+                            );
+                            inject_pending_input(
+                                &notify,
+                                &thread_id,
+                                turn_index + 1,
+                                vec![ConversationMessage {
+                                    role: "developer".to_owned(),
+                                    content: ConversationMessageContent::Text(format!(
+                                        "Loop guard: the tool call `{}` with identical arguments \
+                                         was repeated {} times. Change your strategy — vary the \
+                                         arguments, use a different tool, or stop repeating the \
+                                         failing call. Another detection will end this run.",
+                                        detected.signature.tool_name(),
+                                        detected.hit_count
+                                    )),
+                                    name: Some("slab_loop_guard".to_owned()),
+                                    tool_call_id: None,
+                                    tool_calls: vec![],
+                                }],
+                                &mut messages,
+                            )
+                            .await;
                         }
                         // Steering: inject queued input after the tool batch —
                         // the next LLM iteration sees it.
@@ -1426,6 +1471,26 @@ fn hook_observation_messages(observations: Vec<String>) -> Vec<ConversationMessa
             tool_calls: Vec::new(),
         })
         .collect()
+}
+
+/// Whether the repetition guard should track this tool-call signature.
+/// Non-MCP names defer to the guard's built-in read-only whitelist (applied
+/// inside `observe`); MCP proxy tools (`mcp__*`) follow their handler's
+/// declared concurrency safety — a handler that says the call is
+/// concurrency-safe reads as side-effect-free, while an unavailable handler
+/// or unparseable arguments stay conservative (tracked).
+fn tracks_for_repetition(signature: &ToolCallSignature, router: &ToolRouter) -> bool {
+    if !signature.tool_name().starts_with("mcp__") {
+        return true;
+    }
+    let Some(handler) = router.get(signature.tool_name()) else {
+        return true;
+    };
+    let Ok(arguments) = serde_json::from_str::<serde_json::Value>(signature.arguments_json())
+    else {
+        return true;
+    };
+    !handler.is_concurrency_safe(&arguments)
 }
 
 /// Workspace-bound tool names: `register_all_tools` only registers these when

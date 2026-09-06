@@ -428,6 +428,46 @@ impl LlmPort for RepeatingToolCallLlm {
     }
 }
 
+/// Emits two ALTERNATING tool calls forever — the oscillation shape
+/// (A B A B …) a consecutive-only repetition tracker can never detect.
+struct OscillatingToolCallLlm {
+    tool_name: &'static str,
+    first_arguments: &'static str,
+    second_arguments: &'static str,
+    call_count: Mutex<u32>,
+}
+
+#[async_trait]
+impl LlmPort for OscillatingToolCallLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let call_index = {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            *count
+        };
+        let arguments =
+            if call_index % 2 == 1 { self.first_arguments } else { self.second_arguments };
+        Ok(LlmResponse {
+            content: None,
+            content_already_streamed: false,
+            tool_calls: vec![ParsedToolCall {
+                id: format!("call-{call_index}"),
+                name: self.tool_name.to_owned(),
+                arguments: arguments.to_owned(),
+            }],
+            finish_reason: Some("tool_calls".into()),
+            usage: None,
+        })
+    }
+}
+
 struct BudgetedToolCallLlm;
 
 #[async_trait]
@@ -5754,7 +5794,10 @@ async fn repeated_side_effect_tool_call_interrupts_with_reason_and_trace_event()
         None,
     ));
 
-    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    // The guard now WARNS on the first detection (turn 3) and terminates on
+    // the second — the model must repeat a fresh full threshold (turns 4-6)
+    // after the injected warning before the run ends.
+    let config = AgentConfig { model: "mock".into(), max_turns: 8, ..AgentConfig::default() };
     let thread_id = control
         .spawn(
             "session-repetition".into(),
@@ -5791,6 +5834,124 @@ async fn repeated_side_effect_tool_call_interrupts_with_reason_and_trace_event()
     assert_eq!(loop_event.1.payload["hit_count"], 3);
     assert!(loop_event.1.payload["signature_hash"].as_str().is_some());
     assert_trace_event(&trace_events, "thread_repetition_detected");
+}
+
+/// First-strike softening: the initial detection injects a developer warning
+/// and the run CONTINUES — a model that then changes strategy (stops
+/// repeating) completes normally instead of being killed.
+#[tokio::test]
+async fn first_repetition_strike_injects_warning_and_continues() {
+    let llm = Arc::new(RepeatingToolCallLlm {
+        tool_name: "write_file",
+        arguments: r#"{"content":"same","path":"notes.txt"}"#,
+        // Repeat 4 times (strike at #3 injects the warning), then go final.
+        final_after_calls: Some(4),
+        call_count: Mutex::new(0),
+    });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    router.register(Box::new(JsonNoopTool { name: "write_file" }));
+    let trace = Arc::new(RecordingTraceSink::default());
+    let trace_sink: Arc<dyn AgentTraceSink> = trace.clone();
+
+    let control = Arc::new(AgentControl::new_with_hooks_and_tracing(
+        llm,
+        store_port,
+        notify.clone(),
+        notify.clone(),
+        Arc::new(router),
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        Vec::new(),
+        trace_sink,
+        None,
+    ));
+
+    let config = AgentConfig { model: "mock".into(), max_turns: 8, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-repetition-soft".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("repeat then stop".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+    let snapshot =
+        store.get_thread(&thread_id).await.expect("load snapshot").expect("snapshot should exist");
+    assert_eq!(
+        snapshot.completion_text.as_deref(),
+        Some("continued after soft stop"),
+        "the run must survive the first detection"
+    );
+
+    // The warning landed as a developer-role message ahead of the next turn.
+    let warning = notify
+        .emitted_messages(&thread_id)
+        .into_iter()
+        .find(|message| {
+            message.role == "developer"
+                && message.name.as_deref() == Some("slab_loop_guard")
+                && message.rendered_text().contains("Loop guard")
+        })
+        .expect("strategy-change warning injected");
+    assert!(warning.rendered_text().contains("Change your strategy"), "{warning:?}");
+
+    // The detection is still traced (loop_detected fires on every strike).
+    let trace_events = trace.events.lock().unwrap().clone();
+    assert_trace_event(&trace_events, "loop_detected");
+}
+
+/// The oscillation the consecutive-only tracker could never see: alternating
+/// A B A B … reaches the window threshold, warns, and — kept up — terminates
+/// on the second strike.
+#[tokio::test]
+async fn oscillating_side_effect_tool_calls_eventually_terminate() {
+    let llm = Arc::new(OscillatingToolCallLlm {
+        tool_name: "write_file",
+        first_arguments: r#"{"content":"one","path":"a.txt"}"#,
+        second_arguments: r#"{"content":"two","path":"b.txt"}"#,
+        call_count: Mutex::new(0),
+    });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(JsonNoopTool { name: "write_file" }));
+
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+
+    let config = AgentConfig { model: "mock".into(), max_turns: 14, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-repetition-oscillating".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("oscillate forever".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Interrupted).await;
+    let snapshot =
+        store.get_thread(&thread_id).await.expect("load snapshot").expect("snapshot should exist");
+    assert_eq!(snapshot.status, ThreadStatus::Interrupted);
+    assert_eq!(snapshot.completion_text.as_deref(), Some("repetition_detected"));
 }
 
 #[tokio::test]
