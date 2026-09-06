@@ -552,6 +552,51 @@ impl BackgroundTaskRegistry {
         self.snapshot(task_id).ok_or_else(|| AgentError::Internal("task vanished on stop".into()))
     }
 
+    /// Roll a Stopped task back to Failed after its kill closure could not
+    /// stop the underlying work (the run keeps going): the status must not
+    /// claim "stopped" while the work is still alive. Emits the Failed
+    /// lifecycle event so listeners learn the stop failed. Tasks already past
+    /// `Stopped` (a racing natural completion won) keep their state.
+    pub fn mark_stop_failed(
+        &self,
+        task_id: &str,
+        reason: &str,
+    ) -> Result<BackgroundTaskSnapshot, AgentError> {
+        let event = {
+            let tasks = self.tasks.lock().unwrap_or_else(|p| p.into_inner());
+            let slot = tasks.get(task_id).ok_or_else(|| {
+                AgentError::ToolExecution(format!("unknown background task: {task_id}"))
+            })?;
+            let mut status = slot.status.lock().unwrap_or_else(|p| p.into_inner());
+            if *status != BackgroundTaskStatus::Stopped {
+                // A racing natural completion already settled the slot — its
+                // terminal state wins over the rollback.
+                return Ok(slot_snapshot(
+                    task_id,
+                    slot,
+                    *status,
+                    *slot.exit_code.lock().unwrap_or_else(|p| p.into_inner()),
+                    slot.result.lock().unwrap_or_else(|p| p.into_inner()).clone(),
+                ));
+            }
+            *status = BackgroundTaskStatus::Failed;
+            *slot.result.lock().unwrap_or_else(|p| p.into_inner()) = Some(reason.to_owned());
+            BackgroundTaskEvent {
+                task_id: task_id.to_owned(),
+                thread_id: slot.thread_id.clone(),
+                kind: slot.kind,
+                status: BackgroundTaskStatus::Failed,
+                exit_code: None,
+                pid: slot.pid,
+                command: Some(slot.command.clone()),
+                result_summary: Some(truncate_summary(reason)),
+            }
+        };
+        self.emit(event);
+        self.snapshot(task_id)
+            .ok_or_else(|| AgentError::Internal("task vanished on mark_stop_failed".into()))
+    }
+
     /// Stop every RUNNING task that belongs to `root`'s workspace (workspace
     /// migration: no "ghost" tasks carry into the new workspace): shell tasks
     /// by output-file placement, subagent tasks by their recorded workspace
@@ -1082,6 +1127,54 @@ mod tests {
         assert_eq!(final_snapshot.status, BackgroundTaskStatus::Stopped);
         // The on_terminal callback still observed the terminal transition.
         assert_eq!(final_snapshot.result, None);
+    }
+
+    /// A kill that could not stop the work rolls the Stopped marker back to
+    /// Failed (the task must not read "stopped" while the work is alive), the
+    /// failure text becomes the result, and the watcher's late outcome keeps
+    /// the Failed state (Stopped-wins does not resurrect Stopped).
+    #[tokio::test]
+    async fn stop_failure_rolls_stopped_back_to_failed() {
+        let sink = Arc::new(RecordingSink::default());
+        let registry = Arc::new(BackgroundTaskRegistry::new(Some(sink.clone())));
+        let (task_id, tx) = register_pending_subagent(&registry, "parent", "child-1");
+
+        registry.stop(&task_id).expect("stop");
+        assert_eq!(
+            registry.snapshot(&task_id).expect("snap").status,
+            BackgroundTaskStatus::Stopped
+        );
+
+        let rolled_back = registry
+            .mark_stop_failed(&task_id, "stop failed: interrupt unreachable")
+            .expect("rollback");
+        assert_eq!(rolled_back.status, BackgroundTaskStatus::Failed);
+        assert!(rolled_back.result.expect("reason").contains("stop failed"));
+        // The Failed lifecycle event reached the sink (the existing channel a
+        // parent listens on).
+        wait_for_condition(|| {
+            sink.events.lock().unwrap().iter().any(|event| {
+                event.task_id == task_id && event.status == BackgroundTaskStatus::Failed
+            })
+        })
+        .await;
+
+        // The watcher's synthetic Failed outcome settles the slot on Failed —
+        // the stop-failure state survives the terminal transition.
+        tx.send(DetachedTaskOutcome::Status {
+            status: BackgroundTaskStatus::Failed,
+            result: Some("stop failed: interrupt unreachable".to_owned()),
+        })
+        .expect("send outcome");
+        wait_for_condition(|| {
+            registry.snapshot(&task_id).is_some_and(|s| s.status == BackgroundTaskStatus::Failed)
+        })
+        .await;
+
+        // A second rollback after the slot settled is a no-op.
+        let settled =
+            registry.mark_stop_failed(&task_id, "stop failed: again").expect("no-op call");
+        assert_eq!(settled.status, BackgroundTaskStatus::Failed);
     }
 
     #[tokio::test]

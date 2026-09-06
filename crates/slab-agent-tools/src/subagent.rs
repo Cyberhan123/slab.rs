@@ -290,13 +290,27 @@ impl TypedTool for DelegateSubagentTool {
         // LLM-grade reasoning, spills the artifact, then publishes the
         // terminal outcome. Runs detached from the parent turn — an inline
         // caller that is dropped (parent interrupt) does not affect it.
+        //
+        // The `kill_failed` select arm is the stop-failure escape: when the
+        // kill closure could not interrupt the child, the snapshot wait would
+        // park forever (the child keeps running) — converge the watcher on a
+        // synthetic Errored outcome instead, which maps to `Failed` below.
+        let kill_failed = Arc::new(tokio::sync::Notify::new());
         let wait: DetachedWait = {
             let control = Arc::clone(&self.control);
             let child_id = child_thread_id.clone();
             let artifact_root = workspace_root.clone();
             let shared = Arc::clone(&terminal_data);
+            let kill_failed = Arc::clone(&kill_failed);
             Box::pin(async move {
-                let data = match control.wait_for_terminal_snapshot(&child_id).await {
+                let terminal = tokio::select! {
+                    snapshot = control.wait_for_terminal_snapshot(&child_id) => snapshot,
+                    _ = kill_failed.notified() => Err(AgentError::ToolExecution(format!(
+                        "stop failed: the interrupt did not reach subagent {child_id}; \
+                         the child may still be running"
+                    ))),
+                };
+                let data = match terminal {
                     Ok(snapshot) => {
                         // Diagnostic anchor: a NON-terminal status here (e.g.
                         // `Interrupting` from the bounded persisted-snapshot
@@ -368,6 +382,8 @@ impl TypedTool for DelegateSubagentTool {
             let control = Arc::clone(&self.control);
             let registry = Arc::clone(&self.registry);
             let child_id = child_thread_id.clone();
+            let task_id = task_id.clone();
+            let kill_failed = Arc::clone(&kill_failed);
             Box::new(move || {
                 tokio::spawn(async move {
                     // Grandchildren FIRST: the child-owned delegations must be
@@ -377,8 +393,33 @@ impl TypedTool for DelegateSubagentTool {
                         tracing::debug!(child = %child_id, count = stopped.len(),
                             "cascade-stopped grandchild delegations");
                     }
-                    if let Err(error) = control.interrupt(&child_id).await {
-                        tracing::warn!(%error, "failed to interrupt subagent {child_id}");
+                    match control.interrupt(&child_id).await {
+                        Ok(()) => {}
+                        // The child is already gone or terminal — the natural
+                        // watcher path resolves on the persisted snapshot, so
+                        // there is nothing to roll back.
+                        Err(AgentError::ThreadNotFound(_))
+                        | Err(AgentError::InvalidStateTransition { .. }) => {}
+                        Err(error) => {
+                            tracing::warn!(
+                                %error,
+                                "failed to interrupt subagent {child_id}; rolling the task back to Failed"
+                            );
+                            // The registry already flipped to Stopped inside
+                            // `stop()`; a still-running child must not read as
+                            // "stopped". The rollback re-emits the Failed
+                            // lifecycle event, and the notify un-parks the
+                            // watcher so the failure reaches the parent.
+                            if let Err(rollback) = registry
+                                .mark_stop_failed(&task_id, &format!("stop failed: {error}"))
+                            {
+                                tracing::warn!(
+                                    %rollback,
+                                    "failed to roll back subagent task {task_id} after a failed kill"
+                                );
+                            }
+                            kill_failed.notify_one();
+                        }
                     }
                 });
             })
@@ -412,7 +453,7 @@ impl TypedTool for DelegateSubagentTool {
             });
         });
 
-        self.registry.register_detached(
+        if let Err(register_error) = self.registry.register_detached(
             task_id.clone(),
             DetachedTask {
                 thread_id: ctx.thread_id.clone(),
@@ -423,7 +464,26 @@ impl TypedTool for DelegateSubagentTool {
             wait,
             kill,
             on_terminal,
-        )?;
+        ) {
+            // The child is ALREADY running (spawn happened above) and the
+            // dropped registration took its kill handle with it — without this
+            // interrupt the child would leak with no stop path anywhere.
+            tracing::warn!(
+                %register_error,
+                child_thread_id = %child_thread_id,
+                "subagent registration failed; requesting an interrupt for the running child"
+            );
+            if let Err(interrupt_error) = self.control.interrupt(&child_thread_id).await {
+                tracing::warn!(
+                    %interrupt_error,
+                    "failed to interrupt the unregistered subagent {child_thread_id}"
+                );
+            }
+            return Err(AgentError::ToolExecution(format!(
+                "subagent started but could not be registered ({register_error}); \
+                 an interrupt was requested for the child thread"
+            )));
+        }
 
         if args.background.unwrap_or(true) {
             return Ok(ToolOutput {
@@ -1008,6 +1068,72 @@ mod tests {
                 assert!(
                     message.contains("allow-list"),
                     "error explains the intersection: {message}"
+                );
+            }
+            other => panic!("expected ToolExecution, got: {other:?}"),
+        }
+    }
+
+    /// Registration failure no longer leaks the already-spawned child: the
+    /// capacity gate rejects the 9th concurrent task, and the tool requests an
+    /// interrupt for the running child before failing the call loudly.
+    #[tokio::test]
+    async fn registration_failure_interrupts_the_spawned_child() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(FinalLlm),
+            store.clone(),
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 16, max_depth: 4 },
+            Vec::new(),
+        ));
+
+        // Pre-fill the registry to its running-task capacity so the delegation
+        // below hits the gate AFTER its child has already spawned.
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        for index in 0..8 {
+            let task_id = registry.alloc_task_id();
+            registry
+                .register_detached(
+                    task_id,
+                    DetachedTask {
+                        thread_id: "parent".to_owned(),
+                        command: format!("filler {index}"),
+                        workspace_root: None,
+                        child_thread_id: Some(format!("filler-child-{index}")),
+                    },
+                    Box::pin(std::future::pending()),
+                    Box::new(|| {}),
+                    Box::new(|_| {}),
+                )
+                .expect("fill the capacity gate");
+        }
+
+        let tool = DelegateSubagentTool::new(control, registry, Arc::new(NoopSubagentTaskSink));
+        let error = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({
+                "task": "summarize",
+                "max_turns": 1,
+                "background": false
+            }),
+        )
+        .await
+        .expect_err("registration must fail at the capacity gate");
+        match error {
+            AgentError::ToolExecution(message) => {
+                assert!(
+                    message.contains("could not be registered"),
+                    "the error explains the spawn-then-register failure: {message}"
+                );
+                assert!(
+                    message.contains("background task limit reached"),
+                    "the underlying gate reason is carried through: {message}"
                 );
             }
             other => panic!("expected ToolExecution, got: {other:?}"),
