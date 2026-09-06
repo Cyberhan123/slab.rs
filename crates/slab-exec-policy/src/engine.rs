@@ -192,10 +192,21 @@ impl ExecPolicyPort for ExecPolicyEngine {
         //    short-circuits to Allow; `RequireApproval` prompts. A remembered
         //    Allow rule is how repeat shell calls get silenced — and how an
         //    out-of-envelope op can still be auto-allowed under acceptEdits.
+        //    A shell Allow still re-runs the autorun-safety check on the FULL
+        //    command: prefix/glob matchers refuse control-char suffixes, but
+        //    contains/exact matchers can hit a destructive or network-reaching
+        //    compound (`cargo test && npm install x`) the user never approved
+        //    as a whole — that must prompt, not ride the remembered Allow.
         let rules = self.rules.read().await;
         if let Some(rule) = rules.evaluate(category, subject, descriptor.tool_name.as_deref()) {
             return match rule.action {
-                RuleAction::Allow => ExecDecision::Allow,
+                RuleAction::Allow => {
+                    if category == OperationCategory::Shell && !is_shell_autorun_safe(subject) {
+                        ExecDecision::RequireApproval
+                    } else {
+                        ExecDecision::Allow
+                    }
+                }
                 RuleAction::RequireApproval => ExecDecision::RequireApproval,
                 RuleAction::Block => ExecDecision::Deny,
             };
@@ -566,6 +577,76 @@ mod tests {
         // The rule does not match the compound (control chars in the suffix),
         // and the acceptEdits base refuses the network-reaching command.
         assert_eq!(engine.evaluate("t1", &d).await, ExecDecision::RequireApproval);
+    }
+
+    /// Work-order regression: a remembered "cargo test" Allow must not
+    /// auto-run `cargo test && <network/destructive command>` even when a
+    /// matcher DOES hit the compound. Prefix/glob refuse control-char
+    /// suffixes, but contains/exact match them literally — the step-6 Allow
+    /// re-runs the autorun-safety check on the full command and downgrades to
+    /// RequireApproval when it fails.
+    #[tokio::test]
+    async fn rule_allow_still_prompts_unsafe_shell_compounds() {
+        for matcher in [crate::rule::RuleMatcher::Contains, crate::rule::RuleMatcher::Exact] {
+            let engine = engine_with_rules(
+                PermissionMode::RequestApproval,
+                PermissionBaseline::WorkspaceWrite,
+                vec![Rule::new(
+                    OperationCategory::Shell,
+                    RuleAction::Allow,
+                    matcher,
+                    // Exact must equal the full compound to hit; contains hits
+                    // via the leading "cargo test" substring.
+                    "cargo test && npm install x",
+                )],
+                ws(),
+            );
+            let d = OperationDescriptor::shell("cargo test && npm install x");
+            assert_eq!(
+                engine.evaluate("t1", &d).await,
+                ExecDecision::RequireApproval,
+                "matched Allow must not auto-run the network compound ({matcher:?})"
+            );
+        }
+
+        // Destructive tail rides the same downgrade (a relative rm target so
+        // the step-1 hard-deny patterns stay out of the way — the point here
+        // is the rule-Allow downgrade, not the unconditional deny list).
+        let engine = engine_with_rules(
+            PermissionMode::RequestApproval,
+            PermissionBaseline::WorkspaceWrite,
+            vec![Rule::new(
+                OperationCategory::Shell,
+                RuleAction::Allow,
+                crate::rule::RuleMatcher::Contains,
+                "cargo test",
+            )],
+            ws(),
+        );
+        let d = OperationDescriptor::shell("cargo test && rm -rf build-tmp");
+        assert_eq!(engine.evaluate("t1", &d).await, ExecDecision::RequireApproval);
+    }
+
+    /// The downgrade is scoped to Shell rules: a FileEdit Allow (an explicitly
+    /// remembered edit scope) still short-circuits to Allow unchanged.
+    #[tokio::test]
+    async fn rule_allow_downgrade_is_scoped_to_shell() {
+        let ws = ws_path();
+        let engine = engine_with_rules(
+            PermissionMode::RequestApproval,
+            PermissionBaseline::WorkspaceWrite,
+            vec![Rule::new(
+                OperationCategory::FileEdit,
+                RuleAction::Allow,
+                crate::rule::RuleMatcher::Glob,
+                "*",
+            )],
+            None,
+        );
+        let d =
+            OperationDescriptor::file_edit(ws.join("src/main.rs").to_string_lossy().to_string())
+                .with_workspace(Some(ws));
+        assert_eq!(engine.evaluate("t1", &d).await, ExecDecision::Allow);
     }
 
     #[tokio::test]
