@@ -91,6 +91,7 @@ async function renderPart(
           userMessageTurnIndex: new Map(),
           rollbackToMessage: undefined,
           subagentTasksByTaskId: new Map(),
+          subagentChildItemsByChildId: new Map(),
         }}
       >
         <MessageToolCommandPart

@@ -184,6 +184,7 @@ describe("MessageItem", () => {
           userMessageTurnIndex: new Map([["mu1", 2]]),
           rollbackToMessage,
           subagentTasksByTaskId: new Map(),
+          subagentChildItemsByChildId: new Map(),
         }}
       >
         <MessageItem
@@ -205,6 +206,7 @@ describe("MessageItem", () => {
           userMessageTurnIndex: new Map([["mu0", 0]]),
           rollbackToMessage: vi.fn(),
           subagentTasksByTaskId: new Map(),
+          subagentChildItemsByChildId: new Map(),
         }}
       >
         <MessageItem
@@ -224,6 +226,7 @@ describe("MessageItem", () => {
           userMessageTurnIndex: new Map([["ma1", 2]]),
           rollbackToMessage: vi.fn(),
           subagentTasksByTaskId: new Map(),
+          subagentChildItemsByChildId: new Map(),
         }}
       >
         <MessageItem message={message({ id: "ma1", role: "assistant" })} />

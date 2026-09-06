@@ -1432,3 +1432,302 @@ describe("ConversationController", () => {
     expect(FakeWebSocket.last).toBeUndefined()
   })
 })
+
+// ── remount suppression + orphan recovery + live-text mirror ────────────────
+
+describe("ConversationController remount/orphan/live-text", () => {
+  beforeEach(() => {
+    FakeWebSocket.reset("manual")
+  })
+
+  /** Answer the LATEST thread/resume with `thread`. */
+  async function answerLatestResume(socket: FakeWebSocket, thread: Thread): Promise<void> {
+    const reqs = socket.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((m: { method?: string }) => m.method === "thread/resume")
+    const req = reqs.at(-1)!
+    socket.simMessage(rpcResponse(req.id, { thread }))
+    await flush()
+  }
+
+  function countRequests(socket: FakeWebSocket, method: string): number {
+    return socket.sent.filter((raw) => JSON.parse(raw).method === method).length
+  }
+
+  async function restoredController(): Promise<{
+    controller: ConversationController
+    socket: FakeWebSocket
+  }> {
+    const controller = makeController("s1")
+    controller.start()
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(controller.getState().restoredThreadId).toBe("hthread-1"))
+    return { controller, socket: FakeWebSocket.last! }
+  }
+
+  it("a first thread bind with an unchanged message sequence does not bump the remount version", async () => {
+    const controller = makeController("s1")
+    controller.start()
+    // Fresh session: the initial resume answers "no thread to resume".
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcError(req.id, "no thread to resume for session"))
+    await flush()
+    await vi.waitFor(() => expect(controller.getState().isHistoryLoading).toBe(false))
+    expect(controller.getState().restoreVersion).toBe(0)
+
+    // The transport binds the thread via turn/start; a LATER resume succeeds
+    // with an empty-turn thread (nothing persisted yet) — a null→id bind with
+    // an unchanged ([]) message sequence. Not structural: no remount.
+    controller.client.currentThreadId = "hthread-9"
+    void controller.reconnect()
+    await flush()
+    await answerLatestResume(FakeWebSocket.last!, {
+      ...THREAD,
+      id: "hthread-9",
+      turns: [{ id: "0", status: "running", items: [] }],
+    })
+    await vi.waitFor(() => expect(controller.getState().restoredThreadId).toBe("hthread-9"))
+    expect(controller.getState().restoreVersion).toBe(0)
+  })
+
+  it("a reconnect landing mid-local-stream defers the bump to the terminal event", async () => {
+    const { controller, socket } = await restoredController()
+    controller.markLocalStreamBegin()
+    const versionBefore = controller.getState().restoreVersion
+
+    // A mid-run resume sees a NEW persisted user message (the turn started):
+    // structural, but the pane-attached stream must not be remounted.
+    void controller.reconnect()
+    await flush()
+    await answerLatestResume(socket, {
+      ...THREAD,
+      turns: [
+        {
+          id: "1",
+          status: "running",
+          items: [{ type: "userMessage", id: "u2", content: [{ type: "text", text: "go" }] }],
+        },
+        ...THREAD.turns,
+      ],
+    })
+    await vi.waitFor(() => expect(controller.getState().restoredMessages.length).toBe(3))
+    expect(controller.getState().restoreVersion).toBe(versionBefore)
+
+    // Terminal: the flag clears BEFORE the resync runs, so the deferred bump
+    // materializes — the pane remounts WITH the completed rollout.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "completed",
+      }),
+    )
+    await flush()
+    await answerLatestResume(socket, {
+      ...THREAD,
+      turns: [
+        {
+          id: "1",
+          status: "completed",
+          items: [
+            { type: "userMessage", id: "u2", content: [{ type: "text", text: "go" }] },
+            { type: "agentMessage", id: "a2", text: "the reply" },
+          ],
+        },
+        ...THREAD.turns,
+      ],
+    })
+    await vi.waitFor(() => expect(controller.getState().restoreVersion).toBe(versionBefore + 1))
+    const text = controller
+      .getState()
+      .restoredMessages.map((m) => m.parts.map((p) => ("text" in p ? p.text : "")).join(""))
+      .join(" ")
+    expect(text).toContain("the reply")
+  })
+
+  it("notifyPaneDetachedMidRun materializes the orphaned reply at terminal", async () => {
+    const { controller, socket } = await restoredController()
+    controller.markLocalStreamBegin()
+    controller.notifyPaneDetachedMidRun()
+    const versionBefore = controller.getState().restoreVersion
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "completed",
+      }),
+    )
+    await flush()
+    await answerLatestResume(socket, {
+      ...THREAD,
+      turns: [
+        { id: "1", status: "completed", items: [{ type: "agentMessage", id: "a2", text: "orphaned reply" }] },
+        ...THREAD.turns,
+      ],
+    })
+    await vi.waitFor(() => expect(controller.getState().restoreVersion).toBe(versionBefore + 1))
+    expect(controller.getState().restoredMessages.length).toBe(3)
+  })
+
+  it("notifyPaneDetachedMidRun after a terminal status is a no-op (loop guard)", async () => {
+    const { controller, socket } = await restoredController()
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.THREAD_STATUS_CHANGED, {
+        threadId: "hthread-1",
+        status: "completed",
+      }),
+    )
+    await flush()
+    const resumesBefore = countRequests(socket, "thread/resume")
+
+    controller.notifyPaneDetachedMidRun()
+
+    // A second terminal event must NOT trigger another resync (no loop).
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.TURN_COMPLETED, {
+        threadId: "hthread-1",
+        turnId: "1",
+      }),
+    )
+    await flush()
+    expect(countRequests(socket, "thread/resume")).toBe(resumesBefore)
+  })
+
+  it("markLocalTurnStarted advances turnStartSeq (observable via state)", async () => {
+    const { controller } = await restoredController()
+    expect(controller.getState().turnStartSeq).toBe(0)
+    controller.markLocalTurnStarted()
+    expect(controller.getState().turnStartSeq).toBe(1)
+    controller.markLocalTurnStarted()
+    expect(controller.getState().turnStartSeq).toBe(2)
+  })
+
+  it("an error notification ends the local stream and triggers the resync", async () => {
+    const { controller, socket } = await restoredController()
+    controller.markLocalStreamBegin()
+    const versionBefore = controller.getState().restoreVersion
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.ERROR, {
+        threadId: "hthread-1",
+        turnId: "1",
+        code: "turn_failed",
+        message: "model exploded",
+      }),
+    )
+    await flush()
+
+    // The error consumed the run: a structural resync now bumps immediately
+    // (the flag is cleared by the error arm).
+    void controller.reconnect()
+    await flush()
+    await answerLatestResume(socket, {
+      ...THREAD,
+      turns: [
+        { id: "1", status: "errored", items: [{ type: "agentMessage", id: "a2", text: "partial" }] },
+        ...THREAD.turns,
+      ],
+    })
+    await vi.waitFor(() => expect(controller.getState().restoreVersion).toBe(versionBefore + 1))
+  })
+
+  it("agent-message and reasoning deltas accumulate into the live-text mirror, coalesced", async () => {
+    const { controller, socket } = await restoredController()
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.ITEM_AGENT_MESSAGE_DELTA, {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "a9",
+        delta: "hel",
+      }),
+    )
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.ITEM_AGENT_MESSAGE_DELTA, {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "a9",
+        delta: "lo",
+      }),
+    )
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.ITEM_REASONING_TEXT_DELTA, {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "r1",
+        contentIndex: 0,
+        delta: "thinking",
+      }),
+    )
+    // Not yet flushed — the 16 ms coalescer is still pending.
+    expect(controller.getState().liveTextByItemId.size).toBe(0)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const mirror = controller.getState().liveTextByItemId
+    expect(mirror.get("a9")).toEqual({ itemId: "a9", kind: "message", text: "hello" })
+    expect(mirror.get("r1")).toEqual({ itemId: "r1", kind: "reasoning", text: "thinking" })
+
+    // item/completed removes the item's mirror entry.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.ITEM_COMPLETED, {
+        threadId: "hthread-1",
+        turnId: "1",
+        item: { type: "agentMessage", id: "a9", text: "hello" },
+      }),
+    )
+    expect(controller.getState().liveTextByItemId.has("a9")).toBe(false)
+    expect(controller.getState().liveTextByItemId.has("r1")).toBe(true)
+  })
+
+  it("live text for items already restored is dropped", async () => {
+    const { controller, socket } = await restoredController()
+    // a1 is part of the restored THREAD history.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.ITEM_AGENT_MESSAGE_DELTA, {
+        threadId: "hthread-1",
+        turnId: "0",
+        itemId: "a1",
+        delta: "replayed",
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(controller.getState().liveTextByItemId.size).toBe(0)
+
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.ITEM_AGENT_MESSAGE_DELTA, {
+        threadId: "hthread-1",
+        turnId: "1",
+        itemId: "b1",
+        delta: "fresh",
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(controller.getState().liveTextByItemId.get("b1")?.text).toBe("fresh")
+  })
+
+  it("an unexpected socket close schedules a recovery reconnect", async () => {
+    const { controller, socket } = await restoredController()
+    const socketBefore = socket
+    const resumesBefore = countRequests(socket, "thread/resume")
+
+    socket.simClose()
+    // Recovery re-dials after the backoff; the resume only goes out once the
+    // NEW socket's initialize handshake resolves — answer it, then wait. The
+    // resume count is per-socket (the old socket carried the original one).
+    await vi.waitFor(() => expect(FakeWebSocket.last).not.toBe(socketBefore))
+    await driveOpenAndInit(FakeWebSocket.last!)
+    await vi.waitFor(() => {
+      expect(countRequests(FakeWebSocket.last!, "thread/resume")).toBeGreaterThan(0)
+    })
+    expect(resumesBefore).toBeGreaterThan(0)
+    await vi.waitFor(() => expect(controller.client.getStatus()).toBe("ready"))
+
+    controller.dispose()
+    const after = countRequests(FakeWebSocket.last!, "thread/resume")
+    FakeWebSocket.last!.simClose()
+    await new Promise((resolve) => setTimeout(resolve, RESTORE_BACKOFF_MS + 50))
+    // No recovery after dispose (the disposed gate).
+    expect(countRequests(FakeWebSocket.last!, "thread/resume")).toBe(after)
+  })
+})

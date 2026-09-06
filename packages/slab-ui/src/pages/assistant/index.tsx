@@ -19,9 +19,17 @@ import { useAssistantNewChat } from "./hooks/use-assistant-new-chat"
 import { useAssistantSessions } from "./hooks/use-assistant-sessions"
 import { useHarnessConversation } from "./hooks/use-harness-conversation"
 import { useWorkspaceSwitch, type WorkspaceSelection } from "./hooks/use-workspace-switch"
-import { useWorkspaceHandoffStore } from "@slab/ui/store/useWorkspaceHandoffStore"
+import {
+    useWorkspaceHandoffStore,
+    type AssistantDraft,
+} from "@slab/ui/store/useWorkspaceHandoffStore"
 import { WorkspaceSelector } from "@slab/ui/components/workspace-selector"
 import { useWorkspaceUiStore } from "@slab/ui/store/useWorkspaceUiStore"
+
+/** Delivery attempts a re-staged draft may use before giving up (with a toast). */
+const MAX_DRAFT_ATTEMPTS = 3
+/** Backoff between re-stages (scaled by the attempt) so a transient gate can clear. */
+const DRAFT_RETRY_BACKOFF_MS = 400
 
 function Assistant() {
     const { t } = useTranslation()
@@ -96,6 +104,9 @@ function Assistant() {
         subagentChildItemsByChildId,
         sendSteering,
         interrupt,
+        liveTextByItemId,
+        turnStartSeq,
+        notifyPaneDetachedMidRun,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
 
     // Context window for the usage consumption bar: prefer the runtime's
@@ -236,8 +247,45 @@ function Assistant() {
                       permissionMode: assistantDraft.permissionMode,
                       agentType: assistantDraft.agentType,
                   },
+                  // Included so the pane's claim key distinguishes a re-staged
+                  // retry from the original attempt (the ref-guard would
+                  // otherwise swallow the retry).
+                  attempts: assistantDraft.attempts ?? 0,
               }
             : null
+
+    // Capture the claimed draft for re-staging: `consumeDraft()` nulls the
+    // store, so this is the only copy once the pane has claimed it.
+    const claimedDraftRef = useRef<AssistantDraft | null>(null)
+    const handleAutoSendConsumed = useCallback(() => {
+        claimedDraftRef.current = consumeDraft()
+    }, [consumeDraft])
+
+    /**
+     * The pane reports a claimed draft that never reached `turn/start`
+     * (gate throw, transport failure). Re-stage it with backoff, bounded —
+     * the write goes through `getState().setDraft` from the timer so it
+     * survives this component unmounting (the pane that re-claims it is
+     * whatever detail view is mounted by then; the sessionId gate in the
+     * autoSend derivation still applies).
+     */
+    const handleAutoSendFailed = useCallback(
+        (payload: { attempts: number }) => {
+            const claimed = claimedDraftRef.current
+            claimedDraftRef.current = null
+            if (!claimed) return
+            if (payload.attempts + 1 >= MAX_DRAFT_ATTEMPTS) {
+                toast.error(t("pages.assistant.toast.draftDeliveryFailed"))
+                return
+            }
+            const next: AssistantDraft = { ...claimed, attempts: payload.attempts + 1 }
+            setTimeout(
+                () => useWorkspaceHandoffStore.getState().setDraft(next),
+                DRAFT_RETRY_BACKOFF_MS * (payload.attempts + 1),
+            )
+        },
+        [t],
+    )
 
     const openSessionSheet = useCallback(() => setIsSessionSheetOpen(true), [])
 
@@ -329,7 +377,7 @@ function Assistant() {
             {isDetailView ? (
                 <AssistantChatPane
                     key={`${curConversation ?? "none"}:${restoreVersion}`}
-                    disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || !curConversation}
+                    disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || isPreparingModel || !curConversation}
                     initialMessages={restoredMessages}
                     isHistoryLoading={isHistoryLoading}
                     modelStatusLabel={selectedModelStatusLabel}
@@ -384,7 +432,11 @@ function Assistant() {
                     }}
                     onStartNewChat={navigateToLanding}
                     autoSend={autoSend}
-                    onAutoSendConsumed={consumeDraft}
+                    onAutoSendConsumed={handleAutoSendConsumed}
+                    onAutoSendFailed={handleAutoSendFailed}
+                    onPaneDetached={notifyPaneDetachedMidRun}
+                    liveTextByItemId={liveTextByItemId}
+                    localTurnStartSeq={turnStartSeq}
                     workspaceSlot={
                         <WorkspaceSelector
                             value={liveWorkspaceSelection}

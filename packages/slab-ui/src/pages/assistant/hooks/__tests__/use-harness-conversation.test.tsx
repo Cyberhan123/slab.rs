@@ -195,4 +195,73 @@ describe("useHarnessConversation", () => {
     await expect(stopping).resolves.toBeUndefined()
     await unmount()
   })
+
+  it("exposes the live-text mirror and the pane-detach action from the controller", async () => {
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+
+    // A live delta (not part of the restored history) lands in the mirror.
+    FakeWebSocket.last!.simMessage(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "item/agentMessage/delta",
+        params: { threadId: "hthread-1", turnId: "1", itemId: "a9", delta: "live" },
+      }),
+    )
+    await vi.waitFor(() =>
+      expect(result.current.liveTextByItemId.get("a9")?.text).toBe("live"),
+    )
+
+    // Detach notification is wired through to the controller.
+    expect(typeof result.current.notifyPaneDetachedMidRun).toBe("function")
+    result.current.notifyPaneDetachedMidRun()
+    // No resync fires while the thread is idle-terminal-less: the terminal
+    // status hasn't arrived, so nothing observable yet — the controller tests
+    // cover the terminal path. Just ensure the call does not throw.
+    await flush()
+    await unmount()
+  })
+
+  it("the transport is constructed with the controller lifecycle callbacks", async () => {
+    const { result, unmount } = await renderHook(() => useHarnessConversation("s1", "m1"))
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+    await vi.waitFor(() => expect(result.current.restoredThreadId).toBe("hthread-1"))
+
+    // Drive the transport's send path against the fake socket: the
+    // accepted-turn ack must advance the controller's turnStartSeq.
+    expect(result.current.turnStartSeq).toBe(0)
+    const stream = await result.current.transport.sendMessages({
+      messages: [{ id: "u2", role: "user", parts: [{ type: "text", text: "go" }] }],
+    })
+    // Answer the turn/start the transport fired.
+    const startReq = await vi.waitFor(() => {
+      const req = FakeWebSocket.last!.sent
+        .map((raw) => JSON.parse(raw))
+        .filter((m: { method?: string }) => m.method === "turn/start")
+        .at(-1)
+      expect(req).toBeDefined()
+      return req!
+    })
+    FakeWebSocket.last!.simMessage(rpcResponse(startReq.id, { turn: { id: "1", items: [], status: "inProgress" } }))
+    FakeWebSocket.last!.simMessage(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "turn/completed",
+        params: { threadId: "hthread-1", turn: { id: "1", items: [], status: "completed" } },
+      }),
+    )
+    await vi.waitFor(() => expect(result.current.turnStartSeq).toBe(1))
+    // Drain the stream so the finally (onLocalStreamEnd) settles.
+    const reader = stream.getReader()
+    await reader.read()
+    reader.releaseLock()
+    await unmount()
+  })
 })

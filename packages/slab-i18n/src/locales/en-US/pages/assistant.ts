@@ -160,6 +160,8 @@ export const assistant = {
   toast: {
     waitBeforeDeletingSessions: 'Wait for the current response to finish before deleting sessions.',
     sessionSyncing: 'Assistant session is still syncing. Please try again in a moment.',
+    draftDeliveryFailed: 'Message could not be delivered — please try again.',
+    sessionBusy: 'The assistant is busy — wait for the current run to finish.',
     modelLoadRetry: 'Model load failed, re-downloading and retrying once...',
     failedToPrepareModel: 'Failed to prepare assistant model.',
     waitBeforeSwitchingModels:

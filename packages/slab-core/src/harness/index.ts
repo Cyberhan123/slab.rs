@@ -35,6 +35,7 @@ export type {
   CompactionPhase,
   ConversationControllerOptions,
   ConversationState,
+  LiveTextEntry,
   ModelLoadState,
   SubagentChildItem,
   SubagentTaskInfo,

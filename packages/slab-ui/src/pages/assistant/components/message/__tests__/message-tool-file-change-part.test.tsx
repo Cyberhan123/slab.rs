@@ -29,6 +29,7 @@ function emptyInteraction() {
     userMessageTurnIndex: new Map(),
     rollbackToMessage: undefined,
           subagentTasksByTaskId: new Map(),
+          subagentChildItemsByChildId: new Map(),
   }
 }
 

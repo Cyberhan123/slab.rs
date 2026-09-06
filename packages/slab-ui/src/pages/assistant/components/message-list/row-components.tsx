@@ -5,6 +5,7 @@ import { Marker, MarkerContent } from "@slab/components/marker"
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@slab/components/message"
 import { Bubble, BubbleContent } from "@slab/components/bubble"
 import UserAvatar from "@slab/ui/pages/assistant/components/user-avatar"
+import AgentAvatar from "@slab/ui/pages/assistant/components/agent-avatar"
 import { MessageItem } from "@slab/ui/pages/assistant/components/message/message-item"
 import { Shimmer } from "@slab/ui/pages/assistant/components/message/shimmer"
 import {
@@ -178,6 +179,47 @@ export function BackgroundTaskRow({
 }
 
 /**
+ * Assistant-aligned tail bubble for controller-mirrored in-flight text: shown
+ * when this pane's own AI-SDK stream is NOT attached to the run (a remount
+ * orphaned it mid-stream, or the page reloaded mid-turn). Replaced by the real
+ * (rollout-backed) message row once the run ends and the terminal resync
+ * lands. Mirrors the queued-input ghost-row structure, assistant-side.
+ */
+export function LiveTextRow({
+    row,
+}: ScrollerRowComponentProps<ScrollerRowOf<"liveText">>): ReactElement {
+    const { t } = useTranslation()
+    const { entry } = row
+    return (
+        <Message align="start" data-testid="assistant-live-tail">
+            <MessageAvatar>
+                <AgentAvatar name={t("pages.assistant.message.assistant")} />
+            </MessageAvatar>
+            <MessageContent>
+                <MessageHeader>
+                    {entry.kind === "reasoning"
+                        ? t("pages.assistant.thinking.loading")
+                        : t("pages.assistant.message.assistant")}
+                </MessageHeader>
+                <Bubble align="start" variant="tinted">
+                    <BubbleContent>
+                        <p
+                            className={
+                                entry.kind === "reasoning"
+                                    ? "whitespace-pre-wrap break-words opacity-70"
+                                    : "whitespace-pre-wrap break-words"
+                            }
+                        >
+                            {entry.text}
+                        </p>
+                    </BubbleContent>
+                </Bubble>
+            </MessageContent>
+        </Message>
+    )
+}
+
+/**
  * Row-level component registry, mirroring the MessageParts dispatch pattern.
  * Replaces the former `row.kind === ...` ternary chain in the list. Meta-rows
  * (history/compact markers) live in the SAME positioned container as messages
@@ -197,6 +239,7 @@ export const rowComponents: {
     modelLoadMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"modelLoadMarker">>>
     queuedInput: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"queuedInput">>>
     backgroundTask: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"backgroundTask">>>
+    liveText: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"liveText">>>
     message: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"message">>>
 } = {
     sessionLoadMarker: SessionLoadMarkerRow,
@@ -205,5 +248,6 @@ export const rowComponents: {
     modelLoadMarker: ModelLoadMarkerRow,
     queuedInput: QueuedInputRow,
     backgroundTask: BackgroundTaskRow,
+    liveText: LiveTextRow,
     message: MessageRow,
 }

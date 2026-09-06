@@ -100,48 +100,34 @@ describe("assistant e2e", () => {
     )
     await page.getByTestId("assistant-new-chat-landing").waitFor({ state: "detached", timeout: 90_000 })
 
-    // Gate on the SERVER-side reply before asserting the page: the
-    // landing→detail handoff remounts the chat pane, and the in-flight live
-    // stream can be dropped across that remount (the pane's `useChat` consumer
-    // unmounts mid-turn; the controller-level handoff race is tracked
-    // separately). The restored-history rendering — this test's subject — is
-    // deterministic: wait for the persisted reply, then reload and assert it
-    // renders.
+    // Gate on the SERVER-side reply first (a model-latency flake shield), then
+    // assert the reply renders on the LIVE page WITHOUT a reload: the draft
+    // delivery is guaranteed-or-loud (bounded re-staging), the mid-run pane
+    // remount no longer drops the live stream (remount suppression + orphan
+    // recovery + the controller's live-text mirror), and a mid-run reload
+    // still shows the in-flight reply via the mirrored tail.
     const secondPrompt = `Assistant E2E ${secondRunId}. Reply with one short sentence that includes ${secondRunId}.`
-    // The staged draft's AUTO-SEND is itself part of that handoff race (it
-    // fires only when the fresh pane's gating clears first). Give it a short
-    // window; when the draft did not land server-side, submit manually from
-    // the detail composer — the send path is the product's, only the flaky
-    // trigger is bypassed.
-    let draftDelivered = false
-    try {
-      await eventually(
-        "landing draft delivered server-side",
-        async () => {
-          const restore = await restoreSession(testEnv.serverBaseUrl, secondSessionId)
-          return restore.messages.some(
-            (message) => message.role === "user" && message.content === secondPrompt
-          )
-            ? true
-            : null
-        },
-        20_000,
-        500
-      )
-      draftDelivered = true
-    } catch {
-      // Fall through to the manual send below.
-    }
-    if (!draftDelivered) {
-      await waitForComposerReady(page)
-      await sendAssistantMessage(page, secondPrompt)
-    }
+    await eventually(
+      "landing draft delivered server-side",
+      async () => {
+        const restore = await restoreSession(testEnv.serverBaseUrl, secondSessionId)
+        return restore.messages.some(
+          (message) => message.role === "user" && message.content === secondPrompt
+        )
+          ? true
+          : null
+      },
+      120_000,
+      500
+    )
     const secondReply = await waitForCompletedAssistantReply(
       testEnv.serverBaseUrl,
       secondSessionId,
       secondPrompt
     )
     expect(secondReply.restore.thread?.status).toBe("completed")
+    // The strong form: the reply is visible on the live page (no reload).
+    await expectAssistantPageText(page, secondRunId)
 
     // A full reload of the `?session=` deep link re-mounts the SAME detail
     // (WorkspaceModeSync skips its `/`→`/workspace` redirect for deep links).

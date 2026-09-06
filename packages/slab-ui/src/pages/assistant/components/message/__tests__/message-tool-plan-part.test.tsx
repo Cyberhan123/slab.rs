@@ -22,6 +22,7 @@ async function renderPart(part: Partial<ToolPartLike>, toolCallId = "call-1") {
         userMessageTurnIndex: new Map(),
         rollbackToMessage: undefined,
         subagentTasksByTaskId: new Map(),
+          subagentChildItemsByChildId: new Map(),
       }}
     >
       <MessageToolPlanPart

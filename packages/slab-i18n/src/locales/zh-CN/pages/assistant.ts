@@ -156,6 +156,8 @@ export const assistant = {
   toast: {
     waitBeforeDeletingSessions: '请等待当前回复完成后再删除会话。',
     sessionSyncing: '助手会话仍在同步，请稍后再试。',
+    draftDeliveryFailed: '消息发送失败，请重试。',
+    sessionBusy: '助手正在处理上一轮，请等待本轮结束。',
     modelLoadRetry: '模型加载失败，正在重新下载并重试一次...',
     failedToPrepareModel: '准备助手模型失败。',
     waitBeforeSwitchingModels: '请等待当前回复或会话同步完成后再切换模型。',

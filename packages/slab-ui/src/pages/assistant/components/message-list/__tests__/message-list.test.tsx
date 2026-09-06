@@ -128,4 +128,25 @@ describe("MessageList", () => {
 
     await expect.element(screen.getByTestId("assistant-history-marker")).not.toBeInTheDocument()
   })
+
+  it("renders live-text tail rows after messages and queued inputs", async () => {
+    const screen = await render(
+      <MessageList
+        messages={messages}
+        isBusy={false}
+        queuedTexts={["meanwhile…"]}
+        liveTailTexts={[
+          { itemId: "a9", kind: "message", text: "in-flight reply" },
+          { itemId: "r1", kind: "reasoning", text: "thinking…" },
+        ]}
+      />,
+    )
+    const rows = screen.getByTestId("assistant-live-tail").elements()
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.textContent).toContain("in-flight reply")
+    expect(rows[1]?.textContent).toContain("thinking…")
+    // The tail follows the queued ghost inputs in DOM order.
+    const body = document.body.textContent ?? ""
+    expect(body.indexOf("meanwhile…")).toBeLessThan(body.indexOf("in-flight reply"))
+  })
 })

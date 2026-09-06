@@ -39,6 +39,12 @@ export interface HarnessConversation extends ConversationState {
   sendSteering: (message: UIMessage, options?: Parameters<ConversationController["send"]>[1]) => Promise<unknown>
   /** Interrupt the live turn (Stop control). */
   interrupt: () => Promise<void>
+  /**
+   * The pane unmounted while its `useChat` stream was attached — flags the
+   * terminal-triggered resync so the orphaned run's reply remounts with the
+   * pane instead of staying invisible until a manual reload.
+   */
+  notifyPaneDetachedMidRun: () => void
 }
 
 export function useHarnessConversation(
@@ -72,7 +78,17 @@ export function useHarnessConversation(
   )
 
   const transport = useMemo(
-    () => new HarnessChatTransport({ client: controller.client, model }),
+    () =>
+      new HarnessChatTransport({
+        client: controller.client,
+        model,
+        // Local-stream lifecycle → controller: the mid-run restoreVersion
+        // suppression (begin/end) and the accepted-turn ack the pane's
+        // failed-draft re-stage keys off (turn started).
+        onLocalStreamBegin: controller.markLocalStreamBegin,
+        onLocalTurnStarted: () => controller.markLocalTurnStarted(),
+        onLocalStreamEnd: controller.markLocalStreamEnd,
+      }),
     [controller, model],
   )
 
@@ -87,5 +103,6 @@ export function useHarnessConversation(
     rollbackFromTurn: controller.rollbackFromTurn,
     sendSteering: controller.sendSteering,
     interrupt: controller.interrupt,
+    notifyPaneDetachedMidRun: controller.notifyPaneDetachedMidRun,
   }
 }

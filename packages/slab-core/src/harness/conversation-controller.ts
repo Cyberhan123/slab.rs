@@ -28,6 +28,7 @@ import type { UIMessage } from "ai"
 
 import { HARNESS_NOTIFICATION } from "@slab/api/harness"
 import type {
+  AgentMessageDeltaParams,
   AgentThreadStatus,
   ApprovalScope,
   CommandExecutionOutputDeltaParams,
@@ -35,6 +36,7 @@ import type {
   CommandInfo,
   ContextCompactedParams,
   ContextCompactingParams,
+  ErrorParams,
   FileChangeApprovalChange,
   FileChangeOutputDeltaParams,
   FileChangeRequestApprovalParams,
@@ -93,6 +95,20 @@ export type ModelLoadState = {
 
 /** Whether a compaction marker represents an automatic or manual (`/compact`) run. */
 export type CompactionMode = "auto" | "manual"
+
+/**
+ * A live (not-yet-persisted) assistant text fragment mirrored from the
+ * notification feed. The controller accumulates agent-message/reasoning
+ * deltas per item so a pane that is NOT attached to the AI-SDK stream (a
+ * remount orphaned mid-run, or a mid-turn reload) can still render the
+ * in-flight reply; the pane suppresses the mirror while its own stream is
+ * attached (the same deltas already render there).
+ */
+export interface LiveTextEntry {
+  itemId: string
+  kind: "message" | "reasoning"
+  text: string
+}
 
 /**
  * A resident background task started via `shell background=true`, tracked from
@@ -272,6 +288,21 @@ export interface ConversationState {
   subagentTasksByTaskId: ReadonlyMap<string, SubagentTaskInfo>
   /** childThreadId → relayed child turn items (live child activity in the card). */
   subagentChildItemsByChildId: ReadonlyMap<string, readonly SubagentChildItem[]>
+  /**
+   * itemId → in-flight assistant/reasoning text mirror (see
+   * {@link LiveTextEntry}). Entries whose item is already in the restored
+   * history are dropped — the history bubble renders them instead.
+   */
+  liveTextByItemId: ReadonlyMap<string, LiveTextEntry>
+  /**
+   * Monotonic count of locally-initiated turns the server ACCEPTED (the
+   * `turn/start` response resolved). The pane snapshots it before a draft
+   * send and compares after a failure: an unchanged seq means the turn never
+   * started server-side, so the draft may be re-staged; an advanced seq means
+   * a server-side run exists (orphan recovery owns its display — never
+   * double-send).
+   */
+  turnStartSeq: number
 }
 
 /** Options accepted by the {@link ConversationController} constructor. */
@@ -308,6 +339,14 @@ export interface TurnSendOptions {
  */
 export const MAX_RESTORE_ATTEMPTS = 3
 export const RESTORE_BACKOFF_MS = 400
+
+/**
+ * Trailing-coalesce window for the live-text mirror: agent-message deltas
+ * arrive per-token, and committing per delta would re-render every subscriber
+ * per token. One frame-ish delay keeps the tail visually live without the
+ * per-token cost.
+ */
+const LIVE_TEXT_FLUSH_MS = 16
 
 // ── Pure helpers (moved from the ui hook verbatim) ──────────────────────────
 
@@ -389,6 +428,8 @@ export const EMPTY_SNAPSHOT: ConversationState = {
   backgroundTasks: [],
   subagentTasksByTaskId: new Map(),
   subagentChildItemsByChildId: new Map(),
+  liveTextByItemId: new Map(),
+  turnStartSeq: 0,
 }
 
 // ── Controller ──────────────────────────────────────────────────────────────
@@ -442,6 +483,36 @@ export class ConversationController {
    * yet; the terminal event consumes it.
    */
   private pendingResync = false
+  /**
+   * True while a locally-initiated AI-SDK stream (the pane's `useChat`) is
+   * mid-run. A reconnect landing in that window must NOT bump
+   * `restoreVersion` — the bump remounts the pane and kills its live stream;
+   * the structural change is deferred to the run's terminal event via
+   * `pendingResync` instead. Cleared AT the terminal notifications (not only
+   * by the transport's async finish) so the deferred bump decision is
+   * deterministic: the terminal handler runs synchronously before the resync
+   * it triggers, so that resync always sees the flag cleared and bumps.
+   */
+  private localStreamActive = false
+  /** See {@link ConversationState.turnStartSeq}. */
+  private turnStartSeq = 0
+  /** Committed mirror of in-flight assistant/reasoning text (per item). */
+  private liveText = new Map<string, LiveTextEntry>()
+  /** Staging for {@link liveText}; flushed by a short trailing coalescer. */
+  private liveTextBuffer = new Map<string, LiveTextEntry>()
+  private liveTextFlushTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * Item ids present in the restored history (rebuilt at every resume).
+   * Live-text mirror entries for these are dropped: the history bubble
+   * renders them. The FULL item-id set — an assistant group's message id
+   * equals only its first item's id, so message-id matching would miss
+   * later items in the group and double-render.
+   */
+  private restoredItemIds = new Set<string>()
+  /** Set first thing in `dispose()`; gates the socket-recovery timer. */
+  private disposed = false
+  private unsubscribeStatus: (() => void) | null = null
+  private socketRecoveryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(options: ConversationControllerOptions = {}) {
     this.sessionId = options.sessionId
@@ -454,6 +525,10 @@ export class ConversationController {
         WebSocketCtor: options.WebSocketCtor,
       })
     this.unsubscribeNotifications = this.client.onNotification(this.handleNotification)
+    // An unexpected socket close strands the whole notification feed (the
+    // client does not auto-reconnect): schedule one delayed recovery resume.
+    // See `handleStatusChange` for why this is safe under a live stream.
+    this.unsubscribeStatus = this.client.onStatusChange(this.handleStatusChange)
   }
 
   /** Current immutable snapshot (reference-stable until the next change). */
@@ -521,6 +596,7 @@ export class ConversationController {
       this.backgroundTasks = []
       this.subagentTasks = new Map()
       this.subagentChildItems = new Map()
+      this.resetLiveRunState()
       this.restoreVersion += 1
       this.commit()
       return
@@ -582,6 +658,12 @@ export class ConversationController {
           messages.length === prevMessageIds.length &&
           messages.every((message, index) => message.id === prevMessageIds[index])
         if (!identicalReread) this.restoredMessages = messages
+        // Rebuild the restored-item id set and drop live-text mirror entries
+        // the history now carries (per-item dedupe for the mirror tail).
+        this.restoredItemIds = new Set(thread.turns.flatMap((turn) => turn.items).map((item) => item.id))
+        if (this.liveText.size > 0 || this.liveTextBuffer.size > 0) {
+          this.dropRestoredLiveText()
+        }
         // Background tasks are thread-scoped; a thread switch drops the list.
         // A null `restoredThreadId` means the thread was created by the first
         // `turn/start` (fresh session — never restored) and this resume binds
@@ -591,6 +673,7 @@ export class ConversationController {
           this.backgroundTasks = []
           this.subagentTasks = new Map()
           this.subagentChildItems = new Map()
+          this.resetLiveRunState()
         }
         this.userMessageTurnIndex = buildUserMessageTurnIndex(thread)
         this.restoredThreadId = thread.id
@@ -609,6 +692,7 @@ export class ConversationController {
         this.restoredThreadId = null
         this.activeConversation = this.sessionId
         this.userMessageTurnIndex = new Map()
+        this.restoredItemIds = new Set()
         this.commit()
       }
     } catch (restoreError) {
@@ -619,13 +703,28 @@ export class ConversationController {
     } finally {
       if (isCurrent()) {
         this.isHistoryLoading = false
-        // Remount only on a structural change (thread swap or a different
-        // message-id sequence); an identical re-read keeps the version.
-        const structurallyChanged =
-          this.restoredThreadId !== prevThreadId ||
+        // Remount only on a structural change; an identical re-read keeps the
+        // version. A null→id first bind with an UNCHANGED message sequence is
+        // not structural — the old thread-id clause remounted a fresh
+        // session's pane for literally nothing (the pane was already showing
+        // exactly that content via its live stream).
+        const sequenceChanged =
           this.restoredMessages.length !== prevMessageIds.length ||
           this.restoredMessages.some((message, index) => message.id !== prevMessageIds[index])
-        if (structurallyChanged) this.restoreVersion += 1
+        const threadChanged = this.restoredThreadId !== prevThreadId
+        const firstBind = prevThreadId === null && this.restoredThreadId !== null
+        const structurallyChanged = sequenceChanged || (threadChanged && !firstBind)
+        if (structurallyChanged) {
+          if (this.localStreamActive) {
+            // A pane-attached stream owns the live display of this run: never
+            // remount it mid-stream. Defer the reseed to the run's terminal
+            // event — the existing `pendingResync` consumer does exactly that
+            // (and by then the flag is cleared, so the resync bumps).
+            this.pendingResync = true
+          } else {
+            this.restoreVersion += 1
+          }
+        }
         this.commit()
       }
     }
@@ -721,6 +820,108 @@ export class ConversationController {
     this.pendingResync = false
     this.queuedTexts = []
     if (shouldResync) void this.reconnect()
+  }
+
+  // ── Local-stream lifecycle + orphan recovery (pane/transport seams) ────────
+
+  /** A locally-initiated AI-SDK send began (pane `useChat` stream opening). */
+  readonly markLocalStreamBegin = (): void => {
+    if (this.disposed) return
+    this.localStreamActive = true
+  }
+
+  /** The server ACCEPTED a locally-initiated turn (`turn/start` resolved). */
+  readonly markLocalTurnStarted = (): void => {
+    if (this.disposed) return
+    this.turnStartSeq += 1
+    this.localStreamActive = true
+    this.commit()
+  }
+
+  /** The locally-initiated AI-SDK stream finished (any outcome). */
+  readonly markLocalStreamEnd = (): void => {
+    if (this.disposed) return
+    this.localStreamActive = false
+  }
+
+  /**
+   * The pane unmounted while its `useChat` stream was attached (a
+   * restoreVersion bump remounted it, or the session view torn down mid-run).
+   * The server run keeps going (the transport's abort is local-only), but no
+   * local stream renders it anymore — flag the terminal-triggered resync so
+   * the finished rollout remounts the pane WITH the reply. No-op when the
+   * thread is already terminal (the loop-convergence guard: the
+   * terminal-triggered remount happens after the terminal event, so its own
+   * unmount cannot re-arm the flag).
+   */
+  readonly notifyPaneDetachedMidRun = (): void => {
+    if (this.disposed) return
+    this.localStreamActive = false
+    if (this.threadStatus !== null && TERMINAL_THREAD_STATUSES.has(this.threadStatus)) return
+    this.pendingResync = true
+    this.commit()
+  }
+
+  /** Reset the per-run mirror + stream state (session reset / thread switch). */
+  private resetLiveRunState(): void {
+    this.localStreamActive = false
+    this.liveText = new Map()
+    this.liveTextBuffer = new Map()
+    this.restoredItemIds = new Set()
+    if (this.liveTextFlushTimer !== null) {
+      clearTimeout(this.liveTextFlushTimer)
+      this.liveTextFlushTimer = null
+    }
+  }
+
+  /** Drop live-text entries whose item is now part of the restored history. */
+  private dropRestoredLiveText(): void {
+    let changed = false
+    for (const itemId of this.liveText.keys()) {
+      if (this.restoredItemIds.has(itemId)) {
+        if (!changed) this.liveText = new Map(this.liveText)
+        this.liveText.delete(itemId)
+        changed = true
+      }
+    }
+    // Map iteration tolerates deletion of visited keys — no snapshot needed.
+    for (const itemId of this.liveTextBuffer.keys()) {
+      if (this.restoredItemIds.has(itemId)) this.liveTextBuffer.delete(itemId)
+    }
+    if (changed) this.commit()
+  }
+
+  /**
+   * Stage an agent-message/reasoning delta into the mirror. Deltas arrive
+   * per-token, so the commit is coalesced behind a short trailing timer —
+   * per-delta `commit()` would re-render every subscriber per token.
+   */
+  private appendLiveText(itemId: string, kind: "message" | "reasoning", delta: string): void {
+    const existing = this.liveTextBuffer.get(itemId) ?? this.liveText.get(itemId)
+    const text = ((existing?.kind === kind ? existing.text : "") + delta).slice(0, 256 * 1024)
+    this.liveTextBuffer.set(itemId, { itemId, kind, text })
+    if (this.liveTextFlushTimer === null) {
+      this.liveTextFlushTimer = setTimeout(() => {
+        this.liveTextFlushTimer = null
+        this.flushLiveTextNow()
+      }, LIVE_TEXT_FLUSH_MS)
+    }
+  }
+
+  /** Publish the staged mirror deltas (timer expiry, or terminal events). */
+  private flushLiveTextNow(): void {
+    if (this.liveTextFlushTimer !== null) {
+      clearTimeout(this.liveTextFlushTimer)
+      this.liveTextFlushTimer = null
+    }
+    if (this.liveTextBuffer.size === 0) return
+    this.liveText = new Map(this.liveText)
+    for (const [itemId, entry] of this.liveTextBuffer) {
+      if (this.restoredItemIds.has(itemId)) continue
+      this.liveText.set(itemId, entry)
+    }
+    this.liveTextBuffer = new Map()
+    this.commit()
   }
 
   /**
@@ -929,11 +1130,41 @@ export class ConversationController {
 
   /** Cancel in-flight restore work, drop listeners, and close the client. Idempotent. */
   dispose(): void {
+    this.disposed = true
     this.generation += 1
+    if (this.liveTextFlushTimer !== null) {
+      clearTimeout(this.liveTextFlushTimer)
+      this.liveTextFlushTimer = null
+    }
+    if (this.socketRecoveryTimer !== null) {
+      clearTimeout(this.socketRecoveryTimer)
+      this.socketRecoveryTimer = null
+    }
+    this.unsubscribeStatus?.()
+    this.unsubscribeStatus = null
     this.unsubscribeNotifications?.()
     this.unsubscribeNotifications = null
     this.listeners.clear()
     this.client.close()
+  }
+
+  /**
+   * Single-flight recovery after an UNEXPECTED socket close: one delayed
+   * `reconnect()` re-opens and re-resumes, restoring the notification feed
+   * (replayed terminal events heal a stale `threadStatus`). Safe under a
+   * live pane stream: a resume replays item events (started/completed), not
+   * text deltas, and the still-subscribed transport's per-item open/close is
+   * idempotent — and the reconnect's structural bump is deferred while
+   * `localStreamActive` holds.
+   */
+  private readonly handleStatusChange = (status: string): void => {
+    if (this.disposed || status !== "closed") return
+    if (this.socketRecoveryTimer !== null) return
+    this.socketRecoveryTimer = setTimeout(() => {
+      this.socketRecoveryTimer = null
+      if (this.disposed || this.client.getStatus() !== "closed") return
+      void this.reconnect()
+    }, RESTORE_BACKOFF_MS)
   }
 
   // ── internals ─────────────────────────────────────────────────────────────
@@ -1027,6 +1258,8 @@ export class ConversationController {
       backgroundTasks: this.backgroundTasks,
       subagentTasksByTaskId: this.subagentTasks,
       subagentChildItemsByChildId: this.subagentChildItems,
+      liveTextByItemId: this.liveText,
+      turnStartSeq: this.turnStartSeq,
     }
     for (const listener of this.listeners) listener()
   }
@@ -1052,7 +1285,8 @@ export class ConversationController {
       if (itemId === undefined) return
       const hadOutput = this.liveOutput.has(itemId)
       const hadPatch = this.livePatch.has(itemId)
-      if (!hadOutput && !hadPatch) return
+      const hadLiveText = this.liveText.has(itemId) || this.liveTextBuffer.has(itemId)
+      if (!hadOutput && !hadPatch && !hadLiveText) return
       if (hadOutput) {
         this.liveOutput = new Map(this.liveOutput)
         this.liveOutput.delete(itemId)
@@ -1060,6 +1294,13 @@ export class ConversationController {
       if (hadPatch) {
         this.livePatch = new Map(this.livePatch)
         this.livePatch.delete(itemId)
+      }
+      if (hadLiveText) {
+        // The finalized item carries its own content in the stream/history —
+        // the mirror copy would double-render it.
+        this.liveTextBuffer.delete(itemId)
+        this.liveText = new Map(this.liveText)
+        this.liveText.delete(itemId)
       }
       this.commit()
       return
@@ -1091,6 +1332,25 @@ export class ConversationController {
       this.livePatch = new Map(this.livePatch)
       this.livePatch.set(params.itemId, [...existing, params.delta])
       this.commit()
+      return
+    }
+
+    // Mirror in-flight assistant/reasoning text per item. The pane's own
+    // AI-SDK stream renders these deltas when it is attached; the mirror
+    // serves panes that are NOT attached (a remount orphaned mid-run, a
+    // mid-turn reload — replayed notifications reach here too, since the
+    // turnId filter exists only in the transport).
+    if (
+      method === HARNESS_NOTIFICATION.ITEM_AGENT_MESSAGE_DELTA ||
+      method === HARNESS_NOTIFICATION.ITEM_REASONING_TEXT_DELTA ||
+      method === HARNESS_NOTIFICATION.ITEM_REASONING_SUMMARY_TEXT_DELTA
+    ) {
+      const params = (notification.params ?? {}) as AgentMessageDeltaParams
+      if (params.threadId !== this.client.currentThreadId) return
+      if (params.itemId === undefined || params.delta === undefined) return
+      if (this.restoredItemIds.has(params.itemId)) return
+      const kind = method === HARNESS_NOTIFICATION.ITEM_AGENT_MESSAGE_DELTA ? "message" : "reasoning"
+      this.appendLiveText(params.itemId, kind, params.delta)
       return
     }
 
@@ -1273,7 +1533,12 @@ export class ConversationController {
       if (TERMINAL_THREAD_STATUSES.has(this.threadStatus)) {
         // The run ended; anything still queued client-side was drained into
         // the run or persisted server-side (steering leftovers land in the
-        // rollout history).
+        // rollout history). Clearing `localStreamActive` HERE (before the
+        // resync below runs) makes the deferred-bump decision deterministic:
+        // a resync triggered by this terminal event always sees the flag
+        // cleared and bumps, remounting the pane with the completed rollout.
+        this.localStreamActive = false
+        this.flushLiveTextNow()
         this.denyStalePendingApprovals()
         this.clearQueuedAndResync()
       }
@@ -1289,6 +1554,27 @@ export class ConversationController {
       this.turnUsage = params.usage ?? null
       const reason = typeof params.reason === "string" ? params.reason : null
       this.abortReason = reason && reason !== "completed" ? reason : null
+      // Same ordering contract as THREAD_STATUS_CHANGED: clear the flag
+      // before the terminal-triggered resync so its bump decision is
+      // deterministic.
+      this.localStreamActive = false
+      this.flushLiveTextNow()
+      this.denyStalePendingApprovals()
+      this.clearQueuedAndResync()
+      this.commit()
+      return
+    }
+
+    // A failed run never sends `turn/completed` — without this arm the
+    // thread status, the local-stream flag, and any pending resync would
+    // stick on the failed run forever.
+    if (method === HARNESS_NOTIFICATION.ERROR) {
+      const params = (notification.params ?? {}) as ErrorParams
+      if (params.threadId !== undefined && params.threadId !== this.client.currentThreadId) {
+        return
+      }
+      this.localStreamActive = false
+      this.flushLiveTextNow()
       this.denyStalePendingApprovals()
       this.clearQueuedAndResync()
       this.commit()

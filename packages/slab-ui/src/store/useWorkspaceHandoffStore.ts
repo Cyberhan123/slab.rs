@@ -8,7 +8,7 @@ type AssistantDraftSource = {
   path?: string
 }
 
-type AssistantDraft = {
+export type AssistantDraft = {
   autoSubmit: boolean
   prompt: string
   source?: AssistantDraftSource
@@ -23,6 +23,12 @@ type AssistantDraft = {
   effort?: ReasoningEffort
   permissionMode?: PermissionMode
   agentType?: "plan"
+  /**
+   * Delivery attempts used so far (0 = first try). The pane re-stages a
+   * claimed-but-failed draft with attempts+1; the page bounds the retries
+   * and toasts when the bound is exhausted.
+   */
+  attempts?: number
 }
 
 type WorkspaceRevealPayload = {

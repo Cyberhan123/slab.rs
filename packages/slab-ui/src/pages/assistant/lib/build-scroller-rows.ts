@@ -1,4 +1,9 @@
-import type { BackgroundTaskInfo, CompactionMarker, ModelLoadState } from "@slab/core/harness"
+import type {
+    BackgroundTaskInfo,
+    CompactionMarker,
+    LiveTextEntry,
+    ModelLoadState,
+} from "@slab/core/harness"
 import type { TMessage } from "@slab/ui/pages/assistant/components/message/message-item"
 
 export const HISTORY_MARKER_ID = "__history_marker__" as const
@@ -6,6 +11,7 @@ export const SESSION_LOAD_MARKER_ID = "__session_load_marker__" as const
 export const MODEL_LOAD_MARKER_ID = "__model_load_marker__" as const
 export const QUEUED_INPUT_ID_PREFIX = "__queued_input_" as const
 export const BACKGROUND_TASK_ID_PREFIX = "__background_task_" as const
+export const LIVE_TEXT_ID_PREFIX = "__live_text_" as const
 
 /**
  * A virtualized scroller row. Either a real message, or a synthetic non-message
@@ -22,6 +28,7 @@ export type ScrollerRow =
     | { kind: "modelLoadMarker"; id: typeof MODEL_LOAD_MARKER_ID; modelLoad: NonNullable<ModelLoadState> }
     | { kind: "queuedInput"; id: string; text: string }
     | { kind: "backgroundTask"; id: string; task: BackgroundTaskInfo }
+    | { kind: "liveText"; id: string; entry: LiveTextEntry }
     | { kind: "message"; id: string; message: TMessage }
 
 /** Narrow a `ScrollerRow` to a single variant by its discriminant `kind`. */
@@ -40,6 +47,11 @@ export type BuildScrollerRowsOptions = {
     queuedTexts?: readonly string[]
     /** Resident background tasks (shell background=true); RUNNING tasks render a status Marker at the tail. */
     backgroundTasks?: readonly BackgroundTaskInfo[]
+    /**
+     * Controller-mirrored in-flight assistant text (remount-orphaned runs /
+     * mid-turn reloads); rendered as assistant-aligned tail bubbles.
+     */
+    liveTailTexts?: readonly LiveTextEntry[]
 }
 
 /**
@@ -89,6 +101,9 @@ export function buildScrollerRows(
     }
     for (const [index, text] of (options.queuedTexts ?? []).entries()) {
         out.push({ kind: "queuedInput", id: `${QUEUED_INPUT_ID_PREFIX}${index}`, text })
+    }
+    for (const entry of options.liveTailTexts ?? []) {
+        out.push({ kind: "liveText", id: `${LIVE_TEXT_ID_PREFIX}${entry.itemId}`, entry })
     }
     return out
 }

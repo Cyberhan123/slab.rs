@@ -7,7 +7,12 @@ import {
     MessageScrollerViewport,
 } from "@slab/components/message-scroller"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import type { BackgroundTaskInfo, CompactionMarker, ModelLoadState } from "@slab/core/harness"
+import type {
+    BackgroundTaskInfo,
+    CompactionMarker,
+    LiveTextEntry,
+    ModelLoadState,
+} from "@slab/core/harness"
 import { buildScrollerRows, type ScrollerRow } from "@slab/ui/pages/assistant/lib/build-scroller-rows"
 import type { TMessage } from "@slab/ui/pages/assistant/components/message/message-item"
 import { rowComponents, type ScrollerRowExtraProps } from "./row-components"
@@ -31,6 +36,8 @@ type MessageListProps = {
     queuedTexts?: readonly string[]
     /** Resident background tasks; RUNNING ones render a status Marker at the tail. */
     backgroundTasks?: readonly BackgroundTaskInfo[]
+    /** Controller-mirrored in-flight assistant text; assistant-aligned tail bubbles. */
+    liveTailTexts?: readonly LiveTextEntry[]
 }
 
 function MessageList({
@@ -44,6 +51,7 @@ function MessageList({
     sessionLoading = false,
     queuedTexts,
     backgroundTasks,
+    liveTailTexts,
 }: MessageListProps) {
     const viewportRef = useRef<HTMLDivElement>(null)
 
@@ -56,8 +64,9 @@ function MessageList({
                 sessionLoading,
                 queuedTexts,
                 backgroundTasks,
+                liveTailTexts,
             }),
-        [messages, showHistoryMarker, historyCount, compactionMarkers, modelLoad, sessionLoading, queuedTexts, backgroundTasks],
+        [messages, showHistoryMarker, historyCount, compactionMarkers, modelLoad, sessionLoading, queuedTexts, backgroundTasks, liveTailTexts],
     )
 
     // @tanstack/react-virtual returns mutable instance functions; the compiler

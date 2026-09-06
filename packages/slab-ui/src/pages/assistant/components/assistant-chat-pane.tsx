@@ -40,12 +40,14 @@ import type {
     BackgroundTaskInfo,
     CompactionMarker,
     HarnessChatTransport,
+    LiveTextEntry,
     ModelLoadState,
     SubagentChildItem,
     SubagentTaskInfo,
     ThreadStatusString,
     TurnSendOptions,
 } from "@slab/core/harness"
+import { toast } from "sonner"
 
 /** Static i18n keys per wire abort reason (static strings satisfy the key guards). */
 const ABORT_REASON_LABEL_KEYS: Record<string, string> = {
@@ -130,9 +132,31 @@ export type AssistantChatPaneProps = {
         text: string
         files: FileUIPart[]
         metadata: { effort?: unknown; permissionMode?: unknown; agentType?: unknown }
+        /** Delivery attempts used so far — distinguishes a re-staged retry. */
+        attempts?: number
     } | null
     /** Called exactly once when {@link autoSend} is taken (clears the draft). */
     onAutoSendConsumed?: () => void
+    /**
+     * A claimed draft failed BEFORE the turn started server-side (gate throw,
+     * transport failure). The page re-stages the draft (bounded) or toasts.
+     */
+    onAutoSendFailed?: (payload: { attempts: number }) => void
+    /**
+     * Fired from this pane's unmount cleanup while its `useChat` stream was
+     * attached (`submitted`/`streaming`): the server run keeps going with no
+     * local renderer — the controller flags a terminal-triggered resync so
+     * the finished rollout remounts the pane with the reply.
+     */
+    onPaneDetached?: () => void
+    /** Controller mirror of in-flight assistant/reasoning text (orphan tail). */
+    liveTextByItemId: ReadonlyMap<string, LiveTextEntry>
+    /**
+     * Monotonic count of server-accepted local turns; snapshot before a draft
+     * send and compare on failure (unchanged ⇒ the turn never started ⇒ the
+     * draft may be re-staged).
+     */
+    localTurnStartSeq: number
     /** Live workspace selector rendered inside the Sender toolbar. */
     workspaceSlot?: ReactNode
 }
@@ -176,6 +200,10 @@ export function AssistantChatPane({
     onStartNewChat,
     autoSend,
     onAutoSendConsumed,
+    onAutoSendFailed,
+    onPaneDetached,
+    liveTextByItemId,
+    localTurnStartSeq,
     workspaceSlot,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
@@ -193,6 +221,12 @@ export function AssistantChatPane({
         threadStatus === "pending"
     const steerable = serverBusy
     const abortReasonLabel = abortReason ? ABORT_REASON_LABEL_KEYS[abortReason] : undefined
+    // In-flight assistant text mirrored by the controller: rendered as tail
+    // bubbles ONLY when this pane's own stream is not attached to the run
+    // (remount-orphaned or mid-run reload) — otherwise the same deltas would
+    // double-render through useChat.
+    const liveTailTexts =
+        !isBusy && liveTextByItemId.size > 0 ? Array.from(liveTextByItemId.values()) : []
     const greeting = useGreeting()
 
     const { confirm: confirmRollback, dialog: rollbackConfirmDialog } = useWorkspaceConfirmDialog()
@@ -250,28 +284,84 @@ export function AssistantChatPane({
     // BEFORE sending, so the `${conversation}:${restoreVersion}` pane remount
     // (and React StrictMode double-invocation) can never double-deliver; the
     // claim key guards against effect re-runs for the same staged message.
+    // `attempts` is part of the key — a re-staged retry (same text) must not
+    // be swallowed by the guard. A failure BEFORE the server accepted the
+    // turn (gate throw, transport failure) reports via `onAutoSendFailed` so
+    // the page can re-stage the draft (bounded) instead of silently losing
+    // the first message.
     const claimedAutoSendRef = useRef<string | null>(null)
+    const pendingAutoSendRef = useRef<{ seqBefore: number; attempts: number } | null>(null)
+    const localTurnStartSeqRef = useRef(localTurnStartSeq)
+    useEffect(() => {
+        localTurnStartSeqRef.current = localTurnStartSeq
+    }, [localTurnStartSeq])
     const readyForAutoSend =
         !!autoSend && !!onAutoSendConsumed && !disabled && !isHistoryLoading && !isBusy && !steerable
     useEffect(() => {
         if (!readyForAutoSend || !autoSend || !onAutoSendConsumed) return
-        const claimKey = `${autoSend.text}:${autoSend.metadata?.effort ?? ""}`
+        const claimKey = `${autoSend.text}:${autoSend.metadata?.effort ?? ""}:${autoSend.attempts ?? 0}`
         if (claimedAutoSendRef.current === claimKey) return
         claimedAutoSendRef.current = claimKey
         onAutoSendConsumed()
+        pendingAutoSendRef.current = {
+            seqBefore: localTurnStartSeqRef.current,
+            attempts: autoSend.attempts ?? 0,
+        }
         void (async () => {
             try {
                 await onBeforeSubmit(autoSend.text)
             } catch {
-                return // the gate already toasted why the session isn't ready
+                pendingAutoSendRef.current = null
+                // The gate already toasted why the session isn't ready; the
+                // draft is gone unless the page re-stages it.
+                onAutoSendFailed?.({ attempts: autoSend.attempts ?? 0 })
+                return
             }
-            sendMessage({
-                text: autoSend.text,
-                files: autoSend.files,
-                metadata: autoSend.metadata,
-            })
+            try {
+                sendMessage({
+                    text: autoSend.text,
+                    files: autoSend.files,
+                    metadata: autoSend.metadata,
+                })
+            } catch {
+                pendingAutoSendRef.current = null
+                onAutoSendFailed?.({ attempts: autoSend.attempts ?? 0 })
+            }
         })()
-    }, [readyForAutoSend, autoSend, onAutoSendConsumed, onBeforeSubmit, sendMessage])
+    }, [readyForAutoSend, autoSend, onAutoSendConsumed, onAutoSendFailed, onBeforeSubmit, sendMessage])
+
+    // AI-SDK routes transport/stream failures into the `status === "error"`
+    // state (sendMessage's promise does not reject). Consume a pending draft
+    // failure: when the accepted-turn sequence has NOT advanced, the turn
+    // never started server-side and the page may re-stage the draft; when it
+    // HAS advanced, a server-side run exists and the orphan-recovery path
+    // owns its display — re-sending would double-deliver.
+    useEffect(() => {
+        if (status !== "error") return
+        const pending = pendingAutoSendRef.current
+        if (!pending) return
+        pendingAutoSendRef.current = null
+        if (localTurnStartSeqRef.current !== pending.seqBefore) return
+        onAutoSendFailed?.({ attempts: pending.attempts })
+    }, [status, onAutoSendFailed])
+
+    // Orphan detection: unmounting while this pane's stream is attached means
+    // the (still-running) server turn has no local renderer anymore. Tell the
+    // controller so the terminal-triggered resync remounts the pane with the
+    // finished rollout. Runs on unmount only; `onPaneDetached` is a stable
+    // controller arrow.
+    const statusRef = useRef(status)
+    useEffect(() => {
+        statusRef.current = status
+    }, [status])
+    useEffect(
+        () => () => {
+            if (statusRef.current === "submitted" || statusRef.current === "streaming") {
+                onPaneDetached?.()
+            }
+        },
+        [onPaneDetached],
+    )
 
     return (
         <MessageScrollerProvider defaultScrollPosition="last-anchor">
@@ -320,6 +410,7 @@ export function AssistantChatPane({
                                                     sessionLoading={isHistoryLoading}
                                                     queuedTexts={queuedTexts}
                                                     backgroundTasks={backgroundTasks}
+                                                    liveTailTexts={liveTailTexts}
                                                 />
                                             </MessageInteractionContext.Provider>
                                         </LiveToolOutputContext.Provider>
@@ -347,6 +438,14 @@ export function AssistantChatPane({
                                 // everything else (skills, plain text) reaches sendMessage.
                                 const dispatch = resolveCommandDispatch(value, commands)
                                 if (dispatch.action === "control") {
+                                    // Both actions unconditionally bump the
+                                    // restore version (remounting this pane);
+                                    // while a run is live that would orphan
+                                    // the stream — refuse until it settles.
+                                    if (serverBusy || isBusy || isCompacting || isForking) {
+                                        toast.info(t("pages.assistant.toast.sessionBusy"))
+                                        return
+                                    }
                                     if (dispatch.controlAction === "compact") {
                                         await onCompact()
                                         return
