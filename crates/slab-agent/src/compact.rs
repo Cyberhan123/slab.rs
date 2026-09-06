@@ -200,12 +200,31 @@ impl CompactPort for SlidingWindowCompactPort {
         let mut compacted = trailing_window(messages, self.target_tokens);
         remove_leading_orphan_tool_results(&mut compacted);
 
+        // The task origin (first user message) is the one thing the model
+        // cannot reconstruct from the surviving tail — when the window drops
+        // it, keep a one-line stub. Built before trimming so the stub's tokens
+        // come out of the budget; inserted after the system message.
+        let origin_stub = task_origin_stub(messages, &compacted);
+        let stub_tokens = origin_stub.as_ref().map(estimate_message_tokens).unwrap_or(0);
+
         if let Some(system) = messages.first().filter(|message| message.role == "system")
             && compacted.first() != Some(system)
         {
             compacted.insert(0, system.clone());
-            trim_to_target_after_system(&mut compacted, self.target_tokens);
+            trim_to_target_after_system(
+                &mut compacted,
+                self.target_tokens.saturating_sub(stub_tokens),
+            );
             remove_leading_orphan_tool_results(&mut compacted);
+        }
+
+        if let Some(stub) = origin_stub {
+            let at = if compacted.first().is_some_and(|message| message.role == "system") {
+                1
+            } else {
+                0
+            };
+            compacted.insert(at, stub);
         }
 
         if compacted.is_empty() || compacted.len() >= messages.len() {
@@ -297,6 +316,39 @@ pub fn trim_to_target_after_system(messages: &mut Vec<ConversationMessage>, targ
     }
 }
 
+/// Max chars of the original first user message quoted in the task-origin
+/// stub the sliding window keeps.
+const TASK_ORIGIN_STUB_CHARS: usize = 200;
+
+/// One-line stub preserving the ORIGINAL task when the sliding window drops
+/// the first user message — without it a long run loses sight of what was
+/// asked. `None` when there is no user message or it survived in `compacted`.
+fn task_origin_stub(
+    messages: &[ConversationMessage],
+    compacted: &[ConversationMessage],
+) -> Option<ConversationMessage> {
+    let origin = messages.iter().find(|message| message.role == "user")?;
+    let origin_text = origin.content.rendered_text();
+    if compacted
+        .iter()
+        .any(|message| message.role == "user" && message.content.rendered_text() == origin_text)
+    {
+        return None;
+    }
+    let truncated = origin_text.chars().count() > TASK_ORIGIN_STUB_CHARS;
+    let quoted: String = origin_text.chars().take(TASK_ORIGIN_STUB_CHARS).collect();
+    Some(ConversationMessage {
+        role: "system".to_owned(),
+        content: ConversationMessageContent::Text(format!(
+            "Original task start: {quoted}{} (full content was compacted away)",
+            if truncated { "…" } else { "" }
+        )),
+        name: Some("slab_task_origin".to_owned()),
+        tool_call_id: None,
+        tool_calls: Vec::new(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +411,87 @@ mod tests {
         ]);
 
         assert_eq!(estimate_message_chars(&message), expected);
+    }
+
+    fn text_message(role: &str, text: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: role.to_owned(),
+            content: ConversationMessageContent::Text(text.to_owned()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }
+    }
+
+    /// A window that drops the first user message keeps a one-line origin
+    /// stub after the system message, inside the token budget.
+    #[tokio::test]
+    async fn sliding_window_preserves_task_origin_stub() {
+        let port = SlidingWindowCompactPort::new(1_000, 100);
+        let mut messages = vec![
+            text_message("system", "You are Slab."),
+            text_message(
+                "user",
+                "Perform the big repository migration. The goal is to move every module under \
+                 src/legacy into the new domain layout while keeping tests green.",
+            ),
+        ];
+        for turn in 0..80 {
+            messages.push(text_message(
+                "assistant",
+                &format!("progress update {turn} with some filler content to consume tokens"),
+            ));
+            messages.push(text_message("user", &format!("continue {turn}")));
+        }
+
+        let outcome = port
+            .compact(&messages, &CompactContext { force: true, ..Default::default() })
+            .await
+            .expect("compact");
+        let CompactOutcome::Replaced { messages: compacted, output_tokens, .. } = outcome else {
+            panic!("expected the window to drop head messages");
+        };
+
+        assert_eq!(compacted[0].role, "system", "system preserved");
+        let stub = &compacted[1];
+        assert_eq!(stub.role, "system");
+        assert_eq!(stub.name.as_deref(), Some("slab_task_origin"));
+        let stub_text = stub.content.rendered_text();
+        assert!(
+            stub_text.starts_with("Original task start: Perform the big repository migration"),
+            "{stub_text}"
+        );
+        assert!(stub_text.contains("full content was compacted away"), "{stub_text}");
+        assert!(output_tokens <= 1_000, "stub counted into the budget: {output_tokens}");
+    }
+
+    /// A short history whose first user message survives the window gets NO
+    /// stub (the origin is still there verbatim).
+    #[tokio::test]
+    async fn sliding_window_keeps_origin_when_it_survives() {
+        let port = SlidingWindowCompactPort::new(4_000, 100);
+        let messages = vec![
+            text_message("system", "You are Slab."),
+            text_message("user", "small task"),
+            text_message("assistant", "done"),
+        ];
+
+        let outcome = port
+            .compact(&messages, &CompactContext { force: true, ..Default::default() })
+            .await
+            .expect("compact");
+        // Nothing to drop → skipped (or a replaced window that still contains
+        // the origin) — either way no stub message may appear.
+        match outcome {
+            CompactOutcome::Skipped { .. } => {}
+            CompactOutcome::Replaced { messages: compacted, .. } => {
+                assert!(
+                    !compacted
+                        .iter()
+                        .any(|message| { message.name.as_deref() == Some("slab_task_origin") })
+                );
+                assert!(compacted.iter().any(|message| message.role == "user"));
+            }
+        }
     }
 }
