@@ -126,8 +126,12 @@ describe("assistant e2e", () => {
       secondPrompt
     )
     expect(secondReply.restore.thread?.status).toBe("completed")
-    // The strong form: the reply is visible on the live page (no reload).
-    await expectAssistantPageText(page, secondRunId)
+    // The strong form: the reply is visible on the live page (no reload). The
+    // needle drops the "assistant-" prefix — GLM routinely splits the marker
+    // into "Assistant second-…", and only ASSISTANT bubbles are scanned, so
+    // the unique timestamp suffix alone still proves the reply rendered.
+    const secondNeedle = secondRunId.replace(/^assistant-/, "")
+    await expectAssistantPageText(page, secondNeedle)
 
     // A full reload of the `?session=` deep link re-mounts the SAME detail
     // (WorkspaceModeSync skips its `/`→`/workspace` redirect for deep links).
@@ -137,7 +141,7 @@ describe("assistant e2e", () => {
       testEnv.serverBaseUrl,
       (sessionId) => sessionId === secondSessionId
     )
-    await expectAssistantPageText(page, secondRunId)
+    await expectAssistantPageText(page, secondNeedle)
 
     const sessions = await listSessions(testEnv.serverBaseUrl)
     expect(sessions.some((item) => item.id === session.id)).toBe(true)
