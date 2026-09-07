@@ -296,6 +296,8 @@
         "@slab/api": "workspace:*",
         "@slab/components": "workspace:*",
         "@slab/core": "workspace:*",
+        "@slab/i18n": "workspace:*",
+        "@slab/plugin-sdk": "workspace:*",
         "@streamdown/cjk": "catalog:",
         "@streamdown/code": "catalog:",
         "@streamdown/math": "catalog:",

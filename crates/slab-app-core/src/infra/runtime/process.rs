@@ -291,6 +291,16 @@ impl RuntimeChildSpawner for TokioRuntimeSpawner {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .stdin(Stdio::piped());
+        // Pin the child's working directory to its resolved log directory (the
+        // canonical `<app_home>/logs/runtime` unless settings override it).
+        // Runtime children must not depend on the host's incidental CWD:
+        // modules injected into GPU processes (vendor Vulkan implicit layers
+        // such as WeGame's CrossVulkanLayer) drop diagnostic files named after
+        // the host exe into the CWD, which otherwise pollutes whatever
+        // directory the desktop host happened to start from.
+        if let Some(log_dir) = child_spec.log_file.parent() {
+            cmd.current_dir(log_dir);
+        }
 
         let mut child = cmd.spawn().map_err(|error| {
             AppCoreError::Internal(format!(
