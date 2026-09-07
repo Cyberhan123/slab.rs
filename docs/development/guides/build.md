@@ -41,11 +41,12 @@ see `crates/slab-app-core/Cargo.toml`). `ffmpeg-sys-next` resolves FFmpeg
 through, in order: the `FFMPEG_DIR` environment variable (`<dir>/include` plus
 `<dir>/lib`), vcpkg (MSVC targets, `VCPKG_ROOT`), then pkg-config.
 
-- Windows (MSVC): `vcpkg install ffmpeg:x64-windows-static-md` with `VCPKG_ROOT`
-  pointing at your vcpkg checkout. The `x64-windows-static-md` triplet keeps
-  Rust's default dynamic CRT while providing static FFmpeg libraries, and it is
-  the default triplet the `vcpkg` crate probes, so no extra environment
-  variables are needed. The installed FFmpeg major version must match the
+- Windows (MSVC): `vcpkg install ffmpeg:x64-windows-static` with `VCPKG_ROOT`
+  pointing at your vcpkg checkout. The repo's `.cargo/config.toml` builds MSVC
+  targets with `target-feature=+crt-static`, and the `vcpkg` crate picks its
+  triplet from that: with `+crt-static` it probes `x64-windows-static`, so that
+  is the triplet to install (plain `x64-windows-static-md` only matches a
+  dynamic-CRT Rust default). The installed FFmpeg major version must match the
   `ffmpeg-next` crate major version (currently 8.x); vcpkg classic mode always
   installs the newest port, so if `ports/ffmpeg/vcpkg.json` in your checkout is
   newer, pin the registry first, for example

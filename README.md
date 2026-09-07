@@ -114,7 +114,7 @@ This section keeps only the most common and practical development entry points. 
 - Install the Rust stable toolchain.
 - Install Bun.
 - Install LLVM/Clang (`libclang`) — required by `bindgen`-based native dependencies. On Windows: `winget install -e --id LLVM.LLVM`.
-- On Windows, install FFmpeg development libraries for the native FFmpeg link (for example `vcpkg install ffmpeg:x64-windows-static-md`).
+- On Windows, install FFmpeg development libraries for the native FFmpeg link (for example `vcpkg install ffmpeg:x64-windows-static`, matching the repo's `+crt-static` MSVC build).
 
 See the [Build Workflow Guide](./docs/development/guides/build.md) for details on system prerequisites.
 
