@@ -2,6 +2,7 @@ pub mod api;
 pub mod downloader;
 pub mod error;
 pub mod install;
+mod lock;
 pub mod manifest;
 pub mod platform;
 pub mod variant;

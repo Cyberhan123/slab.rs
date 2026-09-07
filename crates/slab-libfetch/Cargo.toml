@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+fd-lock = { workspace = true }
 flate2 = { workspace = true }
 minijinja = { workspace = true }
 reqwest = { workspace = true }

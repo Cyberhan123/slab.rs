@@ -67,6 +67,12 @@ impl Install {
         version: &str,
         allow_upgrade: bool,
     ) -> Result<PathBuf, FetchError> {
+        // Same rationale as VersionApi::install_with_platform: serialize the
+        // check -> download -> version.json sequence per install directory
+        // across concurrently running build-script processes.
+        let mut install_lock = crate::lock::open_install_lock(&self.install_path)?;
+        let _install_guard = install_lock.write()?;
+
         if self.already_installed() {
             let installed = self.get_installed_version()?;
 

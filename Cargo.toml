@@ -152,6 +152,9 @@ regex = "1.13.1"
 regex-lite = "0.1.9"
 globset = "0.4"
 dunce = "1.0.5"
+# Cross-process advisory file locks for vendored artifact installs (flock on
+# Unix, LockFileEx on Windows); already present as a transitive dependency.
+fd-lock = "4"
 minijinja = { version = "2", features = ["json"] }
 tar = "0.4.46"
 assert_cmd = "2.2.2"

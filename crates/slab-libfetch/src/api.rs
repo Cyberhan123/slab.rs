@@ -251,6 +251,14 @@ impl VersionApi {
 
         let install = Install::new(&self.repo, &self.api.install_dir);
 
+        // Serialize the whole check -> download -> extract -> version.json
+        // sequence against concurrent installs of the same directory (parallel
+        // cargo build scripts share one vendored artifact). The check below is
+        // the in-lock re-check: a build script that lost the download race now
+        // takes the "already installed" fast path instead of racing it.
+        let mut install_lock = crate::lock::open_install_lock(&self.api.install_dir)?;
+        let _install_guard = install_lock.write()?;
+
         // Check existing installation: enforce repo match, skip on same version.
         if install.already_installed() {
             match install.get_installed_version() {
@@ -342,6 +350,13 @@ impl VersionApi {
 
         // Skip if already at this version.
         let install = Install::new_with_path(&self.repo, target_path);
+
+        // Serialize against concurrent installs into the same target
+        // directory (same rationale as install_with_platform/install_asset:
+        // the check below is the in-lock re-check).
+        let mut install_lock = crate::lock::open_install_lock(target_path)?;
+        let _install_guard = install_lock.write()?;
+
         if install.already_installed() {
             if let Ok(info) = install.get_installed_version()
                 && info.tag_name == version

@@ -15804,6 +15804,7 @@ name = "slab-libfetch"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "fd-lock",
  "flate2",
  "minijinja",
  "reqwest 0.13.4",
