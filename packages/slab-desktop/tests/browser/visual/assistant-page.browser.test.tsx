@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => {
     actionError: null,
     commands: [] as ConversationState["commands"],
     compactionMarkers: [] as ConversationState["compactionMarkers"],
+    settingsMarkers: [] as ConversationState["settingsMarkers"],
     compactThread: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     error: null as string | null,
     forkThread: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
@@ -56,6 +57,13 @@ const mocks = vi.hoisted(() => {
     restoreVersion: 1,
     rollbackFromTurn: vi.fn<(turnIndex: number) => void>(),
     setPlanMode: vi.fn<(enabled: boolean) => void>(),
+    noteModelSwitch: vi.fn<(change: { from: string; to: string }) => void>(),
+    notePermissionModeChange: vi.fn<
+      (change: { from: 'request_approval' | 'approve_for_me' | 'full_control' | 'custom'; to: 'request_approval' | 'approve_for_me' | 'full_control' | 'custom' }) => void
+    >(),
+    noteApprovalReviewChange: vi.fn<
+      (change: { fromModel: string | null; toModel: string | null; promptChanged: boolean }) => void
+    >(),
     threadStatus: null,
     abortReason: null,
     queuedCount: 0,

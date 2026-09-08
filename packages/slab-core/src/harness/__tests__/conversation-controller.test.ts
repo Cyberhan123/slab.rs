@@ -85,6 +85,7 @@ describe("ConversationController", () => {
     expect(state.historyCreatedAt).toBeNull()
     expect(state.commands).toEqual([])
     expect(state.compactionMarkers).toEqual([])
+    expect(state.settingsMarkers).toEqual([])
     expect(state.isCompacting).toBe(false)
     expect(state.isForking).toBe(false)
     expect(state.isRollingBack).toBe(false)
@@ -1312,6 +1313,86 @@ describe("ConversationController", () => {
     await controller.compactThread()
     expect(controller.getState().actionError?.kind).toBe("compact")
     expect(FakeWebSocket.last!.sent.length).toBe(sentBefore)
+  })
+
+  // ── settings-change markers ──────────────────────────────────────────────
+
+  it("records a model switch as a settings marker and notifies subscribers", () => {
+    const controller = makeController("s1")
+    const events: number[] = []
+    controller.subscribe(() => events.push(events.length))
+
+    controller.noteModelSwitch({ from: "Model A", to: "Model B" })
+
+    const markers = controller.getState().settingsMarkers
+    expect(markers).toHaveLength(1)
+    expect(markers[0]).toMatchObject({
+      kind: "modelSwitch",
+      fromModel: "Model A",
+      toModel: "Model B",
+    })
+    expect(markers[0].id).toMatch(/^modelSwitch:/)
+    expect(events).toHaveLength(1)
+  })
+
+  it("no-ops a model switch marker when the labels match", () => {
+    const controller = makeController("s1")
+    controller.noteModelSwitch({ from: "Model A", to: "Model A" })
+    expect(controller.getState().settingsMarkers).toEqual([])
+  })
+
+  it("records a permission-mode change only for a real change", () => {
+    const controller = makeController("s1")
+
+    controller.notePermissionModeChange({ from: "approve_for_me", to: "approve_for_me" })
+    expect(controller.getState().settingsMarkers).toEqual([])
+
+    controller.notePermissionModeChange({ from: "approve_for_me", to: "request_approval" })
+    expect(controller.getState().settingsMarkers).toEqual([
+      {
+        id: expect.any(String),
+        kind: "permissionMode",
+        fromMode: "approve_for_me",
+        toMode: "request_approval",
+      },
+    ])
+  })
+
+  it("records approval-review changes and no-ops unchanged saves", () => {
+    const controller = makeController("s1")
+
+    controller.noteApprovalReviewChange({
+      fromModel: null,
+      toModel: null,
+      promptChanged: false,
+    })
+    expect(controller.getState().settingsMarkers).toEqual([])
+
+    controller.noteApprovalReviewChange({
+      fromModel: null,
+      toModel: "Fast Model",
+      promptChanged: false,
+    })
+    controller.noteApprovalReviewChange({
+      fromModel: "Fast Model",
+      toModel: "Fast Model",
+      promptChanged: true,
+    })
+
+    const markers = controller.getState().settingsMarkers
+    expect(markers.map((m) => m.kind)).toEqual(["approvalReview", "approvalReview"])
+    expect(markers[0]).toMatchObject({
+      fromModel: null,
+      toModel: "Fast Model",
+      promptChanged: false,
+    })
+    expect(markers[1]).toMatchObject({
+      fromModel: "Fast Model",
+      toModel: "Fast Model",
+      promptChanged: true,
+    })
+    // Distinct stable ids keep virtualizer keys unique across rapid changes.
+    expect(markers[0].id).not.toBe(markers[1].id)
   })
 
   // ── new API surface ──────────────────────────────────────────────────────

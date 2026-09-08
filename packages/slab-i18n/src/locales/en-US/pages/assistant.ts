@@ -62,6 +62,13 @@ export const assistant = {
     manuallyCompacting: 'Compacting context…',
     manuallyCompacted: 'Context compacted',
   },
+  settingsMarker: {
+    modelSwitched: 'Model switched: {{from}} → {{to}}',
+    permissionModeChanged: 'Permission mode: {{from}} → {{to}}',
+    approvalReviewerChanged: 'Approval reviewer: {{from}} → {{to}}',
+    approvalReviewerNone: 'not set',
+    approvalReviewerPromptUpdated: 'Approval review prompt updated',
+  },
   modelLoad: {
     downloading: 'Downloading model...',
     loading: 'Loading model...',

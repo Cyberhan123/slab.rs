@@ -4,10 +4,12 @@ import { useTranslation } from "@slab/i18n"
 import { Marker, MarkerContent } from "@slab/components/marker"
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@slab/components/message"
 import { Bubble, BubbleContent } from "@slab/components/bubble"
+import type { PermissionMode } from "@slab/api/harness"
 import UserAvatar from "@slab/ui/pages/assistant/components/user-avatar"
 import AgentAvatar from "@slab/ui/pages/assistant/components/agent-avatar"
 import { MessageItem } from "@slab/ui/pages/assistant/components/message/message-item"
 import { Shimmer } from "@slab/ui/pages/assistant/components/message/shimmer"
+import { PERMISSION_MODES } from "@slab/ui/pages/assistant/components/sender"
 import {
     formatMarkerDate,
     type ScrollerRow,
@@ -64,6 +66,48 @@ export function CompactMarkerRow({
                     t("pages.assistant.compaction.manuallyCompacted")
                 )}
             </MarkerContent>
+        </Marker>
+    )
+}
+
+/** Localized composer label for a wire permission mode (shared with the dropdown). */
+function permissionModeLabel(
+    t: ReturnType<typeof useTranslation>["t"],
+    mode: PermissionMode,
+): string {
+    return t(PERMISSION_MODES.find((m) => m.value === mode)?.label ?? PERMISSION_MODES[0].label)
+}
+
+/**
+ * "Model switched / permission mode changed" divider for a session-scoped
+ * settings change the user made mid-conversation. Same separator form as the
+ * compaction marker so settings changes read as part of the status timeline.
+ */
+export function SettingsMarkerRow({
+    row,
+}: ScrollerRowComponentProps<ScrollerRowOf<"settingsMarker">>): ReactElement {
+    const { t } = useTranslation()
+    const { marker } = row
+    const label =
+        marker.kind === "modelSwitch"
+            ? t("pages.assistant.settingsMarker.modelSwitched", {
+                  from: marker.fromModel,
+                  to: marker.toModel,
+              })
+            : marker.kind === "permissionMode"
+              ? t("pages.assistant.settingsMarker.permissionModeChanged", {
+                    from: permissionModeLabel(t, marker.fromMode),
+                    to: permissionModeLabel(t, marker.toMode),
+                })
+              : marker.fromModel !== marker.toModel
+                ? t("pages.assistant.settingsMarker.approvalReviewerChanged", {
+                      from: marker.fromModel ?? t("pages.assistant.settingsMarker.approvalReviewerNone"),
+                      to: marker.toModel ?? t("pages.assistant.settingsMarker.approvalReviewerNone"),
+                  })
+                : t("pages.assistant.settingsMarker.approvalReviewerPromptUpdated")
+    return (
+        <Marker variant="separator" data-testid={`assistant-settings-marker-${marker.id}`}>
+            <MarkerContent>{label}</MarkerContent>
         </Marker>
     )
 }
@@ -236,6 +280,7 @@ export const rowComponents: {
     sessionLoadMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"sessionLoadMarker">>>
     historyMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"historyMarker">>>
     compactMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"compactMarker">>>
+    settingsMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"settingsMarker">>>
     modelLoadMarker: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"modelLoadMarker">>>
     queuedInput: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"queuedInput">>>
     backgroundTask: ComponentType<ScrollerRowComponentProps<ScrollerRowOf<"backgroundTask">>>
@@ -245,6 +290,7 @@ export const rowComponents: {
     sessionLoadMarker: SessionLoadMarkerRow,
     historyMarker: HistoryMarkerRow,
     compactMarker: CompactMarkerRow,
+    settingsMarker: SettingsMarkerRow,
     modelLoadMarker: ModelLoadMarkerRow,
     queuedInput: QueuedInputRow,
     backgroundTask: BackgroundTaskRow,

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { render } from "vitest-browser-react"
 
 
-import { CompactMarkerRow, HistoryMarkerRow, ModelLoadMarkerRow, QueuedInputRow, SessionLoadMarkerRow } from "../row-components"
+import { CompactMarkerRow, HistoryMarkerRow, ModelLoadMarkerRow, QueuedInputRow, SessionLoadMarkerRow, SettingsMarkerRow } from "../row-components"
 import {
   HISTORY_MARKER_ID,
   MODEL_LOAD_MARKER_ID,
@@ -14,7 +14,16 @@ import type { CompactionMarker } from "@slab/core/harness"
 
 vi.mock("@slab/i18n", async () => {
   const { setupSlabI18nMock } = await import("@slab/test-utils/mocks")
-  return setupSlabI18nMock()
+  // The default passthrough `t` drops interpolation values; the settings
+  // marker labels assert their from/to values, so append them after the key
+  // (existing key-only `toContain` assertions still pass through).
+  return setupSlabI18nMock({
+    useTranslation: () => ({
+      t: (key: string, values?: Record<string, unknown>) =>
+        values ? `${key} ${Object.values(values).join(" ")}` : key,
+      i18n: { resolvedLanguage: "en-US", language: "en-US" },
+    }),
+  })
 })
 
 vi.mock("@slab/components/marker", () => ({
@@ -178,6 +187,101 @@ describe("ModelLoadMarkerRow", () => {
 
     expect(screen.getByText("%").query()).toBeNull()
     expect(screen.getByTestId("shimmer").element().textContent).toContain("pages.assistant.modelLoad.loading")
+  })
+})
+
+describe("SettingsMarkerRow", () => {
+  it("renders the model-switch separator keyed to the marker id", async () => {
+    const screen = await render(
+      <SettingsMarkerRow
+        row={{
+          kind: "settingsMarker",
+          id: "modelSwitch:1",
+          marker: { id: "modelSwitch:1", kind: "modelSwitch", fromModel: "Model A", toModel: "Model B" },
+        }}
+        historyCreatedAt={null}
+      />,
+    )
+
+    // The i18n mock passes keys through and appends interpolation values.
+    await expect.element(screen.getByTestId("assistant-settings-marker-modelSwitch:1")).toBeInTheDocument()
+    expect(screen.getByTestId("assistant-settings-marker-modelSwitch:1").element().textContent).toContain(
+      "pages.assistant.settingsMarker.modelSwitched",
+    )
+    expect(screen.getByTestId("assistant-settings-marker-modelSwitch:1").element().textContent).toContain(
+      "Model A",
+    )
+    expect(screen.getByTestId("assistant-settings-marker-modelSwitch:1").element().textContent).toContain(
+      "Model B",
+    )
+  })
+
+  it("renders the permission-mode label with localized from/to modes", async () => {
+    const screen = await render(
+      <SettingsMarkerRow
+        row={{
+          kind: "settingsMarker",
+          id: "permissionMode:2",
+          marker: {
+            id: "permissionMode:2",
+            kind: "permissionMode",
+            fromMode: "approve_for_me",
+            toMode: "request_approval",
+          },
+        }}
+        historyCreatedAt={null}
+      />,
+    )
+
+    const text = screen.getByTestId("assistant-settings-marker-permissionMode:2").element().textContent ?? ""
+    expect(text).toContain("pages.assistant.settingsMarker.permissionModeChanged")
+    expect(text).toContain("pages.assistant.composer.permission.approveForMe")
+    expect(text).toContain("pages.assistant.composer.permission.requestApproval")
+  })
+
+  it("renders the approval-reviewer label for a model change and the prompt label otherwise", async () => {
+    const modelChange = await render(
+      <SettingsMarkerRow
+        row={{
+          kind: "settingsMarker",
+          id: "approvalReview:3",
+          marker: {
+            id: "approvalReview:3",
+            kind: "approvalReview",
+            fromModel: null,
+            toModel: "Fast Model",
+            promptChanged: true,
+          },
+        }}
+        historyCreatedAt={null}
+      />,
+    )
+    const modelText =
+      modelChange.getByTestId("assistant-settings-marker-approvalReview:3").element().textContent ?? ""
+    // A model change wins over a prompt change (the model is the actionable fact);
+    // an unconfigured "from" renders through the not-set label key.
+    expect(modelText).toContain("pages.assistant.settingsMarker.approvalReviewerChanged")
+    expect(modelText).toContain("pages.assistant.settingsMarker.approvalReviewerNone")
+
+    const promptOnly = await render(
+      <SettingsMarkerRow
+        row={{
+          kind: "settingsMarker",
+          id: "approvalReview:4",
+          marker: {
+            id: "approvalReview:4",
+            kind: "approvalReview",
+            fromModel: "Fast Model",
+            toModel: "Fast Model",
+            promptChanged: true,
+          },
+        }}
+        historyCreatedAt={null}
+      />,
+    )
+    expect(
+      promptOnly.getByTestId("assistant-settings-marker-approvalReview:4").element().textContent,
+    ).toContain("pages.assistant.settingsMarker.approvalReviewerPromptUpdated")
   })
 })
 

@@ -131,6 +131,7 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     historyCreatedAt: null,
     commands: [],
     compactionMarkers: [],
+    settingsMarkers: [],
     isCompacting: false,
     onFork: vi.fn(),
     isForking: false,

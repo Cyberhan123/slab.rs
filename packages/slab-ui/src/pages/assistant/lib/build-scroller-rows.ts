@@ -3,6 +3,7 @@ import type {
     CompactionMarker,
     LiveTextEntry,
     ModelLoadState,
+    SettingsMarker,
 } from "@slab/core/harness"
 import type { TMessage } from "@slab/ui/pages/assistant/components/message/message-item"
 
@@ -15,16 +16,18 @@ export const LIVE_TEXT_ID_PREFIX = "__live_text_" as const
 
 /**
  * A virtualized scroller row. Either a real message, or a synthetic non-message
- * status row (session/history/model-load/compaction markers) rendered through
- * the `rowComponents` registry. Meta-rows live in the SAME positioned container
- * as messages (no nested `MessageScrollerItem`, whose content-visibility rules
- * fight the virtualizer) and all share the `<Marker variant="separator">` form
- * so system status reads as one ordered timeline instead of scattered regions.
+ * status row (session/history/model-load/compaction/settings markers) rendered
+ * through the `rowComponents` registry. Meta-rows live in the SAME positioned
+ * container as messages (no nested `MessageScrollerItem`, whose
+ * content-visibility rules fight the virtualizer) and all share the
+ * `<Marker variant="separator">` form so system status reads as one ordered
+ * timeline instead of scattered regions.
  */
 export type ScrollerRow =
     | { kind: "sessionLoadMarker"; id: typeof SESSION_LOAD_MARKER_ID }
     | { kind: "historyMarker"; id: typeof HISTORY_MARKER_ID }
     | { kind: "compactMarker"; id: string; marker: CompactionMarker }
+    | { kind: "settingsMarker"; id: string; marker: SettingsMarker }
     | { kind: "modelLoadMarker"; id: typeof MODEL_LOAD_MARKER_ID; modelLoad: NonNullable<ModelLoadState> }
     | { kind: "queuedInput"; id: string; text: string }
     | { kind: "backgroundTask"; id: string; task: BackgroundTaskInfo }
@@ -41,6 +44,8 @@ export type BuildScrollerRowsOptions = {
     historyCount?: number
     /** Transient model-load state; rendered as a Marker at the live edge. */
     modelLoad?: ModelLoadState | null
+    /** Session-scoped settings-change markers (model switch / permission mode). */
+    settingsMarkers?: readonly SettingsMarker[]
     /** True while restoring; renders a session-load Marker when there are no messages yet. */
     sessionLoading?: boolean
     /** Steering inputs queued on the running turn; rendered as ghost user bubbles at the tail. */
@@ -59,7 +64,8 @@ export type BuildScrollerRowsOptions = {
  * Ordering: the session-load marker leads (only while restoring with no
  * messages); messages follow with the history-restored marker between the
  * restored slice and live messages; completed compaction markers sit at the
- * live edge in arrival order; the transient model-load marker (the current
+ * live edge in arrival order; settings-change markers (model switch /
+ * permission mode) follow them; the transient model-load marker (the current
  * activity) trails them.
  */
 export function buildScrollerRows(
@@ -87,6 +93,9 @@ export function buildScrollerRows(
 
     for (const marker of compactionMarkers) {
         out.push({ kind: "compactMarker", id: marker.id, marker })
+    }
+    for (const marker of options.settingsMarkers ?? []) {
+        out.push({ kind: "settingsMarker", id: marker.id, marker })
     }
     if (options.modelLoad) {
         out.push({ kind: "modelLoadMarker", id: MODEL_LOAD_MARKER_ID, modelLoad: options.modelLoad })

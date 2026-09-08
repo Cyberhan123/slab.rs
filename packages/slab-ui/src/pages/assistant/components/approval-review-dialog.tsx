@@ -28,6 +28,16 @@ import { useAssistantUiStore } from "@slab/ui/store/useAssistantUiStore"
 type ApprovalReviewDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * Saved with a real change (reviewer model and/or policy prompt) — carries
+   * the pre/post values so the parent can record an in-stream marker. Fires
+   * only when something actually changed.
+   */
+  onSaved?: (change: {
+    fromModel: string | null
+    toModel: string | null
+    promptChanged: boolean
+  }) => void
 }
 
 /**
@@ -39,15 +49,21 @@ type ApprovalReviewDialogProps = {
  * The form body mounts only while the dialog is open, so the draft seeds from
  * the store on mount and abandoned edits are discarded on close.
  */
-export function ApprovalReviewDialog({ open, onOpenChange }: ApprovalReviewDialogProps) {
+export function ApprovalReviewDialog({ open, onOpenChange, onSaved }: ApprovalReviewDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {open ? <ApprovalReviewForm onOpenChange={onOpenChange} /> : null}
+      {open ? <ApprovalReviewForm onOpenChange={onOpenChange} onSaved={onSaved} /> : null}
     </Dialog>
   )
 }
 
-function ApprovalReviewForm({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+function ApprovalReviewForm({
+  onOpenChange,
+  onSaved,
+}: {
+  onOpenChange: (open: boolean) => void
+  onSaved?: ApprovalReviewDialogProps["onSaved"]
+}) {
   const { t } = useTranslation()
   const approvalReviewModel = useAssistantUiStore((state) => state.approvalReviewModel)
   const approvalReviewPrompt = useAssistantUiStore((state) => state.approvalReviewPrompt)
@@ -60,6 +76,15 @@ function ApprovalReviewForm({ onOpenChange }: { onOpenChange: (open: boolean) =>
   const [prompt, setPrompt] = useState(approvalReviewPrompt)
 
   const save = () => {
+    // Report the change BEFORE the store write (the pre-save store values are
+    // the "from" side of the marker); skipped when nothing actually changed.
+    if (model !== approvalReviewModel || prompt !== approvalReviewPrompt) {
+      onSaved?.({
+        fromModel: approvalReviewModel || null,
+        toModel: model || null,
+        promptChanged: prompt !== approvalReviewPrompt,
+      })
+    }
     setApprovalReviewModel(model)
     setApprovalReviewPrompt(prompt)
     onOpenChange(false)

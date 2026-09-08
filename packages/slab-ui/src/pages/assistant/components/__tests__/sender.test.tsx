@@ -264,6 +264,28 @@ describe("Sender plan-mode toggle", () => {
 })
 
 describe("Sender permission-mode selector", () => {
+  it("reports a picked mode through onPermissionModeChange (fresh store starts on request_approval)", async () => {
+    const onPermissionModeChange = vi.fn()
+
+    const screen = await renderSender(
+      <Sender
+        onSubmit={vi.fn()}
+        commands={COMMANDS}
+        planMode={false}
+        onPlanModeChange={vi.fn()}
+        onPermissionModeChange={onPermissionModeChange}
+      />,
+    )
+
+    await userEvent.click(screen.getByTestId("assistant-permission-mode-trigger"))
+    await userEvent.click(screen.getByTestId("assistant-permission-mode-full_control"))
+
+    expect(onPermissionModeChange).toHaveBeenCalledWith({
+      from: "request_approval",
+      to: "full_control",
+    })
+  })
+
   it("exposes a dedicated permission button that updates the selected mode", async () => {
     const onSubmit = vi.fn()
 

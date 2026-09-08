@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter, useLocation } from "react-router-dom"
 
 import type { ConversationState } from "@slab/core/harness"
+import type { PermissionMode } from "@slab/api/harness"
 
 import { HeaderProvider } from "@slab/ui/layouts/header-provider"
 import Header from "@slab/ui/layouts/header"
@@ -63,6 +64,7 @@ const mocks = vi.hoisted(() => {
     turnUsage: null,
     commands: [] as ConversationState["commands"],
     compactionMarkers: [] as ConversationState["compactionMarkers"],
+    settingsMarkers: [] as ConversationState["settingsMarkers"],
     isCompacting: false,
     isForking: false,
     isRollingBack: false,
@@ -82,6 +84,17 @@ const mocks = vi.hoisted(() => {
     forkThread: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     rollbackFromTurn: vi.fn<(turnIndex: number) => void>(),
     setPlanMode: vi.fn<(enabled: boolean) => void>(),
+    noteModelSwitch: vi.fn<(change: { from: string; to: string }) => void>(),
+    notePermissionModeChange: vi.fn<
+      (change: { from: PermissionMode; to: PermissionMode }) => void
+    >(),
+    noteApprovalReviewChange: vi.fn<
+      (change: {
+        fromModel: string | null
+        toModel: string | null
+        promptChanged: boolean
+      }) => void
+    >(),
     sendSteering: vi.fn<() => Promise<unknown>>().mockResolvedValue({ queued: true }),
     interrupt: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     resolveApproval: vi.fn<

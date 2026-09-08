@@ -73,6 +73,48 @@ describe('buildScrollerRows', () => {
     expect(rows.at(-1)?.kind).toBe('compactMarker')
   })
 
+  it('appends settings markers after compaction markers, in arrival order', () => {
+    const rows = buildScrollerRows([msg('m1')], [compact('c1')], {
+      showHistoryMarker: false,
+      settingsMarkers: [
+        {
+          id: 'permissionMode:1',
+          kind: 'permissionMode',
+          fromMode: 'approve_for_me',
+          toMode: 'request_approval',
+        },
+        { id: 'modelSwitch:2', kind: 'modelSwitch', fromModel: 'A', toModel: 'B' },
+      ],
+    })
+
+    expect(rows.map((r) => r.kind)).toEqual([
+      'message',
+      'compactMarker',
+      'settingsMarker',
+      'settingsMarker',
+    ])
+    const settings = rows.filter(
+      (r): r is Extract<ScrollerRow, { kind: 'settingsMarker' }> => r.kind === 'settingsMarker',
+    )
+    expect(settings.map((r) => r.id)).toEqual(['permissionMode:1', 'modelSwitch:2'])
+  })
+
+  it('places settings markers between compaction markers and the model-load marker', () => {
+    const load: ModelLoadState = { phase: 'loading', modelId: 'm' }
+    const rows = buildScrollerRows([msg('m1')], [compact('c1')], {
+      showHistoryMarker: false,
+      modelLoad: load,
+      settingsMarkers: [{ id: 'modelSwitch:1', kind: 'modelSwitch', fromModel: 'A', toModel: 'B' }],
+    })
+
+    expect(rows.map((r) => r.kind)).toEqual([
+      'message',
+      'compactMarker',
+      'settingsMarker',
+      'modelLoadMarker',
+    ])
+  })
+
   it('leads with a session-load marker only while restoring with no messages', () => {
     const loading = buildScrollerRows([], [], { showHistoryMarker: false, sessionLoading: true })
     expect(loading).toHaveLength(1)

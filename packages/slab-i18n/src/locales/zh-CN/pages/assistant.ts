@@ -62,6 +62,13 @@ export const assistant = {
     manuallyCompacting: '正在压缩上下文',
     manuallyCompacted: '已压缩上下文',
   },
+  settingsMarker: {
+    modelSwitched: '模型已切换：{{from}} → {{to}}',
+    permissionModeChanged: '权限模式：{{from}} → {{to}}',
+    approvalReviewerChanged: '审批模型：{{from}} → {{to}}',
+    approvalReviewerNone: '未设置',
+    approvalReviewerPromptUpdated: '审批提示词已更新',
+  },
   modelLoad: {
     downloading: '下载模型...',
     loading: '加载模型...',

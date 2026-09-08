@@ -60,7 +60,7 @@ import { ApprovalCard } from "./approval-banner"
 import { ApprovalReviewDialog } from "./approval-review-dialog"
 
 /** Per-session permission modes offered in the composer. */
-const PERMISSION_MODES: ReadonlyArray<{ value: PermissionMode; label: string }> = [
+export const PERMISSION_MODES: ReadonlyArray<{ value: PermissionMode; label: string }> = [
   { value: "request_approval", label: "pages.assistant.composer.permission.requestApproval" },
   { value: "approve_for_me", label: "pages.assistant.composer.permission.approveForMe" },
   { value: "full_control", label: "pages.assistant.composer.permission.fullControl" },
@@ -146,6 +146,20 @@ type SenderProps = {
   /** Toggle plan mode on/off; `/plan` and the plan chip's X use this. */
   onPlanModeChange: (enabled: boolean) => void
   /**
+   * A DIFFERENT permission mode was picked from the composer dropdown — the
+   * page records it as an in-stream settings marker (fires only on change).
+   */
+  onPermissionModeChange?: (change: { from: PermissionMode; to: PermissionMode }) => void
+  /**
+   * The approval-review config dialog saved a real change (reviewer model
+   * and/or policy prompt) — the page records it as an in-stream marker.
+   */
+  onApprovalReviewChange?: (change: {
+    fromModel: string | null
+    toModel: string | null
+    promptChanged: boolean
+  }) => void
+  /**
    * Extra control rendered in the bottom toolbar next to the permission-mode
    * toggle — the assistant page passes the live workspace selector here.
    */
@@ -176,6 +190,8 @@ function Sender({
   commands,
   planMode,
   onPlanModeChange,
+  onPermissionModeChange,
+  onApprovalReviewChange,
   workspaceSlot,
   initialValue,
 }: SenderProps) {
@@ -604,6 +620,9 @@ function Sender({
                   data-testid={`assistant-permission-mode-${mode.value}`}
                   onSelect={(event) => {
                     event.preventDefault()
+                    if (mode.value !== permissionMode) {
+                      onPermissionModeChange?.({ from: permissionMode, to: mode.value })
+                    }
                     setPermissionMode(mode.value)
                     // First switch to "approve for me": configure the reviewer
                     // model right away (the mode is inert without one).
@@ -679,7 +698,11 @@ function Sender({
           </div>
         </InputGroupAddon>
       </InputGroup>
-      <ApprovalReviewDialog open={approvalDialogOpen} onOpenChange={setApprovalDialogOpen} />
+      <ApprovalReviewDialog
+        open={approvalDialogOpen}
+        onOpenChange={setApprovalDialogOpen}
+        onSaved={onApprovalReviewChange}
+      />
     </form>
   )
 }

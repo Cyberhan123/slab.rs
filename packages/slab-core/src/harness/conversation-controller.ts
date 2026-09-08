@@ -166,6 +166,44 @@ export interface CompactionMarker {
   threadId: string
 }
 
+/**
+ * A session-scoped settings-change divider rendered in the message stream: a
+ * mid-conversation model switch or a permission-mode / approval-review change
+ * made from the composer. Same lifecycle as {@link CompactionMarker} — lives
+ * in this controller above the keyed pane (survives pane remounts), cleared on
+ * a full reload, never persisted to the backend. The UI pushes these at the
+ * moment the change is committed; every turn carries the current selection,
+ * so the marker lands before the first turn that uses the new setting.
+ */
+export type SettingsMarker =
+  | {
+      id: string
+      kind: "modelSwitch"
+      /** Display label of the previous model (resolved by the caller). */
+      fromModel: string
+      /** Display label of the next model. */
+      toModel: string
+    }
+  | {
+      id: string
+      kind: "permissionMode"
+      fromMode: PermissionMode
+      toMode: PermissionMode
+    }
+  | {
+      id: string
+      kind: "approvalReview"
+      /** Previous reviewer-model label (null = was not configured). */
+      fromModel: string | null
+      /** Next reviewer-model label (null = cleared). */
+      toModel: string | null
+      /** Whether the policy prompt changed too (the label prefers the model). */
+      promptChanged: boolean
+    }
+
+/** Monotonic nonce for settings-marker ids (rapid changes can share a ms). */
+let settingsMarkerSeq = 0
+
 /** A failed `/compact` or `/fork` action (distinct from a restore `error`). */
 export type ActionError = { kind: "compact" | "fork"; message: string }
 
@@ -256,6 +294,8 @@ export interface ConversationState {
   commands: CommandInfo[]
   /** Session-scoped compaction markers rendered as in-stream dividers. */
   compactionMarkers: CompactionMarker[]
+  /** Session-scoped settings-change markers (model switch / permission mode). */
+  settingsMarkers: SettingsMarker[]
   /** True while a manual `/compact` round-trip is in flight. */
   isCompacting: boolean
   /** True while a `/fork` round-trip is in flight. */
@@ -420,6 +460,7 @@ export const EMPTY_SNAPSHOT: ConversationState = {
   historyCreatedAt: null,
   commands: [],
   compactionMarkers: [],
+  settingsMarkers: [],
   isCompacting: false,
   isForking: false,
   isRollingBack: false,
@@ -468,6 +509,7 @@ export class ConversationController {
   private historyCreatedAt: number | null = null
   private commands: CommandInfo[] = []
   private compactionMarkers: CompactionMarker[] = []
+  private settingsMarkers: SettingsMarker[] = []
   private isCompacting = false
   private isForking = false
   private isRollingBack = false
@@ -547,6 +589,69 @@ export class ConversationController {
    */
   readonly setModel = (model: string): void => {
     this.model = model
+  }
+
+  /**
+   * Record a mid-conversation model switch (the "keep session" path of the
+   * model-switch dialog) as an in-stream marker. Display labels are resolved
+   * by the caller (the page owns the model options). No-op when they match.
+   */
+  readonly noteModelSwitch = (change: { from: string; to: string }): void => {
+    if (change.from === change.to) return
+    this.settingsMarkers = [
+      ...this.settingsMarkers,
+      {
+        id: `modelSwitch:${(settingsMarkerSeq += 1)}`,
+        kind: "modelSwitch",
+        fromModel: change.from,
+        toModel: change.to,
+      },
+    ]
+    this.commit()
+  }
+
+  /**
+   * Record a permission-mode change picked from the composer dropdown as an
+   * in-stream marker. No-op for a re-selection of the current mode.
+   */
+  readonly notePermissionModeChange = (change: {
+    from: PermissionMode
+    to: PermissionMode
+  }): void => {
+    if (change.from === change.to) return
+    this.settingsMarkers = [
+      ...this.settingsMarkers,
+      {
+        id: `permissionMode:${(settingsMarkerSeq += 1)}`,
+        kind: "permissionMode",
+        fromMode: change.from,
+        toMode: change.to,
+      },
+    ]
+    this.commit()
+  }
+
+  /**
+   * Record an approval-review config save (reviewer model and/or policy
+   * prompt) as an in-stream marker. No-op when nothing actually changed.
+   */
+  readonly noteApprovalReviewChange = (change: {
+    fromModel: string | null
+    toModel: string | null
+    promptChanged: boolean
+  }): void => {
+    if (change.fromModel === change.toModel && !change.promptChanged) return
+    this.settingsMarkers = [
+      ...this.settingsMarkers,
+      {
+        id: `approvalReview:${(settingsMarkerSeq += 1)}`,
+        kind: "approvalReview",
+        fromModel: change.fromModel,
+        toModel: change.toModel,
+        promptChanged: change.promptChanged,
+      },
+    ]
+    this.commit()
   }
 
   /** External-store subscription. Bound per instance; reference-stable. */
@@ -1254,6 +1359,7 @@ export class ConversationController {
       historyCreatedAt: this.historyCreatedAt,
       commands: this.commands,
       compactionMarkers: this.compactionMarkers,
+      settingsMarkers: this.settingsMarkers,
       isCompacting: this.isCompacting,
       isForking: this.isForking,
       isRollingBack: this.isRollingBack,

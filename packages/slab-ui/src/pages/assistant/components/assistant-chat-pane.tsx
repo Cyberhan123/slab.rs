@@ -32,6 +32,7 @@ import { useGreeting } from "../hooks/use-greeting"
 import type {
     ApprovalScope,
     CommandInfo,
+    PermissionMode,
     TurnUsage,
 } from "@slab/api/harness"
 import type {
@@ -42,6 +43,7 @@ import type {
     HarnessChatTransport,
     LiveTextEntry,
     ModelLoadState,
+    SettingsMarker,
     SubagentChildItem,
     SubagentTaskInfo,
     ThreadStatusString,
@@ -88,6 +90,8 @@ export type AssistantChatPaneProps = {
     commands: CommandInfo[]
     /** Session-scoped compaction markers rendered as in-stream dividers. */
     compactionMarkers: CompactionMarker[]
+    /** Session-scoped settings-change markers (model switch / permission mode). */
+    settingsMarkers: SettingsMarker[]
     /** True while a manual `/compact` round-trip is in flight. */
     isCompacting: boolean
     /** True while a `/fork` round-trip is in flight. */
@@ -100,6 +104,20 @@ export type AssistantChatPaneProps = {
     planMode: boolean
     /** Toggle plan mode on/off; drives the plan chip + `/plan`. */
     onPlanModeChange: (enabled: boolean) => void
+    /**
+     * A DIFFERENT permission mode was picked from the composer dropdown — the
+     * page records it as an in-stream settings marker.
+     */
+    onPermissionModeChange?: (change: { from: PermissionMode; to: PermissionMode }) => void
+    /**
+     * The approval-review config dialog saved a real change (reviewer model
+     * and/or policy prompt) — the page records it as an in-stream marker.
+     */
+    onApprovalReviewChange?: (change: {
+        fromModel: string | null
+        toModel: string | null
+        promptChanged: boolean
+    }) => void
     /** Authoritative thread status from `thread/statusChanged` (null before the first event). */
     threadStatus: ThreadStatusString | null
     /** Why the last run ended abnormally (null after a clean completion). */
@@ -183,12 +201,15 @@ export function AssistantChatPane({
     historyCreatedAt,
     commands,
     compactionMarkers,
+    settingsMarkers,
     isCompacting,
     isForking,
     userMessageTurnIndex,
     onRollbackFromTurn,
     planMode,
     onPlanModeChange,
+    onPermissionModeChange,
+    onApprovalReviewChange,
     threadStatus,
     abortReason,
     queuedTexts,
@@ -406,6 +427,7 @@ export function AssistantChatPane({
                                                     historyCount={initialMessages.length}
                                                     historyCreatedAt={historyCreatedAt}
                                                     compactionMarkers={compactionMarkers}
+                                                    settingsMarkers={settingsMarkers}
                                                     modelLoad={modelLoad}
                                                     sessionLoading={isHistoryLoading}
                                                     queuedTexts={queuedTexts}
@@ -498,6 +520,8 @@ export function AssistantChatPane({
                             commands={commands}
                             planMode={planMode}
                             onPlanModeChange={onPlanModeChange}
+                            onPermissionModeChange={onPermissionModeChange}
+                            onApprovalReviewChange={onApprovalReviewChange}
                             workspaceSlot={workspaceSlot}
                         />
                         <p

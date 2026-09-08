@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { useTranslation } from "@slab/i18n"
+import type { PermissionMode } from "@slab/api/harness"
 
 import { AssistantChatPane } from "./components/assistant-chat-pane"
 import { AssistantModelSwitchDialog } from "./components/assistant-model-switch-dialog"
@@ -24,6 +25,7 @@ import {
     type AssistantDraft,
 } from "@slab/ui/store/useWorkspaceHandoffStore"
 import { WorkspaceSelector } from "@slab/ui/components/workspace-selector"
+import { useAssistantUiStore } from "@slab/ui/store/useAssistantUiStore"
 import { useWorkspaceUiStore } from "@slab/ui/store/useWorkspaceUiStore"
 
 /** Delivery attempts a re-staged draft may use before giving up (with a toast). */
@@ -87,6 +89,7 @@ function Assistant() {
         historyCreatedAt,
         commands,
         compactionMarkers,
+        settingsMarkers,
         isCompacting,
         isForking,
         resolveApproval,
@@ -96,6 +99,9 @@ function Assistant() {
         rollbackFromTurn,
         planMode,
         setPlanMode,
+        noteModelSwitch,
+        notePermissionModeChange,
+        noteApprovalReviewChange,
         threadStatus,
         abortReason,
         queuedTexts,
@@ -145,6 +151,36 @@ function Assistant() {
         createSession: createEmptySession,
         isCreatingSession,
     })
+
+    // In-stream settings markers: a mid-conversation model switch (the dialog
+    // only opens once the conversation has messages) and composer permission /
+    // approval-review changes are recorded in the session-scoped controller so
+    // they render as timeline dividers like the compaction markers. Empty
+    // conversations skip the markers — there is no timeline to divide yet.
+    const composerPermissionMode = useAssistantUiStore((state) => state.permissionMode)
+    const handleKeepSessionWithMarker = useCallback(() => {
+        const from = selectedModel
+        const to = pendingModelSwitch
+        handleKeepSessionOnModelSwitch()
+        if (from && to && from.id !== to.id) {
+            noteModelSwitch({ from: from.label, to: to.label })
+        }
+    }, [handleKeepSessionOnModelSwitch, noteModelSwitch, pendingModelSwitch, selectedModel])
+    const handlePermissionModeChange = useCallback(
+        (change: { from: PermissionMode; to: PermissionMode }) => {
+            if (messageCount > 0) notePermissionModeChange(change)
+        },
+        [messageCount, notePermissionModeChange],
+    )
+    const handleApprovalReviewChange = useCallback(
+        (change: { fromModel: string | null; toModel: string | null; promptChanged: boolean }) => {
+            // The reviewer config only takes effect in "approve for me" mode.
+            if (messageCount > 0 && composerPermissionMode === "approve_for_me") {
+                noteApprovalReviewChange(change)
+            }
+        },
+        [composerPermissionMode, messageCount, noteApprovalReviewChange],
+    )
 
     // Session navigation: the detail view is `?session=`-driven, so "switch
     // conversation" is a navigation (the store selection is a no-op under the
@@ -400,12 +436,15 @@ function Assistant() {
                     historyCreatedAt={historyCreatedAt}
                     commands={commands}
                     compactionMarkers={compactionMarkers}
+                    settingsMarkers={settingsMarkers}
                     isCompacting={isCompacting}
                     isForking={isForking}
                     userMessageTurnIndex={userMessageTurnIndex}
                     onRollbackFromTurn={rollbackFromTurn}
                     planMode={planMode}
                     onPlanModeChange={setPlanMode}
+                    onPermissionModeChange={handlePermissionModeChange}
+                    onApprovalReviewChange={handleApprovalReviewChange}
                     threadStatus={threadStatus}
                     abortReason={abortReason}
                     queuedTexts={queuedTexts}
@@ -468,7 +507,7 @@ function Assistant() {
                 isCreatingSession={isCreatingSession}
                 messageCount={messageCount}
                 onCreateSession={() => void handleCreateSessionOnModelSwitch()}
-                onKeepSession={handleKeepSessionOnModelSwitch}
+                onKeepSession={handleKeepSessionWithMarker}
                 onOpenChange={(open) => {
                     if (!open) {
                         closePendingModelSwitch()

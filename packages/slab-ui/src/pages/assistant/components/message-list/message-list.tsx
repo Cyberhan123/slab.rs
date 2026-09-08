@@ -12,6 +12,7 @@ import type {
     CompactionMarker,
     LiveTextEntry,
     ModelLoadState,
+    SettingsMarker,
 } from "@slab/core/harness"
 import { buildScrollerRows, type ScrollerRow } from "@slab/ui/pages/assistant/lib/build-scroller-rows"
 import type { TMessage } from "@slab/ui/pages/assistant/components/message/message-item"
@@ -28,6 +29,8 @@ type MessageListProps = {
     historyCreatedAt?: number | null
     /** Session-scoped compaction markers rendered at the end of the stream. */
     compactionMarkers?: CompactionMarker[]
+    /** Session-scoped settings-change markers (model switch / permission mode). */
+    settingsMarkers?: SettingsMarker[]
     /** Transient model-load state; rendered as a Marker at the live edge. */
     modelLoad?: ModelLoadState | null
     /** True while restoring; renders a session-load Marker when there are no messages yet. */
@@ -47,6 +50,7 @@ function MessageList({
     historyCount,
     historyCreatedAt,
     compactionMarkers,
+    settingsMarkers,
     modelLoad,
     sessionLoading = false,
     queuedTexts,
@@ -61,12 +65,13 @@ function MessageList({
                 showHistoryMarker,
                 historyCount,
                 modelLoad,
+                settingsMarkers,
                 sessionLoading,
                 queuedTexts,
                 backgroundTasks,
                 liveTailTexts,
             }),
-        [messages, showHistoryMarker, historyCount, compactionMarkers, modelLoad, sessionLoading, queuedTexts, backgroundTasks, liveTailTexts],
+        [messages, showHistoryMarker, historyCount, compactionMarkers, settingsMarkers, modelLoad, sessionLoading, queuedTexts, backgroundTasks, liveTailTexts],
     )
 
     // @tanstack/react-virtual returns mutable instance functions; the compiler
