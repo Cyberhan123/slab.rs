@@ -142,6 +142,20 @@ impl HarnessService {
         self.0.runtime().control().set_thread_mode(thread_id, mode).await;
     }
 
+    /// Configure (or clear, `model == None`) the per-thread "approve for me"
+    /// reviewer model + custom policy prompt (flows from the harness
+    /// `turn/start` `approval_model` / `approval_prompt` params). Re-applied
+    /// every turn like the permission mode; the reviewer itself gates on the
+    /// thread mode, so the config is inert outside `approve_for_me`.
+    pub async fn set_thread_approval_review(
+        &self,
+        thread_id: &str,
+        model: Option<&str>,
+        prompt: Option<&str>,
+    ) {
+        self.0.runtime().control().set_thread_approval_review(thread_id, model, prompt).await;
+    }
+
     /// Resolve a built-in agent definition by type (flows from the harness
     /// `turn/start` `agent_type` param). Returns `None` for an empty/unknown
     /// type, in which case the caller runs the default agent.

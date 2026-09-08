@@ -479,6 +479,17 @@ pub struct TurnStartParams {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<ReasoningEffort>,
+    /// Approval-review model id for the "approve for me" permission mode. When
+    /// set alongside `permission_mode: approve_for_me`, `RequireApproval`
+    /// verdicts are first reviewed single-shot by this model; on any review
+    /// failure (error, timeout, unparseable output) the normal human approval
+    /// path runs instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_model: Option<String>,
+    /// Optional extra policy instructions appended to the built-in
+    /// approval-review system prompt for this thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<Value>,
 }

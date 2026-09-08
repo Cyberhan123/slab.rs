@@ -179,6 +179,31 @@ pub(crate) async fn turn_start(
         session.service().set_thread_mode(&real_id, runtime_mode).await;
     }
 
+    // Reviewer config for the "approve for me" mode (per-thread, re-applied
+    // every turn like the permission mode; `None` clears). The reviewer's own
+    // mode gate makes this inert outside `approve_for_me`.
+    {
+        let real_id = session.real_id_for(&params.thread_id);
+        let approval_model =
+            params.approval_model.as_deref().map(str::trim).filter(|value| !value.is_empty());
+        if approval_model.is_some() || params.approval_prompt.is_some() {
+            tracing::info!(
+                harness_thread_id = %params.thread_id,
+                real_thread_id = %real_id,
+                approval_model = ?approval_model,
+                "turn/start applying approval review config"
+            );
+        }
+        session
+            .service()
+            .set_thread_approval_review(
+                &real_id,
+                approval_model,
+                params.approval_prompt.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+            )
+            .await;
+    }
+
     Ok(TurnStartResult {
         turn: Turn {
             id: "0".to_owned(),

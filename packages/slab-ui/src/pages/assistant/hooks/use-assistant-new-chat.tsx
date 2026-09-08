@@ -116,6 +116,8 @@ export function useAssistantNewChat({
                     effort: options.effort,
                     permissionMode: options.permissionMode,
                     agentType: options.agentType,
+                    approvalModel: options.approvalModel,
+                    approvalPrompt: options.approvalPrompt,
                 })
             } catch {
                 // `applyWorkspace` already toasted. The landing is behind us (we

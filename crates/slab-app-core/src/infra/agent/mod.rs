@@ -1,5 +1,6 @@
 pub mod adapter;
 pub(crate) mod agent_registry;
+pub(crate) mod approval_reviewer;
 pub(crate) mod bootstrap;
 pub(crate) mod code_tools;
 pub(crate) mod context;

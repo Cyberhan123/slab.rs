@@ -110,6 +110,18 @@ export const assistant = {
       high: '高',
     },
   },
+  approvalReview: {
+    configure: '配置审批模型…',
+    dialogTitle: '替我审批设置',
+    dialogDescription:
+      '选择替你审查审批请求的模型。超出基线许可的操作会先交给该模型做一次快速审查；审查失败或超时将回退为人工审批。',
+    modelField: '审批模型',
+    modelPlaceholder: '选择用于审批的模型',
+    modelHint: '建议选择响应快的小模型；审批调用有 60 秒超时。',
+    promptField: '注入提示词（可选）',
+    promptPlaceholder: '例如：一律拒绝 git push；测试命令可放行…',
+    promptHint: '追加到内置审批规则之后，作为最高优先级的自定义策略；留空则仅使用内置规则。',
+  },
   sessionSheet: {
     title: '管理会话',
     description: '不离开助手界面即可切换和清理会话。',

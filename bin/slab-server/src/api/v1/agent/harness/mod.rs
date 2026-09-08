@@ -1280,4 +1280,63 @@ mod tests {
         assert!(matches!(&thread.turns[1].items[0], TurnItem::UserMessage { content, .. }
             if matches!(&content[0], UserMessageContent::Text { text } if text == "again")));
     }
+
+    // Regression: subagent completion/stall notices are injected as TAGGED
+    // user messages (`slab_subagent_notice`) — LLM-visible, never a user
+    // bubble — on both render paths, and duplicated rollout lines (at-least-
+    // once delivery) render zero notice bubbles.
+    #[test]
+    fn thread_from_timeline_hides_subagent_notices_and_duplicates() {
+        let notice = |id: &str, turn: u32| {
+            tagged_record(
+                id,
+                turn,
+                "user",
+                "slab_subagent_notice",
+                "[subagent task finished] task_id=bg-1 status=completed\nTask: summarize",
+            )
+        };
+        let mut timeline: Vec<slab_app_core::domain::services::TurnTimelineEntry> = vec![
+            slab_app_core::domain::services::TurnTimelineEntry::Message(notice("n1", 0)),
+            // Simulated duplicate MessageAppend line (at-least-once delivery).
+            slab_app_core::domain::services::TurnTimelineEntry::Message(notice("n2", 0)),
+            slab_app_core::domain::services::TurnTimelineEntry::Message(record(
+                "u1",
+                0,
+                "user",
+                "hello",
+                "2024-01-01T00:00:01Z",
+            )),
+            slab_app_core::domain::services::TurnTimelineEntry::Item(TurnItemRecord {
+                id: "a1".to_owned(),
+                thread_id: "t1".to_owned(),
+                turn_index: 0,
+                seq: 0,
+                item_json: serde_json::to_string(&TurnItem::AgentMessage {
+                    id: "a1".to_owned(),
+                    text: "hi".to_owned(),
+                })
+                .unwrap(),
+                created_at: "2024-01-01T00:00:02Z".to_owned(),
+            }),
+        ];
+        // Snapshot-less turn 1: ONLY duplicated notices — no user bubble at all.
+        timeline.push(slab_app_core::domain::services::TurnTimelineEntry::Message(notice("n3", 1)));
+        timeline.push(slab_app_core::domain::services::TurnTimelineEntry::Message(notice("n4", 1)));
+
+        let thread = thread_from_timeline("hthread-1", &snapshot(), &[], &timeline);
+        let all_items: Vec<&TurnItem> = thread.turns.iter().flat_map(|t| t.items.iter()).collect();
+        assert!(
+            all_items.iter().all(|item| !matches!(item, TurnItem::UserMessage { content, .. }
+                if matches!(&content[0], UserMessageContent::Text { text }
+                    if text.contains("[subagent task")))),
+            "no notice renders as a user message: {:?}",
+            all_items
+        );
+        assert_eq!(
+            all_items.iter().filter(|item| matches!(item, TurnItem::UserMessage { .. })).count(),
+            1,
+            "only the real prompt renders"
+        );
+    }
 }

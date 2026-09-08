@@ -14,7 +14,9 @@ use slab_types::{ConversationMessage, agent::ToolCallStatus};
 use crate::{
     error::AgentError,
     hook::{HookEvent, HookToolAction, dispatch_registered_hooks},
-    port::{ApprovalDecision, ParsedToolCall, ToolRiskAssessment},
+    port::{
+        ApprovalDecision, ApprovalReviewRequest, ParsedToolCall, ReviewOutcome, ToolRiskAssessment,
+    },
     protocol::{
         CommandExecutionOutputDeltaParams, CommandExecutionRequestApprovalParams, EventMsg,
         FileChangeApprovalChange, FileChangeOutputDeltaParams, FileChangeRequestApprovalParams,
@@ -1184,6 +1186,116 @@ async fn run_tool_with_optional_approval(
     let Some(ref request) = run.approval_request else {
         return run_tool_without_approval(&run).await;
     };
+
+    // "Approve for me" model delegation: try the bounded single-shot review
+    // BEFORE the human card, so no approval banner is shown while a review is
+    // in flight. `Unavailable` (unconfigured, wrong mode, LLM failure, timeout,
+    // unparseable output) falls through to the human path below — the human
+    // approval always remains the safety net.
+    let review_request = ApprovalReviewRequest {
+        tool_name: run.tool_call.name.clone(),
+        display: request.display.clone(),
+        descriptor: request.descriptor.clone(),
+        arguments: run.effective_arguments.to_owned(),
+        risk: Some(run.risk.clone()),
+    };
+    let review = tokio::select! {
+        outcome = run.context.approval_reviewer.review(
+            run.context.thread_id,
+            &review_request,
+        ) => outcome,
+        _ = run.context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+    };
+    match review {
+        ReviewOutcome::Approved { reason } => {
+            record_json(
+                run.context.trace,
+                &run.context.trace_context,
+                "slab-agent",
+                "tool_call_approval_auto_reviewed",
+                serde_json::json!({
+                    "item_id": run.tool_call.id,
+                    "call_id": run.call_id,
+                    "tool_name": run.tool_call.name,
+                    "command": &request.display,
+                    "verdict": "approved",
+                    "reason": reason,
+                }),
+            );
+            info!(
+                thread_id = run.context.thread_id,
+                turn_index = run.context.turn_index,
+                item_id = %run.tool_call.id,
+                call_id = %run.call_id,
+                tool_name = %run.tool_call.name,
+                "agent tool call auto-approved by approval model"
+            );
+            // RunOnce only: a model approval covers THIS call and must never
+            // persist an allow rule (no `remember`).
+            emit_approval_resolved(&run, true).await;
+            if run.context.cancellation.is_cancelled() {
+                return Err(AgentError::Interrupted);
+            }
+            run.tool_state.transition(ToolCallStatus::Running)?;
+            emit_tool_execution_started(&run).await;
+            let (mut output, status) = tokio::select! {
+                result = execute_tool_call(
+                    run.call_id,
+                    &run.tool_call.name,
+                    run.handler.clone(),
+                    run.tool_context,
+                    run.effective_args,
+                ) => result,
+                _ = run.context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+            };
+            // Transparency marker: the agent (and the transcript) must see the
+            // call ran without a human decision.
+            let marker = match reason.as_deref().filter(|value| !value.is_empty()) {
+                Some(reason) => format!("[auto-approved by approval model: {reason}]"),
+                None => "[auto-approved by approval model]".to_owned(),
+            };
+            output.content = if output.content.is_empty() {
+                marker
+            } else {
+                format!("{}\n{marker}", output.content)
+            };
+            return Ok((output, status));
+        }
+        ReviewOutcome::Rejected { reason } => {
+            record_json(
+                run.context.trace,
+                &run.context.trace_context,
+                "slab-agent",
+                "tool_call_approval_auto_reviewed",
+                serde_json::json!({
+                    "item_id": run.tool_call.id,
+                    "call_id": run.call_id,
+                    "tool_name": run.tool_call.name,
+                    "command": &request.display,
+                    "verdict": "rejected",
+                    "reason": reason,
+                }),
+            );
+            info!(
+                thread_id = run.context.thread_id,
+                turn_index = run.context.turn_index,
+                item_id = %run.tool_call.id,
+                call_id = %run.call_id,
+                tool_name = %run.tool_call.name,
+                "agent tool call rejected by approval model"
+            );
+            emit_approval_resolved(&run, false).await;
+            return Ok((
+                ToolOutput {
+                    content: format!("tool call rejected by approval model: {reason}"),
+                    metadata: None,
+                },
+                ToolCallStatus::Failed,
+            ));
+        }
+        ReviewOutcome::Unavailable => {}
+    }
+
     // Advisory phase: the batch is blocked on a user approval (status-only).
     emit_turn_phase(run.context, TurnPhase::AwaitingApproval).await;
     emit_approval_request(&run).await;

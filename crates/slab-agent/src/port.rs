@@ -193,6 +193,69 @@ pub trait ApprovalPort: Send + Sync {
     ) -> ApprovalDecision;
 }
 
+/// Input to a model-based approval review ("approve for me" delegation).
+#[derive(Debug, Clone)]
+pub struct ApprovalReviewRequest {
+    /// Canonical tool name being gated.
+    pub tool_name: String,
+    /// Human-readable operation subject (command line, file path, query…).
+    pub display: String,
+    /// Unified policy descriptor for the operation.
+    pub descriptor: slab_exec_policy::OperationDescriptor,
+    /// Effective JSON arguments of the tool call (caller-side truncation).
+    pub arguments: String,
+    /// Risk assessment attached to the call, when one was produced.
+    pub risk: Option<ToolRiskAssessment>,
+}
+
+/// Outcome of a model-based approval review.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewOutcome {
+    /// The reviewer approves this single execution (never a persistent rule).
+    Approved { reason: Option<String> },
+    /// The reviewer denies the call; `reason` is fed back to the agent.
+    Rejected { reason: String },
+    /// Review not applicable or failed (no model configured, wrong permission
+    /// mode, LLM error, timeout, unparseable output). The caller MUST fall
+    /// back to the human [`ApprovalPort`] path.
+    Unavailable,
+}
+
+/// Port that delegates "approve for me" approval decisions to a bounded,
+/// single-shot model review before the human approval card is shown.
+///
+/// Implementations MUST bound the review call well under the human approval
+/// timeout and report ANY failure as [`ReviewOutcome::Unavailable`] rather
+/// than erroring — the human path remains the safety net.
+#[async_trait]
+pub trait ApprovalReviewerPort: Send + Sync {
+    /// Attempt a bounded, single-shot model review of a pending tool call.
+    async fn review(&self, thread_id: &str, request: &ApprovalReviewRequest) -> ReviewOutcome;
+
+    /// Configure (or clear, `model == None`) the per-thread reviewer model +
+    /// custom policy prompt. Flows from the harness `turn/start` params.
+    /// The default is a no-op so unconfigured hosts keep compiling.
+    async fn set_thread_config(
+        &self,
+        _thread_id: &str,
+        _model: Option<&str>,
+        _prompt: Option<&str>,
+    ) {
+    }
+}
+
+/// [`ApprovalReviewerPort`] that never reviews — the default when no model
+/// delegation is wired, so every verdict falls back to the human path.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopApprovalReviewer;
+
+#[async_trait]
+impl ApprovalReviewerPort for NoopApprovalReviewer {
+    async fn review(&self, _thread_id: &str, _request: &ApprovalReviewRequest) -> ReviewOutcome {
+        ReviewOutcome::Unavailable
+    }
+}
+
 // ── Port traits ──────────────────────────────────────────────────────────────
 
 /// Port for calling chat completions.

@@ -431,7 +431,7 @@ export function AssistantChatPane({
                             </p>
                         ) : null}
                         <Sender
-                            onSubmit={async (value, { files, effort, permissionMode, agentType }) => {
+                            onSubmit={async (value, { files, effort, permissionMode, agentType, approvalModel, approvalPrompt }) => {
                                 // Registry-driven dispatch: Control commands run a
                                 // host action and never reach the model. `/plan` is
                                 // intercepted by the Sender (toggle, never submitted);
@@ -462,14 +462,26 @@ export function AssistantChatPane({
                                 // gate throws while the session is busy, which it
                                 // always is here (the turn is running).
                                 if (steerable) {
-                                    await onSteerSubmit(value, { effort, permissionMode, agentType })
+                                    await onSteerSubmit(value, {
+                                        effort,
+                                        permissionMode,
+                                        agentType,
+                                        approvalModel,
+                                        approvalPrompt,
+                                    })
                                     return
                                 }
                                 await onBeforeSubmit(value)
                                 sendMessage({
                                     text: value,
                                     files,
-                                    metadata: { effort, permissionMode, agentType },
+                                    metadata: {
+                                        effort,
+                                        permissionMode,
+                                        agentType,
+                                        approvalModel,
+                                        approvalPrompt,
+                                    },
                                 })
                             }}
                             onStop={() => {

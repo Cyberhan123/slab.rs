@@ -22,9 +22,9 @@ use crate::{
     compact::{CompactContext, CompactOutcome, CompactPort, SlidingWindowCompactPort},
     config::{AgentConfig, AgentToolChoice},
     port::{
-        AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-        LlmUsage, ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec,
-        TurnStateRecord,
+        AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, ApprovalReviewRequest,
+        ApprovalReviewerPort, LlmPort, LlmResponse, LlmUsage, ParsedToolCall, ReviewOutcome,
+        ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec, TurnStateRecord,
     },
     protocol::{EventMsg, TurnItem},
     risk::ToolRiskAnalyzer,
@@ -2824,6 +2824,181 @@ async fn approved_tool_runs_after_prompting_exec_policy() {
 
     assert_eq!(final_status, ThreadStatus::Completed);
     assert_eq!(approval.calls(), 1, "approved tool must prompt exactly once");
+}
+
+/// Scripted [`ApprovalReviewerPort`] for the "approve for me" gate tests:
+/// returns a canned outcome and counts reviews.
+struct ScriptedReviewer {
+    outcome: ReviewOutcome,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait]
+impl ApprovalReviewerPort for ScriptedReviewer {
+    async fn review(&self, _thread_id: &str, request: &ApprovalReviewRequest) -> ReviewOutcome {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // The gate must hand the reviewer the gated call's identity.
+        assert_eq!(request.tool_name, "echo");
+        self.outcome.clone()
+    }
+}
+
+async fn spawn_with_reviewer(
+    notify: Arc<ApprovingRecordingNotify>,
+    reviewer: Arc<ScriptedReviewer>,
+) -> (Arc<AgentControl>, String) {
+    let llm = Arc::new(MockLlm::new());
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let router = ToolRouter::new();
+    router.register(Box::new(ApprovalEchoTool));
+
+    let approval = Arc::clone(&notify) as Arc<dyn ApprovalPort>;
+    let control = Arc::new(
+        AgentControl::new(llm, store, notify, approval, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(AskAllExecPolicy))
+            .with_approval_reviewer(reviewer),
+    );
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id =
+        control.spawn("session-approve-for-me".into(), config, messages).await.expect("spawn");
+    (control, thread_id)
+}
+
+/// Collect every completed tool item's textual output + status. The render
+/// varies by tool/category and outcome (ToolCall result vs error vs
+/// CommandExecution output), so gather all shapes.
+fn completed_item_texts(events: &[EventMsg], thread_id: &str) -> Vec<(String, String)> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::ItemCompleted(p) if p.thread_id == thread_id => match &p.item {
+                TurnItem::ToolCall { result, error, status, .. } => {
+                    let text = result
+                        .clone()
+                        .or(error.clone())
+                        .map(|value| value.to_string())
+                        .unwrap_or_default();
+                    Some((text, status.clone()))
+                }
+                TurnItem::CommandExecution { aggregated_output, status, .. } => {
+                    Some((aggregated_output.clone().unwrap_or_default(), status.clone()))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// A model-approved call runs WITHOUT the human approval banner, and the
+/// result carries the auto-approval marker for transparency.
+#[tokio::test]
+async fn model_reviewed_tool_runs_without_human_approval_banner() {
+    let notify = Arc::new(ApprovingRecordingNotify::default());
+    let reviewer = Arc::new(ScriptedReviewer {
+        outcome: ReviewOutcome::Approved { reason: Some("safe test command".into()) },
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let (control, thread_id) = spawn_with_reviewer(notify.clone(), reviewer.clone()).await;
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+    assert_eq!(final_status, ThreadStatus::Completed);
+    assert_eq!(
+        reviewer.calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the reviewer is consulted exactly once"
+    );
+
+    let events = notify.events.lock().unwrap().clone();
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            EventMsg::CommandExecutionRequestApproval(p) if p.thread_id == thread_id
+        )),
+        "no human approval banner while a model review decides"
+    );
+    let items = completed_item_texts(&events, &thread_id);
+    let result = items
+        .iter()
+        .find(|(_, status)| status == "completed")
+        .map(|(result, _)| result.clone())
+        .unwrap_or_default();
+    assert!(result.contains("approved: hello from agent"), "tool output: {result}");
+    assert!(
+        result.contains("[auto-approved by approval model: safe test command]"),
+        "transparency marker appended: {result}"
+    );
+}
+
+/// A model rejection fails the call WITHOUT a human banner; the reviewer's
+/// reason flows back as the tool result.
+#[tokio::test]
+async fn model_reviewed_rejection_fails_the_tool_with_reason() {
+    let notify = Arc::new(ApprovingRecordingNotify::default());
+    let reviewer = Arc::new(ScriptedReviewer {
+        outcome: ReviewOutcome::Rejected { reason: "touches credentials".into() },
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let (control, thread_id) = spawn_with_reviewer(notify.clone(), reviewer.clone()).await;
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+    assert_eq!(final_status, ThreadStatus::Completed);
+
+    let events = notify.events.lock().unwrap().clone();
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            EventMsg::CommandExecutionRequestApproval(p) if p.thread_id == thread_id
+        )),
+        "no human approval banner on a model rejection"
+    );
+    let items = completed_item_texts(&events, &thread_id);
+    let result = items
+        .iter()
+        .find(|(_, status)| status == "failed")
+        .map(|(result, _)| result.clone())
+        .unwrap_or_default();
+    assert!(
+        result.contains("tool call rejected by approval model: touches credentials"),
+        "reviewer reason flows back: {result}"
+    );
+}
+
+/// `Unavailable` (unconfigured / failed / timed out / unparseable) falls back
+/// to the human approval path unchanged.
+#[tokio::test]
+async fn unavailable_review_falls_back_to_human_approval() {
+    let notify = Arc::new(ApprovingRecordingNotify::default());
+    let reviewer = Arc::new(ScriptedReviewer {
+        outcome: ReviewOutcome::Unavailable,
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let (control, thread_id) = spawn_with_reviewer(notify.clone(), reviewer.clone()).await;
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+    assert_eq!(final_status, ThreadStatus::Completed);
+
+    let events = notify.events.lock().unwrap().clone();
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            EventMsg::CommandExecutionRequestApproval(p) if p.thread_id == thread_id
+        )),
+        "the human approval banner is shown on reviewer unavailability"
+    );
+    let items = completed_item_texts(&events, &thread_id);
+    let result = items
+        .iter()
+        .find(|(_, status)| status == "completed")
+        .map(|(result, _)| result.clone())
+        .unwrap_or_default();
+    assert!(result.contains("approved: hello from agent"), "human path executes: {result}");
+    assert!(!result.contains("auto-approved"), "no model marker on the human path: {result}");
 }
 
 #[tokio::test]

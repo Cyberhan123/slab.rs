@@ -12,6 +12,7 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use slab_agent::port::ThreadMessageRecord;
 use slab_agent::protocol::{
     EventMsg, ItemCompletedParams, ItemStartedParams, SubagentChildEventParams,
 };
@@ -32,6 +33,16 @@ use crate::infra::agent::event_hub::AgentEventHub;
 /// e2e scripted stack shortens this via `SLAB_E2E_STALL_MS` (see
 /// [`stall_warn_after`]).
 const SUBAGENT_STALL_WARN_AFTER: Duration = Duration::from_secs(5 * 60);
+
+/// Internal tag on the parent-facing completion/stall notices. The notices are
+/// injected with the user role (the parent agent must read them), but they are
+/// harness-generated — never user turns. Every thread/resume render path skips
+/// named user messages (same channel as the init-context fragment tags), so a
+/// tagged notice stays LLM-visible yet never surfaces in the chat UI as a user
+/// bubble. Must not collide with the ContextInstructionHook init-batch tags
+/// (`slab_system`, `slab_agents_md`, …) — `merge_injected_messages` replaces
+/// messages BY TAG and would strip a colliding notice.
+const SUBAGENT_NOTICE_TAG: &str = "slab_subagent_notice";
 
 pub(crate) struct SubagentBridge {
     core: OnceLock<Arc<AgentCore>>,
@@ -86,6 +97,7 @@ impl SubagentTaskSink for SubagentBridge {
             let child_thread_id = event.child_thread_id.clone();
             let notify_core = Arc::clone(core);
             let notice_parent = event.parent_thread_id.clone();
+            let dedupe_needle = stall_notice_needle(&event.child_thread_id);
             tokio::spawn(SubagentWatchdog { stall_after: stall_warn_after() }.run(
                 hub,
                 child_thread_id,
@@ -95,13 +107,12 @@ impl SubagentTaskSink for SubagentBridge {
                         // parent's tail must be durable before the notice
                         // re-reads the rollout.
                         notify_core.await_durable(&notice_parent).await;
-                        let message = ConversationMessage {
-                            role: "user".to_owned(),
-                            content: ConversationMessageContent::Text(notice),
-                            name: None,
-                            tool_call_id: None,
-                            tool_calls: Vec::new(),
-                        };
+                        if notice_already_delivered(&notify_core, &notice_parent, &dedupe_needle)
+                            .await
+                        {
+                            return;
+                        }
+                        let message = notice_message(notice);
                         if let Err(error) =
                             notify_core.send_input_message(&notice_parent, message).await
                         {
@@ -136,13 +147,11 @@ impl SubagentTaskSink for SubagentBridge {
             // re-reads the rollout history, or the resume would rebuild a
             // tail-less conversation.
             core.await_durable(&event.parent_thread_id).await;
-            let message = ConversationMessage {
-                role: "user".to_owned(),
-                content: ConversationMessageContent::Text(render_notification(&event)),
-                name: None,
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-            };
+            let needle = completion_notice_needle(&event.task_id);
+            if notice_already_delivered(&core, &event.parent_thread_id, &needle).await {
+                return;
+            }
+            let message = notice_message(render_notification(&event));
             if let Err(error) = core.send_input_message(&event.parent_thread_id, message).await {
                 // The parent may be archived/shut down — a missed follow-up
                 // is unfortunate but not fatal; the registry result and the
@@ -163,6 +172,61 @@ impl SubagentTaskSink for SubagentBridge {
 /// the artifact but never wake the parent).
 fn should_notify_parent(event: &SubagentFinishedEvent) -> bool {
     !event.no_resume
+}
+
+/// Build a tagged parent-facing notice message (see [`SUBAGENT_NOTICE_TAG`]).
+fn notice_message(text: String) -> ConversationMessage {
+    ConversationMessage {
+        role: "user".to_owned(),
+        content: ConversationMessageContent::Text(text),
+        name: Some(SUBAGENT_NOTICE_TAG.to_owned()),
+        tool_call_id: None,
+        tool_calls: Vec::new(),
+    }
+}
+
+/// Stable needle identifying a completion notice in rendered message text.
+fn completion_notice_needle(task_id: &str) -> String {
+    format!("[subagent task finished] task_id={task_id}")
+}
+
+/// Stable needle identifying a stall notice in rendered message text.
+fn stall_notice_needle(child_thread_id: &str) -> String {
+    format!("[subagent task stalled] child_thread_id={child_thread_id}")
+}
+
+/// Whether the parent's durable history already carries a tagged notice
+/// containing `needle`. Delivery is at-least-once by construction (detached
+/// watcher tasks, queue-or-resume races); the durable rollout is the source
+/// of truth for "already delivered", so a re-fired event is dropped instead
+/// of appending a duplicate notice. A history read failure must NOT drop the
+/// notice — fail open (deliver).
+async fn notice_already_delivered(
+    core: &Arc<AgentCore>,
+    parent_thread_id: &str,
+    needle: &str,
+) -> bool {
+    let records = core.list_thread_messages(parent_thread_id).await.unwrap_or_default();
+    let delivered = already_notified(&records, needle);
+    if delivered {
+        tracing::debug!(
+            parent_thread_id,
+            needle,
+            "subagent notice already delivered; skipping duplicate"
+        );
+    }
+    delivered
+}
+
+/// Pure predicate behind [`notice_already_delivered`]: matches TAGGED
+/// user-role notices only, so a real user message quoting a notice verbatim
+/// never suppresses delivery, and assistant echoes never match either.
+fn already_notified(records: &[ThreadMessageRecord], needle: &str) -> bool {
+    records.iter().any(|record| {
+        record.message.role == "user"
+            && record.message.name.as_deref() == Some(SUBAGENT_NOTICE_TAG)
+            && record.message.content.rendered_text().contains(needle)
+    })
 }
 
 /// Relay the delegated child's turn items onto the PARENT thread's UI channel
@@ -513,6 +577,82 @@ mod tests {
         let mut suppressed = finished(Some("done"), &[]);
         suppressed.no_resume = true;
         assert!(!should_notify_parent(&suppressed));
+    }
+
+    fn record(name: Option<&str>, role: &str, text: &str) -> ThreadMessageRecord {
+        ThreadMessageRecord {
+            id: format!("record-{}-{role}", name.unwrap_or("anonymous")),
+            thread_id: "parent".to_owned(),
+            turn_index: 0,
+            message: ConversationMessage {
+                role: role.to_owned(),
+                content: ConversationMessageContent::Text(text.to_owned()),
+                name: name.map(str::to_owned),
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            },
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+        }
+    }
+
+    /// Both notice kinds are tagged so every thread/resume render path skips
+    /// them (LLM-visible, never a user bubble).
+    #[test]
+    fn notice_messages_carry_the_internal_tag() {
+        let completion = notice_message(render_notification(&finished(Some("done"), &[])));
+        assert_eq!(completion.role, "user");
+        assert_eq!(completion.name.as_deref(), Some(SUBAGENT_NOTICE_TAG));
+        assert!(completion.content.rendered_text().starts_with("[subagent task finished]"));
+
+        let stall = notice_message(render_stall_notice("child-1", Duration::from_secs(300)));
+        assert_eq!(stall.role, "user");
+        assert_eq!(stall.name.as_deref(), Some(SUBAGENT_NOTICE_TAG));
+        assert!(stall.content.rendered_text().starts_with("[subagent task stalled]"));
+    }
+
+    #[test]
+    fn needles_pin_the_notice_identity() {
+        assert_eq!(completion_notice_needle("bg-x-1"), "[subagent task finished] task_id=bg-x-1");
+        assert_eq!(
+            stall_notice_needle("child-1"),
+            "[subagent task stalled] child_thread_id=child-1"
+        );
+    }
+
+    /// The duplicate guard matches only the SAME task's tagged notice.
+    #[test]
+    fn already_notified_matches_same_task_tagged_notice_only() {
+        let needle = completion_notice_needle("bg-x-1");
+        let delivered = record(
+            Some(SUBAGENT_NOTICE_TAG),
+            "user",
+            "[subagent task finished] task_id=bg-x-1 status=completed\nTask: anything",
+        );
+        assert!(already_notified(&[delivered], &needle));
+
+        // A different task's notice does not suppress this one.
+        let other_task = record(
+            Some(SUBAGENT_NOTICE_TAG),
+            "user",
+            "[subagent task finished] task_id=bg-other status=completed",
+        );
+        assert!(!already_notified(&[other_task], &needle));
+
+        // An assistant echo repeating the notice is not a delivered notice.
+        let echo = record(
+            Some(SUBAGENT_NOTICE_TAG),
+            "assistant",
+            "[subagent task finished] task_id=bg-x-1 status=completed",
+        );
+        assert!(!already_notified(&[echo], &needle));
+
+        // A real user message quoting the notice verbatim (untagged) never
+        // suppresses delivery.
+        let quoted =
+            record(None, "user", "[subagent task finished] task_id=bg-x-1 status=completed");
+        assert!(!already_notified(&[quoted], &needle));
+
+        assert!(!already_notified(&[], &needle));
     }
 
     #[test]

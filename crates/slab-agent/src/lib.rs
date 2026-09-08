@@ -72,10 +72,10 @@ pub use llm_output::{
 };
 pub use plan::{Plan, PlanCounts, PlanItem, PlanStatus};
 pub use port::{
-    AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, ExecPolicyPort, LlmPort,
-    LlmResponse, MemoryPressure, MemoryPressurePort, NoopMemoryPressurePort, NoopPlanStore,
-    PlanStorePort, PluginToolPort, ThreadStatus, ToolRiskAssessment, ToolRiskLevel,
-    TurnStateRecord,
+    AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, ApprovalReviewRequest,
+    ApprovalReviewerPort, ExecPolicyPort, LlmPort, LlmResponse, MemoryPressure, MemoryPressurePort,
+    NoopApprovalReviewer, NoopMemoryPressurePort, NoopPlanStore, PlanStorePort, PluginToolPort,
+    ReviewOutcome, ThreadStatus, ToolRiskAssessment, ToolRiskLevel, TurnStateRecord,
 };
 pub use risk::{BasicToolRiskAnalyzer, ToolApprovalDecision, ToolApprovalPolicy, ToolRiskAnalyzer};
 pub use runtime::AgentRuntime;

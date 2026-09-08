@@ -6,6 +6,7 @@ export const common = {
     tryAgain: '重试',
     reload: '重新加载',
     later: '稍后',
+    save: '保存',
   },
   fields: {
     model: '模型',
@@ -20,6 +21,7 @@ export const common = {
     error: '错误',
     enabled: '已启用',
     disabled: '已禁用',
+    loading: '加载中…',
   },
   progress: {
     queued: '已入队，等待运行时处理',

@@ -22,8 +22,8 @@ use crate::{
     error::AgentError,
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
-        AgentNotifyPort, ApprovalPort, ExecPolicyPort, LlmPort, LlmStreamObserver, LlmUsage,
-        ParsedToolCall, PlanStorePort, ToolSpec,
+        AgentNotifyPort, ApprovalPort, ApprovalReviewerPort, ExecPolicyPort, LlmPort,
+        LlmStreamObserver, LlmUsage, ParsedToolCall, PlanStorePort, ToolSpec,
     },
     protocol::{
         AgentMessageDeltaParams, EventMsg, ItemCompletedParams, ItemStartedParams,
@@ -55,6 +55,10 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub notify: &'a dyn AgentNotifyPort,
     pub approval: &'a dyn ApprovalPort,
     pub exec_policy: &'a dyn ExecPolicyPort,
+    /// Model-based reviewer for the "approve for me" permission mode: consulted
+    /// BEFORE the human approval card; `ReviewOutcome::Unavailable` (unconfigured,
+    /// wrong mode, failed, timed out) falls back to [`Self::approval`].
+    pub approval_reviewer: &'a dyn ApprovalReviewerPort,
     /// Built-in agent registry (Slice 4). Read-only turn use — drives
     /// [`crate::agent::filter_tools_for_agent`] from `config.agent_type`.
     pub agent_registry: &'a dyn crate::agent::AgentRegistry,

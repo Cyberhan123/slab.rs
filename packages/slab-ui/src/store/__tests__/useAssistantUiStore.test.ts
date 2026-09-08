@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import './mock-ui-state-storage';
-import { migrateAssistantUiState, normalizeToolConcurrency, useAssistantUiStore } from '../useAssistantUiStore';
+import {
+  migrateAssistantUiState,
+  normalizePermissionMode,
+  normalizeToolConcurrency,
+  useAssistantUiStore,
+} from '../useAssistantUiStore';
 
 describe('useAssistantUiStore', () => {
   beforeEach(() => {
@@ -12,6 +17,9 @@ describe('useAssistantUiStore', () => {
       toolChoice: { type: 'auto' },
       advancedPanelOpen: false,
       sessionLabels: {},
+      permissionMode: 'request_approval',
+      approvalReviewModel: '',
+      approvalReviewPrompt: '',
       hasHydrated: false,
     });
   });
@@ -25,6 +33,9 @@ describe('useAssistantUiStore', () => {
     expect(state.toolChoice).toEqual({ type: 'auto' });
     expect(state.advancedPanelOpen).toBe(false);
     expect(state.sessionLabels).toEqual({});
+    expect(state.permissionMode).toBe('request_approval');
+    expect(state.approvalReviewModel).toBe('');
+    expect(state.approvalReviewPrompt).toBe('');
     expect(state.hasHydrated).toBe(false);
   });
 
@@ -90,6 +101,23 @@ describe('useAssistantUiStore', () => {
     expect(useAssistantUiStore.getState().hasHydrated).toBe(true);
   });
 
+  it('should set the approve-for-me reviewer config', () => {
+    const state = useAssistantUiStore.getState();
+    state.setPermissionMode('approve_for_me');
+    state.setApprovalReviewModel('  glm-4-flash  ');
+    state.setApprovalReviewPrompt('deny git push');
+
+    const next = useAssistantUiStore.getState();
+    expect(next.permissionMode).toBe('approve_for_me');
+    expect(next.approvalReviewModel).toBe('glm-4-flash');
+    expect(next.approvalReviewPrompt).toBe('deny git push');
+  });
+
+  it('should reject invalid permission modes', () => {
+    useAssistantUiStore.getState().setPermissionMode('yolo' as never);
+    expect(useAssistantUiStore.getState().permissionMode).toBe('request_approval');
+  });
+
   it('should maintain multiple session labels', () => {
     const state = useAssistantUiStore.getState();
     state.setSessionLabel('session-1', 'Chat 1');
@@ -112,6 +140,9 @@ const initialPersistedSnapshot = {
   toolChoice: { type: 'auto' },
   advancedPanelOpen: false,
   sessionLabels: {},
+  permissionMode: 'request_approval',
+  approvalReviewModel: '',
+  approvalReviewPrompt: '',
 };
 
 describe('normalizeToolConcurrency', () => {
@@ -176,6 +207,9 @@ describe('migrateAssistantUiState', () => {
         toolChoice: { type: 'required' },
         advancedPanelOpen: true,
         sessionLabels: { s1: 'Chat 1' },
+        permissionMode: 'approve_for_me',
+        approvalReviewModel: 'glm-4-flash',
+        approvalReviewPrompt: 'deny git push',
       }),
     ).toEqual({
       currentSessionId: 's1',
@@ -185,6 +219,42 @@ describe('migrateAssistantUiState', () => {
       toolChoice: { type: 'required' },
       advancedPanelOpen: true,
       sessionLabels: { s1: 'Chat 1' },
+      permissionMode: 'approve_for_me',
+      approvalReviewModel: 'glm-4-flash',
+      approvalReviewPrompt: 'deny git push',
     });
+  });
+
+  it('defaults the v2 reviewer fields on pre-v2 state', () => {
+    // A v1 payload (no reviewer fields) migrates with the defaults.
+    expect(migrateAssistantUiState({ currentSessionId: 's1' })).toMatchObject({
+      permissionMode: 'request_approval',
+      approvalReviewModel: '',
+      approvalReviewPrompt: '',
+    });
+  });
+
+  it('falls back to request_approval for an invalid persisted permission mode', () => {
+    expect(
+      migrateAssistantUiState({ permissionMode: 'yolo', approvalReviewModel: 42 }),
+    ).toMatchObject({
+      permissionMode: 'request_approval',
+      approvalReviewModel: '',
+    });
+  });
+});
+
+describe('normalizePermissionMode', () => {
+  it.each([
+    ['request_approval', 'request_approval'],
+    ['approve_for_me', 'approve_for_me'],
+    ['full_control', 'full_control'],
+    ['custom', 'custom'],
+    ['yolo', 'request_approval'],
+    [undefined, 'request_approval'],
+    [null, 'request_approval'],
+    [42, 'request_approval'],
+  ])('normalizes %p to %p', (input, expected) => {
+    expect(normalizePermissionMode(input)).toBe(expected);
   });
 });

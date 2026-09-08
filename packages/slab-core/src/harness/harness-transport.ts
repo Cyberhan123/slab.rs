@@ -103,6 +103,20 @@ function readAgentType(metadata: unknown): "plan" | undefined {
   return agentType === "plan" ? "plan" : undefined
 }
 
+/** Read the "approve for me" reviewer model carried via `sendMessage({ metadata })`. */
+function readApprovalModel(metadata: unknown): string | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined
+  const model = (metadata as { approvalModel?: unknown }).approvalModel
+  return typeof model === "string" && model.trim() ? model.trim() : undefined
+}
+
+/** Read the "approve for me" custom policy prompt carried via `sendMessage({ metadata })`. */
+function readApprovalPrompt(metadata: unknown): string | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined
+  const prompt = (metadata as { approvalPrompt?: unknown }).approvalPrompt
+  return typeof prompt === "string" && prompt.trim() ? prompt : undefined
+}
+
 export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatTransport<UI_MESSAGE> {
   private readonly client: HarnessClient
   private readonly model: string
@@ -142,6 +156,8 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
     const effort = readEffort(metadata)
     const permissionMode = readPermissionMode(metadata)
     const agentType = readAgentType(metadata)
+    const approvalModel = readApprovalModel(metadata)
+    const approvalPrompt = approvalModel ? readApprovalPrompt(metadata) : undefined
 
     return createUIMessageStream({
       execute: async ({ writer }) => {
@@ -216,6 +232,11 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
             if (effort) turnParams.effort = effort
             if (permissionMode) turnParams.permissionMode = permissionMode
             if (agentType) turnParams.agentType = agentType
+            // Reviewer delegation rides along only with an approval model.
+            if (approvalModel) {
+              turnParams.approvalModel = approvalModel
+              if (approvalPrompt) turnParams.approvalPrompt = approvalPrompt
+            }
             this.client
               .turnStart(turnParams)
               // Ack the ACCEPTED turn (advances the controller's turnStartSeq).

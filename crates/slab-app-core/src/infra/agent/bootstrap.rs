@@ -204,7 +204,8 @@ fn build_agent_control(
     background_tasks: Arc<slab_agent_tools::BackgroundTaskRegistry>,
     subagent_bridge: Arc<super::subagent_bridge::SubagentBridge>,
 ) -> Arc<AgentControl> {
-    let llm = Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
+    let llm: Arc<dyn slab_agent::LlmPort> =
+        Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
     // memory_store / exec_db stay on the original SQL store (metadata +
     // memory pipeline); only the conversation/turn-state/item surface is backed
     // by rollout via store_adapter.
@@ -359,6 +360,12 @@ fn build_agent_control(
     // ADR-013: concurrency limits are configurable via settings
     // (agent.runtime.limits), defaulting to the historical 32/4 ceiling.
     let runtime_limits = ctx.pmid.config().agent.runtime.limits.clamped();
+    // "Approve for me" model delegation: the reviewer shares the LLM adapter
+    // (arbitrary model ids) and gates on the exec policy's per-thread mode.
+    let approval_reviewer = Arc::new(super::approval_reviewer::ModelApprovalReviewer::new(
+        Arc::clone(&llm),
+        Arc::clone(&exec_policy),
+    ));
     let control = AgentControl::new_with_hooks_and_tracing(
         llm,
         store_adapter,
@@ -375,6 +382,9 @@ fn build_agent_control(
     )
     .with_thread_context(thread_context)
     .with_exec_policy(exec_policy)
+    // Approval review for the "approve for me" mode (inert until a turn
+    // carries approval_model — see TurnStartParams).
+    .with_approval_reviewer(approval_reviewer)
     // Plan agent: disk-backed plan store (durable JSON under `<app_home>/plans`,
     // hot in-memory copy for live queries) — the source of truth for the
     // `plan` / `update_plan` / `present_plan` tools.

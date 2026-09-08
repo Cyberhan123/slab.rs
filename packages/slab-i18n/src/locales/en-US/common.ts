@@ -6,6 +6,7 @@ export const common = {
     tryAgain: 'Try again',
     reload: 'Reload',
     later: 'Later',
+    save: 'Save',
   },
   fields: {
     model: 'Model',
@@ -20,6 +21,7 @@ export const common = {
     error: 'Error',
     enabled: 'Enabled',
     disabled: 'Disabled',
+    loading: 'Loading…',
   },
   progress: {
     queued: 'Queued and waiting for the runtime',

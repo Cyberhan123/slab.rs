@@ -136,6 +136,7 @@ pub struct AgentControl {
     notify: Arc<dyn AgentNotifyPort>,
     approval: Arc<dyn ApprovalPort>,
     exec_policy: Arc<dyn crate::port::ExecPolicyPort>,
+    approval_reviewer: Arc<dyn crate::port::ApprovalReviewerPort>,
     agent_registry: Arc<dyn crate::agent::AgentRegistry>,
     plan_store: Arc<dyn crate::port::PlanStorePort>,
     tool_router: Arc<ToolRouter>,
@@ -223,6 +224,7 @@ impl AgentControl {
             notify,
             approval,
             exec_policy: Arc::new(slab_exec_policy::AllowAllExecPolicy),
+            approval_reviewer: Arc::new(crate::port::NoopApprovalReviewer),
             plan_store: Arc::new(crate::port::NoopPlanStore),
             agent_registry: Arc::new(crate::agent::NoopAgentRegistry),
             tool_router,
@@ -258,6 +260,7 @@ impl AgentControl {
             notify,
             approval,
             exec_policy: Arc::new(slab_exec_policy::AllowAllExecPolicy),
+            approval_reviewer: Arc::new(crate::port::NoopApprovalReviewer),
             plan_store: Arc::new(crate::port::NoopPlanStore),
             agent_registry: Arc::new(crate::agent::NoopAgentRegistry),
             tool_router,
@@ -317,6 +320,18 @@ impl AgentControl {
     /// allowed, nothing persisted) — suitable for tests but not production.
     pub fn with_exec_policy(mut self, port: Arc<dyn crate::port::ExecPolicyPort>) -> Self {
         self.exec_policy = port;
+        self
+    }
+
+    /// Attach the model-based approval reviewer for the "approve for me"
+    /// permission mode. When unset, a [`crate::port::NoopApprovalReviewer`]
+    /// stub is used — every `RequireApproval` verdict falls back to the human
+    /// approval path, preserving the legacy behavior.
+    pub fn with_approval_reviewer(
+        mut self,
+        reviewer: Arc<dyn crate::port::ApprovalReviewerPort>,
+    ) -> Self {
+        self.approval_reviewer = reviewer;
         self
     }
 
@@ -931,6 +946,20 @@ impl AgentControl {
         self.exec_policy.set_thread_mode(thread_id, mode).await;
     }
 
+    /// Configure (or clear, `model == None`) the per-thread "approve for me"
+    /// reviewer model + custom policy prompt (flows from `TurnStartParams`
+    /// `approval_model` / `approval_prompt`). Re-applied every turn; the
+    /// reviewer itself gates on the thread's permission mode, so an unset
+    /// mode makes the config inert.
+    pub async fn set_thread_approval_review(
+        &self,
+        thread_id: &str,
+        model: Option<&str>,
+        prompt: Option<&str>,
+    ) {
+        self.approval_reviewer.set_thread_config(thread_id, model, prompt).await;
+    }
+
     /// Drop per-thread state when the thread ends: the exec-policy permission
     /// mode and the durable plan (plan store). Both are keyed by `thread_id`;
     /// clearing here prevents cross-thread leakage on the process-wide singleton.
@@ -1023,6 +1052,7 @@ impl AgentControl {
         let notify = Arc::clone(&self.notify);
         let approval = Arc::clone(&self.approval);
         let exec_policy = Arc::clone(&self.exec_policy);
+        let approval_reviewer = Arc::clone(&self.approval_reviewer);
         let plan_store = Arc::clone(&self.plan_store);
         let agent_registry = Arc::clone(&self.agent_registry);
         let tools = Arc::clone(&self.tool_router);
@@ -1044,6 +1074,7 @@ impl AgentControl {
             notify,
             approval,
             exec_policy,
+            approval_reviewer,
             agent_registry,
             plan_store,
             tools,

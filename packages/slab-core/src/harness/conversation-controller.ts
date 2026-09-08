@@ -327,6 +327,10 @@ export interface TurnSendOptions {
   permissionMode?: PermissionMode
   /** Built-in agent type (`"plan"` when plan mode is active). */
   agentType?: "plan"
+  /** Reviewer model for "approve for me" delegation (set when configured). */
+  approvalModel?: string
+  /** Extra policy prompt appended to the built-in review prompt. */
+  approvalPrompt?: string
 }
 
 /**
@@ -768,6 +772,10 @@ export class ConversationController {
     if (options?.effort) params.effort = options.effort
     if (options?.permissionMode) params.permissionMode = options.permissionMode
     if (options?.agentType) params.agentType = options.agentType
+    if (options?.approvalModel) {
+      params.approvalModel = options.approvalModel
+      if (options.approvalPrompt) params.approvalPrompt = options.approvalPrompt
+    }
     return this.client.turnStart(params)
   }
 

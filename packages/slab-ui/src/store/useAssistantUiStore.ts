@@ -2,12 +2,20 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import type { components } from '@slab/api';
+import type { PermissionMode } from '@slab/api/harness';
 
 import { createUiStateStorage } from './ui-state-storage';
 
 type SessionLabelMap = Record<string, string>;
 export type AssistantReasoningEffort = components['schemas']['ChatReasoningEffort'];
 export type AssistantToolChoice = components['schemas']['AgentToolChoiceInput'];
+
+const PERMISSION_MODES: ReadonlyArray<PermissionMode> = [
+  'request_approval',
+  'approve_for_me',
+  'full_control',
+  'custom',
+];
 
 type PersistedAssistantUiState = {
   currentSessionId: string;
@@ -17,6 +25,12 @@ type PersistedAssistantUiState = {
   toolChoice: AssistantToolChoice;
   advancedPanelOpen: boolean;
   sessionLabels: SessionLabelMap;
+  /** Composer permission mode (v2: persisted across sessions). */
+  permissionMode: PermissionMode;
+  /** Reviewer model for "approve for me" delegation ('' = not configured). */
+  approvalReviewModel: string;
+  /** Extra policy prompt appended to the built-in review prompt ('' = default). */
+  approvalReviewPrompt: string;
 };
 
 type AssistantUiState = PersistedAssistantUiState & {
@@ -30,6 +44,9 @@ type AssistantUiState = PersistedAssistantUiState & {
   setAdvancedPanelOpen: (advancedPanelOpen: boolean) => void;
   setSessionLabel: (sessionId: string, label: string) => void;
   removeSessionLabel: (sessionId: string) => void;
+  setPermissionMode: (permissionMode: PermissionMode) => void;
+  setApprovalReviewModel: (model: string) => void;
+  setApprovalReviewPrompt: (prompt: string) => void;
 };
 
 const initialPersistedState: PersistedAssistantUiState = {
@@ -40,6 +57,9 @@ const initialPersistedState: PersistedAssistantUiState = {
   toolChoice: { type: 'auto' },
   advancedPanelOpen: false,
   sessionLabels: {},
+  permissionMode: 'request_approval',
+  approvalReviewModel: '',
+  approvalReviewPrompt: '',
 };
 
 export function normalizeToolConcurrency(value: number) {
@@ -48,6 +68,12 @@ export function normalizeToolConcurrency(value: number) {
   }
 
   return Math.min(4, Math.max(1, Math.trunc(value)));
+}
+
+export function normalizePermissionMode(value: unknown): PermissionMode {
+  return typeof value === 'string' && PERMISSION_MODES.includes(value as PermissionMode)
+    ? (value as PermissionMode)
+    : initialPersistedState.permissionMode;
 }
 
 export function migrateAssistantUiState(value: unknown): PersistedAssistantUiState {
@@ -79,6 +105,12 @@ export function migrateAssistantUiState(value: unknown): PersistedAssistantUiSta
       typeof state.sessionLabels === 'object' && state.sessionLabels !== null
         ? state.sessionLabels
         : {},
+    // v2 fields default on pre-v2 state (invalid persisted modes fall back).
+    permissionMode: normalizePermissionMode(state.permissionMode),
+    approvalReviewModel:
+      typeof state.approvalReviewModel === 'string' ? state.approvalReviewModel : '',
+    approvalReviewPrompt:
+      typeof state.approvalReviewPrompt === 'string' ? state.approvalReviewPrompt : '',
   };
 }
 
@@ -148,11 +180,15 @@ export const useAssistantUiStore = create<AssistantUiState>()(
           return { sessionLabels: nextLabels };
         });
       },
+      setPermissionMode: (permissionMode) =>
+        set({ permissionMode: normalizePermissionMode(permissionMode) }),
+      setApprovalReviewModel: (model) => set({ approvalReviewModel: model.trim() }),
+      setApprovalReviewPrompt: (prompt) => set({ approvalReviewPrompt: prompt }),
     }),
     {
       name: 'assistant-ui',
       storage: createJSONStorage(() => createAssistantUiStorage()),
-      version: 1,
+      version: 2,
       migrate: (value) => migrateAssistantUiState(value),
       partialize: ({
         currentSessionId,
@@ -162,6 +198,9 @@ export const useAssistantUiStore = create<AssistantUiState>()(
         toolChoice,
         advancedPanelOpen,
         sessionLabels,
+        permissionMode,
+        approvalReviewModel,
+        approvalReviewPrompt,
       }) => ({
         currentSessionId,
         reasoningEffort,
@@ -170,6 +209,9 @@ export const useAssistantUiStore = create<AssistantUiState>()(
         toolChoice,
         advancedPanelOpen,
         sessionLabels,
+        permissionMode,
+        approvalReviewModel,
+        approvalReviewPrompt,
       }),
       onRehydrateStorage: () => (state, error) => {
         if (error) {

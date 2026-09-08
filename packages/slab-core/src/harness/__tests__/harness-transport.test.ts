@@ -240,4 +240,51 @@ describe("HarnessChatTransport", () => {
     expect(chunks.filter((chunk) => chunk.type === "text-start")).toHaveLength(1)
     expect(chunks.filter((chunk) => chunk.type === "text-end")).toHaveLength(1)
   })
+
+  // ── "approve for me" reviewer delegation params ────────────────────────────
+
+  it("forwards the approval reviewer model and prompt from the send metadata", async () => {
+    const fake = makeFakeClient({ currentThreadId: "hthread-1" })
+    const transport = new HarnessChatTransport({
+      client: fake as unknown as HarnessClient,
+    })
+
+    await collect(
+      await transport.sendMessages({
+        messages: [userMessage("run the tests")],
+        metadata: {
+          permissionMode: "approve_for_me",
+          approvalModel: "glm-4-flash",
+          approvalPrompt: "deny git push; tests may run",
+        },
+      }),
+    )
+
+    expect(fake.turnStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        permissionMode: "approve_for_me",
+        approvalModel: "glm-4-flash",
+        approvalPrompt: "deny git push; tests may run",
+      }),
+    )
+  })
+
+  it("omits approval review params when no reviewer model is configured", async () => {
+    const fake = makeFakeClient({ currentThreadId: "hthread-1" })
+    const transport = new HarnessChatTransport({
+      client: fake as unknown as HarnessClient,
+    })
+
+    await collect(
+      await transport.sendMessages({
+        messages: [userMessage("run the tests")],
+        // approvalPrompt WITHOUT a model must not ride along either.
+        metadata: { permissionMode: "approve_for_me", approvalPrompt: "deny git push" },
+      }),
+    )
+
+    const params = fake.turnStart.mock.calls[0]?.[0] as TurnStartParams
+    expect(params.approvalModel).toBeUndefined()
+    expect(params.approvalPrompt).toBeUndefined()
+  })
 })

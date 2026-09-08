@@ -640,7 +640,20 @@ permissionMode?: PermissionMode,
  * server resolves the agent definition (tool constraint + system prompt)
  * and applies it for this turn only. Unset = default agent.
  */
-agentType?: string, model?: string, effort?: ReasoningEffort, outputSchema?: JsonValue, };
+agentType?: string, model?: string, effort?: ReasoningEffort, 
+/**
+ * Approval-review model id for the "approve for me" permission mode. When
+ * set alongside `permission_mode: approve_for_me`, `RequireApproval`
+ * verdicts are first reviewed single-shot by this model; on any review
+ * failure (error, timeout, unparseable output) the normal human approval
+ * path runs instead.
+ */
+approvalModel?: string, 
+/**
+ * Optional extra policy instructions appended to the built-in
+ * approval-review system prompt for this thread.
+ */
+approvalPrompt?: string, outputSchema?: JsonValue, };
 
 // ── TurnStartResult ──
 export type TurnStartResult = { turn: Turn, 

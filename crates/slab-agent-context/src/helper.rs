@@ -21,6 +21,8 @@ pub const PERMISSIONS_TEMPLATE: &str = include_str!("../templates/permissions.ji
 pub const REASONING_EFFORT_TEMPLATE: &str = include_str!("../templates/reasoning_effort.jinja");
 /// The read-only `plan` built-in agent's system prompt (Slice 4 Phase F).
 pub const PLAN_AGENT_TEMPLATE: &str = include_str!("../templates/plan_agent.jinja");
+/// The "approve for me" model-delegation approval-review prompt.
+pub const APPROVAL_REVIEW_TEMPLATE: &str = include_str!("../templates/approval_review.jinja");
 
 /// Template names registered in every environment built by [`build_environment`].
 pub const SYSTEM_TEMPLATE_NAME: &str = "system";
@@ -31,6 +33,7 @@ pub const ENVIRONMENT_TEMPLATE_NAME: &str = "environment";
 pub const PERMISSIONS_TEMPLATE_NAME: &str = "permissions";
 pub const REASONING_EFFORT_TEMPLATE_NAME: &str = "reasoning_effort";
 pub const PLAN_AGENT_TEMPLATE_NAME: &str = "plan_agent";
+pub const APPROVAL_REVIEW_TEMPLATE_NAME: &str = "approval_review";
 
 /// A short-path alias mapping, emitted in the developer instruction so prompts
 /// can reference `skill://<name>` / `instruction://agent.md` instead of long
@@ -59,6 +62,7 @@ pub fn build_environment() -> Environment<'static> {
     let _ = env.add_template(PERMISSIONS_TEMPLATE_NAME, PERMISSIONS_TEMPLATE);
     let _ = env.add_template(REASONING_EFFORT_TEMPLATE_NAME, REASONING_EFFORT_TEMPLATE);
     let _ = env.add_template(PLAN_AGENT_TEMPLATE_NAME, PLAN_AGENT_TEMPLATE);
+    let _ = env.add_template(APPROVAL_REVIEW_TEMPLATE_NAME, APPROVAL_REVIEW_TEMPLATE);
     env
 }
 

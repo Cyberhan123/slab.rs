@@ -11,6 +11,7 @@
 
 pub mod agent_md_manager;
 pub mod agent_prompt;
+pub mod approval_prompt;
 pub mod developer_instruction;
 pub mod environment_instruction;
 pub mod error;
@@ -26,6 +27,7 @@ pub mod system_instruction;
 pub mod user_instruction;
 
 pub use agent_prompt::render_plan_agent_prompt;
+pub use approval_prompt::{ApprovalReviewContext, render_approval_review_prompt};
 pub use environment_instruction::EnvironmentContextFragment;
 pub use error::{ContextError, Result};
 pub use hooks::ContextInstructionHook;

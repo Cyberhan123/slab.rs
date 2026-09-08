@@ -246,6 +246,8 @@ function Assistant() {
                       effort: assistantDraft.effort,
                       permissionMode: assistantDraft.permissionMode,
                       agentType: assistantDraft.agentType,
+                      approvalModel: assistantDraft.approvalModel,
+                      approvalPrompt: assistantDraft.approvalPrompt,
                   },
                   // Included so the pane's claim key distinguishes a re-staged
                   // retry from the original attempt (the ref-guard would

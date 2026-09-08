@@ -23,6 +23,10 @@ export type AssistantDraft = {
   effort?: ReasoningEffort
   permissionMode?: PermissionMode
   agentType?: "plan"
+  /** Reviewer model for "approve for me" delegation (set when configured). */
+  approvalModel?: string
+  /** Extra policy prompt appended to the built-in review prompt. */
+  approvalPrompt?: string
   /**
    * Delivery attempts used so far (0 = first try). The pane re-stages a
    * claimed-but-failed draft with attempts+1; the page bounds the retries

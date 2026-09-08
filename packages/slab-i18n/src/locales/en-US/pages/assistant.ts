@@ -110,6 +110,19 @@ export const assistant = {
       high: 'High',
     },
   },
+  approvalReview: {
+    configure: 'Configure approval model…',
+    dialogTitle: 'Approve-for-me settings',
+    dialogDescription:
+      'Pick the model that reviews approval requests on your behalf. Operations outside the baseline get one quick review by this model; on failure or timeout the request falls back to human approval.',
+    modelField: 'Approval model',
+    modelPlaceholder: 'Select the model used for approvals',
+    modelHint: 'A fast, small model is recommended; reviews time out after 60 seconds.',
+    promptField: 'Injected prompt (optional)',
+    promptPlaceholder: 'e.g. Always deny git push; test commands may run…',
+    promptHint:
+      'Appended after the built-in rules as your highest-priority custom policy; leave empty to use the built-in rules only.',
+  },
   sessionSheet: {
     title: 'Manage sessions',
     description: 'Switch and clean up conversations without leaving the assistant stage.',

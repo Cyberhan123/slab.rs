@@ -39,6 +39,7 @@ import {
   Mic,
   PaperclipIcon,
   PlusIcon,
+  Settings2,
   ShieldCheck,
   Slash,
   Sparkle,
@@ -53,8 +54,10 @@ import type {
   ReasoningEffort,
 } from "@slab/api/harness"
 import type { ApprovalRequest } from "@slab/core/harness"
+import { useAssistantUiStore } from "@slab/ui/store/useAssistantUiStore"
 import { resolveCommandDispatch } from "../lib/assistant-commands"
 import { ApprovalCard } from "./approval-banner"
+import { ApprovalReviewDialog } from "./approval-review-dialog"
 
 /** Per-session permission modes offered in the composer. */
 const PERMISSION_MODES: ReadonlyArray<{ value: PermissionMode; label: string }> = [
@@ -111,6 +114,10 @@ export type SenderSubmitOptions = {
   permissionMode: PermissionMode
   /** Built-in agent type for this turn (`"plan"` when plan mode is active). */
   agentType?: "plan"
+  /** Reviewer model for "approve for me" delegation (set when configured). */
+  approvalModel?: string
+  /** Extra policy prompt appended to the built-in review prompt. */
+  approvalPrompt?: string
 }
 
 type SenderProps = {
@@ -179,7 +186,13 @@ function Sender({
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
   const [effortLevel, setEffortLevel] = useState<EffortLevel>("high")
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>("request_approval")
+  // Permission mode (and the "approve for me" reviewer config) live in the
+  // persisted assistant UI store so they survive remounts and restarts.
+  const permissionMode = useAssistantUiStore((state) => state.permissionMode)
+  const setPermissionMode = useAssistantUiStore((state) => state.setPermissionMode)
+  const approvalReviewModel = useAssistantUiStore((state) => state.approvalReviewModel)
+  const approvalReviewPrompt = useAssistantUiStore((state) => state.approvalReviewPrompt)
+  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false)
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -282,7 +295,20 @@ function Sender({
 
     await onSubmit(
       message,
-      { files, effort, permissionMode, agentType: planMode ? "plan" : undefined },
+      {
+        files,
+        effort,
+        permissionMode,
+        agentType: planMode ? "plan" : undefined,
+        approvalModel:
+          permissionMode === "approve_for_me" && approvalReviewModel
+            ? approvalReviewModel
+            : undefined,
+        approvalPrompt:
+          permissionMode === "approve_for_me" && approvalReviewModel && approvalReviewPrompt.trim()
+            ? approvalReviewPrompt
+            : undefined,
+      },
       event,
     )
 
@@ -579,6 +605,11 @@ function Sender({
                   onSelect={(event) => {
                     event.preventDefault()
                     setPermissionMode(mode.value)
+                    // First switch to "approve for me": configure the reviewer
+                    // model right away (the mode is inert without one).
+                    if (mode.value === "approve_for_me" && !approvalReviewModel) {
+                      setApprovalDialogOpen(true)
+                    }
                   }}
                 >
                   <ShieldCheck />
@@ -586,6 +617,24 @@ function Sender({
                   {permissionMode === mode.value ? <Check className="ml-auto size-3.5" /> : null}
                 </DropdownMenuItem>
               ))}
+              {permissionMode === "approve_for_me" ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    data-testid="assistant-approval-review-configure"
+                    onSelect={(event) => {
+                      event.preventDefault()
+                      setApprovalDialogOpen(true)
+                    }}
+                  >
+                    <Settings2 />
+                    {t("pages.assistant.approvalReview.configure")}
+                    {approvalReviewModel ? (
+                      <Check className="ml-auto size-3.5" />
+                    ) : null}
+                  </DropdownMenuItem>
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
           {workspaceSlot}
@@ -630,6 +679,7 @@ function Sender({
           </div>
         </InputGroupAddon>
       </InputGroup>
+      <ApprovalReviewDialog open={approvalDialogOpen} onOpenChange={setApprovalDialogOpen} />
     </form>
   )
 }
