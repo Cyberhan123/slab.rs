@@ -1009,7 +1009,7 @@ mod tests {
             &ctx,
             "read file",
             Some(&root),
-            &[memory_root.clone()],
+            std::slice::from_ref(&memory_root),
             memory_file.to_str().expect("utf8 path"),
         )
         .expect("extra roots are exempt from the scope");
