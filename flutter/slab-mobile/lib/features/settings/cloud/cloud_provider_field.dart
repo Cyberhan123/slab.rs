@@ -19,6 +19,16 @@ import 'cloud_provider_kinds.dart';
 final _idPattern = RegExp(r'^[a-z0-9][a-z0-9-_]*$');
 final _apiBasePattern = RegExp(r'^https?://.+');
 
+/// Wire-protocol preference for OpenAI-lineage providers (mirrors ApiStyle).
+const _apiStyleValues = ['auto', 'responses', 'chat_completions'];
+String _coerceApiStyle(Object? value) =>
+    _apiStyleValues.contains(value) ? value.toString() : 'auto';
+String _apiStyleLabelKey(String value) => switch (value) {
+      'responses' => 'responses',
+      'chat_completions' => 'chatCompletions',
+      _ => 'auto',
+    };
+
 List<Map<String, Object?>> _decodeProviders(Object? value) {
   if (value is List) {
     return value.whereType<Map<String, Object?>>().map((entry) => Map<String, Object?>.of(entry)).toList();
@@ -31,6 +41,7 @@ Map<String, Object?> _defaultProvider(CloudProviderKind kind) => {
       'family': kind.value,
       'display_name': kind.label,
       'api_base': kind.defaultApiBase,
+      'api_style': 'auto',
       'auth': {'api_key': null, 'api_key_env': kind.defaultKeyEnv.isEmpty ? null : kind.defaultKeyEnv},
     };
 
@@ -148,6 +159,7 @@ class _ProviderSheetState extends State<_ProviderSheet> {
   String get _family => (_provider['family'] ?? '').toString();
   String get _displayName => (_provider['display_name'] ?? '').toString();
   String get _apiBase => (_provider['api_base'] ?? '').toString();
+  String get _apiStyle => _coerceApiStyle(_provider['api_style']);
   String get _apiKey => (_auth['api_key'] ?? '').toString();
   String get _apiKeyEnv => (_auth['api_key_env'] ?? '').toString();
 
@@ -188,6 +200,7 @@ class _ProviderSheetState extends State<_ProviderSheet> {
       'id': _id.trim(),
       'display_name': _displayName.trim(),
       'api_base': _apiBase.trim(),
+      'api_style': _apiStyle,
       'auth': {
         if (_apiKey.trim().isNotEmpty) 'api_key': _apiKey.trim(),
         if (_apiKeyEnv.trim().isNotEmpty) 'api_key_env': _apiKeyEnv.trim(),
@@ -231,6 +244,18 @@ class _ProviderSheetState extends State<_ProviderSheet> {
               label: t('pages.settings.providerRegistry.fields.apiBase.label'),
               value: _apiBase,
               onChanged: (v) => _set(() => _provider['api_base'] = v),
+            ),
+            Text(t('pages.settings.providerRegistry.fields.apiStyle.label'),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            TCell(
+              title: Text(t('pages.settings.providerRegistry.fields.apiStyle.options.${_apiStyleLabelKey(_apiStyle)}')),
+              arrow: true,
+              onTap: () => _pickApiStyle(context),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 2, 0, 8),
+              child: Text(t('pages.settings.providerRegistry.fields.apiStyle.description'),
+                  style: TextStyle(fontSize: SlabMetrics.textCaption, color: td.textColorSecondary)),
             ),
             _field(
               label: t('pages.settings.providerRegistry.fields.apiKey.label'),
@@ -292,6 +317,27 @@ class _ProviderSheetState extends State<_ProviderSheet> {
       ),
     );
     if (picked != null) _onFamilyChanged(picked);
+  }
+
+  Future<void> _pickApiStyle(BuildContext context) async {
+    final t = widget.catalog.t;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            for (final value in _apiStyleValues)
+              TCell(
+                title: Text(t('pages.settings.providerRegistry.fields.apiStyle.options.${_apiStyleLabelKey(value)}')),
+                arrow: false,
+                onTap: () => Navigator.of(sheetContext).pop(value),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked != null) _set(() => _provider['api_style'] = picked);
   }
 
   Widget _field({

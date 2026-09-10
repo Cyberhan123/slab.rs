@@ -119,6 +119,16 @@ export const settings = {
         label: 'API 基础 URL',
         description: '提供商端点的基础 URL。',
       },
+      apiStyle: {
+        label: 'API 风格',
+        description:
+          'OpenAI 血统提供商的线协议。Auto 按家族推导，自定义端点会探测 /responses 支持；其他家族忽略此项。',
+        options: {
+          auto: '自动（探测）',
+          responses: 'Responses',
+          chatCompletions: 'Chat Completions',
+        },
+      },
       apiKey: {
         label: 'API Key',
         description: '直接存储在设置中的可选密钥。',

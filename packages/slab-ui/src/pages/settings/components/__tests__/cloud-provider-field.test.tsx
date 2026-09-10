@@ -90,4 +90,40 @@ describe("CloudProviderField", () => {
 
     await expect.element(screen.getByText("My Local")).toBeInTheDocument();
   });
+
+  it("preserves api_style when saving an edited provider", async () => {
+    const onChange = vi.fn();
+    const entry = { ...OPENAI_ENTRY, api_style: "responses" };
+    const screen = await render(<CloudProviderField value={[entry]} onChange={onChange} />);
+
+    await screen.getByLabelText("Edit provider").click();
+    await expect
+      .element(screen.getByText("pages.settings.providerRegistry.dialog.editTitle"))
+      .toBeInTheDocument();
+    await screen.getByText("pages.settings.providerRegistry.dialog.save").click();
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const emitted = onChange.mock.calls[0]![0] as Array<Record<string, unknown>>;
+    expect(emitted).toHaveLength(1);
+    // The pre-existing explicit preference survives the edit round trip.
+    expect(emitted[0]!.api_style).toBe("responses");
+  });
+
+  it("defaults api_style to auto when editing a legacy provider without one", async () => {
+    const onChange = vi.fn();
+    // OPENAI_ENTRY predates api_style — the field must not stay missing after
+    // an edit round trip (the historical data-loss shape).
+    const screen = await render(<CloudProviderField value={[OPENAI_ENTRY]} onChange={onChange} />);
+
+    await screen.getByLabelText("Edit provider").click();
+    await expect
+      .element(screen.getByText("pages.settings.providerRegistry.dialog.editTitle"))
+      .toBeInTheDocument();
+    await screen.getByText("pages.settings.providerRegistry.dialog.save").click();
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const emitted = onChange.mock.calls[0]![0] as Array<Record<string, unknown>>;
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]!.api_style).toBe("auto");
+  });
 });

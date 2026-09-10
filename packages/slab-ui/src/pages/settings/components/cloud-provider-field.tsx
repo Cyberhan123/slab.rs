@@ -56,8 +56,25 @@ type RegistryEntry = {
   family: string;
   display_name: string;
   api_base: string;
+  api_style: string;
   auth: { api_key: string | null; api_key_env: string | null };
 };
+
+/** Wire-protocol preference for OpenAI-lineage providers (mirrors ApiStyle). */
+const API_STYLE_VALUES = ['auto', 'responses', 'chat_completions'] as const;
+const DEFAULT_API_STYLE: (typeof API_STYLE_VALUES)[number] = 'auto';
+const API_STYLE_OPTIONS: ReadonlyArray<{
+  value: (typeof API_STYLE_VALUES)[number];
+  labelKey: 'auto' | 'responses' | 'chatCompletions';
+}> = [
+  { value: 'auto', labelKey: 'auto' },
+  { value: 'responses', labelKey: 'responses' },
+  { value: 'chat_completions', labelKey: 'chatCompletions' },
+];
+
+function coerceApiStyle(value: unknown): (typeof API_STYLE_VALUES)[number] {
+  return API_STYLE_VALUES.find((candidate) => candidate === value) ?? DEFAULT_API_STYLE;
+}
 
 const providerFormSchema = z.object({
   id: z
@@ -70,6 +87,7 @@ const providerFormSchema = z.object({
     .string()
     .min(1, 'API base URL is required')
     .regex(/^https?:\/\//i, 'Must start with http:// or https://'),
+  apiStyle: z.enum(API_STYLE_VALUES),
   apiKey: z.string(),
   apiKeyEnv: z.string(),
 });
@@ -81,6 +99,7 @@ const EMPTY_FORM: ProviderFormValues = {
   family: OPENAI_COMPATIBLE_VALUE,
   displayName: '',
   apiBase: '',
+  apiStyle: DEFAULT_API_STYLE,
   apiKey: '',
   apiKeyEnv: '',
 };
@@ -111,6 +130,7 @@ export function CloudProviderField({ value, errorState, onChange }: CloudProvide
       family: entry.family || OPENAI_COMPATIBLE_VALUE,
       displayName: entry.display_name,
       apiBase: entry.api_base,
+      apiStyle: coerceApiStyle(entry.api_style),
       apiKey: entry.auth.api_key ?? '',
       apiKeyEnv: entry.auth.api_key_env ?? '',
     });
@@ -123,6 +143,7 @@ export function CloudProviderField({ value, errorState, onChange }: CloudProvide
       family: values.family,
       display_name: values.displayName.trim(),
       api_base: values.apiBase.trim(),
+      api_style: values.apiStyle,
       auth: {
         api_key: emptyToNull(values.apiKey),
         api_key_env: emptyToNull(values.apiKeyEnv),
@@ -291,6 +312,31 @@ export function CloudProviderField({ value, errorState, onChange }: CloudProvide
                 )}
               />
 
+              <Controller
+                control={form.control}
+                name="apiStyle"
+                render={({ field }) => (
+                  <Field>
+                    <FieldLabel>{t('pages.settings.providerRegistry.fields.apiStyle.label')}</FieldLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger className="h-11">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {API_STYLE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {t(`pages.settings.providerRegistry.fields.apiStyle.options.${option.labelKey}`)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FieldDescription>
+                      {t('pages.settings.providerRegistry.fields.apiStyle.description')}
+                    </FieldDescription>
+                  </Field>
+                )}
+              />
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <Controller
                   control={form.control}
@@ -421,6 +467,7 @@ function coerceEntries(value: JsonValue): RegistryEntry[] {
         family: readString(entry.family) || OPENAI_COMPATIBLE_VALUE,
         display_name: readString(entry.display_name),
         api_base: readString(entry.api_base),
+        api_style: coerceApiStyle(entry.api_style),
         auth: {
           api_key: readNullableString(auth?.api_key),
           api_key_env: readNullableString(auth?.api_key_env),
@@ -435,6 +482,7 @@ function toJsonEntry(entry: RegistryEntry): JsonValue {
     family: entry.family,
     display_name: entry.display_name,
     api_base: entry.api_base,
+    api_style: entry.api_style,
     auth: {
       api_key: entry.auth.api_key,
       api_key_env: entry.auth.api_key_env,

@@ -121,6 +121,16 @@ export const settings = {
         label: 'API Base URL',
         description: 'Base URL for the provider endpoint.',
       },
+      apiStyle: {
+        label: 'API Style',
+        description:
+          'Wire protocol for OpenAI-lineage providers. Auto derives it from the family and probes custom endpoints for /responses support; ignored by other families.',
+        options: {
+          auto: 'Auto (probe)',
+          responses: 'Responses',
+          chatCompletions: 'Chat Completions',
+        },
+      },
       apiKey: {
         label: 'API Key',
         description: 'Optional secret stored directly in settings.',
