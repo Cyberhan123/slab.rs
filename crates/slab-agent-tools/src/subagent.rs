@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -36,6 +37,16 @@ const MAX_SUBAGENT_TURNS_CAP: u32 = 100;
 /// slab-app-core truncates at the same bound, so the two crates share this
 /// single constant (app-core imports it — the dependency only runs that way).
 pub const MAX_NOTIFICATION_RESULT_CHARS: usize = 8_000;
+
+/// Bounded re-scan budget for the grandchild cascade in the kill closure: a
+/// grandchild delegation can land in the registry between the pre-interrupt
+/// scan and the child's interrupt (spawn and register are not atomic), and
+/// interrupting the child does not cascade to it. Re-scan until the child
+/// owns no running delegations. A grandchild registering after the last
+/// attempt is a declared residual window — it keeps running to its own turn
+/// budget.
+const KILL_GRANDCHILD_RESCAN_ATTEMPTS: usize = 5;
+const KILL_GRANDCHILD_RESCAN_DELAY: Duration = Duration::from_millis(100);
 
 /// A subagent was spawned (both background and inline delegations report
 /// this — the host uses it to attach rollout persistence to the child).
@@ -476,7 +487,12 @@ impl TypedTool for DelegateSubagentTool {
                             "cascade-stopped grandchild delegations");
                     }
                     match control.interrupt(&child_id).await {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            // The pre-interrupt scan raced any grandchild
+                            // delegation still between spawn and register —
+                            // close that window before declaring the tree dead.
+                            cascade_stop_late_grandchildren(&registry, &child_id).await;
+                        }
                         // The child is already gone or terminal — the natural
                         // watcher path resolves on the persisted snapshot, so
                         // there is nothing to roll back.
@@ -631,6 +647,25 @@ pub(crate) fn summarize_task_for_registry(task: &str) -> String {
         summary.push('…');
     }
     summary
+}
+
+/// Post-interrupt cascade stop for a child thread's delegations. The kill
+/// closure scans once BEFORE interrupting the child; this closes the
+/// spawn→register race window straddling the interrupt. See
+/// [`KILL_GRANDCHILD_RESCAN_ATTEMPTS`] for the bound and the residual window.
+async fn cascade_stop_late_grandchildren(registry: &BackgroundTaskRegistry, child_id: &str) {
+    for _ in 0..KILL_GRANDCHILD_RESCAN_ATTEMPTS {
+        let stopped = registry.stop_subagent_tasks_for_thread(child_id);
+        if stopped.is_empty() {
+            return;
+        }
+        tracing::debug!(
+            child = %child_id,
+            count = stopped.len(),
+            "cascade-stopped late-registered grandchild delegations"
+        );
+        tokio::time::sleep(KILL_GRANDCHILD_RESCAN_DELAY).await;
+    }
 }
 
 fn default_system_prompt() -> String {
@@ -1942,6 +1977,54 @@ mod tests {
         // In-scope write: allowed.
         let (_, inside_created) = round("src/inside.txt").await;
         assert!(inside_created, "in-scope write must land");
+    }
+
+    /// The kill closure's pre-interrupt grandchild scan races the child's own
+    /// delegations (spawn and register_detached are not atomic): a grandchild
+    /// landing in between is invisible to the scan and interrupting the child
+    /// does not cascade to it. The post-interrupt re-scan loop must catch it.
+    #[tokio::test]
+    async fn cascade_stop_catches_grandchild_registered_after_first_scan() {
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        // The grandchild registers shortly after the "first scan" would have
+        // run (straddling the child interrupt).
+        let late_registry = Arc::clone(&registry);
+        let registrar = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let wait: DetachedWait = Box::pin(std::future::pending());
+            let task_id = late_registry.alloc_task_id();
+            late_registry
+                .register_detached(
+                    task_id,
+                    DetachedTask {
+                        thread_id: "child".to_owned(),
+                        command: "grandchild".to_owned(),
+                        workspace_root: None,
+                        child_thread_id: Some("grand-1".to_owned()),
+                    },
+                    wait,
+                    Box::new(|| {}),
+                    Box::new(|_| {}),
+                )
+                .expect("register grandchild");
+        });
+
+        // The kill closure's pre-interrupt scan missed it...
+        assert!(
+            registry.stop_subagent_tasks_for_thread("child").is_empty(),
+            "pre-condition: the grandchild is not registered yet"
+        );
+
+        registrar.await.expect("grandchild registered");
+        // ...so the post-interrupt re-scan loop is the one that must stop it.
+        cascade_stop_late_grandchildren(&registry, "child").await;
+
+        let snapshot = registry
+            .list()
+            .into_iter()
+            .find(|task| task.child_thread_id.as_deref() == Some("grand-1"))
+            .expect("grandchild registered");
+        assert_eq!(snapshot.status, BackgroundTaskStatus::Stopped);
     }
 
     #[tokio::test]
