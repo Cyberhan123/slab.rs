@@ -217,6 +217,20 @@ impl TypedTool for DelegateSubagentTool {
             ctx.workspace.as_ref().map(|workspace| workspace.root.as_path()),
             args.workspace_scope.as_deref(),
         )?;
+        // A scoped agent delegating an explicitly OUT-OF-SCOPE child scope is
+        // a hard error (a scoped parent must not widen the boundary). A
+        // scoped parent delegating WITHOUT a child scope stays allowed — the
+        // child then runs unscoped (declared gap; nesting is bounded by
+        // max_depth).
+        if let (Some(parent_scope), Some(child_scope)) =
+            (ctx.workspace_scope.as_ref(), workspace_scope.as_ref())
+            && !child_scope.root.starts_with(&parent_scope.root)
+        {
+            return Err(AgentError::ToolExecution(format!(
+                "workspace_scope must stay inside this agent's own delegated scope '{}'",
+                parent_scope.relative
+            )));
+        }
 
         let parent = self
             .control
@@ -290,6 +304,10 @@ impl TypedTool for DelegateSubagentTool {
         child_config.max_turns =
             args.max_turns.unwrap_or(DEFAULT_SUBAGENT_TURNS).clamp(1, MAX_SUBAGENT_TURNS_CAP);
         child_config.transient = true;
+        // The validated scope rides on the config: the kernel resolves it
+        // into every ToolContext of the child thread and the file tools
+        // enforce it (see resolve_scoped_agent_path).
+        child_config.workspace_scope = workspace_scope.as_ref().map(|scope| scope.relative.clone());
 
         let messages = vec![ConversationMessage {
             role: "user".to_owned(),
@@ -550,6 +568,9 @@ impl TypedTool for DelegateSubagentTool {
                 "status": "running",
                 "hint": "Delegated in the background. The result will arrive as a follow-up message when the subagent finishes; use subagent_status to check progress, subagent_message to steer it, or subagent_stop to cancel."
             });
+            if let Some(scope) = workspace_scope.as_ref() {
+                value["workspace_scope"] = serde_json::json!(scope.relative);
+            }
             if max_turns_clamped {
                 value["max_turns_note"] = format!(
                     "requested max_turns exceeded the cap; clamped to {MAX_SUBAGENT_TURNS_CAP}"
@@ -575,6 +596,9 @@ impl TypedTool for DelegateSubagentTool {
             "completion_text": data.completion_text,
             "artifact_refs": data.artifact_refs,
         });
+        if let Some(scope) = workspace_scope.as_ref() {
+            value["workspace_scope"] = serde_json::json!(scope.relative);
+        }
         if max_turns_clamped {
             value["max_turns_note"] = format!(
                 "requested max_turns exceeded the cap; clamped to {MAX_SUBAGENT_TURNS_CAP}"
@@ -619,6 +643,7 @@ fn render_child_task(
     if let Some(scope) = workspace_scope {
         prompt.push_str("\n- Limit workspace file operations to this workspace-relative scope: ");
         prompt.push_str(&scope.relative);
+        prompt.push_str(" (enforced: file tool calls outside this scope are rejected)");
     }
     if let Some(output_format) = output_format {
         prompt.push_str("\n\nRequired output format:\n");
@@ -629,9 +654,20 @@ fn render_child_task(
 
 #[derive(Debug, Clone)]
 struct WorkspaceScope {
+    /// Original workspace-relative path (normalized separators), used for the
+    /// child prompt, the tool result echo, and AgentConfig persistence.
     relative: String,
+    /// Canonical absolute root of the scope (the scope directory may not
+    /// exist yet), used for the grandchild containment check.
+    root: PathBuf,
 }
 
+/// Resolve and validate the caller-supplied `workspace_scope` argument.
+///
+/// Semantics: the scope is ALWAYS relative to the workspace root — a
+/// grandchild delegation resolves against the workspace too, never against
+/// the delegating parent's scope; explicit escapes are caught separately in
+/// `execute` via the parent's own scope.
 fn resolve_workspace_scope(
     workspace_root: Option<&Path>,
     workspace_scope: Option<&str>,
@@ -664,7 +700,27 @@ fn resolve_workspace_scope(
             "workspace_scope must stay inside the workspace".to_owned(),
         ));
     }
-    Ok(Some(WorkspaceScope { relative: normalize_relative_scope(scope_path) }))
+    // Canonical containment: the lexical check above is blind to symlinks —
+    // an existing segment of the scope path pointing outside the workspace
+    // would pass it. Resolve through the existing ancestors and re-check.
+    let canonical_root = slab_utils::fs::existing_ancestor(workspace_root).map_err(|error| {
+        AgentError::ToolExecution(format!("workspace_scope could not be resolved: {error}"))
+    })?;
+    let canonical_scope = slab_utils::fs::canonicalize_with_existing_ancestor(
+        &workspace_root.join(normalize_relative_scope(scope_path)),
+    )
+    .map_err(|error| {
+        AgentError::ToolExecution(format!("workspace_scope could not be resolved: {error}"))
+    })?;
+    if !canonical_scope.starts_with(&canonical_root) {
+        return Err(AgentError::ToolExecution(
+            "workspace_scope must stay inside the workspace".to_owned(),
+        ));
+    }
+    Ok(Some(WorkspaceScope {
+        relative: normalize_relative_scope(scope_path),
+        root: canonical_scope,
+    }))
 }
 
 fn normalize_path(path: impl AsRef<Path>) -> PathBuf {
@@ -1279,7 +1335,16 @@ mod tests {
             .rendered_text();
         assert!(child_prompt.contains("Objective:\nsummarize"));
         assert!(child_prompt.contains("workspace-relative scope: src"));
-        assert!(child_prompt.contains("Required output format:"));
+        // The prompt now also says the scope is enforced, and the scope rides
+        // on the persisted child config (consumed by the kernel into every
+        // child ToolContext).
+        assert!(child_prompt.contains("(enforced:"), "{child_prompt}");
+        assert_eq!(value["workspace_scope"], "src");
+        let child_id = value["child_thread_id"].as_str().expect("child id");
+        let child = store.get_thread(child_id).await.expect("thread").expect("child");
+        let child_config: AgentConfig =
+            serde_json::from_str(&child.config_json).expect("child config");
+        assert_eq!(child_config.workspace_scope.as_deref(), Some("src"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -1482,6 +1547,53 @@ mod tests {
         ))
     }
 
+    /// LLM double: the FIRST call requests a `write_file` tool call for the
+    /// configured path; every later call finalizes. Drives the end-to-end
+    /// scope-enforcement round (the child sees its tool result and finishes).
+    struct WriteThenFinalLlm {
+        path: String,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl LlmPort for WriteThenFinalLlm {
+        async fn chat_completion(
+            &self,
+            _model: &str,
+            _messages: &[ConversationMessage],
+            _tools: &[ToolSpec],
+            _config: &AgentConfig,
+            _trace_context: &AgentTraceContext,
+        ) -> Result<LlmResponse, AgentError> {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if call == 0 {
+                Ok(LlmResponse {
+                    content: None,
+                    content_already_streamed: false,
+                    tool_calls: vec![ParsedToolCall {
+                        id: "call-write".to_owned(),
+                        name: "write_file".to_owned(),
+                        arguments: serde_json::json!({
+                            "path": self.path,
+                            "content": "payload"
+                        })
+                        .to_string(),
+                    }],
+                    finish_reason: Some("tool_calls".to_owned()),
+                    usage: None,
+                })
+            } else {
+                Ok(LlmResponse {
+                    content: Some("done".to_owned()),
+                    content_already_streamed: false,
+                    tool_calls: Vec::new(),
+                    finish_reason: Some("stop".to_owned()),
+                    usage: None,
+                })
+            }
+        }
+    }
+
     /// Inline delegation whose child runs out of turns: the synthesized
     /// partial findings flow back as the result instead of a bare
     /// "max_turns_reached" — the raw thread status stays honestly
@@ -1654,6 +1766,175 @@ mod tests {
 
         let error = result.expect_err("scope escape rejected").to_string();
         assert!(error.contains("workspace_scope must stay inside the workspace"));
+    }
+
+    /// The lexical escape check is blind to symlinks: a scope directory that
+    /// exists as a symlink pointing OUTSIDE the workspace must be rejected by
+    /// the canonical containment check.
+    #[tokio::test]
+    async fn delegate_subagent_rejects_symlinked_workspace_scope() {
+        let temp_dir = std::env::temp_dir()
+            .join(format!("slab-agent-tools-subagent-symlink-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        tokio::fs::create_dir_all(&temp_dir).await.expect("temp workspace");
+        let outside = temp_dir.join("outside");
+        tokio::fs::create_dir_all(&outside).await.expect("outside dir");
+        let link = temp_dir.join("src");
+        #[cfg(unix)]
+        let symlink_result = std::os::unix::fs::symlink(&outside, &link);
+        #[cfg(windows)]
+        let symlink_result = std::os::windows::fs::symlink_dir(&outside, &link);
+        if symlink_result.is_err() {
+            // Symlink creation needs privileges on some hosts; skip silently.
+            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+            return;
+        }
+
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(FinalLlm),
+            store,
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ));
+        let tool = delegate_tool(control);
+
+        let result = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent")
+                .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
+                .build(),
+            &serde_json::json!({"task": "summarize", "workspace_scope": "src"}),
+        )
+        .await;
+
+        let error = result.expect_err("symlinked scope rejected").to_string();
+        assert!(error.contains("workspace_scope must stay inside the workspace"), "{error}");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    /// A scoped agent delegating an explicitly out-of-scope child scope is a
+    /// hard error. Delegating WITHOUT a child scope stays allowed (declared
+    /// gap — nesting is bounded by max_depth instead).
+    #[tokio::test]
+    async fn delegate_subagent_rejects_child_scope_outside_parent_scope() {
+        let temp_dir = std::env::temp_dir()
+            .join(format!("slab-agent-tools-subagent-parent-scope-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        tokio::fs::create_dir_all(temp_dir.join("src")).await.expect("scope dir");
+
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(FinalLlm),
+            store,
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ));
+        let tool = delegate_tool(control);
+
+        let parent_scope = slab_agent::WorkspaceScopeRef {
+            root: temp_dir.join("src").canonicalize().expect("canonical scope"),
+            relative: "src".to_owned(),
+        };
+        let result = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent")
+                .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
+                .workspace_scope(parent_scope)
+                .build(),
+            &serde_json::json!({"task": "summarize", "workspace_scope": "docs"}),
+        )
+        .await;
+
+        let error = result.expect_err("widening scope rejected").to_string();
+        assert!(
+            error.contains(
+                "workspace_scope must stay inside this agent's own delegated scope \
+                            'src'"
+            ),
+            "{error}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    /// End-to-end: the scope on the persisted child config reaches the child's
+    /// ToolContext and the REAL write_file tool rejects out-of-scope writes
+    /// while allowing in-scope ones.
+    #[tokio::test]
+    async fn delegate_subagent_enforces_workspace_scope_end_to_end() {
+        async fn round(write_path: &str) -> (bool, bool) {
+            let temp_dir = std::env::temp_dir()
+                .join(format!("slab-agent-tools-subagent-e2e-scope-{}", std::process::id()));
+            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+            tokio::fs::create_dir_all(&temp_dir).await.expect("temp workspace");
+
+            let router = ToolRouter::new();
+            router.register(Box::new(crate::fs::WriteFileTool::new(Some(temp_dir.clone()))));
+            let store = Arc::new(MemoryStore::default());
+            store.insert_parent(1);
+            let llm = Arc::new(WriteThenFinalLlm {
+                path: write_path.to_owned(),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            });
+            let control = Arc::new(
+                slab_agent::AgentControl::new_with_hooks(
+                    llm,
+                    store,
+                    Arc::new(NoopNotify),
+                    Arc::new(NoopNotify),
+                    Arc::new(router),
+                    AgentControlLimits { max_threads: 4, max_depth: 4 },
+                    Vec::new(),
+                )
+                .with_thread_context(
+                    slab_agent::AgentThreadContext::new()
+                        .with_workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None }),
+                ),
+            );
+            let tool = delegate_tool(control);
+
+            let output = ToolHandler::execute(
+                &tool,
+                &ToolContext::for_thread("parent")
+                    .workspace(WorkspaceRef { root: temp_dir.clone(), session_id: None })
+                    .build(),
+                &serde_json::json!({
+                    "task": "write the file",
+                    "workspace_scope": "src",
+                    "max_turns": 3,
+                    "background": false
+                }),
+            )
+            .await
+            .expect("delegate");
+            let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+            assert_eq!(value["status"], "completed", "child still finishes: {value}");
+
+            let outside_created = temp_dir.join("outside.txt").exists();
+            let inside_created = temp_dir.join("src").join("inside.txt").exists();
+            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+            (outside_created, inside_created)
+        }
+
+        // Out-of-scope write: rejected, file never lands.
+        let (outside_created, _) = round("outside.txt").await;
+        assert!(!outside_created, "out-of-scope write must not land");
+
+        // In-scope write: allowed.
+        let (_, inside_created) = round("src/inside.txt").await;
+        assert!(inside_created, "in-scope write must land");
     }
 
     #[tokio::test]
