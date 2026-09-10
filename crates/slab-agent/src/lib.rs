@@ -87,6 +87,7 @@ pub use tool::{
     AgentThreadContext, PlanRef, ToolApprovalRequest, ToolCallRender, ToolCapability, ToolContext,
     ToolContextBuilder, ToolDiscoveryState, ToolHandler, ToolName, ToolNamespace, ToolOutput,
     ToolOutputObserver, ToolOutputStream, ToolRouter, ToolVisibility, WorkspaceRef,
+    WorkspaceScopeRef,
 };
 pub use turn::{MAX_TURNS_PARTIAL_PREFIX, strip_think_blocks};
 pub use typed_tool::{TypedTool, parse_tool_input, typed_input_schema};

@@ -105,6 +105,17 @@ pub struct AgentConfig {
     /// as `None`.
     #[serde(default)]
     pub agent_type: Option<String>,
+    /// Workspace-relative directory bounding the delegated child's file
+    /// operations. INTERNAL — set only by `delegate_subagent` after lexical
+    /// and canonical validation; always resolved against the workspace root
+    /// (grandchildren too, never against the parent's scope). The kernel
+    /// resolves it into every [`crate::ToolContext`] and the file tools in
+    /// `slab-agent-tools` enforce it. Not a security boundary for shell,
+    /// git, or MCP/plugin tools (see `WorkspaceScopeRef`). Persisted so a
+    /// delegated child carries its scope across the spawn boundary;
+    /// `#[serde(default)]` keeps older snapshots deserializing as `None`.
+    #[serde(default)]
+    pub workspace_scope: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -134,6 +145,7 @@ impl Default for AgentConfig {
             structured_output: None,
             transient: false,
             agent_type: None,
+            workspace_scope: None,
         }
     }
 }
@@ -175,5 +187,30 @@ mod tests {
     #[test]
     fn default_max_turns_matches_constant() {
         assert_eq!(AgentConfig::default().max_turns, DEFAULT_MAX_TURNS);
+    }
+
+    #[test]
+    fn default_workspace_scope_is_none() {
+        assert_eq!(AgentConfig::default().workspace_scope, None);
+    }
+
+    #[test]
+    fn workspace_scope_deserializes_as_none_for_older_snapshots() {
+        let json = r#"{
+            "model": "default",
+            "max_turns": 10,
+            "max_depth": 3,
+            "max_threads": 8,
+            "temperature": null,
+            "top_p": null,
+            "top_k": null,
+            "min_p": null,
+            "presence_penalty": null,
+            "repetition_penalty": null,
+            "reasoning_effort": null,
+            "verbosity": null
+        }"#;
+        let config: AgentConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.workspace_scope, None);
     }
 }

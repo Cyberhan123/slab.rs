@@ -12,6 +12,7 @@ use slab_agent_tracing::record_json;
 use slab_types::{ConversationMessage, agent::ToolCallStatus};
 
 use crate::{
+    config::AgentConfig,
     error::AgentError,
     hook::{HookEvent, HookToolAction, dispatch_registered_hooks},
     port::{
@@ -25,7 +26,7 @@ use crate::{
     state::ToolCallStateMachine,
     tool::{
         PlanRef, ToolApprovalRequest, ToolCallRender, ToolContext, ToolHandler, ToolOutput,
-        ToolOutputObserver, ToolOutputStream,
+        ToolOutputObserver, ToolOutputStream, WorkspaceRef, WorkspaceScopeRef,
     },
     turn::{TurnExecutionContext, emit_turn_phase},
     turn_state::TurnPhase,
@@ -609,6 +610,52 @@ fn partition_tool_calls<'a>(
         .collect()
 }
 
+/// Resolve [`AgentConfig::workspace_scope`] (workspace-relative) against the
+/// thread workspace into the canonical boundary carried by every
+/// [`ToolContext`]. `None` when unset. A missing workspace or a resolution IO
+/// failure logs a warning and yields `None` — `delegate_subagent` already
+/// validated the scope canonically, so failing here is a rare race that must
+/// not brick the thread. A scope that now resolves outside the workspace root
+/// (the symlink was swapped after delegation) KEEPS the scope with a warning:
+/// `resolve_agent_path` still clamps candidates into the workspace, so every
+/// file tool call fails closed with a clear message.
+fn resolve_thread_workspace_scope(
+    thread_id: &str,
+    config: &AgentConfig,
+    workspace: Option<&WorkspaceRef>,
+) -> Option<WorkspaceScopeRef> {
+    let relative = config.workspace_scope.as_deref()?.trim();
+    if relative.is_empty() {
+        return None;
+    }
+    let workspace = workspace?;
+    let scope_root =
+        match slab_utils::fs::canonicalize_with_existing_ancestor(&workspace.root.join(relative)) {
+            Ok(root) => root,
+            Err(error) => {
+                warn!(
+                    thread_id,
+                    scope = relative,
+                    %error,
+                    "workspace_scope could not be resolved; file tools run unscoped"
+                );
+                return None;
+            }
+        };
+    if let Ok(workspace_root) = slab_utils::fs::existing_ancestor(&workspace.root)
+        && !scope_root.starts_with(&workspace_root)
+    {
+        warn!(
+            thread_id,
+            scope = relative,
+            scope_root = %scope_root.display(),
+            workspace_root = %workspace_root.display(),
+            "workspace_scope resolves outside the workspace root; file tool calls will fail closed"
+        );
+    }
+    Some(WorkspaceScopeRef { root: scope_root, relative: relative.to_owned() })
+}
+
 /// Execute the given tool calls and persist their results.
 ///
 /// Returns `Some(TaskCompletion)` when a `task.complete` tool call succeeded,
@@ -637,6 +684,13 @@ pub(crate) async fn handle_tool_calls(
             thread_id: context.thread_id.to_owned(),
             plan_id: Some(plan_id.to_owned()),
         });
+    }
+    if let Some(scope) = resolve_thread_workspace_scope(
+        context.thread_id,
+        context.config,
+        context.thread_context.workspace.as_ref(),
+    ) {
+        tool_context_builder = tool_context_builder.workspace_scope(scope);
     }
     let tool_context = tool_context_builder.build();
     let now = Utc::now().to_rfc3339();

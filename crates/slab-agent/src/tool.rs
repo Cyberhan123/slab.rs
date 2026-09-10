@@ -40,6 +40,9 @@ pub struct ToolContext {
     pub depth: u32,
     /// Workspace scope associated with the thread, when the host provided one.
     pub workspace: Option<WorkspaceRef>,
+    /// Delegated workspace boundary (from `AgentConfig::workspace_scope`),
+    /// when this thread is a scoped child. Enforced by the file tools.
+    pub workspace_scope: Option<WorkspaceScopeRef>,
     /// Durable plan scope associated with the thread, when plan-aware tools need it.
     pub plan: Option<PlanRef>,
     /// Per-thread plan store backing Plan interaction mode. Defaults to a no-op
@@ -58,6 +61,7 @@ impl std::fmt::Debug for ToolContext {
             .field("turn_index", &self.turn_index)
             .field("depth", &self.depth)
             .field("workspace", &self.workspace)
+            .field("workspace_scope", &self.workspace_scope)
             .field("plan", &self.plan)
             .field("plan_store", &"<port>")
             .field("output", &self.output.as_ref().map(|_| "<observer>"))
@@ -73,6 +77,7 @@ impl ToolContext {
             turn_index: 0,
             depth: 0,
             workspace: None,
+            workspace_scope: None,
             plan: None,
             plan_store: Arc::new(NoopPlanStore),
             output: None,
@@ -131,6 +136,22 @@ pub struct WorkspaceRef {
     pub session_id: Option<String>,
 }
 
+/// Delegated workspace boundary for a child agent thread, set from
+/// [`crate::AgentConfig::workspace_scope`] by the kernel. Transport only:
+/// the file tools in `slab-agent-tools` enforce it. NOT a security boundary
+/// for shell/verify (cwd pinned to the workspace root), git tools, or
+/// MCP/plugin tools; a scoped parent spawning an unscoped child also escapes
+/// it — nesting depth is bounded by `max_depth` instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceScopeRef {
+    /// Canonical workspace-relative root of the delegated scope (resolved via
+    /// `slab_utils::fs::canonicalize_with_existing_ancestor`, so the scope
+    /// directory may not exist yet).
+    pub root: PathBuf,
+    /// Original workspace-relative path, kept for error messages and telemetry.
+    pub relative: String,
+}
+
 /// Reference to durable plan state for plan-aware tools.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanRef {
@@ -147,6 +168,7 @@ pub struct ToolContextBuilder {
     turn_index: u32,
     depth: u32,
     workspace: Option<WorkspaceRef>,
+    workspace_scope: Option<WorkspaceScopeRef>,
     plan: Option<PlanRef>,
     plan_store: Arc<dyn PlanStorePort>,
     output: Option<Arc<dyn ToolOutputObserver>>,
@@ -159,6 +181,7 @@ impl std::fmt::Debug for ToolContextBuilder {
             .field("turn_index", &self.turn_index)
             .field("depth", &self.depth)
             .field("workspace", &self.workspace)
+            .field("workspace_scope", &self.workspace_scope)
             .field("plan", &self.plan)
             .field("plan_store", &"<port>")
             .field("output", &self.output.as_ref().map(|_| "<observer>"))
@@ -179,6 +202,12 @@ impl ToolContextBuilder {
 
     pub fn workspace(mut self, workspace: WorkspaceRef) -> Self {
         self.workspace = Some(workspace);
+        self
+    }
+
+    /// Attach the delegated workspace boundary (from a scoped child config).
+    pub fn workspace_scope(mut self, scope: WorkspaceScopeRef) -> Self {
+        self.workspace_scope = Some(scope);
         self
     }
 
@@ -206,6 +235,7 @@ impl ToolContextBuilder {
             turn_index: self.turn_index,
             depth: self.depth,
             workspace: self.workspace,
+            workspace_scope: self.workspace_scope,
             plan: self.plan,
             plan_store: self.plan_store,
             output: self.output,
