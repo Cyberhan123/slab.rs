@@ -99,6 +99,36 @@ impl TypedTool for ApplyPatchTool {
         })?;
         let cwd = AbsolutePathBuf::resolve_path_against_base(&self.workspace_root, &base);
         let root = cwd.as_path().to_path_buf();
+        // Delegated scope pre-check: validate EVERY patch target before the
+        // engine runs — the engine commits files in order, so catching an
+        // out-of-scope target after the fact would leave a partially applied
+        // patch. Same error shape as render_err so the model sees a familiar
+        // envelope; nothing has been touched at this point.
+        if ctx.workspace_scope.is_some() {
+            for target in patch_target_paths(&patch) {
+                if let Err(error) = crate::fs::resolve_scoped_agent_path(
+                    ctx,
+                    "apply patch",
+                    Some(&root),
+                    &[],
+                    &target,
+                ) {
+                    return Ok(ToolOutput {
+                        content: serde_json::json!({
+                            "result": "error",
+                            "error_message": error.to_string(),
+                            "added": [],
+                            "modified": [],
+                            "deleted": [],
+                            "applied_files": [],
+                            "exact": true,
+                        })
+                        .to_string(),
+                        metadata: None,
+                    });
+                }
+            }
+        }
         let sandbox = FileSystemSandboxContext {
             policy: FileSystemSandboxPolicy::WorkspaceWrite,
             cwd: Some(root.clone()),
@@ -243,6 +273,31 @@ fn first_path_in_patch(patch: &str) -> String {
         }
     }
     "patch".to_owned()
+}
+
+/// Enumerate every filesystem target of a patch (Add/Delete/Update paths plus
+/// `*** Move to:` destinations) for the delegated-scope pre-check. An
+/// unparseable patch yields an empty list — the engine then reports the parse
+/// error itself.
+fn patch_target_paths(patch: &str) -> Vec<String> {
+    let Ok(args) = parse_patch(patch) else {
+        return Vec::new();
+    };
+    let mut targets = Vec::new();
+    for hunk in args.hunks {
+        match hunk {
+            Hunk::AddFile { path, .. } | Hunk::DeleteFile { path } => {
+                targets.push(path.to_string_lossy().into_owned());
+            }
+            Hunk::UpdateFile { path, move_path, .. } => {
+                targets.push(path.to_string_lossy().into_owned());
+                if let Some(move_path) = move_path {
+                    targets.push(move_path.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    targets
 }
 
 /// Build the per-file change list for the `FileChange` turn item (and the
@@ -585,6 +640,67 @@ mod tests {
             .expect_err("missing patch rejected");
 
         assert_eq!(error.to_string(), "tool execution error: missing 'patch' argument");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn apply_patch_tool_rejects_out_of_scope_target_before_engine_runs() {
+        let root = temp_root("scope_escape");
+        let tool = ApplyPatchTool::new(root.clone());
+        let ctx = crate::fs::test_support::scoped_ctx(&root, "src");
+        // The in-scope add runs first in file order — the pre-check must
+        // reject the WHOLE patch so no partial state lands.
+        let patch = "\
+*** Begin Patch
+*** Add File: src/inside.txt
++ok
+*** Add File: outside.txt
++escaped
+*** End Patch\n";
+
+        let output = ToolHandler::execute(&tool, &ctx, &json!({ "patch": patch }))
+            .await
+            .expect("patch output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        assert_eq!(value["result"], "error");
+        assert!(
+            value["error_message"].as_str().expect("error message").contains("[scope.escape]"),
+            "error_message was: {value}"
+        );
+        assert_eq!(value["added"], json!([]));
+        assert!(!root.join("src").join("inside.txt").exists());
+        assert!(!root.join("outside.txt").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn apply_patch_tool_rejects_out_of_scope_move_destination() {
+        let root = temp_root("scope_move");
+        fs::create_dir_all(root.join("src")).expect("create scope dir");
+        fs::write(root.join("src").join("a.txt"), "one\n").expect("seed file");
+        let tool = ApplyPatchTool::new(root.clone());
+        let ctx = crate::fs::test_support::scoped_ctx(&root, "src");
+        let patch = "\
+*** Begin Patch
+*** Update File: src/a.txt
+*** Move to: docs/escaped.txt
+@@
+-one
++two
+*** End Patch\n";
+
+        let output = ToolHandler::execute(&tool, &ctx, &json!({ "patch": patch }))
+            .await
+            .expect("patch output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        assert_eq!(value["result"], "error");
+        assert!(
+            value["error_message"].as_str().expect("error message").contains("[scope.escape]"),
+            "error_message was: {value}"
+        );
+        assert!(!root.join("docs").join("escaped.txt").exists());
+
         let _ = fs::remove_dir_all(root);
     }
 }

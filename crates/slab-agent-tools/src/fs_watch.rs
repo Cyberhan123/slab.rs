@@ -106,10 +106,16 @@ impl TypedTool for FsWatchTool {
 
         // Resolve against the active workspace so a relative path does not
         // silently land in the server process's CWD.
+        // NOTE: unlike resolve_agent_path, this join is purely lexical and
+        // does NOT enforce the workspace-root escape policy — a `..` path
+        // escapes the workspace here. Only the delegated scope is enforced
+        // (below); the workspace escape hole is a known pre-existing gap,
+        // filed separately.
         let path = match ctx.workspace.as_ref() {
             Some(workspace) => workspace.root.join(&args.path),
             None => PathBuf::from(&args.path),
         };
+        crate::fs::ensure_path_in_scope(ctx, "watch file system path", &path)?;
         let watch_path = WatchPath { path, recursive };
 
         let (subscriber, mut rx) = self.watcher.add_subscriber();
@@ -184,5 +190,34 @@ mod tests {
 
         assert_eq!(value["changed_paths"], json!([]));
         assert_eq!(value["timed_out"], true);
+    }
+
+    #[tokio::test]
+    async fn fs_watch_rejects_path_outside_delegated_scope() {
+        let root = std::env::temp_dir().join(format!(
+            "slab_agent_tools_fs_watch_scope_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create root");
+        let ctx = ToolContext::for_thread("child")
+            .workspace(slab_agent::WorkspaceRef { root: root.clone(), session_id: None })
+            .workspace_scope(slab_agent::WorkspaceScopeRef {
+                root: slab_utils::fs::canonicalize_with_existing_ancestor(&root.join("src"))
+                    .expect("canonical scope root"),
+                relative: "src".to_owned(),
+            })
+            .build();
+
+        let error = ToolHandler::execute(
+            &FsWatchTool::noop(),
+            &ctx,
+            &json!({"path": "docs", "recursive": false, "timeout_ms": 1}),
+        )
+        .await
+        .expect_err("scope escape rejected");
+
+        assert!(error.to_string().contains("[scope.escape]"));
+        let _ = std::fs::remove_dir_all(root);
     }
 }
