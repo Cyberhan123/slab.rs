@@ -20,3 +20,9 @@
 # core.autocrlf checkouts cannot turn blank context lines into lone "\r"
 # bytes that git apply rejects as a corrupt patch.
 patches/*.patch text eol=lf
+
+# The generated settings-document schema is string-compared by a slab-config
+# test against the in-process generator output (LF). Force LF on every
+# platform so a Windows core.autocrlf checkout cannot flip the file to CRLF
+# and fail `generated_document_schema_matches_checked_in_file`.
+docs/public/manifests/v1/settings-document.schema.json text eol=lf
