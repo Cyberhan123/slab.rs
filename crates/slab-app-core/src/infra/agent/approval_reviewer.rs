@@ -240,7 +240,6 @@ fn parse_review_verdict(text: &str) -> Option<(bool, Option<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait as _;
     use slab_agent::error::AgentError;
     use slab_agent::port::LlmResponse;
     use slab_exec_policy::{
