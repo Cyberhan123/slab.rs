@@ -461,6 +461,13 @@ impl TypedTool for DelegateSubagentTool {
             let kill_failed = Arc::clone(&kill_failed);
             Box::new(move || {
                 tokio::spawn(async move {
+                    // Releases the stop()'s pending-kill protection on every
+                    // exit path (incl. panic) — until then the Stopped slot
+                    // must survive pruning so the rollback below can find it.
+                    let _pending_kill_guard = crate::background::PendingKillGuard::new(
+                        Arc::clone(&registry),
+                        task_id.clone(),
+                    );
                     // Grandchildren FIRST: the child-owned delegations must be
                     // cascade-stopped before the child itself is interrupted.
                     let stopped = registry.stop_subagent_tasks_for_thread(&child_id);

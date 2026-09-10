@@ -10,7 +10,7 @@
 //! registry lives with the tool router (server process) and dies with it
 //! (the OS then closes every job/process-group handle, killing the trees).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -88,6 +88,27 @@ pub type DetachedWait =
 /// Fires the task's cancellation (process tree kill / thread interrupt).
 /// MUST NOT be called while the registry lock is held.
 pub type DetachedKill = Box<dyn FnOnce() + Send + 'static>;
+
+/// Releases a task's pending-kill protection when the fired kill closure
+/// finishes — on every exit path, including a panic unwind. The kill task
+/// holds this for its whole body; `clear_pending_kill` is idempotent, so the
+/// watcher settle path clearing the same id first is harmless.
+pub struct PendingKillGuard {
+    registry: Arc<BackgroundTaskRegistry>,
+    task_id: String,
+}
+
+impl PendingKillGuard {
+    pub fn new(registry: Arc<BackgroundTaskRegistry>, task_id: String) -> Self {
+        Self { registry, task_id }
+    }
+}
+
+impl Drop for PendingKillGuard {
+    fn drop(&mut self) {
+        self.registry.clear_pending_kill(&self.task_id);
+    }
+}
 /// Invoked once with the task's final snapshot after the terminal event has
 /// been emitted (e.g. the subagent completion bridge notifying the parent).
 pub type DetachedOnTerminal = Box<dyn FnOnce(BackgroundTaskSnapshot) + Send + 'static>;
@@ -176,6 +197,13 @@ struct TaskSlot {
 /// creates ONE and shares it with the `shell` tool and the `task_*` tools.
 pub struct BackgroundTaskRegistry {
     tasks: Mutex<HashMap<String, TaskSlot>>,
+    /// Task ids whose kill closure is IN FLIGHT. A Stopped slot is nominally
+    /// terminal and prunable, but until the kill settles it can still roll
+    /// back to `Failed` (`mark_stop_failed`) — pruning it first would strand
+    /// the parent without any terminal notification. Guard order: only ever
+    /// acquired while holding (or before) the `tasks` lock, never the other
+    /// way around.
+    pending_kill: Mutex<HashSet<String>>,
     next_id: std::sync::atomic::AtomicU64,
     /// Per-registry (process) nonce embedded in every task id. The registry
     /// is in-memory only, so after a server restart the counter restarts at
@@ -203,6 +231,7 @@ impl BackgroundTaskRegistry {
         let id_nonce = format!("{:x}{:x}", nanos, std::process::id());
         Self {
             tasks: Mutex::new(HashMap::new()),
+            pending_kill: Mutex::new(HashSet::new()),
             next_id: std::sync::atomic::AtomicU64::new(1),
             id_nonce,
             event_sink,
@@ -359,7 +388,10 @@ impl BackgroundTaskRegistry {
                 )));
             }
             tasks.insert(task_id, slot);
-            Self::prune_terminal(&mut tasks);
+            // Kills in flight are NOT prunable (see `pending_kill`) — their
+            // Stopped slot may still roll back to Failed.
+            let pending_kill = self.pending_kill.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            Self::prune_terminal(&mut tasks, &pending_kill);
         }
         self.emit(running_event);
         Ok(())
@@ -418,6 +450,8 @@ impl BackgroundTaskRegistry {
             *slot.result.lock().unwrap_or_else(|p| p.into_inner()) = result.clone();
             // The kill closure is moot once the work ended.
             *slot.kill.lock().unwrap_or_else(|p| p.into_inner()) = None;
+            // ...and so is its pending-kill protection.
+            self.pending_kill.lock().unwrap_or_else(|p| p.into_inner()).remove(task_id);
             slot_snapshot(task_id, slot, terminal, exit_code, result)
         };
         let event = BackgroundTaskEvent {
@@ -443,13 +477,15 @@ impl BackgroundTaskRegistry {
 
     /// Evict the OLDEST terminal slots beyond the retention bound (insertion
     /// order is approximated by the numeric id suffix after the nonce:
-    /// `bg-<nonce>-<n>`).
-    fn prune_terminal(tasks: &mut HashMap<String, TaskSlot>) {
+    /// `bg-<nonce>-<n>`). Slots whose kill is still in flight are skipped —
+    /// they are not settled yet.
+    fn prune_terminal(tasks: &mut HashMap<String, TaskSlot>, pending_kill: &HashSet<String>) {
         let terminal: Vec<(u64, String)> = tasks
             .iter()
-            .filter(|(_, slot)| {
-                *slot.status.lock().unwrap_or_else(|p| p.into_inner())
-                    != BackgroundTaskStatus::Running
+            .filter(|(id, slot)| {
+                !pending_kill.contains(*id)
+                    && *slot.status.lock().unwrap_or_else(|p| p.into_inner())
+                        != BackgroundTaskStatus::Running
             })
             .filter_map(|(id, _)| {
                 id.strip_prefix("bg-")
@@ -531,6 +567,14 @@ impl BackgroundTaskRegistry {
             // Take the kill closure now; fire it AFTER the locks release (a
             // kill closure must never run while the registry is locked).
             let kill = slot.kill.lock().unwrap_or_else(|p| p.into_inner()).take();
+            // A fired kill keeps the slot un-prunable until it settles (the
+            // rollback path `mark_stop_failed` needs the slot to exist).
+            if kill.is_some() {
+                self.pending_kill
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .insert(task_id.to_owned());
+            }
             *slot.status.lock().unwrap_or_else(|p| p.into_inner()) = BackgroundTaskStatus::Stopped;
             let kind = slot.kind;
             let event = BackgroundTaskEvent {
@@ -595,6 +639,13 @@ impl BackgroundTaskRegistry {
         self.emit(event);
         self.snapshot(task_id)
             .ok_or_else(|| AgentError::Internal("task vanished on mark_stop_failed".into()))
+    }
+
+    /// Idempotent release of a task's pending-kill protection. Called when the
+    /// fired kill closure finishes (all exit paths — see
+    /// [`PendingKillGuard`]); the watcher settle path clears it too.
+    pub fn clear_pending_kill(&self, task_id: &str) {
+        self.pending_kill.lock().unwrap_or_else(|p| p.into_inner()).remove(task_id);
     }
 
     /// Stop every RUNNING task that belongs to `root`'s workspace (workspace
@@ -1175,6 +1226,154 @@ mod tests {
         let settled =
             registry.mark_stop_failed(&task_id, "stop failed: again").expect("no-op call");
         assert_eq!(settled.status, BackgroundTaskStatus::Failed);
+    }
+
+    /// Register `count` tasks that immediately complete, filling the terminal
+    /// retention budget (MAX_RETAINED_TERMINAL_TASKS) so any later
+    /// registration triggers pruning.
+    async fn fill_terminal_slots(registry: &Arc<BackgroundTaskRegistry>, count: usize) {
+        for _ in 0..count {
+            let (wait, tx) = pending_outcome();
+            let task_id = registry.alloc_task_id();
+            registry
+                .register_detached(
+                    task_id.clone(),
+                    DetachedTask {
+                        thread_id: "parent".to_owned(),
+                        command: "filler".to_owned(),
+                        workspace_root: None,
+                        child_thread_id: None,
+                    },
+                    wait,
+                    Box::new(|| {}),
+                    Box::new(|_| {}),
+                )
+                .expect("register filler");
+            tx.send(DetachedTaskOutcome::Status {
+                status: BackgroundTaskStatus::Completed,
+                result: None,
+            })
+            .expect("complete filler");
+            wait_for_condition(|| {
+                registry
+                    .snapshot(&task_id)
+                    .is_some_and(|s| s.status == BackgroundTaskStatus::Completed)
+            })
+            .await;
+        }
+    }
+
+    /// A Stopped slot whose kill is still in flight must NOT be evicted by
+    /// prune_terminal: the rollback path (`mark_stop_failed`) needs the slot
+    /// to exist, and the parent's only terminal notification flows through it.
+    #[tokio::test]
+    async fn prune_keeps_stopped_slot_while_kill_is_pending() {
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        fill_terminal_slots(&registry, MAX_RETAINED_TERMINAL_TASKS).await;
+
+        // Victim: kill closure parks the rollback until the test releases it,
+        // keeping the stop pending (like a real interrupt in flight).
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<DetachedTaskOutcome>();
+        let (wait, _tx) = pending_outcome();
+        let task_id = registry.alloc_task_id();
+        let registry_for_kill = Arc::clone(&registry);
+        let task_id_for_kill = task_id.clone();
+        registry
+            .register_detached(
+                task_id.clone(),
+                DetachedTask {
+                    thread_id: "parent".to_owned(),
+                    command: "victim".to_owned(),
+                    workspace_root: None,
+                    child_thread_id: Some("child-1".to_owned()),
+                },
+                wait,
+                Box::new(move || {
+                    tokio::spawn(async move {
+                        // Deferred rollback — the window the old code lost the
+                        // slot in.
+                        let _ = release_rx.await;
+                        let _rollback =
+                            registry_for_kill.mark_stop_failed(&task_id_for_kill, "stop failed: x");
+                        registry_for_kill.clear_pending_kill(&task_id_for_kill);
+                    });
+                }),
+                Box::new(|_| {}),
+            )
+            .expect("register victim");
+
+        let stopped = registry.stop(&task_id).expect("stop");
+        assert_eq!(stopped.status, BackgroundTaskStatus::Stopped);
+
+        // Registration-triggered pruning runs while the kill is pending — the
+        // victim must survive it.
+        fill_terminal_slots(&registry, 2).await;
+        assert!(
+            registry.snapshot(&task_id).is_some(),
+            "a Stopped slot with an in-flight kill must not be pruned"
+        );
+
+        // Once the kill settles (rollback ran), the protection is released.
+        release_tx
+            .send(DetachedTaskOutcome::Status {
+                status: BackgroundTaskStatus::Failed,
+                result: None,
+            })
+            .expect("release rollback");
+        wait_for_condition(|| {
+            registry.snapshot(&task_id).is_some_and(|s| s.status == BackgroundTaskStatus::Failed)
+        })
+        .await;
+    }
+
+    /// The original bug: with the retention budget already full, a stop whose
+    /// kill fails rolled back to `unknown background task` because the slot
+    /// had been pruned between `stop()` and `mark_stop_failed` — the parent
+    /// never received any terminal state.
+    #[tokio::test]
+    async fn stop_failure_rollback_survives_retention_pressure() {
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        fill_terminal_slots(&registry, MAX_RETAINED_TERMINAL_TASKS).await;
+
+        let (wait, _tx) = pending_outcome();
+        let task_id = registry.alloc_task_id();
+        let registry_for_kill = Arc::clone(&registry);
+        let task_id_for_kill = task_id.clone();
+        let rollback_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let rollback_flag = Arc::clone(&rollback_done);
+        registry
+            .register_detached(
+                task_id.clone(),
+                DetachedTask {
+                    thread_id: "parent".to_owned(),
+                    command: "victim".to_owned(),
+                    workspace_root: None,
+                    child_thread_id: Some("child-1".to_owned()),
+                },
+                wait,
+                Box::new(move || {
+                    tokio::spawn(async move {
+                        let _rollback = registry_for_kill
+                            .mark_stop_failed(&task_id_for_kill, "stop failed: interrupt error");
+                        registry_for_kill.clear_pending_kill(&task_id_for_kill);
+                        rollback_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                    });
+                }),
+                Box::new(|_| {}),
+            )
+            .expect("register victim");
+
+        registry.stop(&task_id).expect("stop");
+        // Pruning fires on the next registration — with the fix, the victim
+        // stays registered and the deferred rollback finds its slot.
+        fill_terminal_slots(&registry, 1).await;
+        wait_for_condition(|| rollback_done.load(std::sync::atomic::Ordering::SeqCst)).await;
+
+        let snapshot = registry
+            .snapshot(&task_id)
+            .expect("rollback found the slot despite retention pressure");
+        assert_eq!(snapshot.status, BackgroundTaskStatus::Failed);
+        assert!(snapshot.result.expect("reason").contains("stop failed"));
     }
 
     #[tokio::test]
