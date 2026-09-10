@@ -32,7 +32,6 @@ import { useGreeting } from "../hooks/use-greeting"
 import type {
     ApprovalScope,
     CommandInfo,
-    PermissionMode,
     TurnUsage,
 } from "@slab/api/harness"
 import type {
@@ -105,10 +104,10 @@ export type AssistantChatPaneProps = {
     /** Toggle plan mode on/off; drives the plan chip + `/plan`. */
     onPlanModeChange: (enabled: boolean) => void
     /**
-     * A DIFFERENT permission mode was picked from the composer dropdown — the
-     * page records it as an in-stream settings marker.
+     * The live message tail's id changed (null while empty) — the page keeps
+     * the latest id in a ref to anchor settings markers to the timeline.
      */
-    onPermissionModeChange?: (change: { from: PermissionMode; to: PermissionMode }) => void
+    onLastMessageIdChange?: (id: string | null) => void
     /**
      * The approval-review config dialog saved a real change (reviewer model
      * and/or policy prompt) — the page records it as an in-stream marker.
@@ -208,7 +207,7 @@ export function AssistantChatPane({
     onRollbackFromTurn,
     planMode,
     onPlanModeChange,
-    onPermissionModeChange,
+    onLastMessageIdChange,
     onApprovalReviewChange,
     threadStatus,
     abortReason,
@@ -299,6 +298,14 @@ export function AssistantChatPane({
     useEffect(() => {
         onMessageCountChange(messages.length)
     }, [messages.length, onMessageCountChange])
+
+    // Track the live tail's message id so the page can anchor settings
+    // markers (model switch / permission mode) to the timeline position they
+    // were committed at, instead of stacking them at the flow tail.
+    useEffect(() => {
+        const last = messages.length > 0 ? messages[messages.length - 1] : null
+        onLastMessageIdChange?.(last?.id ?? null)
+    }, [messages, onLastMessageIdChange])
 
     // New-chat dialog handoff: deliver the staged draft through the exact
     // manual-submit path once the controller is ready. The claim happens
@@ -520,7 +527,6 @@ export function AssistantChatPane({
                             commands={commands}
                             planMode={planMode}
                             onPlanModeChange={onPlanModeChange}
-                            onPermissionModeChange={onPermissionModeChange}
                             onApprovalReviewChange={onApprovalReviewChange}
                             workspaceSlot={workspaceSlot}
                         />

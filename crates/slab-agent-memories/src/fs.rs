@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::{Result, error::fs_error, phase2::Phase2Input};
+use crate::{Result, error::fs_error, phase1::sanitize_slug, phase2::Phase2Input};
 
 pub const RAW_MEMORIES_FILE: &str = "raw_memories.md";
 pub const PHASE2_WORKSPACE_DIFF_FILE: &str = "phase2_workspace_diff.md";
@@ -15,6 +15,10 @@ const PROJECT_KEY_MAX_LEN: usize = 120;
 pub const MEMORY_REGISTRY_FILE: &str = "MEMORY.md";
 pub const MEMORY_MAX_LINES: usize = 200;
 pub const MEMORY_MAX_BYTES: usize = 25 * 1024;
+/// Truncation marker appended by [`enforce_memory_registry_limits`]; a const so
+/// the cut can reserve its line/byte budget and the output NEVER exceeds the
+/// caps (marker included).
+const MEMORY_TRUNCATION_MARKER: &str = "<!-- memory registry truncated to line/byte budget -->\n";
 
 /// Sanitize a project identity (canonical git root or workspace root) into a
 /// single filesystem path segment: lowercase, every non-`[a-z0-9]` run
@@ -52,7 +56,9 @@ pub fn project_memory_root(memory_root: &Path, project_key: &str) -> PathBuf {
 /// Enforce the MEMORY.md registry limits in CODE (not just prompt): over
 /// `MEMORY_MAX_LINES` lines OR `MEMORY_MAX_BYTES` bytes triggers a
 /// deterministic truncation — byte-safe, cut back to the last newline, with
-/// a marker line appended. Returns `true` when the file was truncated.
+/// a marker line appended. The marker itself counts against BOTH budgets, so
+/// the truncated file never exceeds the caps. Returns `true` when the file
+/// was truncated.
 ///
 /// The phase2 consolidation agent is instructed to stay within the budget,
 /// but a prompt is not a guarantee; this is the Claude-style post-write
@@ -69,13 +75,17 @@ pub fn enforce_memory_registry_limits(project_root: &Path) -> Result<bool> {
     }
     let mut truncated = String::new();
     for (index, line) in contents.lines().enumerate() {
-        if index >= MEMORY_MAX_LINES || truncated.len() + line.len() + 1 > MEMORY_MAX_BYTES {
+        // Reserve one line and the marker's bytes: content lines plus marker
+        // must stay within the caps.
+        if index + 1 >= MEMORY_MAX_LINES
+            || truncated.len() + line.len() + 1 + MEMORY_TRUNCATION_MARKER.len() > MEMORY_MAX_BYTES
+        {
             break;
         }
         truncated.push_str(line);
         truncated.push('\n');
     }
-    truncated.push_str("<!-- memory registry truncated to line/byte budget -->\n");
+    truncated.push_str(MEMORY_TRUNCATION_MARKER);
     std::fs::write(&registry_path, &truncated).map_err(|error| fs_error(&registry_path, error))?;
     Ok(true)
 }
@@ -153,7 +163,11 @@ pub fn sync_phase2_workspace(
 
     let mut expected_summaries = BTreeSet::new();
     for input in inputs {
-        let filename = summary_filename(input);
+        // Unsanitizable stems are skipped entirely: no file written, and the
+        // stale-summary sweep below will not treat them as expected.
+        let Some(filename) = summary_filename(input) else {
+            continue;
+        };
         expected_summaries.insert(filename.clone());
         write_file(&summaries_dir.join(filename), &input.rollout_summary)?;
     }
@@ -179,11 +193,16 @@ pub fn render_raw_memories(inputs: &[Phase2Input]) -> String {
     sorted.sort_by(|left, right| left.thread_id.cmp(&right.thread_id));
     let mut output = String::from("# Raw Memories\n\n");
     for input in sorted {
+        // Entries whose stem sanitizes to nothing keep their raw memory
+        // context but lose the summary routing line — the recall-side
+        // manifest then never offers them for selection.
+        let routing = summary_filename(&input)
+            .map(|filename| format!("summary_file: rollout_summaries/{filename}\n"))
+            .unwrap_or_default();
         output.push_str(&format!(
-            "## Thread {}\n\nsession_id: {}\nsummary_file: rollout_summaries/{}\nsource_updated_at: {}\ngenerated_at: {}\n\n{}\n\n",
+            "## Thread {}\n\nsession_id: {}\n{routing}source_updated_at: {}\ngenerated_at: {}\n\n{}\n\n",
             input.thread_id,
             input.session_id,
-            summary_filename(&input),
             input.source_updated_at.to_rfc3339(),
             input.generated_at.to_rfc3339(),
             input.raw_memory.trim()
@@ -192,13 +211,21 @@ pub fn render_raw_memories(inputs: &[Phase2Input]) -> String {
     output
 }
 
-pub fn summary_filename(input: &Phase2Input) -> String {
+/// Summary filename for a phase2 input: the rollout slug (already sanitized
+/// at phase1 ingestion) or, when absent, the sanitized thread id. Both
+/// sources pass through [`crate::phase1::sanitize_slug`] — the stem comes
+/// from DB strings and must never carry path separators or traversal
+/// sequences into `write_file`/`remove_stale_summaries`. Returns `None` when
+/// the stem sanitizes to nothing; callers skip such entries (no file write,
+/// no manifest routing).
+pub fn summary_filename(input: &Phase2Input) -> Option<String> {
     let stem = input
         .rollout_slug
         .as_deref()
         .filter(|slug| !slug.trim().is_empty())
         .unwrap_or(&input.thread_id);
-    format!("{stem}.md")
+    let sanitized = sanitize_slug(stem);
+    (!sanitized.is_empty()).then(|| format!("{sanitized}.md"))
 }
 
 fn ensure_dir(path: &Path) -> Result<()> {
@@ -311,6 +338,57 @@ mod tests {
     }
 
     #[test]
+    fn summary_filename_sanitizes_both_stem_sources() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0).unwrap();
+        // Thread-id fallback: separators and traversal collapse away.
+        let mut dirty_id = input("a/b../../c", now);
+        dirty_id.rollout_slug = None;
+        assert_eq!(summary_filename(&dirty_id).as_deref(), Some("abc.md"));
+        // Slug source: host-inserted rows bypass phase1 ingestion, so the
+        // write side must sanitize too.
+        let mut dirty_slug = input("thread", now);
+        dirty_slug.rollout_slug = Some("nested/../../evil".to_owned());
+        assert_eq!(summary_filename(&dirty_slug).as_deref(), Some("nestedevil.md"));
+        // Already-clean stems pass through unchanged.
+        assert_eq!(
+            summary_filename(&input("plain-thread", now)).as_deref(),
+            Some("plain-thread.md")
+        );
+    }
+
+    #[test]
+    fn sync_keeps_traversal_thread_ids_inside_summaries_dir() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let now = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0).unwrap();
+
+        sync_phase2_workspace(root.path(), &[input("a/b../../c", now)], 30, now).expect("sync");
+
+        assert!(root.path().join("rollout_summaries").join("abc.md").exists());
+        assert!(!root.path().join("c.md").exists(), "nothing written outside the summaries dir");
+        let raw = std::fs::read_to_string(root.path().join(RAW_MEMORIES_FILE)).expect("raw");
+        assert!(raw.contains("summary_file: rollout_summaries/abc.md"));
+    }
+
+    #[test]
+    fn sync_skips_entries_whose_stem_sanitizes_to_empty() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let summaries = root.path().join("rollout_summaries");
+        std::fs::create_dir_all(&summaries).expect("dir");
+        let now = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0).unwrap();
+
+        sync_phase2_workspace(root.path(), &[input("!!!", now)], 30, now).expect("sync");
+
+        assert_eq!(
+            std::fs::read_dir(&summaries).expect("dir").count(),
+            0,
+            "no summary file for the unsanitizable entry"
+        );
+        let raw = std::fs::read_to_string(root.path().join(RAW_MEMORIES_FILE)).expect("raw");
+        assert!(raw.contains("## Thread !!!"), "raw memory context is kept");
+        assert!(!raw.contains("summary_file:"), "routing line is dropped");
+    }
+
+    #[test]
     fn sanitize_project_key_collapses_and_lowercases() {
         assert_eq!(sanitize_project_key("C:\\Users\\han\\Repo"), "c-users-han-repo");
         assert_eq!(sanitize_project_key("MyRepo"), "myrepo");
@@ -382,10 +460,13 @@ mod tests {
         assert!(truncated);
         let contents =
             std::fs::read_to_string(root.path().join(MEMORY_REGISTRY_FILE)).expect("read back");
-        assert!(contents.lines().count() <= MEMORY_MAX_LINES + 1);
+        // Marker included, the file never exceeds the line cap.
+        assert!(contents.lines().count() <= MEMORY_MAX_LINES);
         assert!(contents.ends_with("<!-- memory registry truncated to line/byte budget -->\n"));
-        // Cut lands on a line boundary: the marker is its own line.
-        assert!(contents.contains("line 199\n"));
+        // Cut lands on a line boundary: the marker is its own line, and the
+        // reserved marker line pushes the last surviving content line down.
+        assert!(contents.contains("line 198\n"));
+        assert!(!contents.contains("line 199\n"));
     }
 
     #[test]
@@ -401,7 +482,8 @@ mod tests {
         assert!(truncated);
         let contents =
             std::fs::read_to_string(root.path().join(MEMORY_REGISTRY_FILE)).expect("read back");
-        assert!(contents.len() <= MEMORY_MAX_BYTES + 100, "byte budget holds");
+        // Marker included, the file never exceeds the byte cap.
+        assert!(contents.len() <= MEMORY_MAX_BYTES, "byte budget holds");
         assert!(contents.contains("truncated to line/byte budget"));
     }
 

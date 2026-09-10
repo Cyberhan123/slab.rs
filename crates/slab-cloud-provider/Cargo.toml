@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 genai = { workspace = true }
+reqwest = { workspace = true }
 slab-config = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

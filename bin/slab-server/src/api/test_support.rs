@@ -275,6 +275,7 @@ fn write_test_settings(
         // Non-routable local endpoint: catalog read-reconcile may spawn a live discovery for
         // this OpenaiCompatible provider, and tests must never leave localhost.
         api_base: "http://127.0.0.1:9/v1".to_owned(),
+        api_style: Default::default(),
         auth: Default::default(),
     });
     document.providers.registry.extend(extra_providers.iter().cloned());

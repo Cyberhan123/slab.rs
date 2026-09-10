@@ -75,6 +75,7 @@ mod tests {
             family,
             name: id.to_owned(),
             api_base: String::new(),
+            api_style: slab_config::ApiStyle::Auto,
             api_key: None,
             api_key_env: None,
         }

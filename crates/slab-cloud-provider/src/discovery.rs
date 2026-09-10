@@ -88,6 +88,7 @@ mod tests {
             family,
             name: id.to_owned(),
             api_base: api_base.to_owned(),
+            api_style: slab_config::ApiStyle::Auto,
             api_key: Some("sk-test".to_owned()),
             api_key_env: None,
         }

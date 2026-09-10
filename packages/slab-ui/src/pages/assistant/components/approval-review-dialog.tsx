@@ -150,7 +150,11 @@ function ApprovalReviewForm({
       </div>
 
       <DialogFooter className="gap-2">
-        <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <Button
+          variant="outline"
+          data-testid="approval-review-cancel-button"
+          onClick={() => onOpenChange(false)}
+        >
           {t("common.actions.cancel")}
         </Button>
         <Button data-testid="approval-review-save-button" disabled={!model} onClick={save}>

@@ -1341,6 +1341,12 @@ fn find_think_open(text: &str) -> Option<usize> {
     None
 }
 
+/// Prefix stamped on a subagent child's synthesized partial-findings result
+/// when its turn budget runs out. `slab-agent-tools` matches this prefix to
+/// distinguish a budget exit (the partial findings must reach the parent)
+/// from a user-initiated stop (already reported by the stopper).
+pub const MAX_TURNS_PARTIAL_PREFIX: &str = "[max_turns_reached]";
+
 /// Remove complete `<think …>…</think>` blocks from assistant text.
 ///
 /// The app-core adapter embeds the turn's reasoning into the LLM-grade

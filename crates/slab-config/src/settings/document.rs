@@ -1255,6 +1255,31 @@ impl ProviderFamily {
     }
 }
 
+/// Which OpenAI-lineage wire protocol a provider endpoint speaks.
+///
+/// Only meaningful for OpenAI-lineage families (`openai`, `openai_resp`,
+/// `openai_compatible`); other families ignore it. `Auto` derives from the
+/// family (first-party OpenAI defaults to the Responses API; custom
+/// `openai_compatible` endpoints are probed for `/responses` support at first
+/// use and fall back to Chat Completions when the probe fails).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiStyle {
+    #[default]
+    Auto,
+    Responses,
+    ChatCompletions,
+}
+
+impl ApiStyle {
+    /// All variants in their canonical (serde snake_case) string form, in
+    /// declaration order — keeps the `providers.registry` JSON schema enum in
+    /// sync with this type the same way `ProviderFamily::all_str` does.
+    pub fn all_str() -> &'static [&'static str] {
+        &["auto", "responses", "chat_completions"]
+    }
+}
+
 /// A single global provider entry.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProviderRegistryEntry {
@@ -1267,6 +1292,9 @@ pub struct ProviderRegistryEntry {
     pub display_name: String,
     /// Provider API base URL.
     pub api_base: String,
+    /// OpenAI-lineage wire protocol preference (ignored by other families).
+    #[serde(default)]
+    pub api_style: ApiStyle,
     #[serde(default)]
     pub auth: ProviderAuthConfig,
 }
@@ -1593,6 +1621,13 @@ pub fn provider_registry_json_schema() -> Value {
                     "title": "API Base URL",
                     "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderApiBaseTitle), None),
                     "default": ""
+                },
+                "api_style": {
+                    "type": "string",
+                    "title": "API Style",
+                    "description": "OpenAI-lineage wire protocol: responses, chat_completions, or auto (derive from family; probe custom endpoints for /responses support). Ignored by non-OpenAI families.",
+                    "enum": ApiStyle::all_str(),
+                    "default": "auto"
                 },
                 "auth": {
                     "type": "object",
@@ -2241,6 +2276,21 @@ mod tests {
         );
         assert!(family_enum.contains(&Value::String("openai_compatible".to_owned())));
         assert!(family_enum.contains(&Value::String("anthropic".to_owned())));
+
+        // The api_style dropdown mirrors ApiStyle and defaults to auto.
+        let api_style =
+            properties.get("api_style").and_then(Value::as_object).expect("api_style property");
+        assert_eq!(
+            api_style.get("enum").and_then(Value::as_array),
+            Some(
+                &ApiStyle::all_str()
+                    .iter()
+                    .map(|s| Value::String((*s).to_owned()))
+                    .collect::<Vec<_>>()
+            ),
+            "api_style enum must mirror ApiStyle::all_str()"
+        );
+        assert_eq!(api_style.get("default"), Some(&Value::String("auto".to_owned())));
     }
 
     #[test]

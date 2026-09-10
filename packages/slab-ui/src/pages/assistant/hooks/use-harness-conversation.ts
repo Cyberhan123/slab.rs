@@ -28,18 +28,24 @@ export interface HarnessConversation extends ConversationState {
   /** Toggle plan mode on/off. `/plan` and the plan chip use this. */
   setPlanMode: (enabled: boolean) => void
   /** Record a mid-conversation model switch as an in-stream settings marker. */
-  noteModelSwitch: (change: { from: string; to: string }) => void
+  noteModelSwitch: (change: { from: string; to: string }, afterMessageId?: string | null) => void
   /** Record a composer permission-mode change as an in-stream settings marker. */
-  notePermissionModeChange: (change: { from: PermissionMode; to: PermissionMode }) => void
+  notePermissionModeChange: (
+    change: { from: PermissionMode; to: PermissionMode },
+    afterMessageId?: string | null,
+  ) => void
   /**
    * Record an approval-review config save (reviewer model / policy prompt) as
    * an in-stream settings marker.
    */
-  noteApprovalReviewChange: (change: {
-    fromModel: string | null
-    toModel: string | null
-    promptChanged: boolean
-  }) => void
+  noteApprovalReviewChange: (
+    change: {
+      fromModel: string | null
+      toModel: string | null
+      promptChanged: boolean
+    },
+    afterMessageId?: string | null,
+  ) => void
   /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
   resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
   /** Manually compact the current (or given) thread via `thread/compact/start`. */

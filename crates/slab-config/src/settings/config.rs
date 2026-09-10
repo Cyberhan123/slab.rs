@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::document::ProviderFamily;
+use super::document::{ApiStyle, ProviderFamily};
 use super::{
     defaults,
     document::{AgentSettingsConfig, GuardrailSettingsConfig, LoggingConfig, ServerSettingsConfig},
@@ -25,6 +25,11 @@ pub struct CloudProviderConfig {
     /// Base URL for the provider's API.
     #[serde(alias = "apiBase", alias = "base_url", alias = "baseUrl")]
     pub api_base: String,
+    /// OpenAI-lineage wire protocol preference; ignored by non-OpenAI
+    /// families. Defaults to `auto` (derive from family, probing custom
+    /// endpoints for `/responses` support).
+    #[serde(default)]
+    pub api_style: ApiStyle,
     /// Optional API key (stored as plain text; treat as sensitive).
     #[serde(default, alias = "apiKey", skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,

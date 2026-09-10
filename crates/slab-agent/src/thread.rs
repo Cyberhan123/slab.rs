@@ -916,6 +916,21 @@ impl AgentThread {
 
         if !reached_final_turn {
             let termination_reason = termination_reason.unwrap_or(TerminationReason::MaxTurns);
+            // Subagent children that ran out of turns synthesize their
+            // confirmed-so-far findings as the completion text so the parent
+            // receives the accumulated work instead of a bare reason string —
+            // the persisted snapshot is the only delivery channel for spawned
+            // children (the run return value is not consumed there). Root
+            // threads keep the bare reason (their pinned semantics expect
+            // exactly "max_turns_reached"), and other exits (budget,
+            // repetition, user interrupt) are untouched.
+            let partial_result = if matches!(termination_reason, TerminationReason::MaxTurns)
+                && self.parent_id.is_some()
+            {
+                synthesize_max_turns_partial(&messages)
+            } else {
+                None
+            };
             let reason = termination_reason.as_str();
             // Close any straggler items and land the terminal turn state
             // (max-turns / repetition exit from a non-terminal ExecutingTools
@@ -949,8 +964,13 @@ impl AgentThread {
                 last_turn_usage.clone(),
             )
             .await;
-            self.finalize_status(ThreadStatus::Interrupted, Some(reason), &notify, store.as_ref())
-                .await?;
+            self.finalize_status(
+                ThreadStatus::Interrupted,
+                partial_result.as_deref().or(Some(reason)),
+                &notify,
+                store.as_ref(),
+            )
+            .await?;
             record_json(
                 trace.as_ref(),
                 &trace_context,
@@ -962,6 +982,7 @@ impl AgentThread {
                     "max_turns": self.config.max_turns,
                     "consumed_tokens": consumed_tokens,
                     "token_budget": self.config.token_budget,
+                    "partial_findings": partial_result.is_some(),
                 }),
             );
             dispatch_registered_hooks(
@@ -974,7 +995,7 @@ impl AgentThread {
                 },
             )
             .await;
-            return Ok(String::new());
+            return Ok(partial_result.unwrap_or_default());
         }
 
         info!(thread_id, "thread completed");
@@ -1286,6 +1307,42 @@ impl AgentThread {
             }),
         );
     }
+}
+
+/// Deterministic partial-findings synthesis for a subagent child whose turn
+/// budget ran out: the trailing assistant narrations (think blocks stripped —
+/// tool-request turns carry their narration as the message text), newest kept
+/// last, prefixed so `slab-agent-tools` can tell a budget exit carrying
+/// partial work apart from a user-initiated stop.
+///
+/// Deterministic on purpose: an extra "wrap-up" LLM call at the exact moment
+/// the budget said stop could hang (no deadline on the port) or error, and a
+/// child that already ignored the turn discipline has no compliance guarantee
+/// — the accumulated narration is the honest record of confirmed findings.
+fn synthesize_max_turns_partial(messages: &[ConversationMessage]) -> Option<String> {
+    const MAX_SYNTHESIZED_TURNS: usize = 5;
+    let mut texts: Vec<String> = messages
+        .iter()
+        .rev()
+        .filter(|message| message.role == "assistant")
+        .filter_map(|message| match &message.content {
+            ConversationMessageContent::Text(text) if !text.trim().is_empty() => {
+                Some(crate::turn::strip_think_blocks(text).trim().to_owned())
+            }
+            _ => None,
+        })
+        .filter(|text| !text.is_empty())
+        .take(MAX_SYNTHESIZED_TURNS)
+        .collect();
+    if texts.is_empty() {
+        return None;
+    }
+    texts.reverse();
+    Some(format!(
+        "{} Confirmed findings so far (目前已确认的发现):\n\n{}",
+        crate::turn::MAX_TURNS_PARTIAL_PREFIX,
+        texts.join("\n\n")
+    ))
 }
 
 /// Resolve the ROOT thread id for a non-root thread by walking the persisted

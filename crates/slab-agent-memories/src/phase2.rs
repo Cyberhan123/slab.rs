@@ -44,10 +44,19 @@ pub fn select_phase2_inputs(
             .then_with(|| usage_sort_key(right).cmp(&usage_sort_key(left)))
             .then_with(|| left.thread_id.cmp(&right.thread_id))
     });
+    // Watermark semantics = "candidates EVALUATED", not "candidates selected":
+    // computed over the full post-retain candidate set BEFORE the limit cuts.
+    // This aligns with the claim-side SQL (MAX over all succeeded rows for the
+    // project), so the delta-skip equality holds without relying on the
+    // claimed value being folded in — and a row cut by the limit is marked
+    // evaluated deliberately: otherwise every trigger would re-run the full
+    // consolidation just to re-truncate it. Re-evaluation is driven by the
+    // row's `source_updated_at` advancing. Rows dropped by the retain above
+    // (stale, unused) do NOT advance the watermark.
+    let candidate_watermark = inputs.iter().map(|input| input.source_updated_at).max();
     inputs.truncate(config.limit);
 
-    let input_watermark = inputs.iter().map(|input| input.source_updated_at).max();
-    let new_watermark = [claimed_watermark, input_watermark].into_iter().flatten().max();
+    let new_watermark = [claimed_watermark, candidate_watermark].into_iter().flatten().max();
     Phase2Selection { inputs, new_watermark }
 }
 
@@ -179,5 +188,41 @@ mod tests {
 
         let ids = selection.inputs.iter().map(|input| input.thread_id.as_str()).collect::<Vec<_>>();
         assert_eq!(ids, vec!["often"]);
+    }
+
+    #[test]
+    fn limit_truncation_still_advances_the_watermark() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0).unwrap();
+        let newest_source = now + Duration::hours(2);
+
+        // The NEWEST row (by source_updated_at) is also the least-used, so the
+        // limit cuts it from the selection — the watermark must still advance
+        // to its source_updated_at: candidates EVALUATED, not selected.
+        let input = |thread_id: &str, usage_count: u64, source: DateTime<Utc>| Phase2Input {
+            thread_id: thread_id.to_owned(),
+            session_id: "s".into(),
+            raw_memory: thread_id.to_owned(),
+            rollout_summary: thread_id.to_owned(),
+            rollout_slug: None,
+            generated_at: now,
+            source_updated_at: source,
+            last_usage: None,
+            usage_count,
+        };
+
+        let selection = select_phase2_inputs(
+            vec![input("often", 5, now), input("newest-unused", 0, newest_source)],
+            Phase2SelectionConfig { limit: 1, max_unused_days: 30 },
+            now,
+            None,
+        );
+
+        let ids = selection.inputs.iter().map(|input| input.thread_id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids, vec!["often"], "the limit keeps the most-used row");
+        assert_eq!(
+            selection.new_watermark,
+            Some(newest_source),
+            "the truncated newest row still advances the watermark"
+        );
     }
 }

@@ -13,6 +13,8 @@ Agent memory pipeline helpers for Slab.
 
 This crate does not own database scheduling, HTTP routes, UI projection, or model execution. Those integrations belong in `crates/slab-app-core`, `bin/slab-server`, and host layers.
 
+Concurrency note: phase2 mutual exclusion for a project lives in the host layer's DB lease (`agent_memory_phase2_locks`, see `slab-app-core`). This crate is deliberately lock-free — in particular, running two server instances that share one `memory_root` directory on disk from SEPARATE state databases is unsupported (both would consolidate the same workspace concurrently).
+
 ## Type
 
 Rust library crate.

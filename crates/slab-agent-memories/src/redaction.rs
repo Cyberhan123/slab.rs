@@ -34,6 +34,14 @@ fn secret_patterns() -> Vec<Regex> {
         r#"\b(glpat-)([A-Za-z0-9_\-]{20,})"#,
         r#"\b(AIza)([0-9A-Za-z_\-]{35})"#,
         r#"\b(sk-)([A-Za-z0-9_\-]{16,})"#,
+        // PEM private-key blocks: the BEGIN/END armor survives (it names the
+        // secret class); the base64 body between them is redacted. `(?s)` is
+        // required — no other pattern here spans lines.
+        r#"(?s)(-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----)(.*?)(-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----)"#,
+        // JWTs (three dot-separated base64url segments, header starting with
+        // the `eyJ` encoding of `{\"`): keep the header segment (it names the
+        // algorithm, not a secret), redact payload + signature.
+        r#"\b(eyJ[A-Za-z0-9_-]{5,}\.)([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"#,
     ]
     .into_iter()
     .map(|pattern| Regex::new(pattern).expect("valid secret regex"))
@@ -102,5 +110,40 @@ mod tests {
             let redacted = redact_secrets(input);
             assert_eq!(redacted, expected, "input: {input}");
         }
+    }
+
+    #[test]
+    fn redacts_pem_private_key_blocks() {
+        // The armor lines survive; the base64 body between them is gone.
+        let cases = [
+            (
+                "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0123456789\n-----END RSA PRIVATE KEY-----\n",
+                "-----BEGIN RSA PRIVATE KEY-----[REDACTED_SECRET]-----END RSA PRIVATE KEY-----\n",
+            ),
+            (
+                "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\n",
+                "-----BEGIN OPENSSH PRIVATE KEY-----[REDACTED_SECRET]-----END OPENSSH PRIVATE KEY-----\n",
+            ),
+            (
+                "-----BEGIN PRIVATE KEY-----\nMIIBVAIBADANBgkqhkiG9w0BA\n-----END PRIVATE KEY-----\n",
+                "-----BEGIN PRIVATE KEY-----[REDACTED_SECRET]-----END PRIVATE KEY-----\n",
+            ),
+        ];
+
+        for (input, expected) in cases {
+            let redacted = redact_secrets(input);
+            assert_eq!(redacted, expected, "input: {input}");
+        }
+    }
+
+    #[test]
+    fn redacts_jwt_payload_and_signature() {
+        // Header segment (names the algorithm) survives; payload + signature
+        // are the secret-bearing parts.
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        let redacted = redact_secrets(&format!("auth cookie: {jwt} done"));
+        assert_eq!(redacted, "auth cookie: eyJhbGciOiJIUzI1NiJ9.[REDACTED_SECRET] done");
+        assert!(!redacted.contains("SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"));
+        assert!(!redacted.contains("eyJzdWIiOiIxMjM0NTY3ODkwIn0"));
     }
 }

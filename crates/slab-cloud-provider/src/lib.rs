@@ -17,9 +17,11 @@ pub mod adapter_kind;
 pub mod discovery;
 pub mod error;
 pub mod provider;
+pub mod responses_probe;
 
 pub use activation::{CloudModelSpec, default_models_for_provider};
-pub use adapter_kind::family_to_adapter_kind;
+pub use adapter_kind::{AdapterKindResolution, family_to_adapter_kind, resolve_adapter_kind};
 pub use discovery::{list_remote_model_ids, supports_live_discovery};
 pub use error::CloudError;
 pub use provider::resolve_api_key;
+pub use responses_probe::{probe_responses_support, responses_probe_status_to_supports};

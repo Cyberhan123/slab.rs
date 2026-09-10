@@ -64,8 +64,9 @@ impl TypedTool for SubagentStatusTool {
     fn description(&self) -> &str {
         "Report the status of a background subagent started with \
          delegate_subagent (running/completed/errored/stopped, plus its \
-         result once terminal), or list all subagent delegations when task_id \
-         is omitted."
+         result once terminal — a subagent that ran out of turns completes \
+         with its confirmed-so-far findings), or list all subagent \
+         delegations when task_id is omitted."
     }
 
     /// Read-only registry query.
@@ -241,7 +242,8 @@ impl TypedTool for SubagentStopTool {
     fn description(&self) -> &str {
         "Stop a running background subagent delegation: interrupts the child \
          agent thread and reports the resulting status. A stopped subagent \
-         does NOT deliver a completion message."
+         does NOT deliver a completion message (unlike a subagent that runs \
+         out of turns, which completes with its confirmed-so-far findings)."
     }
 
     /// Touches only the task's own child thread — no shared workspace state.

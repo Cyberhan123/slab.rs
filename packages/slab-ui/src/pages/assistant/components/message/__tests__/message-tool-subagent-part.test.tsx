@@ -33,6 +33,7 @@ async function renderPart(
   part: Partial<ToolPartLike>,
   task?: SubagentTaskInfo,
   childItems?: readonly SubagentChildItem[],
+  name = "delegate_subagent",
 ) {
   const interactionValue = {
     approvalStatusByItemId: new Map(),
@@ -51,7 +52,7 @@ async function renderPart(
         message={{} as never}
         index={0}
         kind="tool"
-        name="delegate_subagent"
+        name={name}
         toolCallId="call-1"
       />
     </MessageInteractionContext.Provider>,
@@ -176,5 +177,85 @@ describe("MessageToolSubagentPart", () => {
       { taskId: "bg-1", status: "running" },
     )
     expect(screen.container.querySelector('[data-testid="tool-detail-subagent-activity"]')).toBeNull()
+  })
+
+  // ── companion subagent tools (subagent_status / _message / _stop) ────────
+
+  it("subagent_status renders the task snapshot and correlates live state", async () => {
+    const screen = await renderPart(
+      {
+        type: "tool-subagent_status",
+        input: { task_id: "bg-1" },
+        output:
+          '{"task":{"task_id":"bg-1","parent_thread_id":"p1","child_thread_id":"c1","task":"summarize the repo","status":"running","result":null}}',
+        state: "output-available",
+      },
+      { taskId: "bg-1", status: "running" },
+      undefined,
+      "subagent_status",
+    )
+    // The snapshot's task_id feeds the live-state lookup.
+    expectToolState(screen, "input-available")
+    const body = screen.getByTestId("tool-detail-subagent").element().textContent ?? ""
+    expect(body).toContain("status: running")
+    expect(body).toContain("task: bg-1")
+    // Registry queries never show the delegation footnote.
+    expect(body).not.toContain("background delegation")
+  })
+
+  it("subagent_message reports queued delivery from the output envelope", async () => {
+    const screen = await renderPart(
+      {
+        type: "tool-subagent_message",
+        input: { task_id: "bg-1", message: "wrap up" },
+        output: '{"queued":true,"position":2}',
+        state: "output-available",
+      },
+      undefined,
+      undefined,
+      "subagent_message",
+    )
+    const body = screen.getByTestId("tool-detail-subagent").element().textContent ?? ""
+    // task_id rides only in the input for this tool — still surfaced.
+    expect(body).toContain("status: queued")
+    expect(body).toContain("task: bg-1")
+    expect(body).not.toContain("background delegation")
+  })
+
+  it("subagent_stop renders the stopped snapshot's status and result", async () => {
+    const screen = await renderPart(
+      {
+        type: "tool-subagent_stop",
+        input: { task_id: "bg-1" },
+        output:
+          '{"stopped":{"task_id":"bg-1","parent_thread_id":"p1","child_thread_id":"c1","task":"summarize the repo","status":"stopped","result":"partial findings"}}',
+        state: "output-available",
+      },
+      undefined,
+      undefined,
+      "subagent_stop",
+    )
+    const body = screen.getByTestId("tool-detail-subagent").element().textContent ?? ""
+    expect(body).toContain("status: stopped")
+    expect(body).toContain("partial findings")
+  })
+
+  it("degrades safely on a non-JSON output without fabricating a status", async () => {
+    const screen = await renderPart(
+      {
+        type: "tool-subagent_status",
+        input: { task_id: "bg-1" },
+        output: "not an envelope",
+        state: "output-available",
+      },
+      undefined,
+      undefined,
+      "subagent_status",
+    )
+    const body = screen.getByTestId("tool-detail-subagent").element().textContent ?? ""
+    // No fabricated "completed": the status span is omitted entirely, the
+    // task id still comes from the input.
+    expect(body).not.toContain("status:")
+    expect(body).toContain("task: bg-1")
   })
 })

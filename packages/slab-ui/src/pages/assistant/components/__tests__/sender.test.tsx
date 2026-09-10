@@ -1,9 +1,10 @@
 import { userEvent } from "vitest/browser"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render } from "vitest-browser-react"
 
 import { SlabProvider } from "../../../../provider/slab-provider"
 import { createTestSlabPorts } from "../../../../provider/test-ports"
+import { useAssistantUiStore } from "../../../../store/useAssistantUiStore"
 
 import Sender from "../sender"
 
@@ -16,6 +17,17 @@ function renderSender(ui: ReactElement) {
   )
 }
 import type { CommandInfo } from "@slab/api/harness"
+
+// The approval-review dialog loads its reviewer-model options through this
+// hook; fixed options keep the dialog test offline and deterministic.
+vi.mock("@slab/ui/hooks/use-ai-model", () => ({
+  useAiModel: vi.fn(() => ({
+    options: [
+      { id: "reviewer-model", label: "Reviewer Model", disabled: false },
+    ],
+    loading: false,
+  })),
+}))
 
 /** Mirror of the server-side `command/list` snapshot: the three built-ins. */
 const COMMANDS: CommandInfo[] = [
@@ -264,25 +276,11 @@ describe("Sender plan-mode toggle", () => {
 })
 
 describe("Sender permission-mode selector", () => {
-  it("reports a picked mode through onPermissionModeChange (fresh store starts on request_approval)", async () => {
-    const onPermissionModeChange = vi.fn()
-
-    const screen = await renderSender(
-      <Sender
-        onSubmit={vi.fn()}
-        commands={COMMANDS}
-        planMode={false}
-        onPlanModeChange={vi.fn()}
-        onPermissionModeChange={onPermissionModeChange}
-      />,
-    )
-
-    await userEvent.click(screen.getByTestId("assistant-permission-mode-trigger"))
-    await userEvent.click(screen.getByTestId("assistant-permission-mode-full_control"))
-
-    expect(onPermissionModeChange).toHaveBeenCalledWith({
-      from: "request_approval",
-      to: "full_control",
+  beforeEach(() => {
+    useAssistantUiStore.setState({
+      permissionMode: "request_approval",
+      approvalReviewModel: "",
+      approvalReviewPrompt: "",
     })
   })
 
@@ -305,5 +303,85 @@ describe("Sender permission-mode selector", () => {
       expect.objectContaining({ permissionMode: "full_control" }),
       expect.anything(),
     )
+  })
+
+  it("defers approve_for_me with no reviewer model: the dialog opens but the mode is untouched", async () => {
+    const screen = await renderSender(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    await userEvent.click(screen.getByTestId("assistant-permission-mode-trigger"))
+    await userEvent.click(screen.getByTestId("assistant-permission-mode-approve_for_me"))
+
+    // The config dialog opens; the store keeps the pre-switch mode until save.
+    await expect
+      .element(screen.getByTestId("approval-review-save-button"))
+      .toBeVisible()
+    expect(useAssistantUiStore.getState().permissionMode).toBe("request_approval")
+  })
+
+  it("cancelling the approval dialog rolls back to the pre-switch mode", async () => {
+    const screen = await renderSender(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    await userEvent.click(screen.getByTestId("assistant-permission-mode-trigger"))
+    await userEvent.click(screen.getByTestId("assistant-permission-mode-approve_for_me"))
+    await userEvent.click(screen.getByTestId("approval-review-cancel-button"))
+
+    expect(useAssistantUiStore.getState().permissionMode).toBe("request_approval")
+    expect(useAssistantUiStore.getState().approvalReviewModel).toBe("")
+  })
+
+  it("saving the approval dialog commits the deferred mode and the reviewer config", async () => {
+    const onApprovalReviewChange = vi.fn()
+
+    const screen = await renderSender(
+      <Sender
+        onSubmit={vi.fn()}
+        commands={COMMANDS}
+        planMode={false}
+        onPlanModeChange={vi.fn()}
+        onApprovalReviewChange={onApprovalReviewChange}
+      />,
+    )
+
+    await userEvent.click(screen.getByTestId("assistant-permission-mode-trigger"))
+    await userEvent.click(screen.getByTestId("assistant-permission-mode-approve_for_me"))
+
+    // Pick the reviewer model, then save.
+    await userEvent.click(screen.getByTestId("approval-review-model-select"))
+    await userEvent.click(screen.getByRole("option", { name: "Reviewer Model" }))
+    await userEvent.click(screen.getByTestId("approval-review-save-button"))
+
+    const store = useAssistantUiStore.getState()
+    expect(store.permissionMode).toBe("approve_for_me")
+    expect(store.approvalReviewModel).toBe("reviewer-model")
+    expect(onApprovalReviewChange).toHaveBeenCalledWith({
+      fromModel: null,
+      toModel: "reviewer-model",
+      promptChanged: false,
+    })
+  })
+
+  it("re-editing the config of an already-configured mode discards only the form", async () => {
+    useAssistantUiStore.setState({
+      permissionMode: "approve_for_me",
+      approvalReviewModel: "reviewer-model",
+    })
+
+    const screen = await renderSender(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    // The "Configure" entry (mode already approve_for_me) opens the dialog
+    // with nothing pending; closing it keeps the mode AND the saved config.
+    await userEvent.click(screen.getByTestId("assistant-permission-mode-trigger"))
+    await userEvent.click(screen.getByTestId("assistant-approval-review-configure"))
+    await userEvent.click(screen.getByTestId("approval-review-cancel-button"))
+
+    const store = useAssistantUiStore.getState()
+    expect(store.permissionMode).toBe("approve_for_me")
+    expect(store.approvalReviewModel).toBe("reviewer-model")
   })
 })

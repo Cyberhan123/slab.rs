@@ -5,7 +5,6 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { useTranslation } from "@slab/i18n"
-import type { PermissionMode } from "@slab/api/harness"
 
 import { AssistantChatPane } from "./components/assistant-chat-pane"
 import { AssistantModelSwitchDialog } from "./components/assistant-model-switch-dialog"
@@ -157,29 +156,47 @@ function Assistant() {
     // approval-review changes are recorded in the session-scoped controller so
     // they render as timeline dividers like the compaction markers. Empty
     // conversations skip the markers — there is no timeline to divide yet.
+    // Markers are anchored to the message tail at commit time so they render
+    // in timeline order instead of stacking at the flow bottom.
     const composerPermissionMode = useAssistantUiStore((state) => state.permissionMode)
+    const tailMessageIdRef = useRef<string | null>(null)
+    const handleLastMessageIdChange = useCallback((id: string | null) => {
+        tailMessageIdRef.current = id
+    }, [])
     const handleKeepSessionWithMarker = useCallback(() => {
         const from = selectedModel
         const to = pendingModelSwitch
         handleKeepSessionOnModelSwitch()
         if (from && to && from.id !== to.id) {
-            noteModelSwitch({ from: from.label, to: to.label })
+            noteModelSwitch({ from: from.label, to: to.label }, tailMessageIdRef.current)
         }
     }, [handleKeepSessionOnModelSwitch, noteModelSwitch, pendingModelSwitch, selectedModel])
-    const handlePermissionModeChange = useCallback(
-        (change: { from: PermissionMode; to: PermissionMode }) => {
-            if (messageCount > 0) notePermissionModeChange(change)
-        },
-        [messageCount, notePermissionModeChange],
-    )
+    // Permission-mode markers follow the COMMITTED store value (not the
+    // dropdown's onSelect): a deferred "approve for me" switch that is rolled
+    // back by closing the config dialog never writes the store, so no marker
+    // is recorded for it. Deferred switches commit on dialog save, and the
+    // marker anchor reflects the commit-time tail.
+    const prevPermissionModeRef = useRef(composerPermissionMode)
+    useEffect(() => {
+        const from = prevPermissionModeRef.current
+        if (from === composerPermissionMode) return
+        prevPermissionModeRef.current = composerPermissionMode
+        if (messageCount > 0) {
+            notePermissionModeChange({ from, to: composerPermissionMode }, tailMessageIdRef.current)
+        }
+    }, [composerPermissionMode, messageCount, notePermissionModeChange])
     const handleApprovalReviewChange = useCallback(
         (change: { fromModel: string | null; toModel: string | null; promptChanged: boolean }) => {
             // The reviewer config only takes effect in "approve for me" mode.
-            if (messageCount > 0 && composerPermissionMode === "approve_for_me") {
-                noteApprovalReviewChange(change)
+            // Read the store LIVE: a deferred mode switch commits in the same
+            // tick (sender commits before invoking this callback), before the
+            // re-render would refresh a captured value.
+            const mode = useAssistantUiStore.getState().permissionMode
+            if (messageCount > 0 && mode === "approve_for_me") {
+                noteApprovalReviewChange(change, tailMessageIdRef.current)
             }
         },
-        [composerPermissionMode, messageCount, noteApprovalReviewChange],
+        [messageCount, noteApprovalReviewChange],
     )
 
     // Session navigation: the detail view is `?session=`-driven, so "switch
@@ -422,6 +439,7 @@ function Assistant() {
                     onBeforeSubmit={handleBeforeSubmit}
                     onBusyChange={setIsChatBusy}
                     onMessageCountChange={setMessageCount}
+                    onLastMessageIdChange={handleLastMessageIdChange}
                     transport={transport}
                     approvals={approvals}
                     approvalStatusByItemId={approvalStatusByItemId}
@@ -443,7 +461,6 @@ function Assistant() {
                     onRollbackFromTurn={rollbackFromTurn}
                     planMode={planMode}
                     onPlanModeChange={setPlanMode}
-                    onPermissionModeChange={handlePermissionModeChange}
                     onApprovalReviewChange={handleApprovalReviewChange}
                     threadStatus={threadStatus}
                     abortReason={abortReason}

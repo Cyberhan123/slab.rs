@@ -22,6 +22,10 @@ pub fn ensure_memory_git_baseline(memory_root: &Path) -> Result<()> {
 
 pub fn write_workspace_diff(memory_root: &Path) -> Result<MemoryGitDiff> {
     ensure_memory_git_baseline(memory_root)?;
+    // Drop any stale diff file BEFORE intent-adding the tree: a leftover from
+    // a crashed/killed run would be `add -N`'d and its full prior content
+    // would land INSIDE the new diff, compounding on every subsequent run.
+    remove_workspace_diff_file(memory_root)?;
     run_git(memory_root, &["add", "-N", "."])?;
     let diff = git_output(memory_root, &["diff", "--", "."])?;
     let diff_path = memory_root.join(PHASE2_WORKSPACE_DIFF_FILE);
@@ -113,6 +117,32 @@ mod tests {
         remove_workspace_diff_file(root.path()).expect("remove missing");
 
         assert!(!diff_path.exists());
+    }
+
+    // A stale diff file from a crashed run must not leak its own content into
+    // the next diff (self-referential bloat compounding per run).
+    #[test]
+    fn stale_diff_file_does_not_self_reference_in_new_diff() {
+        let root = tempfile::tempdir().expect("tempdir");
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+
+        ensure_memory_git_baseline(root.path()).expect("baseline");
+        std::fs::write(
+            root.path().join(PHASE2_WORKSPACE_DIFF_FILE),
+            "stale sentinel line from a crashed run\n",
+        )
+        .expect("stale diff");
+        std::fs::write(root.path().join("MEMORY.md"), "hello\n").expect("write");
+
+        let diff = write_workspace_diff(root.path()).expect("diff");
+
+        assert!(diff.diff.contains("+hello"));
+        assert!(
+            !diff.diff.contains("stale sentinel line"),
+            "the stale diff file must be excluded from the new diff"
+        );
     }
 
     // The validation rollback: tracked files return to the committed

@@ -64,9 +64,10 @@ export type BuildScrollerRowsOptions = {
  * Ordering: the session-load marker leads (only while restoring with no
  * messages); messages follow with the history-restored marker between the
  * restored slice and live messages; completed compaction markers sit at the
- * live edge in arrival order; settings-change markers (model switch /
- * permission mode) follow them; the transient model-load marker (the current
- * activity) trails them.
+ * live edge in arrival order; anchored settings-change markers splice in right
+ * after the message they were recorded at (unanchored ones follow the
+ * compaction markers); the transient model-load marker (the current activity)
+ * trails them.
  */
 export function buildScrollerRows(
     messages: ReadonlyArray<TMessage>,
@@ -94,7 +95,39 @@ export function buildScrollerRows(
     for (const marker of compactionMarkers) {
         out.push({ kind: "compactMarker", id: marker.id, marker })
     }
+    // Settings markers split into anchored (inserted right after the message
+    // they were recorded at, keeping the timeline order of mid-conversation
+    // switches) and unanchored/legacy (tail position, after compaction).
+    const tailSettingsMarkers: SettingsMarker[] = []
     for (const marker of options.settingsMarkers ?? []) {
+        const anchor = marker.afterMessageId
+        let insertAfter = -1
+        if (anchor) {
+            // LAST match: repeated message ids anchor to the final occurrence.
+            for (let index = out.length - 1; index >= 0; index -= 1) {
+                const row = out[index]
+                if (row.kind === "message" && row.message.id === anchor) {
+                    insertAfter = index
+                    break
+                }
+            }
+        }
+        if (insertAfter === -1) {
+            tailSettingsMarkers.push(marker)
+            continue
+        }
+        // Markers already anchored to this message pile up contiguously after
+        // it; insert at the END of that run so same-anchor markers keep
+        // arrival order.
+        while (
+            insertAfter + 1 < out.length &&
+            out[insertAfter + 1].kind === "settingsMarker"
+        ) {
+            insertAfter += 1
+        }
+        out.splice(insertAfter + 1, 0, { kind: "settingsMarker", id: marker.id, marker })
+    }
+    for (const marker of tailSettingsMarkers) {
         out.push({ kind: "settingsMarker", id: marker.id, marker })
     }
     if (options.modelLoad) {

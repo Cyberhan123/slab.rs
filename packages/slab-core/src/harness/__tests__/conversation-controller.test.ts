@@ -1354,8 +1354,24 @@ describe("ConversationController", () => {
         kind: "permissionMode",
         fromMode: "approve_for_me",
         toMode: "request_approval",
+        afterMessageId: null,
       },
     ])
+  })
+
+  it("stamps the timeline anchor when recording settings markers", () => {
+    const controller = makeController("s1")
+
+    controller.notePermissionModeChange(
+      { from: "request_approval", to: "full_control" },
+      "msg-7",
+    )
+    controller.noteModelSwitch({ from: "Model A", to: "Model B" }, "msg-8")
+
+    const markers = controller.getState().settingsMarkers
+    expect(markers).toHaveLength(2)
+    expect(markers[0]).toMatchObject({ kind: "permissionMode", afterMessageId: "msg-7" })
+    expect(markers[1]).toMatchObject({ kind: "modelSwitch", afterMessageId: "msg-8" })
   })
 
   it("records approval-review changes and no-ops unchanged saves", () => {

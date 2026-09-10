@@ -146,11 +146,6 @@ type SenderProps = {
   /** Toggle plan mode on/off; `/plan` and the plan chip's X use this. */
   onPlanModeChange: (enabled: boolean) => void
   /**
-   * A DIFFERENT permission mode was picked from the composer dropdown — the
-   * page records it as an in-stream settings marker (fires only on change).
-   */
-  onPermissionModeChange?: (change: { from: PermissionMode; to: PermissionMode }) => void
-  /**
    * The approval-review config dialog saved a real change (reviewer model
    * and/or policy prompt) — the page records it as an in-stream marker.
    */
@@ -190,7 +185,6 @@ function Sender({
   commands,
   planMode,
   onPlanModeChange,
-  onPermissionModeChange,
   onApprovalReviewChange,
   workspaceSlot,
   initialValue,
@@ -211,6 +205,35 @@ function Sender({
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false)
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Deferred "approve for me" switch: entering the mode with no reviewer model
+  // configured opens the config dialog BEFORE touching the store, so closing
+  // or cancelling the dialog discards the switch instead of stranding the mode
+  // inert. Committed (or dropped) via the dialog handlers below.
+  const pendingApprovalModeRef = useRef<PermissionMode | null>(null)
+
+  const handleApprovalDialogOpenChange = (open: boolean) => {
+    setApprovalDialogOpen(open)
+    if (!open) {
+      // Close/cancel: the deferred switch never happened (no store write, no
+      // marker) — the composer dropdown still shows the pre-switch mode.
+      pendingApprovalModeRef.current = null
+    }
+  }
+
+  const handleApprovalSaved = (change: {
+    fromModel: string | null
+    toModel: string | null
+    promptChanged: boolean
+  }) => {
+    // Commit the deferred mode switch FIRST (before the review-change
+    // callback) so the marker gate in the page reads the live mode.
+    const pending = pendingApprovalModeRef.current
+    pendingApprovalModeRef.current = null
+    if (pending) {
+      setPermissionMode(pending)
+    }
+    onApprovalReviewChange?.(change)
+  }
 
   // Voice input transcribes speech into the composer via the shared
   // whisper/parakeet backends. The hook is always called (Rules of Hooks); the
@@ -620,15 +643,17 @@ function Sender({
                   data-testid={`assistant-permission-mode-${mode.value}`}
                   onSelect={(event) => {
                     event.preventDefault()
-                    if (mode.value !== permissionMode) {
-                      onPermissionModeChange?.({ from: permissionMode, to: mode.value })
+                    if (mode.value === "approve_for_me" && !approvalReviewModel) {
+                      // Entering (or re-picking) "approve for me" with no
+                      // reviewer model configured defers the switch until the
+                      // config dialog actually saves — the mode is inert
+                      // without a reviewer, and closing the dialog rolls back
+                      // to the pre-switch selection (nothing was written).
+                      pendingApprovalModeRef.current = mode.value
+                      setApprovalDialogOpen(true)
+                      return
                     }
                     setPermissionMode(mode.value)
-                    // First switch to "approve for me": configure the reviewer
-                    // model right away (the mode is inert without one).
-                    if (mode.value === "approve_for_me" && !approvalReviewModel) {
-                      setApprovalDialogOpen(true)
-                    }
                   }}
                 >
                   <ShieldCheck />
@@ -700,8 +725,8 @@ function Sender({
       </InputGroup>
       <ApprovalReviewDialog
         open={approvalDialogOpen}
-        onOpenChange={setApprovalDialogOpen}
-        onSaved={onApprovalReviewChange}
+        onOpenChange={handleApprovalDialogOpenChange}
+        onSaved={handleApprovalSaved}
       />
     </form>
   )

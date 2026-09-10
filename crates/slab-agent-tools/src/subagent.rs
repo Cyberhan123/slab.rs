@@ -15,7 +15,13 @@ use crate::background::{
     DetachedOnTerminal, DetachedTask, DetachedTaskOutcome, DetachedWait,
 };
 
-const DEFAULT_SUBAGENT_TURNS: u32 = 8;
+/// Default turn budget for a delegation when the caller does not set
+/// `max_turns`. 24 (3× the historical 8): subagent tasks routinely need more
+/// than a handful of tool rounds, and an exhausted child now delivers its
+/// confirmed-so-far findings instead of dropping all work — but a wider
+/// default still buys the child room to finish properly. Callers are told
+/// about the default via a note in the result envelope.
+const DEFAULT_SUBAGENT_TURNS: u32 = 24;
 
 /// Hard upper bound for a child's `max_turns`: a delegation is a focused
 /// task, not a competing main agent — 100 turns already buys an unbounded
@@ -83,11 +89,28 @@ struct SubagentTerminalData {
 }
 
 /// Map an agent-thread terminal status onto the registry task status.
-fn map_registry_status(status: slab_types::AgentThreadStatus) -> BackgroundTaskStatus {
+///
+/// A max-turns interruption whose completion text carries the partial-findings
+/// prefix is a RESULT-carrying exit: it maps to `Completed` so the parent
+/// notification fires and the findings flow through the normal delivery path.
+/// Every genuine user stop stays `Stopped` — the registry pre-marks stopped
+/// slots before interrupting (Stopped-wins), and the only direct-interrupt
+/// bypass (workspace migration) writes a plain "interrupted" completion that
+/// keeps mapping to `Stopped` and stays suppressed.
+fn map_registry_status(
+    status: slab_types::AgentThreadStatus,
+    completion_text: Option<&str>,
+) -> BackgroundTaskStatus {
     use slab_types::AgentThreadStatus as ThreadStatus;
     match status {
         ThreadStatus::Completed => BackgroundTaskStatus::Completed,
         ThreadStatus::Errored => BackgroundTaskStatus::Failed,
+        ThreadStatus::Interrupted
+            if completion_text
+                .is_some_and(|text| text.starts_with(slab_agent::MAX_TURNS_PARTIAL_PREFIX)) =>
+        {
+            BackgroundTaskStatus::Completed
+        }
         ThreadStatus::Interrupted | ThreadStatus::Shutdown => BackgroundTaskStatus::Stopped,
         // Non-terminal statuses cannot reach the watcher; treat defensively.
         _ => BackgroundTaskStatus::Failed,
@@ -261,7 +284,9 @@ impl TypedTool for DelegateSubagentTool {
         }
         // Clamp the model-supplied turn budget to the cap; the clamp is
         // echoed in the tool result so the model knows the effective bound.
+        // A missing budget gets the (wider) default, also echoed as a note.
         let max_turns_clamped = args.max_turns.is_some_and(|turns| turns > MAX_SUBAGENT_TURNS_CAP);
+        let max_turns_defaulted = args.max_turns.is_none();
         child_config.max_turns =
             args.max_turns.unwrap_or(DEFAULT_SUBAGENT_TURNS).clamp(1, MAX_SUBAGENT_TURNS_CAP);
         child_config.transient = true;
@@ -399,7 +424,7 @@ impl TypedTool for DelegateSubagentTool {
                     },
                 };
                 let outcome = DetachedTaskOutcome::Status {
-                    status: map_registry_status(data.status),
+                    status: map_registry_status(data.status, data.completion_text.as_deref()),
                     result: data.completion_text.clone(),
                 };
                 *shared.lock().unwrap_or_else(|p| p.into_inner()) = Some(data.clone());
@@ -530,6 +555,12 @@ impl TypedTool for DelegateSubagentTool {
                     "requested max_turns exceeded the cap; clamped to {MAX_SUBAGENT_TURNS_CAP}"
                 )
                 .into();
+            } else if max_turns_defaulted {
+                value["max_turns_note"] = format!(
+                    "max_turns was not set; defaulted to {DEFAULT_SUBAGENT_TURNS} turns for this \
+                     delegation (set max_turns explicitly if the task needs a different budget)"
+                )
+                .into();
             }
             return Ok(ToolOutput { content: value.to_string(), metadata: None });
         }
@@ -549,6 +580,12 @@ impl TypedTool for DelegateSubagentTool {
                 "requested max_turns exceeded the cap; clamped to {MAX_SUBAGENT_TURNS_CAP}"
             )
             .into();
+        } else if max_turns_defaulted {
+            value["max_turns_note"] = format!(
+                "max_turns was not set; defaulted to {DEFAULT_SUBAGENT_TURNS} turns for this \
+                 delegation (set max_turns explicitly if the task needs a different budget)"
+            )
+            .into();
         }
         Ok(ToolOutput { content: value.to_string(), metadata: None })
     }
@@ -566,7 +603,10 @@ pub(crate) fn summarize_task_for_registry(task: &str) -> String {
 }
 
 fn default_system_prompt() -> String {
-    "You are a focused subagent. Work only on the delegated task, use the allowed tools, and return a concise result for the parent agent.".to_owned()
+    // The running-summary instruction makes the deterministic max-turns
+    // partial-findings synthesis distill-quality: the trailing narrations it
+    // scrapes already state what has been confirmed.
+    "You are a focused subagent. Work only on the delegated task, use the allowed tools, and return a concise result for the parent agent. Keep a running summary of your confirmed findings so far in each response; if the turn budget runs out, that summary is delivered to the parent as your result.".to_owned()
 }
 
 fn render_child_task(
@@ -1398,6 +1438,190 @@ mod tests {
         let child_config: AgentConfig =
             serde_json::from_str(&child.config_json).expect("child config");
         assert_eq!(child_config.max_turns, 100);
+    }
+
+    /// LLM double that never finals: every turn narrates its confirmed
+    /// findings and requests another tool call. A child running against it
+    /// exhausts its turn budget mid-work — the max-turns partial-findings path.
+    struct ToolLoopNarratingLlm;
+
+    #[async_trait]
+    impl LlmPort for ToolLoopNarratingLlm {
+        async fn chat_completion(
+            &self,
+            _model: &str,
+            _messages: &[ConversationMessage],
+            _tools: &[ToolSpec],
+            _config: &AgentConfig,
+            _trace_context: &AgentTraceContext,
+        ) -> Result<LlmResponse, AgentError> {
+            Ok(LlmResponse {
+                content: Some("Confirmed so far: the parser bug is at src/lex.rs:42.".to_owned()),
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "call-loop".to_owned(),
+                    name: "read_file".to_owned(),
+                    arguments: "{\"path\": \"src/lex.rs\"}".to_owned(),
+                }],
+                finish_reason: Some("tool_calls".to_owned()),
+                usage: None,
+            })
+        }
+    }
+
+    fn narrating_control(store: Arc<MemoryStore>) -> Arc<AgentControl> {
+        let notify = Arc::new(NoopNotify);
+        Arc::new(slab_agent::AgentControl::new_with_hooks(
+            Arc::new(ToolLoopNarratingLlm),
+            store,
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ))
+    }
+
+    /// Inline delegation whose child runs out of turns: the synthesized
+    /// partial findings flow back as the result instead of a bare
+    /// "max_turns_reached" — the raw thread status stays honestly
+    /// "interrupted".
+    #[tokio::test]
+    async fn max_turns_child_delivers_partial_findings_inline() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let control = narrating_control(store.clone());
+        let tool = delegate_tool(control);
+
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "find the bug", "max_turns": 1, "background": false }),
+        )
+        .await
+        .expect("delegate");
+
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        assert_eq!(value["status"], "interrupted", "the thread status stays honest");
+        let text = value["completion_text"].as_str().expect("partial findings are inlined");
+        assert!(
+            text.starts_with(slab_agent::MAX_TURNS_PARTIAL_PREFIX),
+            "the partial-findings prefix drives registry routing: {text:?}"
+        );
+        assert!(text.contains("src/lex.rs:42"), "the confirmed finding survives: {text:?}");
+        assert_ne!(text, "max_turns_reached", "not the bare pre-fix reason string");
+    }
+
+    /// Background delegation whose child runs out of turns: the
+    /// partial-carrying interruption maps to `Completed` (not `Stopped`), so
+    /// the parent notification fires and the registry keeps the result.
+    #[tokio::test]
+    async fn max_turns_child_notifies_parent_with_partial_findings() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let control = narrating_control(store.clone());
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        let sink = Arc::new(RecordingSink::default());
+        let tool =
+            DelegateSubagentTool::new(Arc::clone(&control), Arc::clone(&registry), sink.clone());
+
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "find the bug", "max_turns": 1, "background": true }),
+        )
+        .await
+        .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        let task_id = value["task_id"].as_str().expect("task id").to_owned();
+
+        wait_until(|| !sink.finished.lock().unwrap().is_empty()).await;
+        {
+            let finished = sink.finished.lock().unwrap();
+            assert_eq!(finished[0].status, BackgroundTaskStatus::Completed);
+            let text = finished[0].completion_text.as_deref().expect("partial findings");
+            assert!(text.starts_with(slab_agent::MAX_TURNS_PARTIAL_PREFIX));
+        }
+
+        // The registry result survives for subagent_status reads.
+        wait_until(|| {
+            registry.list().iter().any(|task| {
+                task.task_id == task_id && task.status == BackgroundTaskStatus::Completed
+            })
+        })
+        .await;
+        let snapshot = registry
+            .list()
+            .into_iter()
+            .find(|task| task.task_id == task_id)
+            .expect("registered task");
+        assert!(snapshot.result.is_some_and(|result| result.contains("src/lex.rs:42")));
+    }
+
+    /// A genuine user stop stays suppressed: the registry pre-marks the slot
+    /// Stopped, and the plain "interrupted" completion never maps to
+    /// Completed.
+    #[tokio::test]
+    async fn explicit_stop_still_suppresses_the_parent_notification() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let control = narrating_control(store.clone());
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        let sink = Arc::new(RecordingSink::default());
+        let tool =
+            DelegateSubagentTool::new(Arc::clone(&control), Arc::clone(&registry), sink.clone());
+
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "find the bug", "max_turns": 100, "background": true }),
+        )
+        .await
+        .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        let task_id = value["task_id"].as_str().expect("task id").to_owned();
+
+        // Stop immediately: the delegation is registered Running by the time
+        // the background result returns, and the narrating loop burns through
+        // its turns quickly — a sleep here would race the child to terminal.
+        let stopped = registry.stop(&task_id).expect("stop task");
+        assert_eq!(stopped.status, BackgroundTaskStatus::Stopped);
+
+        // Give the watcher a moment: no finished event may fire.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            sink.finished.lock().unwrap().is_empty(),
+            "explicit stops are not re-reported to the parent"
+        );
+    }
+
+    /// Omitting `max_turns` uses the wider default and tells the caller.
+    #[tokio::test]
+    async fn omitted_max_turns_defaults_wider_and_notes_the_caller() {
+        let store = Arc::new(MemoryStore::default());
+        store.insert_parent(1);
+        let control = narrating_control(store.clone());
+        let tool = delegate_tool(control);
+
+        let output = ToolHandler::execute(
+            &tool,
+            &ToolContext::for_thread("parent").build(),
+            &serde_json::json!({ "task": "find the bug", "background": false }),
+        )
+        .await
+        .expect("delegate");
+        let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
+        assert!(
+            value["max_turns_note"].as_str().is_some_and(|note| note.contains("defaulted to")),
+            "the default is echoed to the model: {}",
+            value["max_turns_note"]
+        );
+
+        let child_id = value["child_thread_id"].as_str().expect("child id");
+        let child = store.get_thread(child_id).await.expect("thread").expect("child");
+        let child_config: AgentConfig =
+            serde_json::from_str(&child.config_json).expect("child config");
+        assert_eq!(child_config.max_turns, DEFAULT_SUBAGENT_TURNS);
     }
 
     #[tokio::test]

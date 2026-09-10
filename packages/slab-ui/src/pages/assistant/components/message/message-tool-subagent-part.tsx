@@ -1,8 +1,11 @@
 "use client"
 
 /**
- * `delegate_subagent` tool part — registered under
- * `messagePartComponents.tools["delegate_subagent"]`.
+ * Subagent tool part — registered under `messagePartComponents.tools` for
+ * `delegate_subagent` (delegation card) and the companion
+ * `subagent_status` / `subagent_message` / `subagent_stop` calls (registry
+ * queries and steering, rendered through the same card with envelope-shape
+ * tolerance — see the normalization below).
  *
  * A dedicated card for subagent delegations. In background mode (the default)
  * the tool call returns IMMEDIATELY, so the part itself reaches
@@ -55,15 +58,28 @@ function MessageToolSubagentPart(props: MessagePartRenderProps<TMessagePart, TMe
   const derivedName = (name ?? p.toolName ?? fromType) || "delegate_subagent"
   const summary = summarizeToolCall(derivedName, p.input)
 
-  // Background delegations carry {task_id, background:true, …} in the output;
-  // inline ones carry the legacy {completion_text, …} shape.
+  // Envelope normalization across the subagent tool family:
+  // - delegate_subagent: {task_id, background, child_thread_id, …} or inline
+  //   {status, completion_text, …}
+  // - subagent_status:   {task: {task_id, child_thread_id, status, result, …}}
+  //   (or {tasks: […]} for the list form)
+  // - subagent_message:  {queued: bool, position?} (task_id only in input)
+  // - subagent_stop:     {stopped: {task_id, status, result, …}}
+  // Anything that does not parse degrades safely: the card still renders the
+  // summarized call with no status/result extras.
   const envelope = parseToolEnvelope(p.output)
-  const taskId = str(envelope?.task_id)
+  const input = parseToolEnvelope(p.input) ?? {}
+  const statusSnapshot = (envelope?.task ?? envelope?.stopped ?? null) as Record<
+    string,
+    unknown
+  > | null
+  const taskId =
+    str(envelope?.task_id) ?? str(statusSnapshot?.task_id) ?? str(input.task_id)
   const isBackground = envelope?.background === true || taskId !== undefined
   const task = taskId ? subagentTasksByTaskId.get(taskId) : undefined
   // Relayed child activity (`subagent/childEvent`) correlates by the real
-  // child thread id from the delegation envelope.
-  const childThreadId = str(envelope?.child_thread_id)
+  // child thread id from the delegation envelope (or a status/stop snapshot).
+  const childThreadId = str(envelope?.child_thread_id) ?? str(statusSnapshot?.child_thread_id)
   const childItems =
     isBackground && childThreadId ? subagentChildItemsByChildId.get(childThreadId) : undefined
 
@@ -72,15 +88,21 @@ function MessageToolSubagentPart(props: MessagePartRenderProps<TMessagePart, TMe
   const state =
     isBackground && task ? (liveState(task.status) ?? partState) : partState
 
-  const input = parseToolEnvelope(p.input) ?? {}
   const agentType = str(input.agent_type)
   const maxTurns = num(input.max_turns)
 
-  const statusLabel = task
-    ? task.status
-    : isBackground
-      ? "delegated"
-      : str(envelope?.status) ?? "completed"
+  const envelopeStatus = str(statusSnapshot?.status) ?? str(envelope?.status)
+  const queued = envelope?.queued === true
+  const resultText =
+    str(envelope?.completion_text) ?? str(statusSnapshot?.result)
+  // No fabricated status: an unknown envelope shape renders without a status
+  // span instead of claiming success, and the delegation-vocabulary
+  // "delegated" fallback applies only to delegate_subagent calls.
+  const isDelegation = derivedName === "delegate_subagent"
+  const statusLabel =
+    task?.status ??
+    (queued ? "queued" : envelopeStatus) ??
+    (isDelegation && isBackground ? "delegated" : undefined)
 
   return (
     <ToolRow defaultOpen={state === "approval-requested"}>
@@ -94,7 +116,7 @@ function MessageToolSubagentPart(props: MessagePartRenderProps<TMessagePart, TMe
       <ToolRowContent>
         <div className="space-y-2" data-testid="tool-detail-subagent">
           <DetailMeta>
-            <span>status: {statusLabel}</span>
+            {statusLabel ? <span>status: {statusLabel}</span> : null}
             {agentType ? <span>agent: {agentType}</span> : null}
             {maxTurns !== undefined ? <span>max_turns: {maxTurns}</span> : null}
             {taskId ? <span>task: {taskId}</span> : null}
@@ -126,12 +148,12 @@ function MessageToolSubagentPart(props: MessagePartRenderProps<TMessagePart, TMe
               {task.resultSummary}
             </div>
           ) : null}
-          {str(envelope?.completion_text) ? (
+          {resultText ? (
             <div className="rounded-md bg-muted/40 p-2 text-xs whitespace-pre-wrap">
-              {str(envelope?.completion_text)}
+              {resultText}
             </div>
           ) : null}
-          {isBackground && !task?.resultSummary ? (
+          {derivedName === "delegate_subagent" && isBackground && !task?.resultSummary ? (
             <DetailFootnote>
               background delegation — the result arrives as a follow-up message when the
               subagent finishes (track with subagent_status / subagent_message / subagent_stop)

@@ -12,6 +12,9 @@
 //!   the caller to assemble into its own wire format.
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use futures::StreamExt;
 use genai::adapter::AdapterKind;
@@ -40,7 +43,6 @@ use crate::domain::models::{
 use crate::error::AppCoreError;
 use crate::infra::db::ModelStore;
 use crate::infra::endpoint::{ensure_http_base_url, join_http_url_path};
-use slab_cloud_provider::family_to_adapter_kind;
 
 type CloudProviderConfig = slab_config::CloudProviderConfig;
 
@@ -68,7 +70,118 @@ pub(crate) async fn resolve_cloud_model(
     let Some(model) = find_cloud_catalog_model(state, requested_model).await? else {
         return Err(AppCoreError::BadRequest(format!("unknown cloud model '{}'", requested_model)));
     };
-    resolve_cloud_catalog_model(&providers, &model)
+    resolve_cloud_catalog_model(&providers, &model).await
+}
+
+// ============ chat adapter routing (api_style + /responses probe) ============
+
+/// How long a successful `/responses` probe stays fresh (the endpoint speaks the Responses API).
+const RESPONSES_PROBE_SUCCESS_TTL: Duration = Duration::from_secs(60 * 60);
+/// Backoff after an unsupported or failed probe so dead routes are not re-probed on every request.
+const RESPONSES_PROBE_FAILURE_BACKOFF: Duration = Duration::from_secs(5 * 60);
+/// Bound for a single probe: an unresponsive endpoint must not stall the chat request.
+const RESPONSES_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Process-wide probe results: provider_id -> (supports, recorded_at), plus a probe lock
+/// serializing first-time probes (they are idempotent minimal POSTs, so one global lock is
+/// the cheap dedup; TTL hits never take it).
+static RESPONSES_PROBE_STATE: OnceLock<ResponsesProbeState> = OnceLock::new();
+
+struct ResponsesProbeState {
+    cache: Mutex<HashMap<String, (bool, std::time::Instant)>>,
+    probe_lock: tokio::sync::Mutex<()>,
+}
+
+fn responses_probe_state() -> &'static ResponsesProbeState {
+    RESPONSES_PROBE_STATE.get_or_init(|| ResponsesProbeState {
+        cache: Mutex::new(HashMap::new()),
+        probe_lock: tokio::sync::Mutex::new(()),
+    })
+}
+
+/// Whether a cached probe result is still usable. Successful probes are trusted far longer
+/// than failures: route presence is stable, while a failed probe may just be a transient
+/// network blip that must not pin a provider to chat/completions for an hour.
+fn responses_probe_fresh(supports: bool, age: Duration) -> bool {
+    let ttl = if supports { RESPONSES_PROBE_SUCCESS_TTL } else { RESPONSES_PROBE_FAILURE_BACKOFF };
+    age < ttl
+}
+
+fn responses_probe_cache_get(provider_id: &str) -> Option<bool> {
+    let state = responses_probe_state();
+    let cache = state.cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache.get(provider_id).and_then(|&(supports, recorded_at)| {
+        responses_probe_fresh(supports, recorded_at.elapsed()).then_some(supports)
+    })
+}
+
+fn responses_probe_cache_put(provider_id: &str, supports: bool) {
+    let state = responses_probe_state();
+    let mut cache = state.cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache.insert(provider_id.to_owned(), (supports, std::time::Instant::now()));
+}
+
+/// Map a routing resolution plus probe outcome to the concrete chat adapter.
+fn adapter_kind_from_probe_result(
+    resolution: slab_cloud_provider::AdapterKindResolution,
+    supports_responses: bool,
+) -> AdapterKind {
+    match resolution {
+        slab_cloud_provider::AdapterKindResolution::Kind(kind) => kind,
+        slab_cloud_provider::AdapterKindResolution::ProbeEndpoint => {
+            if supports_responses {
+                AdapterKind::OpenAIResp
+            } else {
+                AdapterKind::OpenAI
+            }
+        }
+    }
+}
+
+/// Resolve the chat adapter for a provider: family + `api_style` first, and for `auto` on a
+/// custom OpenAI-compatible endpoint, a lazily-probed (TTL-cached) `/responses` capability
+/// check. Probe failures are silent — chat/completions is the universal denominator for
+/// third-party endpoints.
+async fn resolve_chat_adapter_kind(
+    provider: &CloudProviderConfig,
+    remote_model: &str,
+) -> AdapterKind {
+    let resolution = slab_cloud_provider::resolve_adapter_kind(provider.family, provider.api_style);
+    if let slab_cloud_provider::AdapterKindResolution::Kind(kind) = resolution {
+        return kind;
+    }
+    if let Some(supports) = responses_probe_cache_get(&provider.id) {
+        return adapter_kind_from_probe_result(resolution, supports);
+    }
+    // Serialize first-time probes (double-checked after acquiring): concurrent first
+    // requests for the same provider share one probe instead of firing N.
+    let _guard = responses_probe_state().probe_lock.lock().await;
+    if let Some(supports) = responses_probe_cache_get(&provider.id) {
+        return adapter_kind_from_probe_result(resolution, supports);
+    }
+    let supports = tokio::time::timeout(
+        RESPONSES_PROBE_TIMEOUT,
+        slab_cloud_provider::probe_responses_support(
+            provider,
+            Some(remote_model),
+            RESPONSES_PROBE_TIMEOUT,
+        ),
+    )
+    .await
+    .unwrap_or(false);
+    responses_probe_cache_put(&provider.id, supports);
+    if supports {
+        info!(
+            provider_id = %provider.id,
+            "custom endpoint supports the Responses API; routing chat via /responses"
+        );
+    } else {
+        debug!(
+            provider_id = %provider.id,
+            "custom endpoint does not advertise /responses; falling back to chat/completions"
+        );
+    }
+    adapter_kind_from_probe_result(resolution, supports)
 }
 
 /// Whether this model is a cloud catalog entry (reused by `should_route_to_cloud`).
@@ -116,7 +229,7 @@ fn referenced_provider_id(model: &UnifiedModel) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn resolve_cloud_catalog_model(
+async fn resolve_cloud_catalog_model(
     providers: &BTreeMap<String, CloudProviderConfig>,
     model: &UnifiedModel,
 ) -> Result<ResolvedCloudModel, AppCoreError> {
@@ -150,7 +263,7 @@ fn resolve_cloud_catalog_model(
     Ok(ResolvedCloudModel {
         provider_id: provider_id.clone(),
         provider_name: provider.name.clone(),
-        adapter_kind: family_to_adapter_kind(provider.family),
+        adapter_kind: resolve_chat_adapter_kind(provider, &remote_model).await,
         api_base: provider.api_base.clone(),
         api_key,
         remote_model,
@@ -567,6 +680,19 @@ fn build_openai_chat_completions_url(api_base: &str) -> Result<String, AppCoreEr
         .map_err(|error| invalid_cloud_api_base(api_base, error))
 }
 
+/// Trace URL for the adapter actually serving the request: OpenAI-lineage traffic goes to
+/// `chat/completions` or `responses` depending on the routed adapter kind.
+fn build_openai_request_url(
+    api_base: &str,
+    adapter_kind: AdapterKind,
+) -> Result<String, AppCoreError> {
+    match adapter_kind {
+        AdapterKind::OpenAIResp => join_http_url_path(api_base, "responses")
+            .map_err(|error| invalid_cloud_api_base(api_base, error)),
+        _ => build_openai_chat_completions_url(api_base),
+    }
+}
+
 fn invalid_cloud_api_base(api_base: &str, error: anyhow::Error) -> AppCoreError {
     AppCoreError::BadRequest(format!(
         "cloud provider api_base '{}' is invalid: {error}",
@@ -576,7 +702,8 @@ fn invalid_cloud_api_base(api_base: &str, error: anyhow::Error) -> AppCoreError 
 
 fn extract_reasoning_content_from_raw_body(raw_body: Option<&Value>) -> Option<String> {
     let payload = raw_body?;
-    payload
+    // Chat Completions shape: choices[0].message.reasoning_content.
+    if let Some(reasoning) = payload
         .get("choices")
         .and_then(Value::as_array)
         .and_then(|choices| choices.first())
@@ -585,7 +712,25 @@ fn extract_reasoning_content_from_raw_body(raw_body: Option<&Value>) -> Option<S
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(str::to_owned)
+    {
+        return Some(reasoning.to_owned());
+    }
+    // Responses API shape: reasoning summaries live in output items of type "reasoning".
+    let reasoning_text = payload
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| item.get("type").and_then(Value::as_str) == Some("reasoning"))
+                .filter_map(|item| item.get("summary").and_then(Value::as_array))
+                .flatten()
+                .filter_map(|summary| summary.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    (!reasoning_text.trim().is_empty()).then_some(reasoning_text)
 }
 
 /// Diagnose a 2xx cloud response whose assistant message carries neither text
@@ -634,7 +779,7 @@ fn build_cloud_http_trace_context(
 
     Ok(CloudHttpTraceContext {
         request_id: Uuid::new_v4().to_string(),
-        request_url: build_openai_chat_completions_url(&target.api_base)?,
+        request_url: build_openai_request_url(&target.api_base, target.adapter_kind)?,
         request_headers: serde_json::to_string_pretty(&request_headers)
             .unwrap_or_else(|_| "<failed to serialize request headers>".to_owned()),
         request_body,
@@ -653,6 +798,12 @@ fn build_cloud_http_request_body(
     messages: &[DomainConversationMessage],
     config: &CloudChatRequestConfig,
 ) -> Value {
+    // Responses-API targets get their native wire shape (instructions/input instead of
+    // messages, max_output_tokens, text.format, flattened tools) so the trace shows what
+    // genai actually sends; genai itself builds the real request from the same options.
+    if matches!(target.adapter_kind, AdapterKind::OpenAIResp) {
+        return build_responses_http_request_body(target, messages, config);
+    }
     let mut payload = json!({
         "model": target.remote_model,
         "messages": messages
@@ -717,6 +868,102 @@ fn function_tool_to_openai_chat_tool(tool: &slab_proto::openai::FunctionTool) ->
         "type": "function",
         "function": function,
     })
+}
+
+/// Trace body in the Responses API wire shape (mirrors genai's `OpenAIResp` adapter):
+/// `instructions` instead of a system message, `input` items instead of `messages`,
+/// `max_output_tokens`, structured output nested under `text.format`, and tools
+/// flattened to `{"type": "function", ...}`.
+fn build_responses_http_request_body(
+    target: &ResolvedCloudModel,
+    messages: &[DomainConversationMessage],
+    config: &CloudChatRequestConfig,
+) -> Value {
+    let mut instructions = Vec::new();
+    let mut input = Vec::new();
+    for message in messages {
+        match message.role.as_str() {
+            "system" | "developer" => instructions.push(message.rendered_text()),
+            "tool" if message.tool_call_id.as_deref().is_some_and(|id| !id.is_empty()) => {
+                input.push(json!({
+                    "type": "function_call_output",
+                    "call_id": message.tool_call_id,
+                    "output": message.rendered_text(),
+                }));
+            }
+            _ => {
+                input.push(json!({
+                    "role": normalize_openai_role(&message.role),
+                    "content": message.rendered_text(),
+                }));
+            }
+        }
+    }
+
+    let mut payload = json!({
+        "model": target.remote_model,
+        "input": input,
+        "stream": config.stream,
+        "temperature": f64::from(config.temperature),
+    });
+    if !instructions.is_empty() {
+        payload["instructions"] = json!(instructions.join("\n\n"));
+    }
+    if let Some(max_tokens) = config.max_tokens {
+        payload["max_output_tokens"] = json!(max_tokens);
+    }
+    if let Some(top_p) = config.top_p {
+        payload["top_p"] = json!(f64::from(top_p));
+    }
+    if let Some(reasoning_effort) = config.reasoning_effort {
+        payload["reasoning"] = json!({ "effort": reasoning_effort.as_str() });
+    }
+    // Responses-API structured output is flattened under text.format (no chat-style
+    // json_schema wrapper object) — mirrors genai's OpenAIResp adapter.
+    match config.structured_output.as_ref() {
+        Some(StructuredOutput::JsonObject) => {
+            payload["text"] = json!({ "format": { "type": "json_object" } });
+        }
+        Some(StructuredOutput::JsonSchema(schema)) => {
+            payload["text"] = json!({
+                "format": {
+                    "type": "json_schema",
+                    "name": schema.name,
+                    "strict": true,
+                    "schema": enforce_closed_object_schema(&schema.schema),
+                }
+            });
+        }
+        None => {}
+    }
+    if !config.tools.is_empty() {
+        payload["tools"] = Value::Array(
+            config.tools.iter().map(function_tool_to_openai_responses_tool).collect::<Vec<_>>(),
+        );
+    }
+    payload
+}
+
+/// Responses-API tools are flattened: no nested `function` object.
+fn function_tool_to_openai_responses_tool(tool: &slab_proto::openai::FunctionTool) -> Value {
+    let mut flattened = serde_json::Map::new();
+    flattened.insert("type".to_owned(), Value::String("function".to_owned()));
+    flattened.insert("name".to_owned(), Value::String(tool.name.clone()));
+    if let Some(description) = tool.description.as_ref().and_then(|value| value.as_deref()) {
+        flattened.insert("description".to_owned(), Value::String(description.to_owned()));
+    }
+    if let Some(parameters) = tool.parameters.as_ref() {
+        flattened.insert(
+            "parameters".to_owned(),
+            Value::Object(
+                parameters.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+            ),
+        );
+    }
+    if let Some(strict) = tool.strict {
+        flattened.insert("strict".to_owned(), Value::Bool(strict));
+    }
+    Value::Object(flattened)
 }
 
 fn structured_output_to_genai_response_format(
@@ -1020,10 +1267,11 @@ fn redact_secret_json(value: &Value) -> String {
 #[cfg(test)]
 mod test {
     use super::{
-        CloudChatRequestConfig, GenaiChatResponseFormat, ResolvedCloudModel,
-        build_cloud_http_request_body, build_openai_chat_completions_url,
-        ensure_genai_endpoint_base, redact_header_value,
-        structured_output_to_genai_response_format,
+        CloudChatRequestConfig, GenaiChatResponseFormat, RESPONSES_PROBE_FAILURE_BACKOFF,
+        RESPONSES_PROBE_SUCCESS_TTL, ResolvedCloudModel, adapter_kind_from_probe_result,
+        build_cloud_http_request_body, build_openai_chat_completions_url, build_openai_request_url,
+        ensure_genai_endpoint_base, extract_reasoning_content_from_raw_body, redact_header_value,
+        responses_probe_fresh, structured_output_to_genai_response_format,
     };
     use crate::domain::models::{
         ConversationMessage as DomainConversationMessage, ConversationMessageContent,
@@ -1032,6 +1280,7 @@ mod test {
     use genai::adapter::AdapterKind;
     use serde_json::json;
     use slab_proto::openai::FunctionTool;
+    use std::time::Duration;
 
     #[test]
     fn ensure_genai_endpoint_base_keeps_v1_path() {
@@ -1047,6 +1296,114 @@ mod test {
             build_openai_chat_completions_url("https://api.openai.com/v1").unwrap(),
             "https://api.openai.com/v1/chat/completions"
         );
+    }
+
+    #[test]
+    fn request_url_follows_the_routed_adapter_kind() {
+        assert_eq!(
+            build_openai_request_url("https://api.openai.com/v1", AdapterKind::OpenAIResp).unwrap(),
+            "https://api.openai.com/v1/responses"
+        );
+        assert_eq!(
+            build_openai_request_url("https://api.openai.com/v1", AdapterKind::OpenAI).unwrap(),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn probe_ttl_trusts_success_far_longer_than_failure() {
+        assert!(responses_probe_fresh(true, RESPONSES_PROBE_SUCCESS_TTL - Duration::from_secs(1)));
+        assert!(!responses_probe_fresh(true, RESPONSES_PROBE_SUCCESS_TTL + Duration::from_secs(1)));
+        // A failed probe (unsupported route or transient error) retried after the short
+        // backoff, so a blip never pins a provider to chat/completions for an hour.
+        assert!(responses_probe_fresh(
+            false,
+            RESPONSES_PROBE_FAILURE_BACKOFF - Duration::from_secs(1)
+        ));
+        assert!(!responses_probe_fresh(
+            false,
+            RESPONSES_PROBE_FAILURE_BACKOFF + Duration::from_secs(1)
+        ));
+    }
+
+    #[test]
+    fn probe_result_routes_between_responses_and_chat_completions() {
+        let probe = slab_cloud_provider::AdapterKindResolution::ProbeEndpoint;
+        assert_eq!(adapter_kind_from_probe_result(probe, true), AdapterKind::OpenAIResp);
+        assert_eq!(adapter_kind_from_probe_result(probe, false), AdapterKind::OpenAI);
+        // Direct resolutions pass through untouched.
+        assert_eq!(
+            adapter_kind_from_probe_result(
+                slab_cloud_provider::AdapterKindResolution::Kind(AdapterKind::OpenAIResp),
+                false
+            ),
+            AdapterKind::OpenAIResp
+        );
+    }
+
+    #[test]
+    fn responses_trace_body_uses_responses_wire_shape() {
+        let target = ResolvedCloudModel { adapter_kind: AdapterKind::OpenAIResp, ..make_target() };
+        let payload = build_cloud_http_request_body(
+            &target,
+            &[make_message("system", "be terse"), make_message("user", "hello")],
+            &CloudChatRequestConfig {
+                max_tokens: Some(64),
+                temperature: 0.7,
+                top_p: None,
+                structured_output: Some(StructuredOutput::JsonSchema(StructuredOutputJsonSchema {
+                    name: "example_schema".to_owned(),
+                    description: None,
+                    strict: Some(true),
+                    schema: json!({
+                        "type": "object",
+                        "properties": { "answer": { "type": "string" } }
+                    }),
+                })),
+                reasoning_effort: None,
+                verbosity: None,
+                tools: vec![make_function_tool()],
+                stream: false,
+                include_usage: false,
+            },
+        );
+
+        assert_eq!(payload["instructions"], "be terse", "system becomes instructions");
+        assert_eq!(payload["input"][0]["role"], "user", "messages become input items");
+        assert_eq!(payload["max_output_tokens"], 64, "responses cap field");
+        assert!(payload.get("max_tokens").is_none());
+        assert_eq!(payload["text"]["format"]["type"], "json_schema");
+        assert_eq!(payload["text"]["format"]["name"], "example_schema");
+        assert_eq!(payload["text"]["format"]["schema"]["additionalProperties"], false);
+        // Responses tools are flattened — no nested `function` object.
+        assert_eq!(payload["tools"][0]["type"], "function");
+        assert_eq!(payload["tools"][0]["name"], "web_search");
+        assert!(payload["tools"][0].get("function").is_none());
+    }
+
+    #[test]
+    fn reasoning_extraction_reads_both_wire_shapes() {
+        let chat_body = json!({
+            "choices": [{ "message": { "reasoning_content": "  thinking…  " } }]
+        });
+        assert_eq!(
+            extract_reasoning_content_from_raw_body(Some(&chat_body)),
+            Some("thinking…".to_owned())
+        );
+        let responses_body = json!({
+            "output": [
+                { "type": "reasoning", "summary": [
+                    { "type": "summary_text", "text": "step one" },
+                    { "type": "summary_text", "text": "step two" },
+                ]},
+                { "type": "message", "content": [{ "type": "output_text", "text": "answer" }] },
+            ]
+        });
+        assert_eq!(
+            extract_reasoning_content_from_raw_body(Some(&responses_body)),
+            Some("step one\nstep two".to_owned())
+        );
+        assert_eq!(extract_reasoning_content_from_raw_body(None), None);
     }
 
     #[test]

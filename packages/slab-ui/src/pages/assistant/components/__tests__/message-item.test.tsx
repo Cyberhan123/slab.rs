@@ -175,6 +175,30 @@ describe("MessageItem", () => {
     await expect.element(screen.getByTestId("tool-part")).not.toBeInTheDocument()
   })
 
+  it("routes the companion subagent tools to the subagent card, not the default", async () => {
+    for (const toolName of ["subagent_status", "subagent_message", "subagent_stop"]) {
+      const screen = await render(
+        <MessageItem
+          message={message({
+            id: `m-${toolName}`,
+            parts: [
+              {
+                type: `tool-${toolName}`,
+                toolName,
+                toolCallId: `tc-${toolName}`,
+                state: "output-available",
+              },
+            ],
+          })}
+        />,
+      )
+
+      // Renders accumulate within one test: take the newest render's match.
+      await expect.element(screen.getByTestId("tool-subagent-part").first()).toBeInTheDocument()
+      await expect.element(screen.getByTestId("tool-part")).not.toBeInTheDocument()
+    }
+  })
+
   it("shows a rollback button on a retracable user message and emits the message id", async () => {
     const rollbackToMessage = vi.fn()
     const screen = await render(

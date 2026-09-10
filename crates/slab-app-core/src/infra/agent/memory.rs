@@ -233,10 +233,14 @@ impl AgentMemoryPipeline {
             now,
         ) {
             memory_git::remove_workspace_diff_file(&project_root).ok();
+            // Failure keeps the PREVIOUS completed watermark: advancing it
+            // here would make the next trigger's delta-skip (claimed ==
+            // completed) swallow this failure as a no-op success — the run
+            // must retry until it succeeds (see the retry notes below).
             self.complete_phase2(
                 &run_id,
                 "failed",
-                selection.new_watermark,
+                claim.previous_completed_watermark,
                 Some(&error.to_string()),
                 project_key,
             )
@@ -283,10 +287,12 @@ impl AgentMemoryPipeline {
                     let error = "consolidation output failed validation: memory_summary.md \
                                  missing or lacks the v1 header"
                         .to_owned();
+                    // Keep the previous completed watermark so the next run
+                    // re-processes the still-unbaselined diff (comment above).
                     self.complete_phase2(
                         &run_id,
                         "failed",
-                        selection.new_watermark,
+                        claim.previous_completed_watermark,
                         Some(&error),
                         project_key,
                     )
@@ -310,12 +316,14 @@ impl AgentMemoryPipeline {
             }
             Err(error) => {
                 // Never leave the ephemeral diff artifact behind on failure;
-                // the next run re-derives it from the git baseline.
+                // the next run re-derives it from the git baseline. The
+                // completed watermark stays at its previous value so the
+                // delta-skip does not swallow the retry.
                 memory_git::remove_workspace_diff_file(&project_root).ok();
                 self.complete_phase2(
                     &run_id,
                     "failed",
-                    selection.new_watermark,
+                    claim.previous_completed_watermark,
                     Some(&error),
                     project_key,
                 )
@@ -544,34 +552,8 @@ impl AgentMemoryPipeline {
         error: Option<&str>,
         project_key: &str,
     ) -> Result<(), String> {
-        let completed_at = Utc::now().to_rfc3339();
-        let watermark = watermark.map(|value| value.to_rfc3339());
-        sqlx::query(
-            "UPDATE agent_memory_phase2_runs \
-             SET status=?1, completed_watermark=?2, completed_at=?3, error=?4 \
-             WHERE id=?5",
-        )
-        .bind(status)
-        .bind(&watermark)
-        .bind(&completed_at)
-        .bind(error)
-        .bind(run_id)
-        .execute(&self.store.pool)
-        .await
-        .map_err(|error| error.to_string())?;
-        sqlx::query(
-            "UPDATE agent_memory_phase2_locks \
-             SET status=?1, lease_owner=NULL, lease_until=NULL, completed_watermark=?2, \
-                 updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
-             WHERE job_key=?3",
-        )
-        .bind(status)
-        .bind(&watermark)
-        .bind(project_key)
-        .execute(&self.store.pool)
-        .await
-        .map_err(|error| error.to_string())?;
-        Ok(())
+        complete_phase2_in_pool(&self.store.pool, run_id, status, watermark, error, project_key)
+            .await
     }
 
     async fn record_memory_usage(
@@ -995,6 +977,51 @@ async fn load_phase2_inputs_in_pool(
     .await
     .map_err(|error| error.to_string())?;
     Ok(rows.into_iter().map(Phase2InputRow::into_input).collect())
+}
+
+/// Finalize a phase2 run: record the run row, then release the lock. Free
+/// function (mirroring [`claim_phase2_in_pool`]) so the watermark retry
+/// semantics are unit-testable without the full host pipeline.
+///
+/// Failure paths MUST pass the PREVIOUS completed watermark (from the claim),
+/// not the selection's: advancing it would make the next trigger's delta-skip
+/// (`claimed == completed`) swallow the failure as a no-op success.
+async fn complete_phase2_in_pool(
+    pool: &sqlx::SqlitePool,
+    run_id: &str,
+    status: &str,
+    watermark: Option<DateTime<Utc>>,
+    error: Option<&str>,
+    project_key: &str,
+) -> Result<(), String> {
+    let completed_at = Utc::now().to_rfc3339();
+    let watermark = watermark.map(|value| value.to_rfc3339());
+    sqlx::query(
+        "UPDATE agent_memory_phase2_runs \
+         SET status=?1, completed_watermark=?2, completed_at=?3, error=?4 \
+         WHERE id=?5",
+    )
+    .bind(status)
+    .bind(&watermark)
+    .bind(&completed_at)
+    .bind(error)
+    .bind(run_id)
+    .execute(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    sqlx::query(
+        "UPDATE agent_memory_phase2_locks \
+         SET status=?1, lease_owner=NULL, lease_until=NULL, completed_watermark=?2, \
+             updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE job_key=?3",
+    )
+    .bind(status)
+    .bind(&watermark)
+    .bind(project_key)
+    .execute(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 /// Claim eligible completed root threads for phase1 extraction.
@@ -1740,6 +1767,83 @@ mod tests {
         assert_eq!(
             inputs_a.iter().map(|input| input.thread_id.as_str()).collect::<Vec<_>>(),
             vec!["thread-a"]
+        );
+    }
+
+    // A FAILED run must not advance the completed watermark: the delta-skip
+    // (`claimed == previous_completed`) would otherwise swallow the failure as
+    // a no-op success on the next trigger instead of retrying.
+    #[tokio::test]
+    async fn failed_phase2_run_keeps_previous_completed_watermark_for_retry() {
+        let store = AnyStore::connect("sqlite::memory:").await.expect("store");
+        insert_thread(&store, "thread-a").await;
+        let now = Utc::now();
+        let stamp = |offset: i64| (now + Duration::hours(offset)).to_rfc3339();
+        sqlx::query(
+            "INSERT INTO agent_memory_phase1_outputs \
+             (thread_id, session_id, project_key, status, raw_memory, rollout_summary, source_updated_at, generated_at) \
+             VALUES ('thread-a', 'session-1', 'proj-a', 'succeeded', 'raw a', 'summary a', ?1, ?1)",
+        )
+        .bind(stamp(0))
+        .execute(&store.pool)
+        .await
+        .expect("phase1 row");
+        let config = AgentMemoriesConfig::default();
+
+        // Run 1 claims and completes successfully at stamp(0).
+        let claim1 = claim_phase2_in_pool(&store.pool, &config, "run-1", "owner-1", now, "proj-a")
+            .await
+            .expect("claim 1")
+            .expect("first claim succeeds");
+        complete_phase2_in_pool(
+            &store.pool,
+            "run-1",
+            "succeeded",
+            claim1.claimed_watermark,
+            None,
+            "proj-a",
+        )
+        .await
+        .expect("complete 1");
+
+        // New data lands (claimed MAX moves to stamp(1)); run 2 then FAILS and
+        // must preserve the previous completed watermark.
+        insert_thread(&store, "thread-a2").await;
+        sqlx::query(
+            "INSERT INTO agent_memory_phase1_outputs \
+             (thread_id, session_id, project_key, status, raw_memory, rollout_summary, source_updated_at, generated_at) \
+             VALUES ('thread-a2', 'session-1', 'proj-a', 'succeeded', 'raw a2', 'summary a2', ?1, ?1)",
+        )
+        .bind(stamp(1))
+        .execute(&store.pool)
+        .await
+        .expect("newer phase1 row");
+        let claim2 = claim_phase2_in_pool(&store.pool, &config, "run-2", "owner-2", now, "proj-a")
+            .await
+            .expect("claim 2")
+            .expect("second claim succeeds");
+        assert_ne!(claim2.claimed_watermark, claim2.previous_completed_watermark);
+        complete_phase2_in_pool(
+            &store.pool,
+            "run-2",
+            "failed",
+            claim2.previous_completed_watermark,
+            Some("consolidation failed"),
+            "proj-a",
+        )
+        .await
+        .expect("complete 2");
+
+        // The next trigger must NOT delta-skip: claimed (new MAX) still differs
+        // from the preserved previous completed watermark, so the run retries.
+        let claim3 = claim_phase2_in_pool(&store.pool, &config, "run-3", "owner-3", now, "proj-a")
+            .await
+            .expect("claim 3")
+            .expect("third claim succeeds after failure");
+        assert_eq!(claim3.claimed_watermark, claim2.claimed_watermark);
+        assert_ne!(
+            claim3.claimed_watermark, claim3.previous_completed_watermark,
+            "failed runs retry on the next trigger instead of no-op succeeding"
         );
     }
 

@@ -5942,6 +5942,105 @@ async fn max_turns_exhaustion_is_interrupted_with_reason_not_completed() {
     );
 }
 
+/// LLM double that narrates its confirmed findings AND requests a tool every
+/// turn — a child running against it never finals and exhausts its budget.
+struct NarratingToolLoopLlm;
+
+#[async_trait]
+impl LlmPort for NarratingToolLoopLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        Ok(LlmResponse {
+            content: Some("Confirmed so far: the parser bug is at src/lex.rs:42.".into()),
+            content_already_streamed: false,
+            tool_calls: vec![ParsedToolCall {
+                id: "call-narrate".into(),
+                name: "echo".into(),
+                arguments: r#"{"message":"still working"}"#.into(),
+            }],
+            finish_reason: Some("tool_calls".into()),
+            usage: None,
+        })
+    }
+}
+
+/// A CHILD thread that runs out of turns synthesizes its confirmed-so-far
+/// findings as the completion text (prefixed for `slab-agent-tools` routing)
+/// instead of the bare "max_turns_reached" — the partial work must reach the
+/// parent. Root threads keep the bare reason (pinned by the test above).
+#[tokio::test]
+async fn max_turns_child_synthesizes_partial_findings() {
+    let llm = Arc::new(NarratingToolLoopLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+
+    // Pre-seed the parent row (the delegation path runs against a persisted
+    // parent, exactly like the subagent tool does mid-turn).
+    let parent_config =
+        AgentConfig { model: "mock".into(), max_depth: 4, ..AgentConfig::default() };
+    let now = "2026-01-01T00:00:00Z".to_owned();
+    store
+        .upsert_thread(&ThreadSnapshot {
+            id: "parent".to_owned(),
+            session_id: "session-child-max-turns".to_owned(),
+            parent_id: None,
+            depth: 0,
+            status: ThreadStatus::Completed,
+            role_name: None,
+            config_json: serde_json::to_string(&parent_config).expect("config"),
+            completion_text: Some("parent".to_owned()),
+            created_at: now.clone(),
+            updated_at: now,
+            archived_at: None,
+        })
+        .await
+        .expect("parent row");
+
+    let child_id = control
+        .spawn_child_for_parent(
+            "parent",
+            AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() },
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("find the bug".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("child spawn");
+
+    wait_for_persisted_status(&store, &child_id, ThreadStatus::Interrupted).await;
+    let snapshot = store
+        .get_thread(&child_id)
+        .await
+        .expect("load snapshot")
+        .expect("child snapshot should exist");
+
+    assert_eq!(snapshot.status, ThreadStatus::Interrupted);
+    let text = snapshot.completion_text.as_deref().expect("partial findings synthesized");
+    assert!(
+        text.starts_with(crate::MAX_TURNS_PARTIAL_PREFIX),
+        "the prefix drives downstream routing: {text:?}"
+    );
+    assert!(text.contains("src/lex.rs:42"), "the confirmed finding survives: {text:?}");
+    assert_ne!(text, "max_turns_reached");
+}
+
 #[tokio::test]
 async fn repeated_side_effect_tool_call_interrupts_with_reason_and_trace_event() {
     let llm = Arc::new(RepeatingToolCallLlm::new(

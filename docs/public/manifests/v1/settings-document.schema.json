@@ -545,6 +545,15 @@
       },
       "type": "object"
     },
+    "ApiStyle": {
+      "description": "Which OpenAI-lineage wire protocol a provider endpoint speaks.\n\nOnly meaningful for OpenAI-lineage families (`openai`, `openai_resp`,\n`openai_compatible`); other families ignore it. `Auto` derives from the\nfamily (first-party OpenAI defaults to the Responses API; custom\n`openai_compatible` endpoints are probed for `/responses` support at first\nuse and fall back to Chat Completions when the probe fails).",
+      "enum": [
+        "auto",
+        "responses",
+        "chat_completions"
+      ],
+      "type": "string"
+    },
     "AutoUnloadConfig": {
       "description": "Automatic model-unload settings.",
       "properties": {
@@ -1297,6 +1306,11 @@
         "api_base": {
           "description": "Provider API base URL.",
           "type": "string"
+        },
+        "api_style": {
+          "$ref": "#/$defs/ApiStyle",
+          "default": "auto",
+          "description": "OpenAI-lineage wire protocol preference (ignored by other families)."
         },
         "auth": {
           "$ref": "#/$defs/ProviderAuthConfig",

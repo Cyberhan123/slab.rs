@@ -273,17 +273,45 @@ pub fn truncate_to_token_budget(text: &str, budget_tokens: usize) -> String {
 /// Each entry gets a heading with its (frozen) freshness label and a
 /// staleness warning when older than a day, and is individually capped at
 /// [`RECALL_ENTRY_TOKEN_BUDGET`].
+/// Validate a manifest-supplied summary filename before it is joined into the
+/// summaries directory. Manifest `summary_file:` values are model-writable
+/// (phase2 consolidation output), so they are a trust boundary: the stripped
+/// name must be one flat path segment in the `[A-Za-z0-9_.-]` charset — no
+/// separators (`/` or `\`), no traversal, no hidden/absolute names.
+fn safe_summary_name(name: &str) -> Option<&str> {
+    if name.is_empty()
+        || name.starts_with('.')
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return None;
+    }
+    Some(name)
+}
+
 pub fn render_selected_entries(
     project_root: &Path,
     filenames: &[String],
     now: DateTime<Utc>,
 ) -> Result<String> {
     let mut rendered = String::new();
+    let summaries_root = project_root.join("rollout_summaries");
+    // Canonical once: entries must resolve inside this directory.
+    let Some(summaries_root) = summaries_root.canonicalize().ok() else {
+        return Ok(rendered);
+    };
     for filename in filenames {
-        let Some(name) = filename.strip_prefix("rollout_summaries/") else {
+        let Some(name) = filename.strip_prefix("rollout_summaries/").and_then(safe_summary_name)
+        else {
             continue;
         };
         let path = project_root.join("rollout_summaries").join(name);
+        // Defense in depth: even a whitelisted name must canonicalize back
+        // inside the summaries dir (a symlink planted in the workspace must
+        // not exfiltrate files outside it). A missing file skips the entry.
+        match path.canonicalize() {
+            Ok(resolved) if resolved.starts_with(&summaries_root) => {}
+            _ => continue,
+        }
         let Some(body) = read_optional(&path)? else {
             continue;
         };
@@ -473,5 +501,67 @@ mod tests {
         assert!(rendered.contains("### rollout_summaries/a.md (saved"));
         assert!(rendered.contains("the body"));
         assert!(rendered.contains("STALE"), "entries older than the staleness window warn");
+    }
+
+    #[test]
+    fn selected_entries_reject_traversal_names() {
+        let root = tempfile::tempdir().expect("tempdir");
+        // A real file OUTSIDE the summaries dir that a poisoned manifest
+        // (model-writable `summary_file:` line) tries to pull into context.
+        let secret = root.path().join("secret.md");
+        std::fs::write(&secret, "should never be rendered").expect("secret");
+        let summaries = root.path().join("rollout_summaries");
+        std::fs::create_dir_all(&summaries).expect("dir");
+        std::fs::write(summaries.join("ok.md"), "# Fine\nbody").expect("ok");
+        let now = Utc.with_ymd_and_hms(2026, 8, 26, 12, 0, 0).unwrap();
+
+        let rendered = render_selected_entries(
+            root.path(),
+            &[
+                "rollout_summaries/../../secret.md".to_owned(),
+                "rollout_summaries/..\\..\\secret.md".to_owned(),
+                "rollout_summaries/../../../etc/passwd".to_owned(),
+                "/etc/passwd".to_owned(),
+                "rollout_summaries/C:\\Windows\\win.ini".to_owned(),
+                "rollout_summaries/.hidden.md".to_owned(),
+                "rollout_summaries/ok.md".to_owned(),
+            ],
+            now,
+        )
+        .expect("rendered");
+
+        assert!(!rendered.contains("should never be rendered"));
+        assert!(!rendered.contains("passwd"));
+        assert!(!rendered.contains("win.ini"));
+        assert!(!rendered.contains(".hidden.md"));
+        assert!(rendered.contains("### rollout_summaries/ok.md"), "valid entries still render");
+    }
+
+    #[test]
+    fn selected_entries_reject_symlink_escape() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let secret = root.path().join("secret.md");
+        std::fs::write(&secret, "exfiltrated").expect("secret");
+        let summaries = root.path().join("rollout_summaries");
+        std::fs::create_dir_all(&summaries).expect("dir");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&secret, summaries.join("escape.md")).expect("symlink");
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::symlink_file;
+            // Symlink creation needs privileges on Windows; skip silently
+            // when unavailable — the canonicalize guard is covered by the
+            // traversal test above.
+            if symlink_file(&secret, summaries.join("escape.md")).is_err() {
+                return;
+            }
+        }
+        let now = Utc.with_ymd_and_hms(2026, 8, 26, 12, 0, 0).unwrap();
+
+        let rendered =
+            render_selected_entries(root.path(), &["rollout_summaries/escape.md".to_owned()], now)
+                .expect("rendered");
+
+        assert!(!rendered.contains("exfiltrated"), "symlinks must not escape the summaries dir");
     }
 }

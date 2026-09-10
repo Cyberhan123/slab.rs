@@ -1993,6 +1993,7 @@ fn provider_registry_entry_to_cloud_provider(entry: &ProviderRegistryEntry) -> C
         family: entry.family,
         name: entry.display_name.clone(),
         api_base: entry.api_base.clone(),
+        api_style: entry.api_style,
         api_key: entry.auth.api_key.clone(),
         api_key_env: entry.auth.api_key_env.clone(),
     }
@@ -2044,6 +2045,7 @@ mod tests {
             family: ProviderFamily::OpenaiCompatible,
             display_name: "OpenAI".to_owned(),
             api_base: "https://api.openai.com/v1".to_owned(),
+            api_style: crate::ApiStyle::Auto,
             auth: ProviderAuthConfig {
                 api_key: api_key.map(str::to_owned),
                 api_key_env: api_key_env.map(str::to_owned),

@@ -73,7 +73,7 @@ describe('buildScrollerRows', () => {
     expect(rows.at(-1)?.kind).toBe('compactMarker')
   })
 
-  it('appends settings markers after compaction markers, in arrival order', () => {
+  it('appends unanchored settings markers after compaction markers, in arrival order', () => {
     const rows = buildScrollerRows([msg('m1')], [compact('c1')], {
       showHistoryMarker: false,
       settingsMarkers: [
@@ -82,8 +82,15 @@ describe('buildScrollerRows', () => {
           kind: 'permissionMode',
           fromMode: 'approve_for_me',
           toMode: 'request_approval',
+          afterMessageId: null,
         },
-        { id: 'modelSwitch:2', kind: 'modelSwitch', fromModel: 'A', toModel: 'B' },
+        {
+          id: 'modelSwitch:2',
+          kind: 'modelSwitch',
+          fromModel: 'A',
+          toModel: 'B',
+          afterMessageId: null,
+        },
       ],
     })
 
@@ -99,12 +106,96 @@ describe('buildScrollerRows', () => {
     expect(settings.map((r) => r.id)).toEqual(['permissionMode:1', 'modelSwitch:2'])
   })
 
-  it('places settings markers between compaction markers and the model-load marker', () => {
+  it('inserts anchored settings markers right after their anchor message', () => {
+    const rows = buildScrollerRows([msg('m1'), msg('m2'), msg('m3')], [], {
+      showHistoryMarker: false,
+      settingsMarkers: [
+        {
+          id: 'modelSwitch:1',
+          kind: 'modelSwitch',
+          fromModel: 'A',
+          toModel: 'B',
+          afterMessageId: 'm1',
+        },
+      ],
+    })
+
+    expect(rows.map((r) => r.kind)).toEqual([
+      'message',
+      'settingsMarker',
+      'message',
+      'message',
+    ])
+    expect(rows[1]).toMatchObject({ kind: 'settingsMarker', id: 'modelSwitch:1' })
+  })
+
+  it('keeps push order for markers sharing one anchor and anchors to the last match', () => {
+    const rows = buildScrollerRows([msg('m1'), msg('m1'), msg('m2')], [], {
+      showHistoryMarker: false,
+      settingsMarkers: [
+        {
+          id: 'permissionMode:1',
+          kind: 'permissionMode',
+          fromMode: 'request_approval',
+          toMode: 'full_control',
+          afterMessageId: 'm1',
+        },
+        {
+          id: 'modelSwitch:2',
+          kind: 'modelSwitch',
+          fromModel: 'A',
+          toModel: 'B',
+          afterMessageId: 'm1',
+        },
+      ],
+    })
+
+    // Both land after the LAST m1, in arrival order (closest to the message
+    // first — the backward scan skips the already-inserted marker row).
+    expect(rows.map((r) => r.kind)).toEqual([
+      'message',
+      'message',
+      'settingsMarker',
+      'settingsMarker',
+      'message',
+    ])
+    expect(rows.slice(2, 4).map((r) => (r as { id: string }).id)).toEqual([
+      'permissionMode:1',
+      'modelSwitch:2',
+    ])
+  })
+
+  it('falls back to the tail when the anchor message no longer exists', () => {
+    const rows = buildScrollerRows([msg('m1'), msg('m2')], [], {
+      showHistoryMarker: false,
+      settingsMarkers: [
+        {
+          id: 'modelSwitch:1',
+          kind: 'modelSwitch',
+          fromModel: 'A',
+          toModel: 'B',
+          afterMessageId: 'deleted-message',
+        },
+      ],
+    })
+
+    expect(rows.map((r) => r.kind)).toEqual(['message', 'message', 'settingsMarker'])
+  })
+
+  it('places unanchored settings markers between compaction markers and the model-load marker', () => {
     const load: ModelLoadState = { phase: 'loading', modelId: 'm' }
     const rows = buildScrollerRows([msg('m1')], [compact('c1')], {
       showHistoryMarker: false,
       modelLoad: load,
-      settingsMarkers: [{ id: 'modelSwitch:1', kind: 'modelSwitch', fromModel: 'A', toModel: 'B' }],
+      settingsMarkers: [
+        {
+          id: 'modelSwitch:1',
+          kind: 'modelSwitch',
+          fromModel: 'A',
+          toModel: 'B',
+          afterMessageId: null,
+        },
+      ],
     })
 
     expect(rows.map((r) => r.kind)).toEqual([

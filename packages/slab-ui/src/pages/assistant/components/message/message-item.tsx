@@ -122,6 +122,11 @@ const messagePartComponents: MessagePartComponents<TMessagePart, TMessage> = {
         file_glob: MessageToolFileGlobPart,
         grep: MessageToolGrepPart,
         delegate_subagent: MessageToolSubagentPart,
+        // Companion subagent registry/steering calls share the subagent card;
+        // it normalizes their envelope shapes (task/stopped snapshots, queued).
+        subagent_status: MessageToolSubagentPart,
+        subagent_message: MessageToolSubagentPart,
+        subagent_stop: MessageToolSubagentPart,
     },
 }
 

@@ -437,6 +437,7 @@ mod tests {
                 family: ProviderFamily::BigModel,
                 display_name: "BigModel (GLM)".to_owned(),
                 api_base: "https://open.bigmodel.cn/api/coding/paas/v4".to_owned(),
+                api_style: Default::default(),
                 auth: Default::default(),
             }],
             ..TestServerOptions::default()

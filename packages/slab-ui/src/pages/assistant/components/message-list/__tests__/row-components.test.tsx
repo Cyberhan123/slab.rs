@@ -197,7 +197,13 @@ describe("SettingsMarkerRow", () => {
         row={{
           kind: "settingsMarker",
           id: "modelSwitch:1",
-          marker: { id: "modelSwitch:1", kind: "modelSwitch", fromModel: "Model A", toModel: "Model B" },
+          marker: {
+            id: "modelSwitch:1",
+            kind: "modelSwitch",
+            fromModel: "Model A",
+            toModel: "Model B",
+            afterMessageId: null,
+          },
         }}
         historyCreatedAt={null}
       />,
@@ -227,6 +233,7 @@ describe("SettingsMarkerRow", () => {
             kind: "permissionMode",
             fromMode: "approve_for_me",
             toMode: "request_approval",
+            afterMessageId: null,
           },
         }}
         historyCreatedAt={null}
@@ -251,6 +258,7 @@ describe("SettingsMarkerRow", () => {
             fromModel: null,
             toModel: "Fast Model",
             promptChanged: true,
+            afterMessageId: null,
           },
         }}
         historyCreatedAt={null}
@@ -274,6 +282,7 @@ describe("SettingsMarkerRow", () => {
             fromModel: "Fast Model",
             toModel: "Fast Model",
             promptChanged: true,
+            afterMessageId: null,
           },
         }}
         historyCreatedAt={null}

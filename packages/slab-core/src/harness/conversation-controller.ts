@@ -174,6 +174,11 @@ export interface CompactionMarker {
  * a full reload, never persisted to the backend. The UI pushes these at the
  * moment the change is committed; every turn carries the current selection,
  * so the marker lands before the first turn that uses the new setting.
+ *
+ * `afterMessageId` anchors the divider to the message timeline: the row list
+ * inserts the marker right after that message instead of at the flow tail, so
+ * a mid-conversation switch reads in order. `null` (or an anchor that no
+ * longer exists) falls back to the tail — the pre-anchor behavior.
  */
 export type SettingsMarker =
   | {
@@ -183,12 +188,16 @@ export type SettingsMarker =
       fromModel: string
       /** Display label of the next model. */
       toModel: string
+      /** Message id the switch was recorded after; null = tail. */
+      afterMessageId: string | null
     }
   | {
       id: string
       kind: "permissionMode"
       fromMode: PermissionMode
       toMode: PermissionMode
+      /** Message id the change was recorded after; null = tail. */
+      afterMessageId: string | null
     }
   | {
       id: string
@@ -199,6 +208,8 @@ export type SettingsMarker =
       toModel: string | null
       /** Whether the policy prompt changed too (the label prefers the model). */
       promptChanged: boolean
+      /** Message id the change was recorded after; null = tail. */
+      afterMessageId: string | null
     }
 
 /** Monotonic nonce for settings-marker ids (rapid changes can share a ms). */
@@ -596,7 +607,10 @@ export class ConversationController {
    * model-switch dialog) as an in-stream marker. Display labels are resolved
    * by the caller (the page owns the model options). No-op when they match.
    */
-  readonly noteModelSwitch = (change: { from: string; to: string }): void => {
+  readonly noteModelSwitch = (
+    change: { from: string; to: string },
+    afterMessageId?: string | null,
+  ): void => {
     if (change.from === change.to) return
     this.settingsMarkers = [
       ...this.settingsMarkers,
@@ -605,6 +619,7 @@ export class ConversationController {
         kind: "modelSwitch",
         fromModel: change.from,
         toModel: change.to,
+        afterMessageId: afterMessageId ?? null,
       },
     ]
     this.commit()
@@ -614,10 +629,13 @@ export class ConversationController {
    * Record a permission-mode change picked from the composer dropdown as an
    * in-stream marker. No-op for a re-selection of the current mode.
    */
-  readonly notePermissionModeChange = (change: {
-    from: PermissionMode
-    to: PermissionMode
-  }): void => {
+  readonly notePermissionModeChange = (
+    change: {
+      from: PermissionMode
+      to: PermissionMode
+    },
+    afterMessageId?: string | null,
+  ): void => {
     if (change.from === change.to) return
     this.settingsMarkers = [
       ...this.settingsMarkers,
@@ -626,6 +644,7 @@ export class ConversationController {
         kind: "permissionMode",
         fromMode: change.from,
         toMode: change.to,
+        afterMessageId: afterMessageId ?? null,
       },
     ]
     this.commit()
@@ -635,11 +654,14 @@ export class ConversationController {
    * Record an approval-review config save (reviewer model and/or policy
    * prompt) as an in-stream marker. No-op when nothing actually changed.
    */
-  readonly noteApprovalReviewChange = (change: {
-    fromModel: string | null
-    toModel: string | null
-    promptChanged: boolean
-  }): void => {
+  readonly noteApprovalReviewChange = (
+    change: {
+      fromModel: string | null
+      toModel: string | null
+      promptChanged: boolean
+    },
+    afterMessageId?: string | null,
+  ): void => {
     if (change.fromModel === change.toModel && !change.promptChanged) return
     this.settingsMarkers = [
       ...this.settingsMarkers,
@@ -649,6 +671,7 @@ export class ConversationController {
         fromModel: change.fromModel,
         toModel: change.toModel,
         promptChanged: change.promptChanged,
+        afterMessageId: afterMessageId ?? null,
       },
     ]
     this.commit()

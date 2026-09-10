@@ -217,6 +217,7 @@ fn cloud_chat_picker_requires_known_provider() {
             family: slab_config::ProviderFamily::Openai,
             name: "OpenAI".to_owned(),
             api_base: "https://api.openai.com/v1".to_owned(),
+            api_style: slab_config::ApiStyle::Auto,
             api_key: None,
             api_key_env: None,
         },

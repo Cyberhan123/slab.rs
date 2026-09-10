@@ -15543,6 +15543,7 @@ name = "slab-cloud-provider"
 version = "0.1.0"
 dependencies = [
  "genai",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "slab-config",
