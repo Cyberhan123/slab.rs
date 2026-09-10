@@ -1626,6 +1626,10 @@ pub fn provider_registry_json_schema() -> Value {
                     "type": "string",
                     "title": "API Style",
                     "description": "OpenAI-lineage wire protocol: responses, chat_completions, or auto (derive from family; probe custom endpoints for /responses support). Ignored by non-OpenAI families.",
+                    "x-i18n": schema_i18n(
+                        Some(ServerI18nKey::SettingsSchemaProviderApiStyleTitle),
+                        Some(ServerI18nKey::SettingsSchemaProviderApiStyleDescription),
+                    ),
                     "enum": ApiStyle::all_str(),
                     "default": "auto"
                 },
@@ -2291,6 +2295,9 @@ mod tests {
             "api_style enum must mirror ApiStyle::all_str()"
         );
         assert_eq!(api_style.get("default"), Some(&Value::String("auto".to_owned())));
+        // Both api_style facets are localized (title + description keys).
+        let i18n = api_style.get("x-i18n").and_then(Value::as_object).expect("api_style x-i18n");
+        assert!(i18n.contains_key("title") && i18n.contains_key("description"));
     }
 
     #[test]

@@ -256,6 +256,8 @@ export const SERVER_I18N_KEYS = [
   'server.settings.schemas.provider.family.title',
   'server.settings.schemas.provider.displayName.title',
   'server.settings.schemas.provider.apiBase.title',
+  'server.settings.schemas.provider.apiStyle.title',
+  'server.settings.schemas.provider.apiStyle.description',
   'server.settings.schemas.provider.auth.title',
   'server.settings.schemas.provider.apiKey.title',
   'server.settings.schemas.provider.apiKeyEnv.title',
@@ -626,6 +628,9 @@ export const enUSServerMessages = {
   'server.settings.schemas.provider.family.title': 'Provider Family',
   'server.settings.schemas.provider.displayName.title': 'Display Name',
   'server.settings.schemas.provider.apiBase.title': 'API Base URL',
+  'server.settings.schemas.provider.apiStyle.title': 'API Style',
+  'server.settings.schemas.provider.apiStyle.description':
+    'OpenAI-lineage wire protocol: responses, chat_completions, or auto (derive from family; probe custom endpoints for /responses support). Ignored by non-OpenAI families.',
   'server.settings.schemas.provider.auth.title': 'Authentication',
   'server.settings.schemas.provider.apiKey.title': 'API Key',
   'server.settings.schemas.provider.apiKeyEnv.title': 'API Key Environment Variable',
@@ -943,6 +948,9 @@ export const zhCNServerMessages = {
   'server.settings.schemas.provider.family.title': '提供商家族',
   'server.settings.schemas.provider.displayName.title': '显示名称',
   'server.settings.schemas.provider.apiBase.title': 'API 基础 URL',
+  'server.settings.schemas.provider.apiStyle.title': 'API 风格',
+  'server.settings.schemas.provider.apiStyle.description':
+    'OpenAI 血统的线协议：responses、chat_completions 或 auto（按家族推导；自定义端点会探测 /responses 支持）。非 OpenAI 家族忽略此项。',
   'server.settings.schemas.provider.auth.title': '认证',
   'server.settings.schemas.provider.apiKey.title': 'API Key',
   'server.settings.schemas.provider.apiKeyEnv.title': 'API Key 环境变量',

@@ -518,6 +518,10 @@ pub enum ServerI18nKey {
     SettingsSchemaProviderDisplayNameTitle,
     #[serde(rename = "server.settings.schemas.provider.apiBase.title")]
     SettingsSchemaProviderApiBaseTitle,
+    #[serde(rename = "server.settings.schemas.provider.apiStyle.title")]
+    SettingsSchemaProviderApiStyleTitle,
+    #[serde(rename = "server.settings.schemas.provider.apiStyle.description")]
+    SettingsSchemaProviderApiStyleDescription,
     #[serde(rename = "server.settings.schemas.provider.auth.title")]
     SettingsSchemaProviderAuthTitle,
     #[serde(rename = "server.settings.schemas.provider.apiKey.title")]
