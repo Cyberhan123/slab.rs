@@ -52,6 +52,34 @@ pub fn existing_ancestor(path: &Path) -> io::Result<PathBuf> {
     current.canonicalize()
 }
 
+/// Canonicalize `path` even when its final components do not exist yet:
+/// canonicalize the closest existing ancestor, then re-append the missing
+/// tail. The tail is collected on the original path — composing
+/// `existing_ancestor` with `strip_prefix` on the input would break because
+/// Windows canonicalize yields `\\?\` verbatim prefixes.
+///
+/// Symlinks in the existing prefix are resolved by `canonicalize`, so a link
+/// pointing outside its directory yields a result outside that directory.
+pub fn canonicalize_with_existing_ancestor(path: &Path) -> io::Result<PathBuf> {
+    let mut current = path.to_path_buf();
+    let mut tail = Vec::new();
+    while !current.exists() {
+        let parent = current.parent().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "path has no existing ancestor")
+        })?;
+        let component = current.strip_prefix(parent).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "path has an unexpected shape")
+        })?;
+        tail.push(component.to_path_buf());
+        current = parent.to_path_buf();
+    }
+    let mut resolved = current.canonicalize()?;
+    for component in tail.iter().rev() {
+        resolved.push(component);
+    }
+    Ok(resolved)
+}
+
 #[cfg(unix)]
 fn set_unix_mode(temp_file: &NamedTempFile, mode: Option<u32>) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -147,6 +175,64 @@ mod tests {
         let ancestor = existing_ancestor(&missing).unwrap();
 
         assert_eq!(ancestor, dir.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn canonicalize_with_existing_ancestor_matches_plain_canonicalize_for_existing_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        fs::write(&file, b"payload").unwrap();
+
+        assert_eq!(
+            canonicalize_with_existing_ancestor(&file).unwrap(),
+            file.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn canonicalize_with_existing_ancestor_preserves_missing_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("a").join("b").join("file.txt");
+
+        assert_eq!(
+            canonicalize_with_existing_ancestor(&missing).unwrap(),
+            dir.path().canonicalize().unwrap().join("a").join("b").join("file.txt")
+        );
+    }
+
+    #[test]
+    fn canonicalize_with_existing_ancestor_walks_to_root_for_fully_missing_chain() {
+        // Absolute so the walk terminates at the drive root / filesystem root.
+        let missing =
+            PathBuf::from("/").join("slab-definitely-missing-root").join("a").join("b.txt");
+
+        let resolved = canonicalize_with_existing_ancestor(&missing).unwrap();
+
+        assert!(
+            resolved.ends_with(Path::new("slab-definitely-missing-root").join("a").join("b.txt"))
+        );
+    }
+
+    #[test]
+    fn canonicalize_with_existing_ancestor_resolves_symlink_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let link = dir.path().join("link");
+        #[cfg(unix)]
+        let symlink_result = std::os::unix::fs::symlink(outside.path(), &link);
+        #[cfg(windows)]
+        let symlink_result = std::os::windows::fs::symlink_dir(outside.path(), &link);
+        // Symlink creation needs privileges on some hosts; skip silently.
+        if symlink_result.is_err() {
+            return;
+        }
+
+        let through_link = link.join("new-file.txt");
+
+        assert_eq!(
+            canonicalize_with_existing_ancestor(&through_link).unwrap(),
+            outside.path().canonicalize().unwrap().join("new-file.txt")
+        );
     }
 
     #[cfg(unix)]
