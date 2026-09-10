@@ -82,11 +82,13 @@ impl TypedTool for FileGlobTool {
 
     async fn execute(
         &self,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         args: FileGlobArgs,
     ) -> Result<ToolOutput, AgentError> {
         let max_results = args.max_results.clamp(1, HARD_MAX_RESULTS as u64) as usize;
-        let search_root = crate::fs::resolve_agent_path(
+        let search_root = crate::fs::resolve_scoped_agent_path(
+            ctx,
+            "search files",
             self.workspace_root.as_deref(),
             &self.extra_roots,
             &args.path,
@@ -410,6 +412,27 @@ mod tests {
                 .expect_err("escape rejected");
 
         assert!(error.to_string().contains("workspace path"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn file_glob_rejects_delegated_scope_escape_before_scanning() {
+        let root = temp_root("scope_escape");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::create_dir_all(root.join("docs")).expect("create docs");
+        let tool = FileGlobTool::new(Some(root.clone()));
+        let ctx = crate::fs::test_support::scoped_ctx(&root, "src");
+
+        let error = ToolHandler::execute(&tool, &ctx, &json!({"path": "docs", "pattern": "*.md"}))
+            .await
+            .expect_err("scope escape rejected");
+        assert!(error.to_string().contains("[scope.escape]"));
+
+        let output = ToolHandler::execute(&tool, &ctx, &json!({"path": "src", "pattern": "*.rs"}))
+            .await
+            .expect("in-scope glob");
+        assert!(output.content.contains("matches"));
+
         let _ = fs::remove_dir_all(root);
     }
 

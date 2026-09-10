@@ -126,7 +126,9 @@ impl TypedTool for GrepTool {
         let max_results = args.max_results.clamp(1, HARD_MAX_RESULTS as u64) as usize;
         let context_lines = args.context_lines.min(MAX_CONTEXT_LINES as u64) as usize;
 
-        let search_root = crate::fs::resolve_agent_path(
+        let search_root = crate::fs::resolve_scoped_agent_path(
+            ctx,
+            "search files",
             self.workspace_root.as_deref(),
             &self.extra_roots,
             &args.path,
@@ -436,6 +438,24 @@ mod tests {
         .await
         .expect_err("absolute path rejected");
         assert!(absolute_escape.to_string().contains("absolute path"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn grep_tool_rejects_delegated_scope_escape_before_scanning() {
+        let root = temp_root("scope_escape");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::create_dir_all(root.join("docs")).expect("create docs");
+        fs::write(root.join("docs").join("a.md"), "needle\n").expect("write doc");
+        let tool = GrepTool::new(Some(root.clone()));
+        let ctx = crate::fs::test_support::scoped_ctx(&root, "src");
+
+        let error =
+            ToolHandler::execute(&tool, &ctx, &json!({"path": "docs", "pattern": "needle"}))
+                .await
+                .expect_err("scope escape rejected");
+        assert!(error.to_string().contains("[scope.escape]"));
 
         let _ = fs::remove_dir_all(root);
     }

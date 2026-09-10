@@ -65,6 +65,22 @@ pub(crate) fn io_tool_error(action: &str, path: &Path, error: &std::io::Error) -
     AgentError::ToolExecution(message)
 }
 
+/// Reject a file operation that escapes the thread's delegated workspace
+/// scope. Coded and self-describing so the model can correct the path on the
+/// next turn.
+pub(crate) fn scope_escape_tool_error(
+    action: &str,
+    path: &Path,
+    scope_relative: &str,
+) -> AgentError {
+    let path_display = path.display();
+    AgentError::ToolExecution(format!(
+        "[scope.escape] failed to {action}: '{path_display}' is outside the delegated workspace \
+         scope '{scope_relative}'; file operations are limited to '{scope_relative}' within this \
+         workspace"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,6 +109,15 @@ mod tests {
         );
         assert!(invalid.to_string().contains("[io.invalid_data]"), "{invalid}");
         assert!(invalid.to_string().contains("binary file"), "{invalid}");
+    }
+
+    #[test]
+    fn scope_escape_tool_error_names_action_path_and_scope() {
+        let error = scope_escape_tool_error("write file", Path::new("outside.txt"), "src");
+        let rendered = error.to_string();
+        assert!(rendered.contains("[scope.escape]"), "{rendered}");
+        assert!(rendered.contains("'outside.txt'"), "{rendered}");
+        assert!(rendered.contains("scope 'src'"), "{rendered}");
     }
 
     #[test]

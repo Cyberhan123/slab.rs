@@ -111,8 +111,13 @@ impl TypedTool for ReadFileTool {
     ) -> Result<ToolOutput, AgentError> {
         let start_line = args.start_line as usize;
         let end_line = args.end_line.map(|v| v as usize);
-        let path =
-            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, &args.path)?;
+        let path = resolve_scoped_agent_path(
+            ctx,
+            "read file",
+            self.workspace_root.as_deref(),
+            &self.extra_roots,
+            &args.path,
+        )?;
         // Stat FIRST: the on-disk size both gates the read strategy (inline vs
         // streamed window) and is the reported `total_bytes` — no multi-GB
         // allocation just to discover the file is huge.
@@ -357,11 +362,16 @@ impl TypedTool for WriteFileTool {
 
     async fn execute(
         &self,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         args: WriteFileArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let path =
-            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, &args.path)?;
+        let path = resolve_scoped_agent_path(
+            ctx,
+            "write file",
+            self.workspace_root.as_deref(),
+            &self.extra_roots,
+            &args.path,
+        )?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|error| {
                 crate::error::io_tool_error("create parent directory", parent, &error)
@@ -426,11 +436,16 @@ impl TypedTool for ListDirTool {
 
     async fn execute(
         &self,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         args: ListDirArgs,
     ) -> Result<ToolOutput, AgentError> {
-        let path =
-            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, &args.path)?;
+        let path = resolve_scoped_agent_path(
+            ctx,
+            "list directory",
+            self.workspace_root.as_deref(),
+            &self.extra_roots,
+            &args.path,
+        )?;
         let entries =
             slab_file::list_dir(None, &path.to_string_lossy()).await.map_err(|error| {
                 // Route the localized io message through the coded mapper; a
@@ -476,6 +491,47 @@ fn path_is_under_extra_root(path: &std::path::Path, extra_roots: &[PathBuf]) -> 
             .map(|canonical_root| candidate_parent.starts_with(canonical_root))
             .unwrap_or(false)
     })
+}
+
+/// Enforce the thread's delegated workspace scope (when set) on an already
+/// resolved path: canonicalize and compare against the canonical scope root,
+/// so symlink escapes through existing segments are caught. No-op without a
+/// scope.
+pub(crate) fn ensure_path_in_scope(
+    ctx: &ToolContext,
+    action: &str,
+    resolved: &std::path::Path,
+) -> Result<(), AgentError> {
+    let Some(scope) = ctx.workspace_scope.as_ref() else {
+        return Ok(());
+    };
+    let candidate = slab_utils::fs::canonicalize_with_existing_ancestor(resolved)
+        .map_err(|error| crate::error::io_tool_error(action, resolved, &error))?;
+    if candidate.starts_with(&scope.root) {
+        Ok(())
+    } else {
+        Err(crate::error::scope_escape_tool_error(action, resolved, &scope.relative))
+    }
+}
+
+/// [`resolve_agent_path`] plus delegated scope enforcement. Absolute paths
+/// under an extra root (agent memories) are exempt — the delegation contract
+/// bounds "workspace file operations" only. Everything else must resolve
+/// inside the workspace AND inside the scope.
+pub(crate) fn resolve_scoped_agent_path(
+    ctx: &ToolContext,
+    action: &str,
+    workspace_root: Option<&std::path::Path>,
+    extra_roots: &[PathBuf],
+    path: &str,
+) -> Result<PathBuf, AgentError> {
+    let path_buf = PathBuf::from(path);
+    if path_buf.is_absolute() && path_is_under_extra_root(&path_buf, extra_roots) {
+        return Ok(path_buf);
+    }
+    let resolved = resolve_agent_path(workspace_root, extra_roots, path)?;
+    ensure_path_in_scope(ctx, action, &resolved)?;
+    Ok(resolved)
 }
 
 #[cfg(test)]
@@ -889,5 +945,116 @@ mod tests {
         ));
         fs::create_dir_all(&root).expect("create temp root");
         root
+    }
+
+    #[test]
+    fn resolve_scoped_agent_path_allows_in_scope_and_rejects_escape() {
+        let root = temp_root("scope_basic");
+        let ctx = test_support::scoped_ctx(&root, "src");
+
+        // Inside the scope — including a not-yet-existing tail — resolves.
+        let inside =
+            resolve_scoped_agent_path(&ctx, "read file", Some(&root), &[], "src/new/file.txt")
+                .expect("inside scope");
+        let canonical_root = root.canonicalize().expect("canonical root");
+        assert!(inside.starts_with(&canonical_root));
+
+        // Outside the scope (but inside the workspace) is a coded rejection.
+        let error =
+            resolve_scoped_agent_path(&ctx, "read file", Some(&root), &[], "docs/readme.md")
+                .expect_err("outside scope");
+        let rendered = error.to_string();
+        assert!(rendered.contains("[scope.escape]"), "{rendered}");
+        assert!(rendered.contains("scope 'src'"), "{rendered}");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_scoped_agent_path_catches_symlink_escape() {
+        let root = temp_root("scope_symlink");
+        fs::create_dir_all(root.join("src")).expect("create scope dir");
+        fs::create_dir_all(root.join("outside")).expect("create outside dir");
+        let link = root.join("src").join("link");
+        #[cfg(unix)]
+        let symlink_result = std::os::unix::fs::symlink(root.join("outside"), &link);
+        #[cfg(windows)]
+        let symlink_result = std::os::windows::fs::symlink_dir(root.join("outside"), &link);
+        if symlink_result.is_err() {
+            // Symlink creation needs privileges on some hosts; skip silently.
+            let _ = fs::remove_dir_all(root);
+            return;
+        }
+
+        // The symlink target is INSIDE the workspace, so the workspace-root
+        // escape check passes — only the scope check catches it.
+        let ctx = test_support::scoped_ctx(&root, "src");
+        let error =
+            resolve_scoped_agent_path(&ctx, "read file", Some(&root), &[], "src/link/secret.txt")
+                .expect_err("symlink escape");
+        assert!(error.to_string().contains("[scope.escape]"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_scoped_agent_path_exempts_extra_roots() {
+        let root = temp_root("scope_extra");
+        let memory_root = temp_root("scope_extra_memory");
+        fs::write(memory_root.join("memory.md"), "note").expect("seed memory");
+        let ctx = test_support::scoped_ctx(&root, "src");
+        let memory_file = memory_root.join("memory.md");
+
+        let resolved = resolve_scoped_agent_path(
+            &ctx,
+            "read file",
+            Some(&root),
+            &[memory_root.clone()],
+            memory_file.to_str().expect("utf8 path"),
+        )
+        .expect("extra roots are exempt from the scope");
+
+        assert_eq!(resolved, memory_file);
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(memory_root);
+    }
+
+    #[tokio::test]
+    async fn write_file_tool_rejects_out_of_scope_path_without_touching_disk() {
+        let root = temp_root("scope_write");
+        fs::create_dir_all(root.join("src")).expect("create scope dir");
+        let tool = WriteFileTool::new(Some(root.clone()));
+        let ctx = test_support::scoped_ctx(&root, "src");
+
+        let error =
+            ToolHandler::execute(&tool, &ctx, &json!({"path": "outside.txt", "content": "nope"}))
+                .await
+                .expect_err("out-of-scope write");
+        let rendered = error.to_string();
+        assert!(rendered.contains("[scope.escape]"), "{rendered}");
+        assert!(!root.join("outside.txt").exists());
+
+        ToolHandler::execute(&tool, &ctx, &json!({"path": "src/inside.txt", "content": "ok"}))
+            .await
+            .expect("in-scope write");
+        assert!(root.join("src").join("inside.txt").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+}
+
+/// Test-only helpers shared with the glob/grep scope tests.
+#[cfg(test)]
+pub(crate) mod test_support {
+    /// Build a ToolContext carrying a delegated workspace scope resolved
+    /// against `root` the same way the kernel does.
+    pub(crate) fn scoped_ctx(root: &std::path::Path, scope: &str) -> slab_agent::ToolContext {
+        slab_agent::ToolContext::for_thread("child")
+            .workspace_scope(slab_agent::WorkspaceScopeRef {
+                root: slab_utils::fs::canonicalize_with_existing_ancestor(&root.join(scope))
+                    .expect("canonical scope root"),
+                relative: scope.to_owned(),
+            })
+            .build()
     }
 }
