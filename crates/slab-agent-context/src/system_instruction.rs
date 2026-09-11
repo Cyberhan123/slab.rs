@@ -7,9 +7,9 @@ use crate::helper::SYSTEM_TEMPLATE_NAME;
 /// Renders the system prompt.
 ///
 /// `workspace_bound` mirrors whether the host registered the workspace-bound
-/// tools (`apply_patch` & friends register only when a workspace root exists),
-/// so the tool-use guidance the model reads matches the tool list it actually
-/// receives instead of describing tools that are not there.
+/// tools (the git trio registers only when a workspace root exists), so the
+/// workspace-scoped guidance the model reads matches the environment it
+/// actually runs in instead of describing tools that are not there.
 ///
 /// `apply_patch_available` is stricter: whether `apply_patch` is actually
 /// CALLABLE this run — registered AND exposed by the permission snapshot AND

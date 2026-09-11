@@ -417,8 +417,8 @@ impl AgentThread {
 
         // Startup consistency guard: the system prompt must not steer the
         // model at workspace-bound tools the router never registered (no
-        // workspace root → apply_patch/git_* drop out; the plan prompt names
-        // git_* unconditionally). Warn and strip the guidance — a prompt/tool
+        // workspace root → git_* drop out; the plan prompt names git_*
+        // unconditionally). Warn and strip the guidance — a prompt/tool
         // drift must not fail the run.
         let missing_workspace_tools: Vec<&str> = WORKSPACE_BOUND_TOOL_NAMES
             .iter()
@@ -1555,11 +1555,11 @@ fn tracks_for_repetition(signature: &ToolCallSignature, router: &ToolRouter) -> 
 
 /// Workspace-bound tool names: `register_all_tools` only registers these when
 /// a workspace root exists, so a system prompt naming one while the router
-/// lacks it is steering the model at a tool it cannot call (e.g. the plan
-/// prompt lists `git_status`/`git_diff` unconditionally, and the main prompt
-/// gates only `apply_patch`).
-const WORKSPACE_BOUND_TOOL_NAMES: [&str; 4] =
-    ["apply_patch", "git_status", "git_diff", "git_commit"];
+/// lacks it is steering the model at a tool it cannot call (the plan prompt
+/// lists `git_status`/`git_diff` unconditionally). `apply_patch` is NOT in
+/// this list: it registers unconditionally and degrades to cwd-relative patch
+/// paths like the other file tools.
+const WORKSPACE_BOUND_TOOL_NAMES: [&str; 3] = ["git_status", "git_diff", "git_commit"];
 
 fn is_word_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
@@ -1802,30 +1802,6 @@ mod merge_tests {
 mod prompt_tool_guard_tests {
     use super::*;
 
-    /// Minimal registered tool stub — occupies a name in the router.
-    struct StubTool(&'static str);
-
-    #[async_trait::async_trait]
-    impl crate::TypedTool for StubTool {
-        type Input = serde_json::Value;
-
-        fn name(&self) -> &str {
-            self.0
-        }
-
-        fn description(&self) -> &str {
-            "stub"
-        }
-
-        async fn execute(
-            &self,
-            _ctx: &crate::tool::ToolContext,
-            _arguments: serde_json::Value,
-        ) -> Result<crate::tool::ToolOutput, crate::error::AgentError> {
-            Ok(crate::tool::ToolOutput { content: String::new(), metadata: None })
-        }
-    }
-
     /// The workspace-bound names missing from the router — exactly what the
     /// run() call site computes before stripping.
     fn missing_from(router: &crate::ToolRouter) -> Vec<&'static str> {
@@ -1838,21 +1814,27 @@ mod prompt_tool_guard_tests {
 
     const MAIN_PROMPT: &str = "# Tool use\n\n- Prefer `apply_patch` for single-file edits; fall back to other means only if it does not work well.\n- Use `plan` to lay out a multi-step task before executing it.";
 
+    const GIT_BULLET_PROMPT: &str = "# Tool use\n\n- Prefer `git_status` to inspect the repository before editing; fall back to other means only if it does not work well.\n- Use `plan` to lay out a multi-step task before executing it.";
+
     const PLAN_PROMPT: &str = "You are a planning agent. Work only with the read-only tools (read_file, grep, glob, ls, git_status, git_diff) and the plan tools (plan, update_plan, present_plan).\n\nFollow the sequence exactly.";
 
     // Router WITHOUT the workspace-bound tools (the `register_all_tools(None)`
-    // shape): the apply_patch guidance bullet must disappear while the rest of
+    // shape): guidance bullets naming them must disappear while the rest of
     // the prompt survives verbatim. `stripped` lists the tools actually
-    // mentioned in the text (MAIN_PROMPT names only apply_patch).
+    // mentioned in the text (GIT_BULLET_PROMPT names only git_status).
     #[test]
     fn missing_tool_guidance_bullet_is_dropped() {
         let router = crate::ToolRouter::new();
         let missing = missing_from(&router);
-        assert_eq!(missing, WORKSPACE_BOUND_TOOL_NAMES, "all four are missing on an empty router");
+        assert_eq!(
+            missing,
+            vec!["git_status", "git_diff", "git_commit"],
+            "all three are missing on an empty router"
+        );
 
-        let (cleaned, stripped) = strip_missing_tool_guidance(MAIN_PROMPT, &missing);
-        assert_eq!(stripped, vec!["apply_patch"]);
-        assert!(!cleaned.contains("apply_patch"), "guidance bullet must be gone:\n{cleaned}");
+        let (cleaned, stripped) = strip_missing_tool_guidance(GIT_BULLET_PROMPT, &missing);
+        assert_eq!(stripped, vec!["git_status"]);
+        assert!(!cleaned.contains("git_status"), "guidance bullet must be gone:\n{cleaned}");
         assert!(
             cleaned.contains("- Use `plan` to lay out a multi-step task"),
             "unrelated bullet kept"
@@ -1860,12 +1842,12 @@ mod prompt_tool_guard_tests {
         assert!(cleaned.starts_with("# Tool use"), "heading kept");
     }
 
-    // Router WITH apply_patch registered: the prompt's guidance for it stays
-    // (nothing it mentions is missing anymore).
+    // A prompt naming only unconditionally-registered tools (apply_patch
+    // degrades with the file tools instead of dropping out): nothing it
+    // mentions is in the missing set, so it passes through untouched.
     #[test]
     fn registered_tool_guidance_is_kept() {
         let router = crate::ToolRouter::new();
-        router.register(Box::new(StubTool("apply_patch")));
         let missing = missing_from(&router);
         assert_eq!(missing, vec!["git_status", "git_diff", "git_commit"]);
 
@@ -1879,7 +1861,6 @@ mod prompt_tool_guard_tests {
     #[test]
     fn inline_list_mention_is_excised_not_the_sentence() {
         let router = crate::ToolRouter::new();
-        router.register(Box::new(StubTool("apply_patch")));
         let missing = missing_from(&router);
 
         let (cleaned, stripped) = strip_missing_tool_guidance(PLAN_PROMPT, &missing);
@@ -1906,7 +1887,7 @@ mod prompt_tool_guard_tests {
     }
 
     // Word boundaries: `git_status_tool` and `my_apply_patch` are different
-    // tool names and must NOT count as mentions of the workspace-bound ones.
+    // tool names and must NOT count as mentions of the searched-for ones.
     #[test]
     fn word_boundaries_are_respected() {
         assert!(!mentions_tool("use git_status_tool for this", "git_status"));

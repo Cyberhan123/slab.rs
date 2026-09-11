@@ -55,14 +55,15 @@ pub trait AgentContextSources: Send + Sync {
     /// policy so this crate stays free of `slab-exec-policy`.
     fn permission_snapshot(&self, thread_id: &str) -> PermissionSnapshot;
 
-    /// Whether the host registered the `apply_patch` tool. The default mirrors
-    /// the registration gate (the workspace-bound tools register only when a
-    /// workspace root exists); hosts with additional registration conditions
-    /// override this. Combined with the permission snapshot and the tool
-    /// whitelist in the hook, this decides whether the system prompt may
-    /// tell the model to prefer `apply_patch`.
+    /// Whether the host registered the `apply_patch` tool. The default is
+    /// `true` — `apply_patch` registers unconditionally and degrades to
+    /// cwd-relative patch paths when no workspace is bound, so registration
+    /// no longer tracks the workspace gate; hosts that can unregister the
+    /// tool (e.g. a whitelist) override this. Combined with the permission
+    /// snapshot and the tool whitelist in the hook, this decides whether the
+    /// system prompt may tell the model to prefer `apply_patch`.
     fn apply_patch_registered(&self) -> bool {
-        self.workspace_root().is_some()
+        true
     }
 
     /// Folded read-side memory context, if memory is enabled and a v1 summary

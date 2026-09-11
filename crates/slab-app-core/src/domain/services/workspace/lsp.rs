@@ -208,9 +208,10 @@ fn has_workspace_marker(dir: &Path) -> bool {
 /// desktop sidecar inherits the Tauri host's CWD (e.g.
 /// `bin/slab-app/src-tauri` deep inside the monorepo), where neither
 /// `SLAB_WORKSPACE_ROOT` nor a `.slab`-relative settings path identifies the
-/// root, so workspace-scoped agent tools (`apply_patch`, `git_*`, `verify`)
-/// went unregistered. Production installs without a checkout naturally
-/// resolve to `None` and keep the explicit open/close semantics.
+/// root, so the workspace-bound git tools went unregistered and the file
+/// tools (apply_patch included) degraded to cwd-relative paths. Production
+/// installs without a checkout naturally resolve to `None` and keep the
+/// explicit open/close semantics.
 pub fn workspace_root_from_ancestors(start: &Path) -> Option<PathBuf> {
     start.ancestors().find(|candidate| has_workspace_marker(candidate)).map(Path::to_path_buf)
 }

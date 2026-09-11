@@ -405,9 +405,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn system_prompt_apply_patch_guidance_follows_workspace_binding() {
-        // Without a workspace root the workspace-bound tools (apply_patch …)
-        // are not registered, so the system prompt must not reference them.
+    async fn system_prompt_apply_patch_guidance_present_without_workspace_binding() {
+        // apply_patch registers unconditionally (cwd-degraded when unbound),
+        // so under permissive permissions the guidance is present even
+        // without a workspace root — only the shell line notes the missing
+        // root.
         let unbound_event = start_event(AgentConfig::default());
         let unbound_hook = ContextInstructionHook::new(Arc::new(mock_sources(None)));
         let HookOutcome::Effects { injected_messages, .. } =
@@ -416,7 +418,7 @@ mod tests {
             panic!("expected effects");
         };
         let system = injected_messages[0].content.rendered_text();
-        assert!(!system.contains("apply_patch"), "unbound system prompt: {system}");
+        assert!(system.contains("Prefer `apply_patch`"), "unbound system prompt: {system}");
         assert!(system.contains("no workspace root is configured"));
 
         // With a workspace root the guidance is present.

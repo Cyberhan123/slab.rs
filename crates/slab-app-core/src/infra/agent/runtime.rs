@@ -132,8 +132,9 @@ impl AgentRuntimeReloader {
 
     /// Re-point the live agent at a new workspace root (UI open/close):
     /// rebuild the sandbox driver and the workspace-bound registrations
-    /// (shell / verify / apply_patch / git / the memory file-tool overlay),
-    /// and swap the thread context future threads spawn with.
+    /// (shell / verify / git / the memory file-tool overlay; apply_patch
+    /// re-registers rooted-or-cwd-degraded like the other file tools), and
+    /// swap the thread context future threads spawn with.
     /// Already-running threads keep their frozen `ToolContext` — the
     /// workspace-migration path interrupts them before the switch. The
     /// exec-policy engine is NOT rebuilt here (its rules live under the
@@ -168,10 +169,11 @@ impl AgentRuntimeReloader {
             .with_background(Arc::clone(&self.background)),
         ));
         self.tool_router.register(Box::new(slab_agent_tools::VerifyTool::new(driver.clone())));
+        // apply_patch re-registers on every refresh (rooted, or cwd-degraded
+        // when unbound) so a retired root never lingers in the router.
+        self.tool_router.register(Box::new(slab_agent_tools::ApplyPatchTool::new(root.clone())));
         match root.clone() {
             Some(root) => {
-                self.tool_router
-                    .register(Box::new(slab_agent_tools::ApplyPatchTool::new(root.clone())));
                 self.tool_router.register(Box::new(slab_agent_tools::GitStatusTool::new(
                     root.clone(),
                     driver.clone(),
@@ -184,9 +186,9 @@ impl AgentRuntimeReloader {
                     .register(Box::new(slab_agent_tools::GitCommitTool::new(root, driver)));
             }
             None => {
-                // Closed: the workspace-bound tools must not keep operating on
-                // the retired root.
-                for name in ["apply_patch", "git_status", "git_diff", "git_commit"] {
+                // Closed: the workspace-bound git tools must not keep
+                // operating on the retired root.
+                for name in ["git_status", "git_diff", "git_commit"] {
                     self.tool_router.unregister(name);
                 }
             }

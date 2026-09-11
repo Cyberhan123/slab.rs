@@ -31,11 +31,11 @@ pub struct ApplyPatchArgs {
 }
 
 pub struct ApplyPatchTool {
-    workspace_root: PathBuf,
+    workspace_root: Option<PathBuf>,
 }
 
 impl ApplyPatchTool {
-    pub fn new(workspace_root: PathBuf) -> Self {
+    pub fn new(workspace_root: Option<PathBuf>) -> Self {
         Self { workspace_root }
     }
 }
@@ -48,23 +48,24 @@ impl TypedTool for ApplyPatchTool {
     }
 
     fn description(&self) -> &str {
-        "Apply a `*** Begin Patch` / `*** End Patch` patch to files inside the \
-         configured workspace root. Wrap the patch with `*** Begin Patch` and \
-         `*** End Patch`. Use `*** Add File: <path>` followed by `+<line>` \
-         lines to create a file, `*** Delete File: <path>` to remove one, or \
-         `*** Update File: <path>` followed by one or more `@@` chunks (each \
-         context line prefixed with a single space, removed lines with `-`, \
-         added lines with `+`; optional `*** Move to: <path>` to rename and \
-         `*** End of File` to anchor the end of the file). Updates match the \
-         surrounding context leniently, and a partial application reports \
-         which files already changed."
+        "Apply a `*** Begin Patch` / `*** End Patch` patch to files. Patch \
+         paths are relative to the configured workspace root, or to the \
+         process working directory when no workspace is bound. Wrap the patch \
+         with `*** Begin Patch` and `*** End Patch`. Use `*** Add File: \
+         <path>` followed by `+<line>` lines to create a file, `*** Delete \
+         File: <path>` to remove one, or `*** Update File: <path>` followed \
+         by one or more `@@` chunks (each context line prefixed with a single \
+         space, removed lines with `-`, added lines with `+`; optional \
+         `*** Move to: <path>` to rename and `*** End of File` to anchor the \
+         end of the file). Updates match the surrounding context leniently, \
+         and a partial application reports which files already changed."
     }
 
     fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
         let patch = arguments.get("patch").and_then(Value::as_str)?;
         Some(
             slab_agent::OperationDescriptor::file_edit(first_path_in_patch(patch))
-                .with_workspace(Some(self.workspace_root.clone()))
+                .with_workspace(self.workspace_root.clone())
                 .with_detail(patch),
         )
     }
@@ -90,14 +91,18 @@ impl TypedTool for ApplyPatchTool {
         let patch = args.patch;
 
         // `workspace_root` may be relative (e.g. registration tests pass "."),
-        // so absolutize it infallibly against the process cwd. `cwd` and the
-        // sandbox `workspace_root` MUST be the same absolute path: the engine
-        // strips `cwd` to form a relative path string and the local filesystem
-        // adapter re-anchors it via `resolve_path(workspace_root, …)`.
+        // and is absent entirely when no workspace is bound — then relative
+        // patch paths resolve against the process cwd, matching the degraded
+        // semantics of the other file tools (`WriteFileTool` et al). Either
+        // way, absolutize the root infallibly against the process cwd. `cwd`
+        // and the sandbox `workspace_root` MUST be the same absolute path: the
+        // engine strips `cwd` to form a relative path string and the local
+        // filesystem adapter re-anchors it via `resolve_path(workspace_root, …)`.
+        let root_arg = self.workspace_root.clone().unwrap_or_else(|| PathBuf::from("."));
         let base = std::env::current_dir().map_err(|error| {
-            crate::error::io_tool_error("resolve current directory", &self.workspace_root, &error)
+            crate::error::io_tool_error("resolve current directory", &root_arg, &error)
         })?;
-        let cwd = AbsolutePathBuf::resolve_path_against_base(&self.workspace_root, &base);
+        let cwd = AbsolutePathBuf::resolve_path_against_base(&root_arg, &base);
         let root = cwd.as_path().to_path_buf();
         // Delegated scope pre-check: validate EVERY patch target before the
         // engine runs — the engine commits files in order, so catching an
@@ -384,7 +389,7 @@ mod tests {
 
     #[test]
     fn apply_patch_renders_file_change_with_first_path() {
-        let tool = ApplyPatchTool::new(PathBuf::from("."));
+        let tool = ApplyPatchTool::new(Some(PathBuf::from(".")));
         let patch = "--- a/x.rs\n+++ b/x.rs\n@@ -1 +1 @@\n-a\n+b\n";
         let call = slab_agent::port::ParsedToolCall {
             id: "c1".into(),
@@ -415,7 +420,7 @@ mod tests {
 
     #[test]
     fn apply_patch_renders_per_file_changes_from_begin_patch_dialect() {
-        let tool = ApplyPatchTool::new(PathBuf::from("."));
+        let tool = ApplyPatchTool::new(Some(PathBuf::from(".")));
         let patch = concat!(
             "*** Begin Patch\n",
             "*** Add File: new.txt\n",
@@ -463,7 +468,7 @@ mod tests {
 
     #[test]
     fn apply_patch_render_falls_back_for_heredoc_wrapped_patch() {
-        let tool = ApplyPatchTool::new(PathBuf::from("."));
+        let tool = ApplyPatchTool::new(Some(PathBuf::from(".")));
         let patch = concat!(
             "apply_patch <<'EOF'\n",
             "*** Begin Patch\n",
@@ -517,7 +522,7 @@ mod tests {
     async fn apply_patch_tool_applies_begin_patch_update() {
         let root = temp_root("update");
         fs::write(root.join("a.txt"), "one\ntwo\n").expect("seed file");
-        let tool = ApplyPatchTool::new(root.clone());
+        let tool = ApplyPatchTool::new(Some(root.clone()));
         let patch = "\
 *** Begin Patch
 *** Update File: a.txt
@@ -542,7 +547,7 @@ mod tests {
     async fn apply_patch_tool_adds_and_deletes_files() {
         let root = temp_root("add_delete");
         fs::write(root.join("old.txt"), "gone\n").expect("seed file");
-        let tool = ApplyPatchTool::new(root.clone());
+        let tool = ApplyPatchTool::new(Some(root.clone()));
         let patch = "\
 *** Begin Patch
 *** Add File: new.txt
@@ -567,7 +572,7 @@ mod tests {
     async fn apply_patch_tool_reports_context_mismatch_as_error() {
         let root = temp_root("mismatch");
         fs::write(root.join("a.txt"), "one\ntwo\n").expect("seed file");
-        let tool = ApplyPatchTool::new(root.clone());
+        let tool = ApplyPatchTool::new(Some(root.clone()));
         let patch = "\
 *** Begin Patch
 *** Update File: a.txt
@@ -598,7 +603,7 @@ mod tests {
     #[tokio::test]
     async fn apply_patch_tool_reports_partial_failure_delta() {
         let root = temp_root("partial");
-        let tool = ApplyPatchTool::new(root.clone());
+        let tool = ApplyPatchTool::new(Some(root.clone()));
         // Add `created.txt`, then try to update `missing.txt` (does not exist).
         // The add commits before the update fails, mirroring scenario 015.
         let patch = "\
@@ -633,7 +638,7 @@ mod tests {
     #[tokio::test]
     async fn apply_patch_tool_requires_patch_argument() {
         let root = temp_root("apply_patch_missing");
-        let tool = ApplyPatchTool::new(root.clone());
+        let tool = ApplyPatchTool::new(Some(root.clone()));
 
         let error = ToolHandler::execute(&tool, &ctx(), &json!({}))
             .await
@@ -646,7 +651,7 @@ mod tests {
     #[tokio::test]
     async fn apply_patch_tool_rejects_out_of_scope_target_before_engine_runs() {
         let root = temp_root("scope_escape");
-        let tool = ApplyPatchTool::new(root.clone());
+        let tool = ApplyPatchTool::new(Some(root.clone()));
         let ctx = crate::fs::test_support::scoped_ctx(&root, "src");
         // The in-scope add runs first in file order — the pre-check must
         // reject the WHOLE patch so no partial state lands.
@@ -679,7 +684,7 @@ mod tests {
         let root = temp_root("scope_move");
         fs::create_dir_all(root.join("src")).expect("create scope dir");
         fs::write(root.join("src").join("a.txt"), "one\n").expect("seed file");
-        let tool = ApplyPatchTool::new(root.clone());
+        let tool = ApplyPatchTool::new(Some(root.clone()));
         let ctx = crate::fs::test_support::scoped_ctx(&root, "src");
         let patch = "\
 *** Begin Patch

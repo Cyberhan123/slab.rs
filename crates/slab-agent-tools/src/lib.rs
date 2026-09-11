@@ -79,14 +79,14 @@ pub fn register_all_tools(
     background_tasks: Arc<BackgroundTaskRegistry>,
 ) {
     // Fail loud(er): a missing workspace root silently degrades the suite —
-    // apply_patch/git tools stay unregistered (while `tool_search` keeps
-    // advertising discovery) and the fs tools lose their path constraint,
-    // resolving relatives against the PROCESS cwd instead. A warn in the log
-    // beats a model silently working against the wrong root.
+    // the file tools (apply_patch included) lose their path constraint and
+    // resolve relatives against the PROCESS cwd instead, and the git tools
+    // stay unregistered (while `tool_search` keeps advertising discovery). A
+    // warn in the log beats a model silently working against the wrong root.
     if workspace_root.is_none() {
         tracing::warn!(
-            "registering agent tools WITHOUT a workspace root: apply_patch and the git tools \
-             are not registered, and file tools resolve relative paths against the process cwd"
+            "registering agent tools WITHOUT a workspace root: file tools (apply_patch included) \
+             resolve relative paths against the process cwd, and the git tools are not registered"
         );
     }
     router.register(Box::new(
@@ -116,13 +116,16 @@ pub fn register_all_tools(
     if let Some(watcher) = FsWatchTool::new() {
         router.register(Box::new(watcher));
     }
-    if let Some(root) = workspace_root {
-        router.register(Box::new(ApplyPatchTool::new(root.clone())));
-        if git_tools {
-            router.register(Box::new(GitStatusTool::new(root.clone(), sandbox_driver.clone())));
-            router.register(Box::new(GitDiffTool::new(root.clone(), sandbox_driver.clone())));
-            router.register(Box::new(GitCommitTool::new(root, sandbox_driver.clone())));
-        }
+    // apply_patch follows the file tools' degraded semantics: without a
+    // workspace root its patch paths resolve against the process cwd. The
+    // git trio genuinely requires a repo root and stays workspace-bound.
+    router.register(Box::new(ApplyPatchTool::new(workspace_root.clone())));
+    if let Some(root) = workspace_root
+        && git_tools
+    {
+        router.register(Box::new(GitStatusTool::new(root.clone(), sandbox_driver.clone())));
+        router.register(Box::new(GitDiffTool::new(root.clone(), sandbox_driver.clone())));
+        router.register(Box::new(GitCommitTool::new(root, sandbox_driver.clone())));
     }
     // Background task controls (read-heavy; safe to run concurrently).
     router.register(Box::new(TaskStatusTool::new(Arc::clone(&background_tasks))));
@@ -172,7 +175,9 @@ mod tests {
         assert!(router.get("task.complete").is_some());
         assert!(router.get("verify").is_some());
         assert!(router.get("web_search").is_some());
-        assert!(router.get("apply_patch").is_none());
+        // apply_patch degrades with the file tools (cwd-relative); only the
+        // git trio stays workspace-bound.
+        assert!(router.get("apply_patch").is_some());
         assert!(router.get("git_status").is_none());
         // Background task controls are workspace-independent — always present.
         assert!(router.get("task_status").is_some());
