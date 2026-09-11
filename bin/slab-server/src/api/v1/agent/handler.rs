@@ -56,6 +56,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/agents/responses", get(agent_responses_get).post(agent_responses_post))
         .route("/agents/harness", get(crate::api::v1::agent::harness::agent_harness))
+        .merge(crate::api::v1::agent::rollouts::router())
         // Same gate as workspace/settings: without a configured admin token
         // loopback binds stay open (dev/e2e); with one, `Authorization:
         // Bearer` must carry the ADMIN token — which is exactly why the slab

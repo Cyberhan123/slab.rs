@@ -6,6 +6,7 @@ import { useTranslation } from "@slab/i18n"
 import { Link, useLocation } from "react-router-dom"
 
 import { cn } from "@slab/ui/lib/utils"
+import { GUARDRAIL_PMIDS, useGuardrailFlag } from "@slab/ui/lib/guardrail-flags"
 import { WindowControls } from "@slab/ui/layouts/window-controls"
 import { useRuntimePlugins } from "@slab/ui/pages/plugins/hooks/use-runtime-plugins"
 import { getSlabRouteEntries, type SlabRouteObject } from "@slab/ui/routes/route-meta"
@@ -35,6 +36,9 @@ export function AppSidebar({ routes }: AppSidebarProps) {
   const { t } = useTranslation()
   const { pathname } = useLocation()
   const { data: runtimePlugins = [] } = useRuntimePlugins()
+  // The rollout debug viewer's entry only exists while "Agent debug tracing"
+  // (`agent.debug`) is on — the server 404s its endpoints when off anyway.
+  const agentDebugEnabled = useGuardrailFlag(GUARDRAIL_PMIDS.agentDebug)
   const routeSidebarItems = getSlabRouteEntries(routes)
     .map(({ path, route }): (SidebarItem & { group: "primary" | "footer" }) | null => {
       const meta = route.meta
@@ -51,6 +55,7 @@ export function AppSidebar({ routes }: AppSidebarProps) {
       }
     })
     .filter((item): item is SidebarItem & { group: "primary" | "footer" } => item !== null)
+    .filter((item) => item.to !== "/agent-rollouts" || agentDebugEnabled)
   const primaryItems = routeSidebarItems.filter((item) => item.group === "primary")
   const footerItems = routeSidebarItems.filter((item) => item.group === "footer")
   const pluginItems = runtimePlugins

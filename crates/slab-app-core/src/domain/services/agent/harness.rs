@@ -127,6 +127,31 @@ impl HarnessService {
         Some((slab_proto::harness::ThreadLiveState { turn_id: snapshot.turn_id, items }, watermark))
     }
 
+    /// The rollout file store (true source). Read-side access for the debug
+    /// viewer endpoints: raw line inspection, session metas, file resolution.
+    pub fn rollout_store(&self) -> &Arc<slab_agent_rollout::RolloutFileStore> {
+        self.0.rollout()
+    }
+
+    /// Open the thread's trace bundle READ-ONLY via the rollout
+    /// `SessionMeta.trace_path` link. `Ok(None)` when the thread has no
+    /// rollout meta or no trace link (agent debug was off); `Err` when the
+    /// linked bundle directory is missing or its manifest is unparseable.
+    pub async fn trace_bundle_for(
+        &self,
+        thread_id: &str,
+    ) -> Result<Option<slab_agent_tracing::bundle::TraceBundle>, AppCoreError> {
+        let Some(meta) = self.0.rollout().read_session_meta(thread_id).await else {
+            return Ok(None);
+        };
+        let Some(trace_path) = meta.trace_path else {
+            return Ok(None);
+        };
+        slab_agent_tracing::bundle::TraceBundle::open_existing(&trace_path)
+            .map(Some)
+            .map_err(|error| AppCoreError::Internal(error.to_string()))
+    }
+
     /// Shared compaction policy (the same `Arc` wired into the agent turn loop),
     /// exposed so the HTTP chat/responses paths can reuse it for auto-compaction.
     pub(crate) fn compact_port(&self) -> Arc<dyn slab_agent::CompactPort> {

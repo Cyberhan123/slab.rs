@@ -8,6 +8,7 @@ export const sidebar = {
     hub: '模型库',
     task: '任务',
     plugins: '插件',
+    agentRollouts: 'Rollout',
     settings: '设置',
   },
 } as const;

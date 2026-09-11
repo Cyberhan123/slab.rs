@@ -203,6 +203,31 @@ impl TraceBundle {
         Ok(TraceBundle { dir, manifest })
     }
 
+    /// Open an EXISTING bundle directory read-only: reads `manifest.json`
+    /// without creating or healing anything. Errors when the directory or its
+    /// manifest is missing/unparseable. Used by offline consumers (the rollout
+    /// debug viewer) that must never mutate a bundle.
+    pub fn open_existing(dir: impl Into<PathBuf>) -> std::io::Result<Self> {
+        let dir = dir.into();
+        let manifest_path = dir.join(MANIFEST_FILE);
+        let raw = std::fs::read_to_string(&manifest_path).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("trace bundle manifest missing at {}: {error}", manifest_path.display()),
+            )
+        })?;
+        let manifest = serde_json::from_str::<BundleManifest>(raw.trim()).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "trace bundle manifest unparseable at {}: {error}",
+                    manifest_path.display()
+                ),
+            )
+        })?;
+        Ok(TraceBundle { dir, manifest })
+    }
+
     /// Bundle directory.
     pub fn dir(&self) -> &Path {
         &self.dir

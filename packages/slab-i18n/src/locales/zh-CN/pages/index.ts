@@ -1,3 +1,4 @@
+import { agentRollouts } from './agentRollouts';
 import { audio } from './audio';
 import { assistant } from './assistant';
 import { hub } from './hub';
@@ -10,6 +11,7 @@ import { video } from './video';
 import { workspace } from './workspace';
 
 export const pages = {
+  agentRollouts,
   audio,
   assistant,
   hub,

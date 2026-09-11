@@ -56,6 +56,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
 pub fn api_docs() -> utoipa::openapi::OpenApi {
     let mut spec = V1Api::openapi();
     spec.merge(agent::AgentApi::openapi());
+    spec.merge(agent::rollouts::RolloutsApi::openapi());
     spec.merge(chat::ChatApi::openapi());
     spec.merge(models::ModelsApi::openapi());
     spec.merge(plugins::PluginApi::openapi());
@@ -85,6 +86,10 @@ mod tests {
         ("/v1/agents/harness", "get"),
         ("/v1/agents/responses", "get"),
         ("/v1/agents/responses", "post"),
+        ("/v1/agents/rollouts", "get"),
+        ("/v1/agents/rollouts/{thread_id}/lines", "get"),
+        ("/v1/agents/rollouts/{thread_id}/timeline", "get"),
+        ("/v1/agents/rollouts/{thread_id}/trace", "get"),
         ("/v1/audio/transcriptions", "get"),
         ("/v1/audio/transcriptions", "post"),
         ("/v1/audio/transcriptions/{id}", "get"),

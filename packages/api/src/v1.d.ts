@@ -52,6 +52,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agents/rollouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_rollout_sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/rollouts/{thread_id}/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["read_rollout_lines_endpoint"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/rollouts/{thread_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["read_rollout_timeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/rollouts/{thread_id}/trace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["read_rollout_trace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/audio/transcriptions": {
         parameters: {
             query?: never;
@@ -2671,6 +2735,62 @@ export interface components {
             format: string;
             output_path: string;
         };
+        /** @description One raw rollout line, item JSON passed through verbatim. */
+        RolloutLineEntry: {
+            /** @description 0-based position of the line in the file. */
+            index: number;
+            item: Record<string, never>;
+            /**
+             * @description The `rolloutType` discriminant (`sessionMeta` / `turnItem` / `eventMsg`
+             *     / `compacted` / `turnContext`).
+             */
+            rollout_type: string;
+            timestamp: string;
+        };
+        RolloutLinesResponse: {
+            limit: number;
+            lines: components["schemas"]["RolloutLineEntry"][];
+            offset: number;
+            total: number;
+            /** @description Whether more lines exist past the returned window. */
+            truncated: boolean;
+        };
+        /** @description One rollout session (thread) discovered on disk. */
+        RolloutSessionEntry: {
+            file_name: string;
+            /** @description Whether the rollout links to a trace bundle (`SessionMeta.trace_path`). */
+            has_trace: boolean;
+            role_name?: string | null;
+            session_id: string;
+            /** Format: int64 */
+            size_bytes: number;
+            started_at: string;
+            thread_id: string;
+        };
+        /**
+         * @description The rollout timeline projected into the harness `Thread` wire type (same
+         *     projection `thread/resume` restores history with) plus every turn's final
+         *     `TurnState` input messages — the exact prompt the model was sent.
+         */
+        RolloutTimelineResponse: {
+            thread: Record<string, never>;
+            /**
+             * @description Per turn (indexed): the persisted `TurnState.input_messages`, or `null`
+             *     when the turn has no state record.
+             */
+            turn_prompts: unknown[];
+        };
+        RolloutTraceResponse: {
+            /**
+             * @description The reducer's reconstruction of the conversation the model actually
+             *     saw (L3 semantic replay). Empty on a reduction failure.
+             */
+            conversation: unknown[];
+            /** @description Raw `trace.jsonl` events (paged, JSON passed through verbatim). */
+            events: unknown[];
+            manifest: Record<string, never>;
+            total_events: number;
+        };
         /** @description Default runtime parameters (request). */
         RuntimePresetsRequest: {
             /**
@@ -3634,6 +3754,133 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OpenAiErrorResponse"];
                 };
+            };
+        };
+    };
+    list_rollout_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rollout sessions on disk (debug viewer) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RolloutSessionEntry"][];
+                };
+            };
+            /** @description Agent debug tracing disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    read_rollout_lines_endpoint: {
+        parameters: {
+            query?: {
+                /** @description First line index (0-based, default 0) */
+                offset?: number;
+                /** @description Page size (default 1000, max 5000) */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Real slab thread id */
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Raw rollout lines (item JSON verbatim) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RolloutLinesResponse"];
+                };
+            };
+            /** @description Thread rollout not found, or debug tracing disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    read_rollout_timeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Real slab thread id */
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rollout timeline projected as a harness Thread + per-turn final prompts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RolloutTimelineResponse"];
+                };
+            };
+            /** @description Thread rollout not found, or debug tracing disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    read_rollout_trace: {
+        parameters: {
+            query?: {
+                /** @description First event index (0-based, default 0) */
+                offset?: number;
+                /** @description Event page size (default 1000, max 5000) */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Real slab thread id */
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Trace bundle manifest + events + the reduced conversation the model saw */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RolloutTraceResponse"];
+                };
+            };
+            /** @description No trace bundle for the thread, or debug tracing disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

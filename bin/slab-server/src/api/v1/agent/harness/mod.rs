@@ -311,7 +311,9 @@ impl RestoreDedupe {
 /// - message entries whose (role, text) matches a recently rendered message
 ///   are dropped — rollout files written by the historical emit-anchor drift
 ///   re-appended a tail of old messages before each new input.
-fn thread_from_timeline(
+///
+/// Also used by the read-only rollout debug viewer endpoints.
+pub(crate) fn thread_from_timeline(
     id: &str,
     snapshot: &ThreadSnapshot,
     turn_states: &[TurnStateRecord],

@@ -164,6 +164,14 @@ from .quantize_model_request import QuantizeModelRequest
 from .recent_workspace_response import RecentWorkspaceResponse
 from .render_subtitle_request import RenderSubtitleRequest
 from .render_subtitle_response import RenderSubtitleResponse
+from .rollout_line_entry import RolloutLineEntry
+from .rollout_line_entry_item import RolloutLineEntryItem
+from .rollout_lines_response import RolloutLinesResponse
+from .rollout_session_entry import RolloutSessionEntry
+from .rollout_timeline_response import RolloutTimelineResponse
+from .rollout_timeline_response_thread import RolloutTimelineResponseThread
+from .rollout_trace_response import RolloutTraceResponse
+from .rollout_trace_response_manifest import RolloutTraceResponseManifest
 from .runtime_presets_request import RuntimePresetsRequest
 from .runtime_presets_response import RuntimePresetsResponse
 from .server_i18n_key import ServerI18NKey
@@ -411,6 +419,14 @@ __all__ = (
     "RecentWorkspaceResponse",
     "RenderSubtitleRequest",
     "RenderSubtitleResponse",
+    "RolloutLineEntry",
+    "RolloutLineEntryItem",
+    "RolloutLinesResponse",
+    "RolloutSessionEntry",
+    "RolloutTimelineResponse",
+    "RolloutTimelineResponseThread",
+    "RolloutTraceResponse",
+    "RolloutTraceResponseManifest",
     "RuntimePresetsRequest",
     "RuntimePresetsResponse",
     "ServerI18NKey",

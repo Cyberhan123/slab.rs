@@ -227,13 +227,22 @@ impl AgentCore {
     /// (e.g. `send_input` resuming a thread) are no-ops. The observer runs for
     /// the process lifetime, capturing every finalized `TurnItem`, compaction
     /// marker, and allowed lifecycle event across all of the thread's runs.
+    /// Event fidelity follows the `agent.debug` setting (`trace_dir` is Some
+    /// exactly when debugging is on): debug sessions keep the Extended event
+    /// stream — deltas/approvals included — so the rollout viewer's raw-line
+    /// inspect shows everything; normal sessions stay on Limited.
     pub(crate) fn ensure_rollout_persistence(&self, real_thread_id: &str) {
         if self.rollout_observers.insert(real_thread_id.to_owned()) {
+            let mode = if self.trace_dir.is_some() {
+                slab_agent_rollout::EventPersistenceMode::Extended
+            } else {
+                slab_agent_rollout::EventPersistenceMode::Limited
+            };
             rollout_persistence::spawn_rollout_persistence(
                 Arc::clone(&self.rollout),
                 Arc::clone(&self.events),
                 real_thread_id.to_owned(),
-                slab_agent_rollout::EventPersistenceMode::Limited,
+                mode,
             );
         }
     }
