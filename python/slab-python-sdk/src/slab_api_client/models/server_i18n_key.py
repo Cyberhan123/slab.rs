@@ -666,6 +666,12 @@ class ServerI18NKey(str, Enum):
     SERVER_SETTINGS_SCHEMAS_PROVIDER_APIKEY_TITLE = (
         "server.settings.schemas.provider.apiKey.title"
     )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_APISTYLE_DESCRIPTION = (
+        "server.settings.schemas.provider.apiStyle.description"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_APISTYLE_TITLE = (
+        "server.settings.schemas.provider.apiStyle.title"
+    )
     SERVER_SETTINGS_SCHEMAS_PROVIDER_AUTH_TITLE = (
         "server.settings.schemas.provider.auth.title"
     )
