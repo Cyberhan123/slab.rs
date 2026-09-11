@@ -80,6 +80,53 @@ impl HarnessService {
         self.0.subscribe_event_msgs(thread_id)
     }
 
+    /// [`subscribe_event_msgs`] with an envelope watermark (replays only
+    /// events AFTER `since`). Paired with [`Self::live_state`]: the snapshot's
+    /// watermark feeds `since`, so snapshot + replay cover every event exactly
+    /// once.
+    pub fn subscribe_event_msgs_since(
+        &self,
+        thread_id: &str,
+        since: u64,
+    ) -> AgentEventMsgSubscription {
+        self.0.subscribe_event_msgs_since(thread_id, since)
+    }
+
+    /// Resume-time live catch-up for a RUNNING thread: the wire snapshot plus
+    /// the envelope watermark it reflects. The harness `thread/resume` handler
+    /// returns the snapshot and starts its fan-out at the watermark.
+    pub fn live_state(
+        &self,
+        thread_id: &str,
+    ) -> Option<(slab_proto::harness::ThreadLiveState, u64)> {
+        let snapshot = self.0.live_snapshot(thread_id)?;
+        let watermark = snapshot.last_event_id;
+        let items = snapshot
+            .items
+            .into_iter()
+            .map(|item| slab_proto::harness::ThreadLiveItem {
+                item_id: item.item_id,
+                kind: match item.kind {
+                    crate::infra::agent::event_hub::LiveItemKind::AgentMessage => {
+                        slab_proto::harness::ThreadLiveItemKind::AgentMessage
+                    }
+                    crate::infra::agent::event_hub::LiveItemKind::Reasoning => {
+                        slab_proto::harness::ThreadLiveItemKind::Reasoning
+                    }
+                    crate::infra::agent::event_hub::LiveItemKind::CommandOutput => {
+                        slab_proto::harness::ThreadLiveItemKind::CommandOutput
+                    }
+                    crate::infra::agent::event_hub::LiveItemKind::FileChangePatch => {
+                        slab_proto::harness::ThreadLiveItemKind::FileChangePatch
+                    }
+                },
+                text: item.text,
+                patch_lines: (!item.patch_lines.is_empty()).then_some(item.patch_lines),
+            })
+            .collect();
+        Some((slab_proto::harness::ThreadLiveState { turn_id: snapshot.turn_id, items }, watermark))
+    }
+
     /// Shared compaction policy (the same `Arc` wired into the agent turn loop),
     /// exposed so the HTTP chat/responses paths can reuse it for auto-compaction.
     pub(crate) fn compact_port(&self) -> Arc<dyn slab_agent::CompactPort> {

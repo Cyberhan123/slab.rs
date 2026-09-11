@@ -320,9 +320,92 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
     throw lastError
   }
 
+  /**
+   * Reattach an AI-SDK stream to a RUNNING turn after a pane remount: seed
+   * the stream from the resume-time live snapshot (accumulated in-flight
+   * output), then consume live notifications until the turn terminates. The
+   * server's fan-out replays only POST-snapshot events, so the seeds and the
+   * deltas never double. `null` (nothing to reconnect) when there is no
+   * snapshot — idle thread, already-consumed snapshot, or a stale turn.
+   */
   reconnectToStream(): Promise<ReadableStream<UIMessageChunk> | null> {
-    // Harness has no server-side resumable stream; `null` tells `useChat` there
-    // is nothing to reconnect. Reload re-runs `thread/resume` via the hook.
-    return Promise.resolve(null)
+    const live = this.client.liveResume
+    const threadId = this.client.currentThreadId
+    if (!live || !threadId) {
+      return Promise.resolve(null)
+    }
+    // Consume the snapshot exactly once: a pane that remounts again without a
+    // fresh resume falls back to the controller's live-text mirror tail.
+    this.client.liveResume = null
+
+    return Promise.resolve(
+      createUIMessageStream({
+        execute: async ({ writer }) => {
+          const state = createStreamState()
+          // Seed every open item's accumulated output as one full delta per
+          // part (text-start/text-delta), matching the part kinds the live
+          // conversion emits so `useChat` merges into the same parts. The
+          // seeded ids are registered in the stream state so later live
+          // deltas (and the terminal close) treat the parts as already open.
+          for (const item of live.items) {
+            if (item.kind === "reasoning") {
+              if (!item.text) continue
+              state.openReasoning.add(item.itemId)
+              writer.write({ id: item.itemId, type: "reasoning-start" })
+              writer.write({ delta: item.text, id: item.itemId, type: "reasoning-delta" })
+            } else if (item.kind === "agentMessage") {
+              if (!item.text) continue
+              state.openText.add(item.itemId)
+              writer.write({ id: item.itemId, type: "text-start" })
+              writer.write({ delta: item.text, id: item.itemId, type: "text-delta" })
+            } else if (item.patchLines && item.patchLines.length > 0) {
+              // Command/file cards live outside the text stream (the pane
+              // renders them from the controller's liveOutput/livePatch
+              // mirrors, which the resume already seeded) — nothing to write.
+              continue
+            }
+          }
+
+          let finished = false
+          await new Promise<void>((resolve) => {
+            const done = () => {
+              if (finished) return
+              finished = true
+              unsubscribe()
+              resolve()
+            }
+
+            const unsubscribe = this.client.onNotification(
+              (notification: JsonRpcNotification) => {
+                if (finished) return
+                const params = (notification.params ?? {}) as {
+                  threadId?: string
+                  turnId?: string
+                }
+                if (params.threadId !== undefined && params.threadId !== threadId) return
+
+                const serverNotif = coerceServerNotification(notification)
+                if (!serverNotif) return
+
+                const terminal = isTerminalNotification(serverNotif)
+                // Same replay guard as `sendMessages`: drop turnId at or below
+                // the client's known threshold (completed-turn history)
+                // unless terminal — the snapshot turn is always newer.
+                if (!terminal) {
+                  const turnNum = Number(params.turnId)
+                  if (!Number.isNaN(turnNum) && turnNum <= this.client.lastTurnIndex) return
+                }
+
+                for (const chunk of convertNotification(serverNotif, state)) {
+                  writer.write(chunk)
+                }
+                if (terminal) done()
+              },
+            )
+          })
+        },
+        onError: (error) => (error instanceof Error ? error.message : "stream error"),
+      }),
+    )
   }
 }

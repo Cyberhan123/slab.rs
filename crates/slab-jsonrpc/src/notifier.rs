@@ -74,6 +74,13 @@ impl Notifier {
         let _ = self.inner.tx.send(message);
     }
 
+    /// Whether the session's outbound receiver is gone (socket closed). A
+    /// long-lived fan-out task should check this between events and exit
+    /// instead of spinning on dead sends until process end.
+    pub fn is_closed(&self) -> bool {
+        self.inner.tx.is_closed()
+    }
+
     /// Downgrade to a [`WeakNotifier`] — for a registry that should NOT keep
     /// the channel alive once the owning connection drops.
     pub fn downgrade(&self) -> WeakNotifier {

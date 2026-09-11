@@ -453,6 +453,27 @@ impl AgentCore {
         self.events.subscribe_event_msgs(thread_id)
     }
 
+    /// [`subscribe_event_msgs`] with an envelope watermark: replays only events
+    /// with id STRICTLY greater than `since` (the `last_event_id` of a live
+    /// snapshot taken just before — snapshot + replay then cover every event
+    /// exactly once).
+    pub(crate) fn subscribe_event_msgs_since(
+        &self,
+        thread_id: &str,
+        since: u64,
+    ) -> AgentEventMsgSubscription {
+        self.events.subscribe_event_msgs_since(thread_id, since)
+    }
+
+    /// Live catch-up snapshot for a RUNNING thread (in-flight accumulated
+    /// output per open item). `None` when the thread has no open items.
+    pub(crate) fn live_snapshot(
+        &self,
+        thread_id: &str,
+    ) -> Option<crate::infra::agent::event_hub::ThreadLiveSnapshot> {
+        self.events.live_snapshot(thread_id)
+    }
+
     /// Cross-turn durability barrier. Enqueue a FIFO sentinel on
     /// the persistence channel and await the observer's reply — which (FIFO
     /// ordering) means EVERY persistence event emitted for `thread_id` so far

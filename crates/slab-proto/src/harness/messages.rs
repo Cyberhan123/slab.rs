@@ -257,6 +257,47 @@ pub struct ThreadResumeParams {
 #[ts(export)]
 pub struct ThreadResumeResult {
     pub thread: Thread,
+    /// In-flight turn catch-up for a RUNNING thread: the accumulated visible
+    /// text/patch per open item at resume time, taken atomically with the
+    /// event subscription watermark (the fan-out replays only events AFTER
+    /// the snapshot, so deltas are neither lost nor double-delivered).
+    /// `None` for an idle thread (no open items) — resume behaves exactly as
+    /// before. Older clients ignore the unknown field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<ThreadLiveState>,
+}
+
+/// Snapshot of one in-flight turn's accumulated output at resume time.
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ThreadLiveState {
+    pub turn_id: String,
+    pub items: Vec<ThreadLiveItem>,
+}
+
+/// Accumulated output for one open item. `text` carries the concatenated
+/// deltas (answer text, reasoning trace, or command output); `patch_lines`
+/// the file-change patch lines when `kind` is `fileChangePatch`.
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ThreadLiveItem {
+    pub item_id: String,
+    pub kind: ThreadLiveItemKind,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch_lines: Option<Vec<String>>,
+}
+
+#[derive(TS, Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ThreadLiveItemKind {
+    AgentMessage,
+    Reasoning,
+    CommandOutput,
+    FileChangePatch,
 }
 
 // ============ thread/fork ============

@@ -23,9 +23,10 @@ pub use messages::{
     OperationCategory, PermissionMode, ReasoningEffort, ShutdownParams, ShutdownResult, SkillInfo,
     SkillSource, SkillsListParams, SkillsListResult, ThreadArchiveParams, ThreadArchiveResult,
     ThreadCompactStartParams, ThreadCompactStartResult, ThreadForkParams, ThreadForkResult,
-    ThreadListParams, ThreadListResult, ThreadResumeParams, ThreadResumeResult,
-    ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams, ThreadStartResult,
-    TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
+    ThreadListParams, ThreadListResult, ThreadLiveItem, ThreadLiveItemKind, ThreadLiveState,
+    ThreadResumeParams, ThreadResumeResult, ThreadRollbackParams, ThreadRollbackResult,
+    ThreadStartParams, ThreadStartResult, TurnInterruptParams, TurnInterruptResult,
+    TurnStartParams, TurnStartResult,
 };
 pub use model::{ModelInfo, ModelListParams, ModelListResult, ReasoningEffortOption};
 pub use notification::{

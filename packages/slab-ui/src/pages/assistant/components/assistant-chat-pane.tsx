@@ -227,7 +227,7 @@ export function AssistantChatPane({
     workspaceSlot,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
-    const { messages, sendMessage, status, stop } = useChat({
+    const { messages, sendMessage, status, stop, resumeStream } = useChat({
         messages: initialMessages,
         transport,
     })
@@ -298,6 +298,24 @@ export function AssistantChatPane({
     useEffect(() => {
         onMessageCountChange(messages.length)
     }, [messages.length, onMessageCountChange])
+
+    // Mid-run pane remount: reattach this pane's AI-SDK stream to the running
+    // turn. The transport seeds it from the resume-time live snapshot (present
+    // only while the thread runs), so the remounted bubble CONTINUES the
+    // in-flight output instead of waiting for the run's terminal resync.
+    // One-shot per mount: `resumeStream` consumes the snapshot, and when the
+    // transport has none (turn already finished) it resolves as a no-op and
+    // the live-tail mirror below renders the interim text.
+    const resumeAttemptedRef = useRef(false)
+    useEffect(() => {
+        if (resumeAttemptedRef.current) return
+        const hasLiveState =
+            liveTextByItemId.size > 0 || liveOutputByItemId.size > 0 || livePatchByItemId.size > 0
+        if (serverBusy && status === "ready" && hasLiveState) {
+            resumeAttemptedRef.current = true
+            void resumeStream()
+        }
+    }, [serverBusy, status, liveTextByItemId, liveOutputByItemId, livePatchByItemId, resumeStream])
 
     // Track the live tail's message id so the page can anchor settings
     // markers (model switch / permission mode) to the timeline position they

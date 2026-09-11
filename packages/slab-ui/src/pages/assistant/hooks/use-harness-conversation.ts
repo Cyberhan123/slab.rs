@@ -18,6 +18,7 @@ import type { UIMessage } from "ai"
 import {
   ConversationController,
   HarnessChatTransport,
+  conversationPool,
   type ConversationState,
 } from "@slab/core/harness"
 import type { ApprovalScope, PermissionMode } from "@slab/api/harness"
@@ -70,9 +71,13 @@ export function useHarnessConversation(
   sessionId: string | undefined,
   model: string,
 ): HarnessConversation {
-  // One controller per session: a session change constructs a fresh controller
-  // (pristine state); the previous one is disposed by the cleanup below.
-  const controller = useMemo(() => new ConversationController({ sessionId }), [sessionId])
+  // One controller per session, POOLED across mounts: navigating away from
+  // the assistant page releases the controller to the pool (its socket and
+  // any in-flight turn stay alive) instead of disposing it — coming back
+  // re-acquires the same conversation with its live state intact. A session
+  // change acquires a different pool key; the previous controller is torn
+  // down by its idle timer.
+  const controller = useMemo(() => conversationPool.acquire(sessionId), [sessionId])
 
   // Keep the controller's programmatic-send model in sync with the selected
   // model (steering + non-transport sends) — otherwise they fall back to the
@@ -86,7 +91,9 @@ export function useHarnessConversation(
   useEffect(() => {
     controller.start()
     return () => {
-      controller.dispose()
+      // Release, not dispose: the pool owns the teardown after the idle
+      // window, keeping the WS (and a running turn) alive across page switches.
+      conversationPool.release(controller)
     }
   }, [controller])
 

@@ -18,6 +18,7 @@
 //!   automatically rejected; a request whose future is dropped (turn
 //!   cancelled) removes its own entry.
 
+use std::collections::HashMap;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
@@ -34,6 +35,12 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{debug, warn};
 
 const CHANNEL_CAPACITY: usize = 256;
+
+/// Accumulation caps for the live catch-up snapshot: per-item text and patch
+/// depth. Past the cap the snapshot stops growing (the completed item carries
+/// the full text from the rollout on the next resync anyway).
+const LIVE_TEXT_CAP_BYTES: usize = 128 * 1024;
+const LIVE_PATCH_LINES_CAP: usize = 1024;
 
 /// Returns true for the STRUCTURAL persistence-grade event subset — the
 /// variants the observer maps to dedicated rollout line kinds
@@ -140,6 +147,120 @@ struct EventChannel {
 struct EventChannelState {
     next_id: u64,
     msg_history: Vec<AgentEventMsgEnvelope>,
+    /// In-flight accumulated output per open item, for the resume-time live
+    /// catch-up snapshot. Entries appear on the first delta of an item and are
+    /// removed at the item's `ItemCompleted` (or the turn's terminal event).
+    live_items: HashMap<String, LiveItemAccumulation>,
+    /// Turn id of the most recent delta/turn-start seen, for the snapshot.
+    last_turn_id: Option<String>,
+}
+
+/// Which stream an item's accumulated text belongs to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LiveItemKind {
+    AgentMessage,
+    Reasoning,
+    CommandOutput,
+    FileChangePatch,
+}
+
+/// Per-open-item accumulated output backing the live catch-up snapshot.
+#[derive(Clone)]
+pub(crate) struct LiveItemAccumulation {
+    pub kind: LiveItemKind,
+    pub text: String,
+    pub patch_lines: Vec<String>,
+}
+
+/// Resume-time live catch-up snapshot for one thread: everything in flight at
+/// a known event watermark, taken under the channel lock.
+pub(crate) struct ThreadLiveSnapshot {
+    /// The envelope id of the last event reflected in this snapshot. A
+    /// subscription created with `since = last_event_id` replays exactly the
+    /// events after it — no loss, no duplication.
+    pub last_event_id: u64,
+    pub turn_id: String,
+    pub items: Vec<ThreadLiveSnapshotItem>,
+}
+
+pub(crate) struct ThreadLiveSnapshotItem {
+    pub item_id: String,
+    pub kind: LiveItemKind,
+    pub text: String,
+    pub patch_lines: Vec<String>,
+}
+
+/// Fold one event into the live accumulation, under the channel lock.
+fn accumulate_live(state: &mut EventChannelState, msg: &EventMsg) {
+    match msg {
+        EventMsg::AgentMessageDelta(p) => {
+            accumulate_text(state, &p.item_id, &p.turn_id, LiveItemKind::AgentMessage, &p.delta);
+        }
+        EventMsg::ReasoningTextDelta(p) => {
+            accumulate_text(state, &p.item_id, &p.turn_id, LiveItemKind::Reasoning, &p.delta);
+        }
+        EventMsg::CommandExecutionOutputDelta(p) => {
+            accumulate_text(state, &p.item_id, &p.turn_id, LiveItemKind::CommandOutput, &p.delta);
+        }
+        EventMsg::FileChangeOutputDelta(p) => {
+            state.last_turn_id = Some(p.turn_id.clone());
+            let Some(entry) = state.live_items.get_mut(&p.item_id) else {
+                let patch_lines = delta_to_lines(&p.delta);
+                if patch_lines.len() >= LIVE_PATCH_LINES_CAP {
+                    return;
+                }
+                state.live_items.insert(
+                    p.item_id.clone(),
+                    LiveItemAccumulation {
+                        kind: LiveItemKind::FileChangePatch,
+                        text: String::new(),
+                        patch_lines,
+                    },
+                );
+                return;
+            };
+            for line in delta_to_lines(&p.delta) {
+                if entry.patch_lines.len() >= LIVE_PATCH_LINES_CAP {
+                    break;
+                }
+                entry.patch_lines.push(line);
+            }
+        }
+        EventMsg::ItemCompleted(p) => {
+            state.live_items.remove(p.item.id());
+        }
+        EventMsg::TurnStarted(p) => {
+            state.live_items.clear();
+            state.last_turn_id = Some(p.turn.id.clone());
+        }
+        // Terminal events close every in-flight item (interrupted items get
+        // no ItemCompleted of their own).
+        EventMsg::TurnCompleted(_) | EventMsg::TurnAborted(_) => {
+            state.live_items.clear();
+        }
+        _ => {}
+    }
+}
+
+fn accumulate_text(
+    state: &mut EventChannelState,
+    item_id: &str,
+    turn_id: &str,
+    kind: LiveItemKind,
+    delta: &str,
+) {
+    state.last_turn_id = Some(turn_id.to_owned());
+    let entry = state.live_items.entry(item_id.to_owned()).or_insert_with(|| {
+        LiveItemAccumulation { kind, text: String::new(), patch_lines: Vec::new() }
+    });
+    if entry.text.len() < LIVE_TEXT_CAP_BYTES {
+        entry.text.push_str(delta);
+    }
+}
+
+/// Split a file-change delta into patch lines (the deltas carry full lines).
+fn delta_to_lines(delta: &str) -> Vec<String> {
+    delta.lines().filter(|line| !line.is_empty()).map(str::to_owned).collect()
 }
 
 impl EventChannel {
@@ -148,14 +269,47 @@ impl EventChannel {
         Self { msg_sender, state: Arc::new(Mutex::new(EventChannelState::default())) }
     }
 
-    fn subscribe_msgs(&self) -> AgentEventMsgSubscription {
+    fn subscribe_msgs_since(&self, since: Option<u64>) -> AgentEventMsgSubscription {
+        // The replay filter and the live receiver registration share the state
+        // lock with `send_msg`, so the boundary between "replayed" and "live"
+        // is exact: every event with id > `since` arrives precisely once,
+        // either in the filtered replay or on the receiver. `None` replays the
+        // full history (ids start at 0, so no `u64` watermark expresses that).
         let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let receiver = self.msg_sender.subscribe();
-        AgentEventMsgSubscription { replay: state.msg_history.clone(), receiver }
+        let replay = match since {
+            Some(since) => {
+                state.msg_history.iter().filter(|envelope| envelope.id > since).cloned().collect()
+            }
+            None => state.msg_history.clone(),
+        };
+        AgentEventMsgSubscription { replay, receiver }
+    }
+
+    fn live_snapshot(&self) -> Option<ThreadLiveSnapshot> {
+        let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.live_items.is_empty() {
+            return None;
+        }
+        Some(ThreadLiveSnapshot {
+            last_event_id: state.next_id.saturating_sub(1),
+            turn_id: state.last_turn_id.clone().unwrap_or_default(),
+            items: state
+                .live_items
+                .iter()
+                .map(|(item_id, entry)| ThreadLiveSnapshotItem {
+                    item_id: item_id.clone(),
+                    kind: entry.kind,
+                    text: entry.text.clone(),
+                    patch_lines: entry.patch_lines.clone(),
+                })
+                .collect(),
+        })
     }
 
     fn send_msg(&self, msg: EventMsg) {
         let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        accumulate_live(&mut state, &msg);
         let envelope = AgentEventMsgEnvelope { id: state.next_id, msg };
         state.next_id += 1;
         if state.msg_history.len() >= CHANNEL_CAPACITY {
@@ -176,7 +330,27 @@ impl AgentEventHub {
     /// Creates the channel on first call. The returned subscription includes
     /// recent events emitted before the subscription and all later live events.
     pub fn subscribe_event_msgs(&self, thread_id: &str) -> AgentEventMsgSubscription {
-        self.channel(thread_id).subscribe_msgs()
+        self.channel(thread_id).subscribe_msgs_since(None)
+    }
+
+    /// [`subscribe_event_msgs`] with a watermark: only events with an envelope
+    /// id STRICTLY greater than `since` are replayed (typically the
+    /// `last_event_id` of a [`ThreadLiveSnapshot`] taken just before, so the
+    /// snapshot + replay pair covers every event exactly once).
+    pub fn subscribe_event_msgs_since(
+        &self,
+        thread_id: &str,
+        since: u64,
+    ) -> AgentEventMsgSubscription {
+        self.channel(thread_id).subscribe_msgs_since(Some(since))
+    }
+
+    /// Live catch-up snapshot for a RUNNING thread: the accumulated output of
+    /// every in-flight item, plus the envelope watermark it reflects. `None`
+    /// when the thread has no open items (idle or terminal). The public
+    /// surface is `HarnessService::live_state` (wire type + watermark).
+    pub(crate) fn live_snapshot(&self, thread_id: &str) -> Option<ThreadLiveSnapshot> {
+        self.channel(thread_id).live_snapshot()
     }
 
     /// Send an approval decision for a pending tool call.
@@ -526,8 +700,11 @@ impl ApprovalPort for AgentEventHub {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{AgentEventHub, is_persistence_grade};
     use slab_agent::protocol::{EventMsg, ItemCompletedParams, Turn, TurnStartedParams};
+    use tokio::sync::{broadcast, oneshot};
 
     #[test]
     fn subscribe_event_msgs_replays_messages_emitted_before_subscription() {
@@ -549,6 +726,180 @@ mod tests {
             &subscription.replay[0].msg,
             EventMsg::AgentMessageDelta(params) if params.delta == "done"
         ));
+    }
+
+    fn text_delta(thread: &str, turn: &str, item: &str, delta: &str) -> EventMsg {
+        EventMsg::AgentMessageDelta(slab_agent::protocol::AgentMessageDeltaParams {
+            thread_id: thread.to_owned(),
+            turn_id: turn.to_owned(),
+            item_id: item.to_owned(),
+            delta: delta.to_owned(),
+        })
+    }
+
+    // Live accumulation: deltas accumulate per item, ItemCompleted removes the
+    // entry, turn-terminal events clear every in-flight item.
+    #[test]
+    fn live_snapshot_accumulates_and_clears_with_item_lifecycle() {
+        let hub = AgentEventHub::new();
+        hub.broadcast_msg("t-live", text_delta("t-live", "0", "a1", "Hello "));
+        hub.broadcast_msg("t-live", text_delta("t-live", "0", "a1", "world"));
+        hub.broadcast_msg(
+            "t-live",
+            EventMsg::ItemCompleted(ItemCompletedParams {
+                item: slab_agent::protocol::TurnItem::AgentMessage {
+                    id: "a1".to_owned(),
+                    text: "Hello world".to_owned(),
+                },
+                thread_id: "t-live".to_owned(),
+                turn_id: "0".to_owned(),
+            }),
+        );
+        // Completed item gone; a still-open item survives.
+        hub.broadcast_msg("t-live", text_delta("t-live", "0", "r1", "thinking"));
+
+        let snapshot = hub.live_snapshot("t-live").expect("open item present");
+        assert_eq!(snapshot.turn_id, "0");
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(snapshot.items[0].item_id, "r1");
+        assert_eq!(snapshot.items[0].text, "thinking");
+        assert!(matches!(snapshot.items[0].kind, super::LiveItemKind::AgentMessage));
+
+        // Turn terminal clears everything → idle thread has no snapshot.
+        hub.broadcast_msg(
+            "t-live",
+            EventMsg::TurnCompleted(slab_agent::protocol::TurnCompletedParams {
+                thread_id: "t-live".to_owned(),
+                turn: Turn::default(),
+                usage: None,
+                reason: None,
+            }),
+        );
+        assert!(hub.live_snapshot("t-live").is_none());
+    }
+
+    // Watermark: `subscribe_event_msgs_since(last_event_id)` replays only the
+    // events after the snapshot — the snapshot + replay pair covers every
+    // event exactly once.
+    #[test]
+    fn subscribe_since_watermark_replays_only_post_snapshot_events() {
+        let hub = AgentEventHub::new();
+        hub.broadcast_msg("t-wm", text_delta("t-wm", "0", "a1", "one"));
+        let snapshot = hub.live_snapshot("t-wm").expect("snapshot with watermark");
+
+        // Events between snapshot and subscription land in the since-replay.
+        hub.broadcast_msg("t-wm", text_delta("t-wm", "0", "a1", " two"));
+        hub.broadcast_msg("t-wm", text_delta("t-wm", "0", "a1", " three"));
+        let subscription = hub.subscribe_event_msgs_since("t-wm", snapshot.last_event_id);
+
+        let replay_text: String = subscription
+            .replay
+            .iter()
+            .filter_map(|envelope| match &envelope.msg {
+                EventMsg::AgentMessageDelta(p) => Some(p.delta.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(replay_text, " two three");
+    }
+
+    // Atomicity: concurrent senders racing a snapshot + since-subscribe cannot
+    // lose or duplicate an event — every delta is in the snapshot OR the
+    // replay OR the live receiver, never zero or two of them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn live_snapshot_and_since_subscribe_cover_exactly_once_under_racing_writers() {
+        let hub = Arc::new(AgentEventHub::new());
+        const WRITERS: usize = 4;
+        const PER_WRITER: usize = 250;
+
+        let writers = (0..WRITERS)
+            .map(|w| {
+                let hub = Arc::clone(&hub);
+                tokio::spawn(async move {
+                    for i in 0..PER_WRITER {
+                        hub.broadcast_msg(
+                            "t-race",
+                            text_delta("t-race", "0", "a1", &format!("w{w}i{i};")),
+                        );
+                        if i % 50 == 0 {
+                            tokio::task::yield_now().await;
+                        }
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        // Interleave a snapshot + subscribe mid-stream (both take the channel
+        // lock, so the boundary is exact). Poll until the writers have made
+        // progress so the snapshot is guaranteed non-empty.
+        let snapshot = loop {
+            if let Some(snapshot) = hub.live_snapshot("t-race") {
+                break snapshot;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        };
+        let mut subscription = hub.subscribe_event_msgs_since("t-race", snapshot.last_event_id);
+        let mut replay_text = String::new();
+        for envelope in &subscription.replay {
+            if let EventMsg::AgentMessageDelta(p) = &envelope.msg {
+                replay_text.push_str(&p.delta);
+            }
+        }
+        // Drain the live receiver CONCURRENTLY with the writers — the
+        // broadcast capacity is 256, so a drain that starts only after they
+        // finish would Lag (the real fan-out pushes each event as it arrives).
+        let (done_tx, mut done_rx) = oneshot::channel::<()>();
+        let drainer = {
+            let mut receiver =
+                std::mem::replace(&mut subscription.receiver, broadcast::channel(1).1);
+            tokio::spawn(async move {
+                let mut received = String::new();
+                loop {
+                    tokio::select! {
+                        done = &mut done_rx => {
+                            let _ = done;
+                            break;
+                        }
+                        event = receiver.recv() => match event {
+                            Ok(envelope) => {
+                                if let EventMsg::AgentMessageDelta(p) = &envelope.msg {
+                                    received.push_str(&p.delta);
+                                }
+                            }
+                            Err(broadcast::error::RecvError::Closed) => break,
+                            Err(broadcast::error::RecvError::Lagged(skipped)) => panic!(
+                                "live receiver lagged ({skipped} events): the drainer must keep up"
+                            ),
+                        }
+                    }
+                }
+                // Drain events raced between the done signal and the break.
+                while let Ok(envelope) = receiver.try_recv() {
+                    if let EventMsg::AgentMessageDelta(p) = &envelope.msg {
+                        received.push_str(&p.delta);
+                    }
+                }
+                received
+            })
+        };
+        for writer in writers {
+            writer.await.expect("writer finished");
+        }
+        done_tx.send(()).expect("drainer still alive");
+        let received_text = drainer.await.expect("drainer finished");
+
+        // Count occurrences of every delta across snapshot + replay + receiver.
+        let mut covered = String::new();
+        covered.push_str(&snapshot.items[0].text);
+        covered.push_str(&replay_text);
+        covered.push_str(&received_text);
+
+        for w in 0..WRITERS {
+            for i in 0..PER_WRITER {
+                let needle = format!("w{w}i{i};");
+                let count = covered.matches(&needle).count();
+                assert_eq!(count, 1, "delta {needle} covered {count} times (want exactly 1)");
+            }
+        }
     }
 
     // Test C (P4) — the no-Lag guarantee for the DEDICATED UNBOUNDED persistence

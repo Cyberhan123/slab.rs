@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { renderHook } from "vitest-browser-react"
 
 import type { Thread } from "@slab/api/harness"
+import { conversationPool } from "@slab/core/harness"
 import { FakeWebSocket } from "@slab/core/harness/testing/fake-websocket"
 import { useHarnessConversation } from "../use-harness-conversation"
 
@@ -55,11 +56,15 @@ async function driveOpenAndInit(socket = FakeWebSocket.last!): Promise<void> {
 
 describe("useHarnessConversation", () => {
   beforeEach(() => {
+    // The hook binds controllers to the module-level pool; reset it so each
+    // test mints its own controller under the freshly-stubbed WebSocket.
+    conversationPool.disposeAll()
     FakeWebSocket.reset("manual")
     vi.stubGlobal("WebSocket", FakeWebSocket)
   })
 
   afterEach(() => {
+    conversationPool.disposeAll()
     vi.unstubAllGlobals()
   })
 

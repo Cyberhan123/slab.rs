@@ -525,6 +525,23 @@ export type ThreadListParams = { cursor?: string, limit?: number, modelProviders
 // ── ThreadListResult ──
 export type ThreadListResult = { data: Array<Thread>, nextCursor?: string, };
 
+// ── ThreadLiveItem ──
+/**
+ * Accumulated output for one open item. `text` carries the concatenated
+ * deltas (answer text, reasoning trace, or command output); `patch_lines`
+ * the file-change patch lines when `kind` is `fileChangePatch`.
+ */
+export type ThreadLiveItem = { itemId: string, kind: ThreadLiveItemKind, text: string, patchLines?: Array<string>, };
+
+// ── ThreadLiveItemKind ──
+export type ThreadLiveItemKind = "agentMessage" | "reasoning" | "commandOutput" | "fileChangePatch";
+
+// ── ThreadLiveState ──
+/**
+ * Snapshot of one in-flight turn's accumulated output at resume time.
+ */
+export type ThreadLiveState = { turnId: string, items: Array<ThreadLiveItem>, };
+
 // ── ThreadResumeParams ──
 export type ThreadResumeParams = { 
 /**
@@ -537,7 +554,16 @@ export type ThreadResumeParams = {
 threadId?: string, path?: string, };
 
 // ── ThreadResumeResult ──
-export type ThreadResumeResult = { thread: Thread, };
+export type ThreadResumeResult = { thread: Thread, 
+/**
+ * In-flight turn catch-up for a RUNNING thread: the accumulated visible
+ * text/patch per open item at resume time, taken atomically with the
+ * event subscription watermark (the fan-out replays only events AFTER
+ * the snapshot, so deltas are neither lost nor double-delivered).
+ * `None` for an idle thread (no open items) — resume behaves exactly as
+ * before. Older clients ignore the unknown field.
+ */
+live?: ThreadLiveState, };
 
 // ── ThreadRollbackParams ──
 export type ThreadRollbackParams = { threadId: string, toTurnId: string, };

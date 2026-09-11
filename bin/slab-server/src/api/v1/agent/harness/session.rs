@@ -151,6 +151,11 @@ impl HarnessSession {
     /// harness-visible id, and push them as JSON-RPC notifications onto the
     /// session's outbound stream.
     ///
+    /// `since` is an envelope watermark: only events AFTER it are replayed.
+    /// `thread/resume` passes the live snapshot's watermark so the snapshot
+    /// (returned in the resume result) plus the replay cover every event
+    /// exactly once; other establish paths pass 0 (full replay).
+    ///
     /// slab-agent emits the harness protocol directly (`EventMsg`), so this
     /// consumes `EventMsg` only — no projection layer. The legacy
     /// `AgentEventKind` stream stays separate and feeds `/responses`.
@@ -160,7 +165,12 @@ impl HarnessSession {
     /// no-op while a fan-out task for that real thread is still running, so
     /// events are never double-delivered. A finished task (its receiver hit
     /// `Closed`) is replaced, allowing re-establishment after task death.
-    pub(crate) fn spawn_event_fanout(&self, real_thread_id: String, harness_thread_id: String) {
+    pub(crate) fn spawn_event_fanout(
+        &self,
+        real_thread_id: String,
+        harness_thread_id: String,
+        since: u64,
+    ) {
         let mut tasks = self.inner.fanout_tasks.lock().expect("fanout task map poisoned");
         if matches!(dedupe_fanout(&tasks, &real_thread_id), FanoutDedupe::Skip) {
             return;
@@ -170,7 +180,7 @@ impl HarnessSession {
         let notifier = self.inner.notifier.clone();
         let real_key = real_thread_id.clone();
         let handle = tokio::spawn(async move {
-            let subscription = service.subscribe_event_msgs(&real_thread_id);
+            let subscription = service.subscribe_event_msgs_since(&real_thread_id, since);
 
             for envelope in &subscription.replay {
                 let msg = rewrite_thread_id(envelope.msg.clone(), &harness_thread_id);
@@ -179,6 +189,12 @@ impl HarnessSession {
 
             let mut receiver = subscription.receiver;
             loop {
+                if notifier.is_closed() {
+                    // The outbound socket is gone — stop instead of spinning
+                    // on dead sends until process end (the hub subscription
+                    // never removes itself).
+                    break;
+                }
                 match receiver.recv().await {
                     Ok(envelope) => {
                         let msg = rewrite_thread_id(envelope.msg, &harness_thread_id);
@@ -204,6 +220,19 @@ impl HarnessSession {
             }
         });
         tasks.insert(real_key, handle);
+    }
+}
+
+/// Connection teardown: abort every fan-out task so a dropped socket cannot
+/// leak per-thread subscribers (their hub subscriptions never remove
+/// themselves, and the detached tasks would keep swallowing events forever).
+/// The tasks hold only `HarnessService`/`Notifier` clones — never this
+/// session's `Arc` — so dropping here cannot deadlock.
+impl Drop for SessionInner {
+    fn drop(&mut self) {
+        for (_, handle) in self.fanout_tasks.lock().expect("fanout task map poisoned").drain() {
+            handle.abort();
+        }
     }
 }
 

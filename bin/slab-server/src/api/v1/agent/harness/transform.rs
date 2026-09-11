@@ -83,6 +83,10 @@ pub(crate) struct Established<R> {
     pub(crate) harness_id: String,
     pub(crate) real_id: String,
     pub(crate) result: R,
+    /// Envelope watermark for the fan-out subscription: replay only events
+    /// AFTER it. `thread/resume` sets it to the live snapshot's watermark (the
+    /// snapshot rides in `result`); other establish paths use 0 (full replay).
+    pub(crate) fanout_since: u64,
 }
 
 /// Adapter that runs an establish body, then binds + fans out centrally.
@@ -105,7 +109,11 @@ where
             serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         let established = (self.body)(session.clone(), parsed).await?;
         session.bind(&established.harness_id, established.real_id.clone());
-        session.spawn_event_fanout(established.real_id, established.harness_id);
+        session.spawn_event_fanout(
+            established.real_id,
+            established.harness_id,
+            established.fanout_since,
+        );
         serde_json::to_value(established.result).map_err(|e| e.to_string())
     }
 }

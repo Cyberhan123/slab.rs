@@ -18,6 +18,9 @@ function makeFakeClient(options: FakeClientOptions = {}) {
   return {
     currentThreadId: options.currentThreadId ?? null,
     lastTurnIndex: -1,
+    liveResume: null as
+      | { turnId: string; items: Array<Record<string, unknown>> }
+      | null,
     open: vi.fn(async () => {}),
     threadStart: vi.fn(async (): Promise<ThreadStartResult> => ({
       thread: { id: "hthread-1", preview: "", modelProvider: "", createdAt: 0, turns: [] },
@@ -143,6 +146,60 @@ describe("HarnessChatTransport", () => {
       client: makeFakeClient() as unknown as HarnessClient,
     })
     await expect(transport.reconnectToStream()).resolves.toBeNull()
+  })
+
+  it("reconnectToStream seeds the live snapshot then streams live deltas to the terminal", async () => {
+    const fake = makeFakeClient({ currentThreadId: "hthread-1" })
+    fake.lastTurnIndex = 0
+    fake.liveResume = {
+      turnId: "1",
+      items: [
+        { itemId: "r1", kind: "reasoning", text: "thinking " },
+        { itemId: "a1", kind: "agentMessage", text: "partial " },
+        // Patch items render from the controller's mirrors, not the stream.
+        { itemId: "f1", kind: "fileChangePatch", text: "", patchLines: ["+x"] },
+      ],
+    }
+    const transport = new HarnessChatTransport({
+      client: fake as unknown as HarnessClient,
+    })
+
+    const stream = await transport.reconnectToStream()
+    expect(stream).not.toBeNull()
+    // The snapshot is consumed exactly once: a second call reconnects nothing.
+    await expect(transport.reconnectToStream()).resolves.toBeNull()
+
+    const collected = collect(stream!)
+    // Let the stream's execute register its notification subscription before
+    // the post-snapshot live events arrive.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    fake.emitNotification("item/agentMessage/delta", {
+      threadId: "hthread-1",
+      turnId: "1",
+      itemId: "a1",
+      delta: "tail",
+    })
+    fake.emitNotification("turn/completed", {
+      threadId: "hthread-1",
+      turn: { id: "1", items: [], status: "completed" },
+    })
+    const chunks = await collected
+
+    expect(chunks.map((chunk) => chunk.type)).toEqual([
+      "reasoning-start",
+      "reasoning-delta",
+      "text-start",
+      "text-delta",
+      "text-delta",
+      // The terminal finish closes the still-open seeded reasoning part.
+      "reasoning-end",
+      "text-end",
+      "finish-step",
+      "finish",
+    ])
+    expect(chunks[1]).toMatchObject({ type: "reasoning-delta", delta: "thinking " })
+    expect(chunks[3]).toMatchObject({ type: "text-delta", delta: "partial " })
+    expect(chunks[4]).toMatchObject({ type: "text-delta", delta: "tail" })
   })
 
   // ── open retry + local-stream lifecycle callbacks ─────────────────────────

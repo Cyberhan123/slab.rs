@@ -159,7 +159,7 @@ pub(crate) async fn turn_start(
             session.bind(&params.thread_id, real_id.clone());
             // ⚠️ Only the first turn establishes a fan-out task; subsequent
             // turns reuse it (a second task would double-deliver every event).
-            session.spawn_event_fanout(real_id, params.thread_id.clone());
+            session.spawn_event_fanout(real_id, params.thread_id.clone(), 0);
         }
     }
 
@@ -475,6 +475,7 @@ pub(crate) async fn thread_fork(
         real_id: snapshot.id.clone(),
         harness_id: harness_id.clone(),
         result: ThreadForkResult { thread: thread_from_snapshot_with_id(&harness_id, &snapshot) },
+        fanout_since: 0,
     })
 }
 
@@ -569,11 +570,22 @@ pub(crate) async fn thread_resume(
         session.service().list_turn_states(&snapshot.id).await.map_err(|e| e.to_string())?;
     let timeline =
         session.service().list_turn_timeline(&snapshot.id).await.map_err(|e| e.to_string())?;
+    // Live catch-up for a RUNNING thread: the snapshot must be taken BEFORE
+    // the adapter spawns the fan-out (the establish_op adapter subscribes at
+    // `fanout_since` = the snapshot watermark, so snapshot + replay cover
+    // every in-flight event exactly once).
+    let (live, fanout_since) = session
+        .service()
+        .live_state(&snapshot.id)
+        .map(|(state, watermark)| (Some(state), watermark))
+        .unwrap_or((None, 0));
     Ok(Established {
         real_id: snapshot.id.clone(),
         harness_id: harness_id.clone(),
+        fanout_since,
         result: ThreadResumeResult {
             thread: thread_from_timeline(&harness_id, &snapshot, &turn_states, &timeline),
+            live,
         },
     })
 }

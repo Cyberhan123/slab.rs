@@ -494,7 +494,8 @@ export class ConversationController {
   /** The owned, long-lived harness client (also feeds `HarnessChatTransport`). */
   readonly client: HarnessClient
 
-  private readonly sessionId: string | undefined
+  /** The slab session this controller restores (pool key; also sent by the UI store). */
+  readonly sessionId: string | undefined
   private model: string
 
   /** Snapshot cache — rebuilt only on state changes so the reference is stable. */
@@ -775,13 +776,40 @@ export class ConversationController {
         // background-task/subagent maps) and diverges from the live fan-out's
         // rewrite id (every later notification gets filtered out). Only the
         // first restore intentionally discovers the thread id-less.
-        const { thread } = await this.client.threadResume(
+        const { thread, live } = await this.client.threadResume(
           this.client.currentThreadId ? { threadId: this.client.currentThreadId } : {},
         )
         const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
         this.client.currentThreadId = thread.id
         this.client.lastTurnIndex = computeLastTurnIndex(thread)
         if (!isCurrent()) return
+        // Live catch-up for a RUNNING thread: seed the per-item mirrors so an
+        // unattached pane renders the in-flight output immediately, and hand
+        // the snapshot to the transport so `reconnectToStream` can rebuild the
+        // AI-SDK stream from it. The server replays only POST-snapshot events,
+        // so the seeds and the incoming deltas never double.
+        this.client.liveResume = live ?? null
+        if (live) {
+          for (const item of live.items) {
+            if (this.restoredItemIds.has(item.itemId)) continue
+            if (item.kind === "commandOutput" && item.text) {
+              this.liveOutput = new Map(this.liveOutput)
+              this.liveOutput.set(item.itemId, item.text)
+            } else if (item.kind === "fileChangePatch" && item.patchLines) {
+              this.livePatch = new Map(this.livePatch)
+              this.livePatch.set(item.itemId, item.patchLines)
+            } else if (
+              (item.kind === "agentMessage" || item.kind === "reasoning") &&
+              item.text
+            ) {
+              this.appendLiveText(
+                item.itemId,
+                item.kind === "reasoning" ? "reasoning" : "message",
+                item.text,
+              )
+            }
+          }
+        }
         // An identical re-read (same thread, same message-id sequence) keeps
         // the PRIOR message objects: downstream memoized rows (keyed on
         // message identity) skip re-rendering and the remount version stays.
@@ -1305,9 +1333,10 @@ export class ConversationController {
    * Single-flight recovery after an UNEXPECTED socket close: one delayed
    * `reconnect()` re-opens and re-resumes, restoring the notification feed
    * (replayed terminal events heal a stale `threadStatus`). Safe under a
-   * live pane stream: a resume replays item events (started/completed), not
-   * text deltas, and the still-subscribed transport's per-item open/close is
-   * idempotent — and the reconnect's structural bump is deferred while
+   * live pane stream: the resume replays item events (started/completed) and
+   * — for the in-flight turn — text deltas gated by the live snapshot's
+   * watermark, the still-subscribed transport's per-item open/close is
+   * idempotent, and the reconnect's structural bump is deferred while
    * `localStreamActive` holds.
    */
   private readonly handleStatusChange = (status: string): void => {
@@ -1691,7 +1720,10 @@ export class ConversationController {
         // resync below runs) makes the deferred-bump decision deterministic:
         // a resync triggered by this terminal event always sees the flag
         // cleared and bumps, remounting the pane with the completed rollout.
+        // The live-resume snapshot is dead too — a pane remounting now must
+        // restore from history, not reattach to a finished stream.
         this.localStreamActive = false
+        this.client.liveResume = null
         this.flushLiveTextNow()
         this.denyStalePendingApprovals()
         this.clearQueuedAndResync()
@@ -1712,6 +1744,7 @@ export class ConversationController {
       // before the terminal-triggered resync so its bump decision is
       // deterministic.
       this.localStreamActive = false
+      this.client.liveResume = null
       this.flushLiveTextNow()
       this.denyStalePendingApprovals()
       this.clearQueuedAndResync()
@@ -1728,6 +1761,7 @@ export class ConversationController {
         return
       }
       this.localStreamActive = false
+      this.client.liveResume = null
       this.flushLiveTextNow()
       this.denyStalePendingApprovals()
       this.clearQueuedAndResync()

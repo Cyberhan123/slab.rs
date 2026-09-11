@@ -43,6 +43,7 @@ export type {
   ThreadStatusString,
   TurnSendOptions,
 } from "./conversation-controller"
+export { conversationPool, POOL_IDLE_DISPOSE_MS } from "./conversation-pool"
 export {
   coerceServerNotification,
   convertNotification,

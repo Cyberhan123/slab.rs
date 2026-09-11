@@ -36,6 +36,7 @@ import type {
   ThreadCompactStartResult,
   ThreadForkParams,
   ThreadForkResult,
+  ThreadLiveState,
   ThreadListParams,
   ThreadListResult,
   ThreadResumeParams,
@@ -120,6 +121,13 @@ export class HarnessClient {
    * `turnId > lastTurnIndex`; replayed history has `turnId <= lastTurnIndex`.
    */
   lastTurnIndex = -1
+  /**
+   * Live catch-up snapshot from the most recent `thread/resume` of a RUNNING
+   * thread (in-flight accumulated output per open item). Consumed — and
+   * cleared — by the transport's `reconnectToStream` so a remounted pane can
+   * reattach its AI-SDK stream mid-run; `null` on idle threads.
+   */
+  liveResume: ThreadLiveState | null = null
 
   constructor(options: HarnessClientOptions) {
     this.sessionId = options.sessionId
