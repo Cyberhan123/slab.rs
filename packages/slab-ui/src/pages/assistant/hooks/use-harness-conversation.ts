@@ -107,6 +107,9 @@ export function useHarnessConversation(
         onLocalStreamBegin: controller.markLocalStreamBegin,
         onLocalTurnStarted: () => controller.markLocalTurnStarted(),
         onLocalStreamEnd: controller.markLocalStreamEnd,
+        // Streamed-vs-final text divergence (leaked think body in the deltas):
+        // remount from history at the run's terminal event.
+        onItemTextDivergence: controller.handleItemTextDivergence,
       }),
     [controller, model],
   )

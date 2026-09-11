@@ -136,13 +136,14 @@ function reasoningToString(value: ReasoningText): string {
 }
 
 /**
- * Complete `<think …>…</think>` blocks the server used to embed into the
- * persisted agentMessage text (LLM-context form). History renders item text
- * verbatim, so legacy rollout files still carrying the block must be cleaned
- * here or the raw thinking shows up in the message body. Mirrors the
- * server-side `strip_think_blocks` emission guard.
+ * `<think …>…</think>` blocks the server used to embed into the persisted
+ * agentMessage text (LLM-context form). History renders item text verbatim,
+ * so rollout items still carrying the block must be cleaned here or the raw
+ * thinking shows up in the message body. The `$` alternative drops an
+ * UNTERMINATED block (interrupted stream) from its open tag onward, matching
+ * the server-side `strip_think_blocks` semantics.
  */
-const THINK_BLOCK_PATTERN = /<think\b[^>]*>[\s\S]*?<\/think>/gi
+const THINK_BLOCK_PATTERN = /<think\b[^>]*>[\s\S]*?(?:<\/think>|$)/gi
 
 function stripThinkBlocks(text: string): string {
   return text.replace(THINK_BLOCK_PATTERN, "").trim()

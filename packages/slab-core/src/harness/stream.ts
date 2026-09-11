@@ -67,10 +67,31 @@ export interface StreamState {
   openReasoning: Set<string>
   /** Item ids with an open tool part (Running card, no result yet). */
   openTools: Set<string>
+  /** Accumulated text deltas per item id, for final-item divergence checks. */
+  textById: Map<string, string>
+  /**
+   * Fired when a completed agentMessage item's authoritative text disagrees
+   * with the accumulated live deltas (e.g. an older server leaked a
+   * `<think>` block through the delta path). The AI SDK has no replace
+   * chunk, so the host remounts from history instead of leaving the leaked
+   * text in the bubble.
+   */
+  onItemTextDivergence?: (itemId: string) => void
 }
 
 export function createStreamState(): StreamState {
-  return { finished: false, openText: new Set(), openReasoning: new Set(), openTools: new Set() }
+  return {
+    finished: false,
+    openText: new Set(),
+    openReasoning: new Set(),
+    openTools: new Set(),
+    textById: new Map(),
+  }
+}
+
+/** Whitespace-insensitive comparison key for streamed-vs-final text. */
+function normalizedText(text: string): string {
+  return text.replace(/\s+/g, " ").trim()
 }
 
 function openText(state: StreamState, itemId: string): UIMessageChunk[] {
@@ -82,6 +103,7 @@ function openText(state: StreamState, itemId: string): UIMessageChunk[] {
 function closeText(state: StreamState, itemId: string): UIMessageChunk[] {
   if (!state.openText.has(itemId)) return []
   state.openText.delete(itemId)
+  state.textById.delete(itemId)
   return [{ id: itemId, type: "text-end" }]
 }
 
@@ -112,6 +134,7 @@ function finishChunks(state: StreamState, reason: "stop" | "error" = "stop"): UI
   state.openReasoning.clear()
   state.openText.clear()
   state.openTools.clear()
+  state.textById.clear()
   chunks.push({ type: "finish-step" }, { finishReason: reason, type: "finish" })
   state.finished = true
   return chunks
@@ -195,7 +218,17 @@ function handleItemStarted(state: StreamState, params: ItemStartedParams): UIMes
 
 function handleItemCompleted(state: StreamState, params: ItemCompletedParams): UIMessageChunk[] {
   const { item } = params
-  if (item.type === "agentMessage") return closeText(state, item.id)
+  if (item.type === "agentMessage") {
+    // The completed item's text is the authoritative UI-grade form (the
+    // server strips think blocks there). If the accumulated live deltas
+    // disagree, the streamed bubble text is stale or leaked — hand the
+    // divergence to the host to resync from history.
+    const streamed = state.textById.get(item.id)
+    if (streamed !== undefined && normalizedText(streamed) !== normalizedText(item.text ?? "")) {
+      state.onItemTextDivergence?.(item.id)
+    }
+    return closeText(state, item.id)
+  }
   if (item.type === "reasoning") return closeReasoning(state, item.id)
   return toolChunksFromItem(state, item)
 }
@@ -204,6 +237,7 @@ function handleAgentMessageDelta(
   state: StreamState,
   params: AgentMessageDeltaParams,
 ): UIMessageChunk[] {
+  state.textById.set(params.itemId, (state.textById.get(params.itemId) ?? "") + params.delta)
   return openText(state, params.itemId).concat({
     delta: params.delta,
     id: params.itemId,

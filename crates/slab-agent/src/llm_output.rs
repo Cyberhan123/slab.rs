@@ -308,18 +308,29 @@ impl StreamVisibilityGate {
     }
 
     fn emitted_prefix(&self, content: &str) -> String {
-        content[..self.emitted_len].trim_end().to_owned()
+        // Defense in depth: the gate never emits think blocks, but the
+        // hide-unparsed path reconstructs content from the emitted prefix —
+        // strip anyway so a gate regression cannot leak thinking there.
+        crate::turn::strip_think_blocks(&content[..self.emitted_len]).trim_end().to_owned()
     }
 
+    /// Emit the newly visible text, never crossing a `<tool_call>` marker or
+    /// an unterminated `<think …>` block, and silently skipping COMPLETE
+    /// think blocks (the LLM-grade stream embeds reasoning; the visible
+    /// stream must not — a provider that routes thinking through the content
+    /// channel would otherwise leak it into the live message bubble).
     fn visible_delta(&mut self, content: &str) -> Option<String> {
-        let visible_end = self.visible_boundary(content);
-        if visible_end <= self.emitted_len {
+        if self.emitted_len == 0 && stream_prefix_needs_buffering(content) {
             return None;
         }
 
-        let delta = content[self.emitted_len..visible_end].to_owned();
-        self.emitted_len = visible_end;
-        Some(delta)
+        let mut delta = String::new();
+        while self.emit_upto_limiter(content, &mut delta) || self.skip_complete_think_block(content)
+        {
+            // Emit text up to the next limiter; if the limiter is a complete
+            // think block, skip it and keep scanning.
+        }
+        (!delta.is_empty()).then_some(delta)
     }
 
     fn flush(&mut self, content: &str) -> Option<String> {
@@ -327,22 +338,65 @@ impl StreamVisibilityGate {
             return None;
         }
 
-        let delta = content[self.emitted_len..].to_owned();
+        // Finish-time tail: complete blocks are stripped and a truncated
+        // unterminated block is dropped from its open tag onward.
+        let delta = crate::turn::strip_think_blocks(&content[self.emitted_len..]);
         self.emitted_len = content.len();
-        if delta.is_empty() { None } else { Some(delta) }
+        (!delta.is_empty()).then_some(delta)
     }
 
-    fn visible_boundary(&self, content: &str) -> usize {
-        if self.emitted_len == 0 && stream_prefix_needs_buffering(content) {
-            return 0;
-        }
-
+    /// Emit text from `emitted_len` up to the earliest limiter in the
+    /// remainder (a `<tool_call>` marker, an unterminated think open tag, or
+    /// a trailing partial marker a later chunk may complete). Returns whether
+    /// anything was emitted.
+    fn emit_upto_limiter(&mut self, content: &str, delta: &mut String) -> bool {
         let rest = &content[self.emitted_len..];
+        let mut end = rest.len();
         if let Some(index) = rest.find(COMMON_TOOL_CALL_OPEN) {
-            return self.emitted_len + index;
+            end = end.min(index);
         }
+        if let Some(open) = crate::turn::find_think_open(rest) {
+            end = end.min(open);
+        }
+        // A chunk boundary may split a marker (`<thi` / `<tool_c`): hold the
+        // partial tail so a completed marker is never half-emitted. The think
+        // variant includes the FULL `<think` marker: a bare `<think` with no
+        // `>`/whitespace yet is matched by neither `find_think_open` nor the
+        // exclusive partial scan, but the next chunk must be able to complete
+        // it into a tag.
+        let held_tail = trailing_partial_marker_len(content, COMMON_TOOL_CALL_OPEN)
+            .max(trailing_partial_think_marker_len(content));
+        end = end.min(rest.len().saturating_sub(held_tail));
 
-        content.len().saturating_sub(trailing_partial_marker_len(content, COMMON_TOOL_CALL_OPEN))
+        if end == 0 {
+            return false;
+        }
+        delta.push_str(&rest[..end]);
+        self.emitted_len += end;
+        true
+    }
+
+    /// If the remainder starts with a COMPLETE `<think …>…</think>` block,
+    /// advance past its close tag. Returns whether a block was skipped.
+    fn skip_complete_think_block(&mut self, content: &str) -> bool {
+        let rest = &content[self.emitted_len..];
+        let Some(0) = crate::turn::find_think_open(rest) else {
+            return false;
+        };
+        let after_open = &rest[crate::turn::THINK_OPEN_MARKER.len()..];
+        let Some(tag_end) = after_open.find('>') else {
+            return false;
+        };
+        let body = &after_open[tag_end + 1..];
+        let Some(close) = body.find(crate::turn::THINK_CLOSE_TAG) else {
+            return false;
+        };
+        self.emitted_len += crate::turn::THINK_OPEN_MARKER.len()
+            + tag_end
+            + 1
+            + close
+            + crate::turn::THINK_CLOSE_TAG.len();
+        true
     }
 }
 
@@ -364,6 +418,16 @@ fn stream_prefix_needs_buffering(buffer: &str) -> bool {
 
 fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
     let max = raw.len().min(marker.len().saturating_sub(1));
+    (1..=max).rev().find(|len| raw.ends_with(&marker[..*len])).unwrap_or(0)
+}
+
+/// [`trailing_partial_marker_len`] for the think OPEN marker, inclusive of the
+/// full `<think` run: unlike `<tool_call>`, the tag is not complete at the
+/// marker itself (it still needs `>` or whitespace), so the whole marker is a
+/// holdable partial.
+fn trailing_partial_think_marker_len(raw: &str) -> usize {
+    let marker = crate::turn::THINK_OPEN_MARKER;
+    let max = raw.len().min(marker.len());
     (1..=max).rev().find(|len| raw.ends_with(&marker[..*len])).unwrap_or(0)
 }
 
@@ -880,6 +944,117 @@ mod tests {
 
         assert_eq!(completion.tool_calls.len(), 1);
         assert_eq!(completion.content, "I need to check.");
+    }
+
+    #[test]
+    fn stream_assembler_holds_and_skips_complete_think_block() {
+        let mut assembler = AgentStreamAssembler::default();
+
+        // A provider routing thinking through the content channel: the block
+        // must never surface as a visible delta, split at any chunk boundary.
+        assert!(
+            assembler
+                .ingest_data(r#"{"choices":[{"delta":{"content":"<thi"}}]}"#)
+                .expect("partial open tag")
+                .is_empty()
+        );
+        assert!(
+            assembler
+                .ingest_data(r#"{"choices":[{"delta":{"content":"nk status=\"done\">\n\nsecret plan\n\n</thi"}}]}"#)
+                .expect("block body")
+                .is_empty()
+        );
+        let deltas = assembler
+            .ingest_data(r#"{"choices":[{"delta":{"content":"nk>\n\nfinal answer"}}]}"#)
+            .expect("close and answer")
+            .into_iter()
+            .map(|delta| match delta {
+                AgentStreamDelta::Text(text) => text,
+                AgentStreamDelta::Reasoning(text) => text,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        assert_eq!(deltas, "\n\nfinal answer");
+        let completion = assembler.finish();
+
+        // The LLM-grade content keeps the embedded block (next-turn prompt).
+        assert_eq!(
+            completion.content,
+            "<think status=\"done\">\n\nsecret plan\n\n</think>\n\nfinal answer"
+        );
+        assert!(completion.content_already_streamed);
+        assert_eq!(completion.unstreamed_text_delta, None);
+    }
+
+    #[test]
+    fn stream_assembler_streams_text_around_think_blocks() {
+        let mut assembler = AgentStreamAssembler::default();
+
+        let first = assembler
+            .ingest_data(r#"{"choices":[{"delta":{"content":"A"}}]}"#)
+            .expect("text before");
+        assert!(matches!(&first[0], AgentStreamDelta::Text(delta) if delta == "A"));
+        let held = assembler
+            .ingest_data(r#"{"choices":[{"delta":{"content":"<think>x</think>"}}]}"#)
+            .expect("complete block");
+        assert!(held.is_empty(), "block itself must not surface");
+        let second = assembler
+            .ingest_data(r#"{"choices":[{"delta":{"content":"B<think>y</think>C"}}]}"#)
+            .expect("text after");
+        // One ingest call coalesces the text around the skipped block into a
+        // single delta: "B" + skip + "C".
+        assert!(matches!(&second[0], AgentStreamDelta::Text(delta) if delta == "BC"));
+        assert_eq!(second.len(), 1);
+    }
+
+    #[test]
+    fn stream_assembler_flush_drops_unterminated_think_tail() {
+        let mut assembler = AgentStreamAssembler::default();
+
+        let first = assembler
+            .ingest_data(r#"{"choices":[{"delta":{"content":"ok "}}]}"#)
+            .expect("visible prefix");
+        assert!(matches!(&first[0], AgentStreamDelta::Text(delta) if delta == "ok "));
+        assert!(
+            assembler
+                .ingest_data(r#"{"choices":[{"delta":{"content":"<think>truncated tail"}}]}"#)
+                .expect("unterminated block")
+                .is_empty()
+        );
+        let completion = assembler.finish();
+
+        assert_eq!(completion.unstreamed_text_delta, None);
+        // LLM-grade content keeps the raw tail; nothing more was streamed.
+        assert_eq!(completion.content, "ok <think>truncated tail");
+    }
+
+    #[test]
+    fn stream_assembler_think_gate_is_orthogonal_to_tool_call_gate() {
+        let mut assembler = AgentStreamAssembler::default();
+
+        let deltas = assembler
+            .ingest_data(r#"{"choices":[{"delta":{"content":"<think>reason</think>pre <tool"}}]}"#)
+            .expect("think block then tool prefix")
+            .into_iter()
+            .map(|delta| match delta {
+                AgentStreamDelta::Text(text) => text,
+                AgentStreamDelta::Reasoning(text) => text,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        assert_eq!(deltas, "pre ");
+        assert!(
+            assembler
+                .ingest_data(
+                    r#"{"choices":[{"delta":{"content":"_call>\n<function=echo>\n<parameter=message>\nhi\n</parameter>\n</function>\n</tool_call>"}}]}"#
+                )
+                .expect("tool call")
+                .is_empty()
+        );
+        let completion = assembler.finish();
+
+        assert_eq!(completion.tool_calls.len(), 1);
+        assert_eq!(completion.tool_calls[0].name, "echo");
     }
 
     #[test]

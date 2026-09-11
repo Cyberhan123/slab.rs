@@ -33,6 +33,34 @@ describe("harness stream convertNotification", () => {
     ])
   })
 
+  it("flags streamed-vs-final text divergence on item/completed(agentMessage)", () => {
+    // Defense in depth: an older server leaking a `<think>` body through the
+    // delta path leaves it in the streamed bubble; the authoritative item
+    // text disagrees and the host remounts from history.
+    const diverged: string[] = []
+    const state = createStreamState()
+    state.onItemTextDivergence = (itemId) => diverged.push(itemId)
+    convertNotification(agentMessageStarted("i1"), state)
+    convertNotification(
+      { method: "item/agentMessage/delta", params: { threadId: THREAD, turnId: TURN, itemId: "i1", delta: "<think>leaked</think>answer" } },
+      state,
+    )
+    // Whitespace-only differences are NOT divergence (the server trims).
+    convertNotification(agentMessageCompleted("i1", "answer"), state)
+    expect(diverged).toEqual(["i1"])
+    // Matching text (modulo whitespace) stays silent.
+    const quiet: string[] = []
+    const okState = createStreamState()
+    okState.onItemTextDivergence = (itemId) => quiet.push(itemId)
+    convertNotification(agentMessageStarted("i2"), okState)
+    convertNotification(
+      { method: "item/agentMessage/delta", params: { threadId: THREAD, turnId: TURN, itemId: "i2", delta: "  answer  " } },
+      okState,
+    )
+    convertNotification(agentMessageCompleted("i2", "answer"), okState)
+    expect(quiet).toEqual([])
+  })
+
   it("streams reasoning parts", () => {
     const state = createStreamState()
     const item: TurnItem = { type: "reasoning", id: "r1", summary: "", content: "" }

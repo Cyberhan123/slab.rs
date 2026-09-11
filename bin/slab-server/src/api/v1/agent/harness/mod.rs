@@ -182,7 +182,11 @@ fn turn_items_for_message(message: &ThreadMessageRecord) -> Vec<TurnItem> {
         }],
         "assistant" => {
             let mut items = Vec::new();
-            let text = record.content.rendered_text();
+            // The rollout MessageAppend keeps the LLM-grade text (embedded
+            // `<think>` blocks feed the next prompt); the restored UI item is
+            // UI-grade, so strip here — same as the live ItemCompleted path
+            // and the thread preview above.
+            let text = slab_agent::strip_think_blocks(&record.content.rendered_text());
             if !text.trim().is_empty() {
                 items.push(TurnItem::AgentMessage { id: format!("{id}-text"), text });
             }
@@ -1187,6 +1191,27 @@ mod tests {
         // system/developer messages are LLM-visible only — never UI items.
         assert!(turn_items_for_message(&record("s1", 0, "system", "persona", "t")).is_empty());
         assert!(turn_items_for_message(&record("d1", 0, "developer", "<skills>", "t")).is_empty());
+    }
+
+    // Regression: the rollout MessageAppend keeps the LLM-grade text (embedded
+    // `<think>` block feeds the next prompt); the lossy restore synthesized it
+    // verbatim into an AgentMessage and the raw thinking rendered as the
+    // message body. The restored item must be UI-grade.
+    #[test]
+    fn turn_items_for_message_strips_embedded_think_block() {
+        let items = turn_items_for_message(&record(
+            "a1",
+            0,
+            "assistant",
+            "<think status=\"done\">\n\nplan\n\n</think>\n\n源码已经给出了决定性证据。",
+            "t",
+        ));
+        assert!(matches!(&items[..], [TurnItem::AgentMessage { text, .. }]
+            if text == "源码已经给出了决定性证据。"));
+        // Unterminated block (interrupted stream): dropped from the open tag.
+        let items =
+            turn_items_for_message(&record("a2", 0, "assistant", "before<think>truncated", "t"));
+        assert!(matches!(&items[..], [TurnItem::AgentMessage { text, .. }] if text == "before"));
     }
 
     // Regression: the `slab_agents_md` init-context fragment rides the USER

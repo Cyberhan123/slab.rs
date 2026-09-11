@@ -63,6 +63,13 @@ export interface HarnessChatTransportOptions {
   onLocalStreamBegin?: () => void
   onLocalTurnStarted?: (threadId: string) => void
   onLocalStreamEnd?: () => void
+  /**
+   * The completed agentMessage item's authoritative text disagrees with the
+   * accumulated live deltas (e.g. an older server leaked `<think>` content
+   * through the delta path). The controller marks the conversation for a
+   * history resync so the leaked text cannot stay in the bubble.
+   */
+  onItemTextDivergence?: (itemId: string) => void
 }
 
 /** Read the reasoning-effort selector carried via `sendMessage({ metadata })`. */
@@ -123,6 +130,7 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
   private readonly onLocalStreamBegin?: () => void
   private readonly onLocalTurnStarted?: (threadId: string) => void
   private readonly onLocalStreamEnd?: () => void
+  private readonly onItemTextDivergence?: (itemId: string) => void
 
   constructor(options: HarnessChatTransportOptions) {
     this.client = options.client
@@ -130,6 +138,7 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
     this.onLocalStreamBegin = options.onLocalStreamBegin
     this.onLocalTurnStarted = options.onLocalTurnStarted
     this.onLocalStreamEnd = options.onLocalStreamEnd
+    this.onItemTextDivergence = options.onItemTextDivergence
   }
 
   async sendMessages(options: {
@@ -182,6 +191,9 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
 
           const threshold = this.client.lastTurnIndex
           const state = createStreamState()
+          if (this.onItemTextDivergence) {
+            state.onItemTextDivergence = this.onItemTextDivergence
+          }
           let finished = false
 
           await new Promise<void>((resolve) => {

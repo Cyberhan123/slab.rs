@@ -104,9 +104,11 @@ describe("harness turnItemsToMessages", () => {
     ).toEqual([])
   })
 
-  it("keeps unterminated or lookalike think markup verbatim", () => {
+  it("drops unterminated think markup but keeps lookalike tags", () => {
+    // An unterminated block is an interrupted stream's reasoning tail —
+    // dropped from its open tag, matching the server-side strip semantics.
     expect(turnItemToUiParts(agent("a1", "before<think>never closes"))).toEqual([
-      { type: "text", text: "before<think>never closes" },
+      { type: "text", text: "before" },
     ])
     expect(turnItemToUiParts(agent("a1", "<thinking>not a think tag</thinking>"))).toEqual([
       { type: "text", text: "<thinking>not a think tag</thinking>" },

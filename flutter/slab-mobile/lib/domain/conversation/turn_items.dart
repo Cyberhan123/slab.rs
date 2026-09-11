@@ -144,10 +144,11 @@ String stringifyToolValue(Object? value) {
 
 // ── History projection ──────────────────────────────────────────────────────
 
-/// Complete `<think …>…</think>` blocks the server used to embed into the
-/// persisted agentMessage text (LLM-context form). Mirrors the server-side
-/// `strip_think_blocks` emission guard and the TS `THINK_BLOCK_PATTERN`.
-final RegExp thinkBlockPattern = RegExp(r'<think\b[^>]*>[\s\S]*?</think>', caseSensitive: false);
+/// `<think …>…</think>` blocks the server used to embed into the persisted
+/// agentMessage text (LLM-context form). The `$` alternative drops an
+/// UNTERMINATED block (interrupted stream) from its open tag onward. Mirrors
+/// the server-side `strip_think_blocks` and the TS `THINK_BLOCK_PATTERN`.
+final RegExp thinkBlockPattern = RegExp(r'<think\b[^>]*>[\s\S]*?(?:</think>|$)', caseSensitive: false);
 
 String stripThinkBlocks(String text) => text.replaceAll(thinkBlockPattern, '').trim();
 

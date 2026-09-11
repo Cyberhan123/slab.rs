@@ -1322,17 +1322,21 @@ async fn emit_reasoning_completed(
     notify.on_event_msg(thread_id, &msg).await;
 }
 
-const THINK_OPEN_MARKER: &str = "<think";
-const THINK_CLOSE_TAG: &str = "</think>";
+pub(crate) const THINK_OPEN_MARKER: &str = "<think";
+pub(crate) const THINK_CLOSE_TAG: &str = "</think>";
 
 /// Find the start of a `<think …>` open tag whose next char is `>` or
-/// whitespace (so `<thinking>` and friends are not matched).
-fn find_think_open(text: &str) -> Option<usize> {
+/// whitespace (so `<thinking>` and friends are not matched). A marker at the
+/// very END of the text also counts: the tag may simply be truncated there.
+/// `pub(crate)` so the stream visibility gate in `llm_output` reuses the exact
+/// same tag semantics instead of growing a second, drifting matcher.
+pub(crate) fn find_think_open(text: &str) -> Option<usize> {
     let mut search = 0;
     while let Some(found) = text[search..].find(THINK_OPEN_MARKER) {
         let at = search + found;
         let after = &text[at + THINK_OPEN_MARKER.len()..];
-        let is_tag = after.chars().next().is_some_and(|c| c == '>' || c.is_whitespace());
+        let is_tag =
+            after.is_empty() || after.chars().next().is_some_and(|c| c == '>' || c.is_whitespace());
         if is_tag {
             return Some(at);
         }
@@ -1347,14 +1351,15 @@ fn find_think_open(text: &str) -> Option<usize> {
 /// from a user-initiated stop (already reported by the stopper).
 pub const MAX_TURNS_PARTIAL_PREFIX: &str = "[max_turns_reached]";
 
-/// Remove complete `<think …>…</think>` blocks from assistant text.
+/// Remove `<think …>…</think>` blocks from assistant text.
 ///
 /// The app-core adapter embeds the turn's reasoning into the LLM-grade
 /// assistant text (`format_assistant_content`) so the next prompt's chat
 /// template slots it correctly. That form must not reach the UI-grade
 /// agentMessage item — history renders the item text verbatim, which would
 /// show the raw thinking block in the message body. Unterminated blocks
-/// (streaming truncation) are kept verbatim.
+/// (streaming truncation) are dropped from the open tag onward: what follows
+/// a stray open tag is reasoning tail, not assistant content.
 ///
 /// Public so app-core can produce UI-grade text on its own surfaces (e.g. the
 /// REST history endpoint reads the LLM-grade rollout messages directly).
@@ -1362,15 +1367,17 @@ pub fn strip_think_blocks(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(open) = find_think_open(rest) {
+        out.push_str(&rest[..open]);
         let after_open = &rest[open + THINK_OPEN_MARKER.len()..];
         let Some(tag_end) = after_open.find('>') else {
-            break;
+            // Unterminated open tag: drop the remainder from it.
+            return out.trim().to_owned();
         };
         let body = &after_open[tag_end + 1..];
         let Some(close) = body.find(THINK_CLOSE_TAG) else {
-            break;
+            // Unterminated block: drop from the open tag onward.
+            return out.trim().to_owned();
         };
-        out.push_str(&rest[..open]);
         rest = &body[close + THINK_CLOSE_TAG.len()..];
     }
     out.push_str(rest);
@@ -1461,9 +1468,10 @@ mod tests {
     }
 
     #[test]
-    fn strip_think_blocks_keeps_unterminated_block_verbatim() {
-        let text = "before<think>never closes";
-        assert_eq!(strip_think_blocks(text), "before<think>never closes");
+    fn strip_think_blocks_drops_unterminated_block() {
+        assert_eq!(strip_think_blocks("before<think>never closes"), "before");
+        // Unterminated open tag itself (no `>` after `<think`).
+        assert_eq!(strip_think_blocks("before<think"), "before");
     }
 
     #[test]

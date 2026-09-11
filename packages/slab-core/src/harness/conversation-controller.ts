@@ -998,6 +998,23 @@ export class ConversationController {
     this.commit()
   }
 
+  /**
+   * A completed agentMessage item's authoritative text disagreed with the
+   * accumulated live deltas — defense in depth against servers predating the
+   * think-block stream gate (a `<think>` body leaked through the delta path
+   * stays in the AI-SDK bubble, which has no replace chunk). Owe a history
+   * resync so the terminal event remounts the pane with the authoritative
+   * item text; if the thread is already terminal, resync now.
+   */
+  readonly handleItemTextDivergence = (_itemId: string): void => {
+    if (this.disposed) return
+    if (this.threadStatus !== null && TERMINAL_THREAD_STATUSES.has(this.threadStatus)) {
+      void this.reconnect()
+      return
+    }
+    this.pendingResync = true
+  }
+
   /** Reset the per-run mirror + stream state (session reset / thread switch). */
   private resetLiveRunState(): void {
     this.localStreamActive = false

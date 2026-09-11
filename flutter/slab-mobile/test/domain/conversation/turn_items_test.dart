@@ -17,6 +17,12 @@ void main() {
       expect(stripThinkBlocks(text), 'before  after');
     });
 
+    test('drops an unterminated block from its open tag', () {
+      // Interrupted stream: what follows the stray open tag is reasoning
+      // tail, not assistant content — mirrors the server-side strip.
+      expect(stripThinkBlocks('before<think>never closes'), 'before');
+    });
+
     test('leaves plain text untouched', () {
       expect(stripThinkBlocks('hello'), 'hello');
     });
