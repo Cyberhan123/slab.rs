@@ -16160,6 +16160,8 @@ dependencies = [
  "serde_json",
  "slab-agent",
  "slab-agent-context",
+ "slab-agent-rollout",
+ "slab-agent-tracing",
  "slab-app-core",
  "slab-cloud-provider",
  "slab-config",
