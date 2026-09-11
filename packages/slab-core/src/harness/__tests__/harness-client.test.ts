@@ -45,12 +45,12 @@ describe("HarnessClient", () => {
     FakeWebSocket.reset("manual")
   })
 
-  it("connects with the session token on the WS url", async () => {
+  it("connects with the session id on the WS url", async () => {
     const client = makeClient("abc")
     const ready = client.open()
     await flush()
     expect(FakeWebSocket.last?.url).toContain("/v1/agents/harness")
-    expect(FakeWebSocket.last?.url).toContain("token=abc")
+    expect(FakeWebSocket.last?.url).toContain("session=abc")
 
     FakeWebSocket.last!.simOpen()
     await flush()

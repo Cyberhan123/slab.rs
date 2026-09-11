@@ -52,22 +52,45 @@ use slab_app_core::domain::services::agent::response::stream::{
 )]
 pub struct AgentApi;
 
-pub fn router() -> Router<Arc<AppState>> {
+pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/agents/responses", get(agent_responses_get).post(agent_responses_post))
         .route("/agents/harness", get(crate::api::v1::agent::harness::agent_harness))
+        // Same gate as workspace/settings: without a configured admin token
+        // loopback binds stay open (dev/e2e); with one, `Authorization:
+        // Bearer` must carry the ADMIN token — which is exactly why the slab
+        // session id moved OUT of the Bearer header into `?session=` below.
+        .route_layer(axum::middleware::from_fn_with_state(
+            state,
+            crate::api::middleware::auth::auth_middleware,
+        ))
 }
 
 #[derive(Debug, Deserialize)]
 struct AgentResponsesQuery {
     transport: Option<String>,
     thread_id: Option<String>,
-    /// Slab session id for the canonical (openai-protocol) WS mode. Browsers
-    /// cannot set headers on a WebSocket handshake, so the SDK carries the
-    /// session as `?token=` (the slab-dialect mode reads it from the first
-    /// client message body instead).
+    /// Slab session id (query param — browsers cannot set WS headers, and the
+    /// Bearer header is reserved for admin auth).
+    #[serde(default)]
+    session: Option<String>,
+    /// Deprecated alias of `session`, kept for clients predating the rename.
     #[serde(default)]
     token: Option<String>,
+}
+
+impl AgentResponsesQuery {
+    /// Resolve the slab session: `session` wins, the deprecated `token`
+    /// alias falls back, then the shared default. Never read from the
+    /// Authorization header — that header is admin auth only.
+    fn session_id(&self) -> String {
+        self.session
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| self.token.as_deref().filter(|value| !value.trim().is_empty()))
+            .map(str::to_owned)
+            .unwrap_or_else(|| "assistant-default".to_owned())
+    }
 }
 
 /// Parsed inbound WS command. The responses socket only accepts canonical
@@ -220,7 +243,9 @@ fn openai_error_type_for_code(code: &str) -> &'static str {
     tag = "agents",
     params(
         ("transport" = Option<String>, Query, description = "Use `sse` for the fallback event stream"),
-        ("thread_id" = Option<String>, Query, description = "Agent thread ID for SSE fallback")
+        ("thread_id" = Option<String>, Query, description = "Agent thread ID for SSE fallback"),
+        ("session" = Option<String>, Query, description = "Slab session id for the WS mode"),
+        ("token" = Option<String>, Query, description = "Deprecated alias of `session`")
     ),
     responses(
         (status = 101, description = "WebSocket upgrade for bidirectional agent responses"),
@@ -239,12 +264,7 @@ async fn agent_responses_get(
         // handshake signal; all websocket payloads are canonical Responses events.
         let is_canonical = is_canonical_ws_request(&headers);
         let ws = if is_canonical { ws.protocols(["slab.responses"]) } else { ws };
-        let session_id = query
-            .token
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| bearer_session_id(&headers));
+        let session_id = query.session_id();
         return Ok(ws
             .on_upgrade(move |socket| {
                 agent_responses_socket(socket, service, session_id, is_canonical)
@@ -273,6 +293,10 @@ async fn agent_responses_get(
     post,
     path = "/v1/agents/responses",
     tag = "agents",
+    params(
+        ("session" = Option<String>, Query, description = "Slab session id"),
+        ("token" = Option<String>, Query, description = "Deprecated alias of `session`")
+    ),
     // Standard OpenAI Responses `ResponseCreateParamsBase` body (consumed by
     // the official `openai` SDK). Not typed here because utoipa can't model the
     // `input` untagged string|items union; see `OpenAICreateRequest`.
@@ -286,10 +310,10 @@ async fn agent_responses_get(
 )]
 async fn agent_responses_post(
     State(service): State<ResponseService>,
-    headers: HeaderMap,
+    Query(query): Query<AgentResponsesQuery>,
     Json(req): Json<OpenAICreateRequest>,
 ) -> Result<Response, AgentCompatError> {
-    let session_id = bearer_session_id(&headers);
+    let session_id = query.session_id();
     if req.stream.unwrap_or(false) {
         let model = req.model.clone().unwrap_or_default();
         let (response_id, frames) = service.stream_response(req, session_id).await?;
@@ -298,24 +322,6 @@ async fn agent_responses_post(
         let response = service.create_response(req, session_id).await?;
         Ok(Json(response).into_response())
     }
-}
-
-/// Read the slab session id from an `Authorization: Bearer <session>` header
-/// (the `openai` SDK is constructed with `apiKey: <session>`). Falls back to the
-/// assistant default when absent.
-fn bearer_session_id(headers: &HeaderMap) -> String {
-    let default = "assistant-default".to_owned();
-    let Some(value) = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok())
-    else {
-        return default;
-    };
-    let trimmed = value.trim();
-    let token = trimmed
-        .strip_prefix("Bearer ")
-        .or_else(|| trimmed.strip_prefix("bearer "))
-        .unwrap_or(trimmed);
-    let token = token.trim();
-    if token.is_empty() { default } else { token.to_owned() }
 }
 
 // ---------------------------------------------------------------------------

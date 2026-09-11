@@ -13,6 +13,8 @@ def _get_kwargs(
     *,
     transport: str | Unset = UNSET,
     thread_id: str | Unset = UNSET,
+    session: str | Unset = UNSET,
+    token: str | Unset = UNSET,
 ) -> dict[str, Any]:
 
     params: dict[str, Any] = {}
@@ -20,6 +22,10 @@ def _get_kwargs(
     params["transport"] = transport
 
     params["thread_id"] = thread_id
+
+    params["session"] = session
+
+    params["token"] = token
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
@@ -70,11 +76,15 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     transport: str | Unset = UNSET,
     thread_id: str | Unset = UNSET,
+    session: str | Unset = UNSET,
+    token: str | Unset = UNSET,
 ) -> Response[Any | OpenAiErrorResponse]:
     """
     Args:
         transport (str | Unset):
         thread_id (str | Unset):
+        session (str | Unset):
+        token (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -87,6 +97,8 @@ def sync_detailed(
     kwargs = _get_kwargs(
         transport=transport,
         thread_id=thread_id,
+        session=session,
+        token=token,
     )
 
     response = client.get_httpx_client().request(
@@ -101,11 +113,15 @@ def sync(
     client: AuthenticatedClient | Client,
     transport: str | Unset = UNSET,
     thread_id: str | Unset = UNSET,
+    session: str | Unset = UNSET,
+    token: str | Unset = UNSET,
 ) -> Any | OpenAiErrorResponse | None:
     """
     Args:
         transport (str | Unset):
         thread_id (str | Unset):
+        session (str | Unset):
+        token (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -119,6 +135,8 @@ def sync(
         client=client,
         transport=transport,
         thread_id=thread_id,
+        session=session,
+        token=token,
     ).parsed
 
 
@@ -127,11 +145,15 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     transport: str | Unset = UNSET,
     thread_id: str | Unset = UNSET,
+    session: str | Unset = UNSET,
+    token: str | Unset = UNSET,
 ) -> Response[Any | OpenAiErrorResponse]:
     """
     Args:
         transport (str | Unset):
         thread_id (str | Unset):
+        session (str | Unset):
+        token (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -144,6 +166,8 @@ async def asyncio_detailed(
     kwargs = _get_kwargs(
         transport=transport,
         thread_id=thread_id,
+        session=session,
+        token=token,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -156,11 +180,15 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     transport: str | Unset = UNSET,
     thread_id: str | Unset = UNSET,
+    session: str | Unset = UNSET,
+    token: str | Unset = UNSET,
 ) -> Any | OpenAiErrorResponse | None:
     """
     Args:
         transport (str | Unset):
         thread_id (str | Unset):
+        session (str | Unset):
+        token (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -175,5 +203,7 @@ async def asyncio(
             client=client,
             transport=transport,
             thread_id=thread_id,
+            session=session,
+            token=token,
         )
     ).parsed

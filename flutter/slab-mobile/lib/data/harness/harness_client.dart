@@ -68,11 +68,11 @@ const _requestTimeout = Duration(seconds: 30);
 const _backoffBaseDefault = Duration(milliseconds: 500);
 const _backoffCap = Duration(seconds: 30);
 
-/// Build the harness WS URL: `ws(s)://<origin>/v1/agents/harness?token=<sessionId>`.
+/// Build the harness WS URL: `ws(s)://<origin>/v1/agents/harness?session=<sessionId>`.
 Uri harnessWebSocketUri(Uri baseUrl, String sessionId) => baseUrl.replace(
       scheme: baseUrl.scheme == 'https' || baseUrl.scheme == 'wss' ? 'wss' : 'ws',
       path: '/v1/agents/harness',
-      query: 'token=${Uri.encodeComponent(sessionId)}',
+      query: 'session=${Uri.encodeComponent(sessionId)}',
       fragment: '',
     );
 

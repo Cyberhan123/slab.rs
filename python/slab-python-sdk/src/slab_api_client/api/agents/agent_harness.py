@@ -10,10 +10,13 @@ from ...types import UNSET, Response, Unset
 
 def _get_kwargs(
     *,
+    session: str | Unset = UNSET,
     token: str | Unset = UNSET,
 ) -> dict[str, Any]:
 
     params: dict[str, Any] = {}
+
+    params["session"] = session
 
     params["token"] = token
 
@@ -54,10 +57,12 @@ def _build_response(
 def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
+    session: str | Unset = UNSET,
     token: str | Unset = UNSET,
 ) -> Response[Any]:
     """
     Args:
+        session (str | Unset):
         token (str | Unset):
 
     Raises:
@@ -69,6 +74,7 @@ def sync_detailed(
     """
 
     kwargs = _get_kwargs(
+        session=session,
         token=token,
     )
 
@@ -82,10 +88,12 @@ def sync_detailed(
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
+    session: str | Unset = UNSET,
     token: str | Unset = UNSET,
 ) -> Response[Any]:
     """
     Args:
+        session (str | Unset):
         token (str | Unset):
 
     Raises:
@@ -97,6 +105,7 @@ async def asyncio_detailed(
     """
 
     kwargs = _get_kwargs(
+        session=session,
         token=token,
     )
 

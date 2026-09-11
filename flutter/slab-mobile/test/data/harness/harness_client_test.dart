@@ -12,11 +12,11 @@ void main() {
     FakeSlabSocket.instanceCount = 0;
   });
 
-  test('harnessWebSocketUri builds ws(s)://…?token=', () {
+  test('harnessWebSocketUri builds ws(s)://…?session=', () {
     final ws = harnessWebSocketUri(Uri.parse('http://192.168.1.5:3000'), 'séance 1');
     expect(ws.scheme, 'ws');
     expect(ws.path, '/v1/agents/harness');
-    expect(ws.query, 'token=s%C3%A9ance%201');
+    expect(ws.query, 'session=s%C3%A9ance%201');
 
     final wss = harnessWebSocketUri(Uri.parse('https://slab.example.com/base'), 't');
     expect(wss.scheme, 'wss');

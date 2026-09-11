@@ -42,7 +42,8 @@ use host::HarnessHost;
     path = "/v1/agents/harness",
     tag = "agents",
     params(
-        ("token" = Option<String>, Query, description = "Slab session id (browsers cannot set WS headers)")
+        ("session" = Option<String>, Query, description = "Slab session id (browsers cannot set WS headers)"),
+        ("token" = Option<String>, Query, description = "Deprecated alias of `session`; kept for clients predating the rename")
     ),
     responses(
         (status = 101, description = "WebSocket upgrade for the JSON-RPC 2.0 harness protocol"),
@@ -53,10 +54,7 @@ pub async fn agent_harness(
     Query(query): Query<HarnessQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let session_id = query
-        .token
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "assistant-default".to_owned());
+    let session_id = query.session_id();
     let service = state.services.harness.clone();
     ws.on_upgrade(move |socket| run_harness_socket(socket, state, service, session_id))
 }
@@ -64,7 +62,30 @@ pub async fn agent_harness(
 #[derive(Debug, serde::Deserialize)]
 pub struct HarnessQuery {
     #[serde(default)]
+    session: Option<String>,
+    /// Deprecated alias of `session`, kept so clients predating the rename
+    /// keep working; remove once the Flutter app ships `?session=`.
+    #[serde(default)]
     token: Option<String>,
+}
+
+impl HarnessQuery {
+    /// Resolve the slab session: `session` wins, the deprecated `token`
+    /// alias falls back (warned once per connection), then the shared
+    /// default.
+    fn session_id(&self) -> String {
+        if let Some(value) = self.session.as_deref().filter(|value| !value.trim().is_empty()) {
+            return value.to_owned();
+        }
+        if let Some(value) = self.token.as_deref().filter(|value| !value.trim().is_empty()) {
+            tracing::warn!(
+                value,
+                "harness WS connected with the deprecated ?token= session param; send ?session= instead"
+            );
+            return value.to_owned();
+        }
+        "assistant-default".to_owned()
+    }
 }
 
 async fn run_harness_socket(
@@ -1212,6 +1233,22 @@ mod tests {
         let items =
             turn_items_for_message(&record("a2", 0, "assistant", "before<think>truncated", "t"));
         assert!(matches!(&items[..], [TurnItem::AgentMessage { text, .. }] if text == "before"));
+    }
+
+    #[test]
+    fn harness_query_session_resolution_priority() {
+        let query = |session: Option<&str>, token: Option<&str>| HarnessQuery {
+            session: session.map(str::to_owned),
+            token: token.map(str::to_owned),
+        };
+        // `session` wins over the deprecated alias.
+        assert_eq!(query(Some("s1"), Some("t1")).session_id(), "s1");
+        // Alias still resolves (older clients), blanks fall through.
+        assert_eq!(query(None, Some("t1")).session_id(), "t1");
+        assert_eq!(query(Some("  "), Some("t1")).session_id(), "t1");
+        // Nothing usable: the shared default.
+        assert_eq!(query(None, None).session_id(), "assistant-default");
+        assert_eq!(query(Some(""), Some("")).session_id(), "assistant-default");
     }
 
     // Regression: the `slab_agents_md` init-context fragment rides the USER

@@ -3512,6 +3512,8 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Slab session id (browsers cannot set WS headers) */
+                session?: string;
+                /** @description Deprecated alias of `session`; kept for clients predating the rename */
                 token?: string;
             };
             header?: never;
@@ -3536,6 +3538,10 @@ export interface operations {
                 transport?: string;
                 /** @description Agent thread ID for SSE fallback */
                 thread_id?: string;
+                /** @description Slab session id for the WS mode */
+                session?: string;
+                /** @description Deprecated alias of `session` */
+                token?: string;
             };
             header?: never;
             path?: never;
@@ -3570,7 +3576,12 @@ export interface operations {
     };
     agent_responses_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Slab session id */
+                session?: string;
+                /** @description Deprecated alias of `session` */
+                token?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

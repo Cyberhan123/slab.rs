@@ -55,7 +55,7 @@ import type {
 import { classifyJsonRpcMessage, nextRequestId } from "./json-rpc"
 
 export interface HarnessClientOptions {
-  /** Slab session id, carried on the WS URL as `?token=`. */
+  /** Slab session id, carried on the WS URL as `?session=`. */
   sessionId: string
   /** Override the server base URL (defaults to `SERVER_BASE_URL`). */
   baseURL?: string
@@ -80,12 +80,12 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>
 }
 
-/** Build the harness WS URL: `ws(s)://<origin>/v1/agents/harness?token=<sessionId>`. */
+/** Build the harness WS URL: `ws(s)://<origin>/v1/agents/harness?session=<sessionId>`. */
 export function harnessWebSocketUrl(baseURL: string, sessionId: string): string {
   const url = new URL(baseURL)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
   url.pathname = "/v1/agents/harness"
-  url.search = `token=${encodeURIComponent(sessionId)}`
+  url.search = `session=${encodeURIComponent(sessionId)}`
   url.hash = ""
   return url.toString()
 }

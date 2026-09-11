@@ -33,7 +33,7 @@ pub struct V1Api;
 /// Routes nested under `/v1`.
 pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
-        .merge(agent::router())
+        .merge(agent::router(state.clone()))
         .merge(chat::router())
         .merge(models::router())
         .merge(plugins::router())

@@ -28,12 +28,16 @@ describe("single-shot Responses API rollout persistence", () => {
     const marker = `SLAB_RESPONSES_E2E_${Date.now()}`
     const input = `Reply with only the token ${marker} and nothing else.`
 
-    // Bearer = slab session id; the handler resolves/creates the thread in it.
-    const reply = await requestJson<ResponsesPayload>(testEnv.serverBaseUrl, "/v1/agents/responses", {
-      method: "POST",
-      headers: { authorization: `Bearer ${session.id}` },
-      json: { model: testEnv.modelId, input, stream: false },
-    })
+    // ?session= carries the slab session id; the handler resolves/creates the
+    // thread in it (Bearer is admin auth only).
+    const reply = await requestJson<ResponsesPayload>(
+      testEnv.serverBaseUrl,
+      `/v1/agents/responses?session=${encodeURIComponent(session.id)}`,
+      {
+        method: "POST",
+        json: { model: testEnv.modelId, input, stream: false },
+      },
+    )
     expect(typeof (reply as { id?: unknown }).id).toBe("string")
 
     // The history read path flushes the recorder, so by the time this returns

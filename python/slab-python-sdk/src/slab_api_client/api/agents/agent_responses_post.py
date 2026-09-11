@@ -7,18 +7,29 @@ from ... import errors
 from ...client import AuthenticatedClient, Client
 from ...models.open_ai_create_request import OpenAICreateRequest
 from ...models.open_ai_error_response import OpenAiErrorResponse
-from ...types import Response
+from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
     *,
     body: OpenAICreateRequest,
+    session: str | Unset = UNSET,
+    token: str | Unset = UNSET,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
+
+    params: dict[str, Any] = {}
+
+    params["session"] = session
+
+    params["token"] = token
+
+    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
     _kwargs: dict[str, Any] = {
         "method": "post",
         "url": "/v1/agents/responses",
+        "params": params,
     }
 
     _kwargs["json"] = body.to_dict()
@@ -77,9 +88,13 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: OpenAICreateRequest,
+    session: str | Unset = UNSET,
+    token: str | Unset = UNSET,
 ) -> Response[Any | OpenAiErrorResponse]:
     """
     Args:
+        session (str | Unset):
+        token (str | Unset):
         body (OpenAICreateRequest): `POST /v1/agents/responses` body as sent by the official
             `openai` SDK
             (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
@@ -97,6 +112,8 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         body=body,
+        session=session,
+        token=token,
     )
 
     response = client.get_httpx_client().request(
@@ -110,9 +127,13 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     body: OpenAICreateRequest,
+    session: str | Unset = UNSET,
+    token: str | Unset = UNSET,
 ) -> Any | OpenAiErrorResponse | None:
     """
     Args:
+        session (str | Unset):
+        token (str | Unset):
         body (OpenAICreateRequest): `POST /v1/agents/responses` body as sent by the official
             `openai` SDK
             (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
@@ -131,6 +152,8 @@ def sync(
     return sync_detailed(
         client=client,
         body=body,
+        session=session,
+        token=token,
     ).parsed
 
 
@@ -138,9 +161,13 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: OpenAICreateRequest,
+    session: str | Unset = UNSET,
+    token: str | Unset = UNSET,
 ) -> Response[Any | OpenAiErrorResponse]:
     """
     Args:
+        session (str | Unset):
+        token (str | Unset):
         body (OpenAICreateRequest): `POST /v1/agents/responses` body as sent by the official
             `openai` SDK
             (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
@@ -158,6 +185,8 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         body=body,
+        session=session,
+        token=token,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -169,9 +198,13 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: OpenAICreateRequest,
+    session: str | Unset = UNSET,
+    token: str | Unset = UNSET,
 ) -> Any | OpenAiErrorResponse | None:
     """
     Args:
+        session (str | Unset):
+        token (str | Unset):
         body (OpenAICreateRequest): `POST /v1/agents/responses` body as sent by the official
             `openai` SDK
             (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
@@ -191,5 +224,7 @@ async def asyncio(
         await asyncio_detailed(
             client=client,
             body=body,
+            session=session,
+            token=token,
         )
     ).parsed
