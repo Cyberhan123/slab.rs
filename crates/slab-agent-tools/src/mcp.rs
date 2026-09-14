@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{
-    AgentError, ToolCallRender, ToolContext, ToolOutput, ToolVisibility, TypedTool,
+    AgentError, ToolCallRender, ToolContext, ToolOutput, ToolServiceKey, ToolVisibility, TypedTool,
     protocol::TurnItem,
 };
 use slab_mcp::{McpClient, McpToolSpec};
@@ -183,6 +183,14 @@ impl TypedTool for McpProxyTool {
         // model discovers them via `tool_search`, so many MCP tools don't bloat
         // the model-facing tool table.
         ToolVisibility::Deferred
+    }
+
+    fn service_deps(&self) -> Vec<ToolServiceKey> {
+        // PENDING while the backing server is unreachable (the runtime
+        // reloader's probe flips this key): a dead server's proxies drop out
+        // of the projections instead of staying discoverable-but-erroring,
+        // and heal automatically when the server answers again.
+        vec![ToolServiceKey::McpServer(self.spec.server_name.clone())]
     }
 
     fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {

@@ -11,7 +11,7 @@ use slab_mcp_client::{
 };
 use thiserror::Error;
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{
     config::{McpClientConfig, McpServerLauncher},
@@ -57,7 +57,7 @@ impl McpClient {
         .map_err(|source| transport_error(&server_name, source))?;
 
         self.servers.write().await.insert(server_name.clone(), Arc::new(server));
-        self.refresh_cached_tools().await?;
+        self.refresh_and_probe_servers().await;
         let tool_count = self
             .cached_tools()
             .await
@@ -77,7 +77,7 @@ impl McpClient {
     }
 
     pub async fn list_tools(&self) -> Result<Vec<McpToolSpec>, McpClientError> {
-        self.refresh_cached_tools().await?;
+        self.refresh_and_probe_servers().await;
         Ok(self.cached_tools().await)
     }
 
@@ -99,22 +99,45 @@ impl McpClient {
         server.ping().await.map_err(|source| transport_error(server_name, source))
     }
 
-    async fn refresh_cached_tools(&self) -> Result<(), McpClientError> {
+    /// Refresh the cached tool list from every connected server and report
+    /// each server's health: `true` = the server answered `tools/list`,
+    /// `false` = it failed (dead / unreachable) and contributes no tools this
+    /// round. Individual server failures are tolerated — a dead server no
+    /// longer poisons the whole refresh, so healthy servers' tools stay
+    /// cached and `mcp_list_tools` keeps working.
+    ///
+    /// The agent runtime reloader uses the health map to gate MCP proxy-tool
+    /// visibility (`ToolServiceKey::McpServer`): dead-server proxies go
+    /// PENDING (hidden from the projections) and heal on a later probe.
+    pub async fn refresh_and_probe_servers(&self) -> HashMap<String, bool> {
         let servers = self.servers.read().await;
         let mut tools = Vec::new();
+        let mut health = HashMap::new();
         for (server_name, server) in servers.iter() {
-            let remote_tools =
-                server.list_tools().await.map_err(|source| transport_error(server_name, source))?;
-            tools.extend(
-                remote_tools
-                    .into_iter()
-                    .map(|tool| McpToolSpec { server_name: server_name.clone(), tool }),
-            );
+            match server.list_tools().await {
+                Ok(remote_tools) => {
+                    health.insert(server_name.clone(), true);
+                    tools.extend(
+                        remote_tools
+                            .into_iter()
+                            .map(|tool| McpToolSpec { server_name: server_name.clone(), tool }),
+                    );
+                }
+                Err(source) => {
+                    health.insert(server_name.clone(), false);
+                    warn!(
+                        server = server_name,
+                        error = %source,
+                        "MCP server list_tools failed; skipping its tools this refresh"
+                    );
+                }
+            }
         }
+        drop(servers);
         if let Ok(mut cached_tools) = self.cached_tools.write() {
             *cached_tools = tools;
         }
-        Ok(())
+        health
     }
 
     async fn server(&self, server_name: &str) -> Result<Arc<dyn ServerConnection>, McpClientError> {
@@ -276,5 +299,52 @@ mod tests {
             client.call_tool("missing", "echo", json!({})).await.expect_err("missing server");
 
         assert!(matches!(error, McpClientError::ServerNotFound(name) if name == "missing"));
+    }
+
+    /// A server whose transport is dead: every call fails.
+    struct FailingServer;
+
+    impl ServerConnection for FailingServer {
+        fn list_tools(&self) -> BoxFuture<'_, Result<Vec<TransportTool>, TransportError>> {
+            async move { Err(TransportError::Protocol("server died".to_string())) }.boxed()
+        }
+
+        fn call_tool<'a>(
+            &'a self,
+            _tool_name: &'a str,
+            _arguments: Value,
+        ) -> BoxFuture<'a, Result<McpToolResult, TransportError>> {
+            async move { Err(TransportError::Protocol("server died".to_string())) }.boxed()
+        }
+
+        fn ping(&self) -> BoxFuture<'_, Result<(), TransportError>> {
+            async move { Err(TransportError::Protocol("server died".to_string())) }.boxed()
+        }
+    }
+
+    #[tokio::test]
+    async fn refresh_tolerates_dead_servers() {
+        let client = McpClient::new();
+        client
+            .insert_server_for_test(
+                "healthy",
+                Arc::new(FakeServer::new(vec![tool("echo")], text_result(""))),
+            )
+            .await;
+        client.insert_server_for_test("dead", Arc::new(FailingServer)).await;
+
+        let health = client.refresh_and_probe_servers().await;
+        assert_eq!(health.get("healthy"), Some(&true));
+        assert_eq!(health.get("dead"), Some(&false));
+
+        // The healthy server's tools stay cached; the dead one contributes
+        // none (instead of failing the whole refresh).
+        let tools = client.cached_tools().await;
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].server_name, "healthy");
+
+        // `mcp_list_tools` keeps working when one server is dead.
+        let listed = client.list_tools().await.expect("tolerant list");
+        assert_eq!(listed.len(), 1);
     }
 }

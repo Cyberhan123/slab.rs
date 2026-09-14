@@ -104,6 +104,14 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     // delivers background-delegation completions to the parent. Bound into
     // the delegate tool below; the AgentCore is late-bound once it exists.
     let subagent_bridge = Arc::new(super::subagent_bridge::SubagentBridge::new());
+    // Built once here and shared: `build_agent_control` registers the initial
+    // tool suite against it, the runtime reloader probes it on every reload,
+    // and the connection scheduler below re-syncs proxies once the async
+    // connects settle (bootstrap registration runs before they do).
+    let (mcp_client, mcp_launchers) = match build_agent_mcp_client(ctx) {
+        Some((client, launchers)) => (Some(client), launchers),
+        None => (None, Vec::new()),
+    };
     let control = build_agent_control(
         ctx,
         Arc::clone(&store),
@@ -116,6 +124,7 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         trace_dir.clone(),
         Arc::clone(&background_tasks),
         Arc::clone(&subagent_bridge),
+        mcp_client.clone(),
     );
     let agent_runtime = AgentRuntime::new(control);
     let core = AgentCore::new(
@@ -136,8 +145,10 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         rollout,
         rollout_store,
         background_tasks,
+        mcp_client.clone(),
     );
     schedule_agent_runtime_reload(runtime.clone());
+    schedule_agent_mcp_connections(mcp_client, mcp_launchers, Some(runtime.clone()));
     let harness = HarnessService::new(core.clone());
     let response = ResponseService::new(core, (*ctx.model_state).clone());
 
@@ -203,6 +214,7 @@ fn build_agent_control(
     trace_dir: Option<PathBuf>,
     background_tasks: Arc<slab_agent_tools::BackgroundTaskRegistry>,
     subagent_bridge: Arc<super::subagent_bridge::SubagentBridge>,
+    mcp_client: Option<Arc<slab_mcp::McpClient>>,
 ) -> Arc<AgentControl> {
     let llm: Arc<dyn slab_agent::LlmPort> =
         Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
@@ -231,7 +243,6 @@ fn build_agent_control(
         slab_config::ShellLauncherKind::PowerShell => slab_agent_tools::ShellLauncher::PowerShell,
         slab_config::ShellLauncherKind::Cmd => slab_agent_tools::ShellLauncher::Cmd,
     };
-    let mcp_client = build_agent_mcp_client(ctx);
     slab_agent_tools::register_all_tools(
         &mut tool_router,
         sandbox_driver,
@@ -502,7 +513,13 @@ fn normalize_non_empty_path(value: &str) -> Option<PathBuf> {
     (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
 }
 
-fn build_agent_mcp_client(ctx: &AppContext) -> Option<Arc<slab_mcp::McpClient>> {
+/// Build the shared MCP client plus the configured server launchers, without
+/// connecting. The caller owns when connections start (see
+/// [`schedule_agent_mcp_connections`]) so the runtime reloader can be wired to
+/// the same client handle first.
+fn build_agent_mcp_client(
+    ctx: &AppContext,
+) -> Option<(Arc<slab_mcp::McpClient>, Vec<slab_mcp::McpServerLauncher>)> {
     let settings = ctx.pmid.config().agent.tools.mcp;
     if !settings.enabled {
         return None;
@@ -510,16 +527,25 @@ fn build_agent_mcp_client(ctx: &AppContext) -> Option<Arc<slab_mcp::McpClient>> 
 
     let client = Arc::new(slab_mcp::McpClient::new());
     let launchers = agent_mcp_client_config(&settings).servers;
-    if !launchers.is_empty() {
-        schedule_agent_mcp_connections(Arc::clone(&client), launchers);
-    }
-    Some(client)
+    Some((client, launchers))
 }
 
+/// Connect the configured MCP servers in the background. Once the connect
+/// loop settles, trigger one agent-runtime reload: bootstrap's synchronous
+/// proxy registration runs before these async connects complete, so the
+/// reload's MCP sync is where `mcp__*` proxies actually appear (and where
+/// per-server health gating is initialized).
 fn schedule_agent_mcp_connections(
-    client: Arc<slab_mcp::McpClient>,
+    client: Option<Arc<slab_mcp::McpClient>>,
     launchers: Vec<slab_mcp::McpServerLauncher>,
+    on_settled: Option<AgentRuntimeReloader>,
 ) {
+    if launchers.is_empty() {
+        return;
+    }
+    let Some(client) = client else {
+        return;
+    };
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         tracing::warn!("agent MCP server launchers are configured, but no Tokio runtime is active");
         return;
@@ -538,6 +564,14 @@ fn schedule_agent_mcp_connections(
                         "failed to connect configured MCP stdio server"
                     );
                 }
+            }
+        }
+        if let Some(reloader) = on_settled {
+            if let Err(error) = reloader.reload().await {
+                tracing::warn!(
+                    %error,
+                    "failed to reload agent runtime after MCP connections settled"
+                );
             }
         }
     });

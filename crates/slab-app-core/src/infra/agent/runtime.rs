@@ -30,6 +30,10 @@ pub(crate) struct AgentRuntimeReloader {
     /// the shell tool against it so background execution survives a workspace
     /// switch (tasks of the OLD workspace are stopped by the migration path).
     background: Arc<slab_agent_tools::BackgroundTaskRegistry>,
+    /// Shared MCP client (None when MCP is disabled): `reload` probes every
+    /// configured server through it and gates `mcp__*` proxy visibility on
+    /// per-server health (`ToolServiceKey::McpServer`).
+    mcp_client: Option<Arc<slab_mcp::McpClient>>,
 }
 
 impl AgentRuntimeReloader {
@@ -39,9 +43,10 @@ impl AgentRuntimeReloader {
         rollout: Arc<RolloutFileStore>,
         rollout_store: Arc<RolloutBackedAgentStore>,
         background: Arc<slab_agent_tools::BackgroundTaskRegistry>,
+        mcp_client: Option<Arc<slab_mcp::McpClient>>,
     ) -> Self {
         let tool_router = runtime.tool_router();
-        Self { state, runtime, tool_router, rollout, rollout_store, background }
+        Self { state, runtime, tool_router, rollout, rollout_store, background, mcp_client }
     }
 
     /// Stop every background task rooted under `old_root` — the workspace
@@ -94,7 +99,39 @@ impl AgentRuntimeReloader {
             &capability_sources,
             &enabled_plugin_ids,
         );
+        self.sync_mcp_tools().await;
         Ok(())
+    }
+
+    /// Re-sync the `mcp__*` proxy registrations with the MCP client:
+    ///
+    /// - Probe every configured server (tolerant refresh — a dead server no
+    ///   longer fails the whole refresh) and flip each server's
+    ///   [`slab_agent::ToolServiceKey::McpServer`] dep to its health, so a
+    ///   dead server's proxies go PENDING (hidden from the projections,
+    ///   healing on a later probe) instead of staying discoverable-but-erroring.
+    /// - Register proxies for tools that entered the cache since the last sync
+    ///   (bootstrap's synchronous registration runs before the async connects
+    ///   settle, so this is where `mcp__*` proxies normally appear).
+    async fn sync_mcp_tools(&self) {
+        use slab_agent::ToolHandler as _;
+
+        let Some(client) = &self.mcp_client else {
+            return;
+        };
+        let health = client.refresh_and_probe_servers().await;
+        for (server, healthy) in health {
+            self.tool_router
+                .set_dep_satisfied(slab_agent::ToolServiceKey::McpServer(server), healthy);
+        }
+        for spec in client.cached_tools().await {
+            let tool = slab_agent_tools::McpProxyTool::new(Arc::clone(client), spec);
+            if self.tool_router.get(tool.name()).is_some() {
+                // Same conflict-skip as the bootstrap registration.
+                continue;
+            }
+            self.tool_router.register(Box::new(tool));
+        }
     }
 
     fn refresh_memory_tools(&self, config: &AgentMemoriesConfig, memory_root: &Path) {
