@@ -11,14 +11,15 @@
 //! The inferred tier is stamped on every tool output's metadata so the host
 //! observability layer sees the isolation tier that was applied.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use slab_agent::{
-    AgentError, PluginToolPort, ToolContext, ToolNamespace, ToolOutput, ToolRouter, ToolVisibility,
-    TypedTool,
+    AgentError, PluginToolPort, ToolContext, ToolNamespace, ToolOutput, ToolRouter, ToolServiceKey,
+    ToolVisibility, TypedTool,
 };
 use slab_types::{
     PluginCapabilityKind, PluginManifest,
@@ -121,6 +122,13 @@ impl TypedTool for PluginCapabilityProxyTool {
         ToolVisibility::Deferred
     }
 
+    fn service_deps(&self) -> Vec<ToolServiceKey> {
+        // PENDING while the plugin is disabled: the proxy stays registered (and
+        // dispatch-rejected by the plugin service with a clean error) but is
+        // filtered out of the model-facing projections until re-enabled.
+        vec![ToolServiceKey::PluginEnabled(self.descriptor.plugin_id.clone())]
+    }
+
     async fn execute(
         &self,
         _ctx: &ToolContext,
@@ -176,20 +184,46 @@ impl PluginToolPort for PluginServiceCapabilityPort {
     }
 }
 
-/// Register a `plugin__<id>__<cap>` proxy for every `Tool`-kind capability of
-/// every enabled plugin in `sources`, all dispatching through `port`. A proxy
-/// replaces any previously registered handler with the same tool name.
-pub(crate) fn register_plugin_capability_tools(
+/// Keep the router's plugin-capability proxies in sync with the installed and
+/// enabled plugin sets:
+///
+/// 1. Register (or replace) a `plugin__<id>__<cap>` proxy for every `Tool`-kind
+///    capability of every INSTALLED plugin in `sources` — enabled or not.
+/// 2. Flip each plugin's [`ToolServiceKey::PluginEnabled`] dep to its enable
+///    state: disabled plugins' proxies stay registered but PENDING (filtered
+///    out of the projections) until re-enabled — no unregister/register churn
+///    on toggles, and a disabled plugin can no longer be discovered via
+///    `tool_search`.
+/// 3. `unregister_where` sweeps proxies whose plugin left the installed set
+///    (uninstalled since a previous sync), disposing them in reverse
+///    registration order.
+///
+/// Registration runs BEFORE the sweep so a re-configured set never has an
+/// empty-projection window; the projections are per-request snapshots.
+pub(crate) fn sync_plugin_capability_tools(
     router: &ToolRouter,
     port: Arc<dyn PluginToolPort>,
     sources: &[PluginCapabilitySource],
+    enabled_plugin_ids: &HashSet<String>,
 ) {
+    let mut expected = HashSet::new();
     for source in sources {
         for descriptor in CapabilityDescriptor::for_source(source) {
+            expected
+                .insert(plugin_agent_tool_name(&descriptor.plugin_id, &descriptor.capability_id));
             router
                 .register(Box::new(PluginCapabilityProxyTool::new(Arc::clone(&port), descriptor)));
         }
     }
+    let installed_ids: HashSet<String> =
+        sources.iter().map(|source| source.manifest.id.clone()).collect();
+    for plugin_id in &installed_ids {
+        let enabled = enabled_plugin_ids.contains(plugin_id);
+        router.set_dep_satisfied(ToolServiceKey::PluginEnabled(plugin_id.clone()), enabled);
+    }
+    router.unregister_where(|name, cap| {
+        cap.namespace.as_str() == "plugin" && !expected.contains(name)
+    });
 }
 
 /// Parse a capability `inputSchema` string into a JSON Schema value. An absent,
@@ -204,6 +238,7 @@ fn parse_input_schema(raw: Option<&str>) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
@@ -399,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn register_plugin_capability_tools_registers_one_proxy_per_tool_capability() {
+    fn sync_registers_one_proxy_per_tool_capability() {
         let router = ToolRouter::new();
         let port: Arc<dyn PluginToolPort> = Arc::new(CapturingPort::new(json!({})));
         let src = source(
@@ -407,11 +442,98 @@ mod tests {
             vec![tool_cap("search", None), tool_cap("render", Some(r#"{"type":"object"}"#))],
             false,
         );
-        super::register_plugin_capability_tools(&router, port, std::slice::from_ref(&src));
+        let mut enabled = HashSet::new();
+        enabled.insert("team-plugin".to_owned());
+        super::sync_plugin_capability_tools(&router, port, std::slice::from_ref(&src), &enabled);
 
         assert!(router.get("plugin__team_plugin__search").is_some());
         assert!(router.get("plugin__team_plugin__render").is_some());
         // Unknown capabilities get no proxy.
         assert!(router.get("plugin__team_plugin__missing").is_none());
+    }
+
+    #[test]
+    fn disabled_plugin_proxy_stays_registered_but_pending() {
+        let router = ToolRouter::new();
+        let port: Arc<dyn PluginToolPort> = Arc::new(CapturingPort::new(json!({})));
+        let sources = vec![
+            source("enabled-plugin", vec![tool_cap("go", None)], false),
+            source("disabled-plugin", vec![tool_cap("nope", None)], false),
+        ];
+        let mut enabled = HashSet::new();
+        enabled.insert("enabled-plugin".to_owned());
+        super::sync_plugin_capability_tools(&router, port, &sources, &enabled);
+
+        // Both proxies are registered and dispatchable…
+        assert!(router.get("plugin__enabled_plugin__go").is_some());
+        assert!(router.get("plugin__disabled_plugin__nope").is_some());
+        // …but only the enabled plugin's proxy is discoverable. Regression for
+        // the pre-sync bug where a disabled plugin's proxy lingered in the
+        // deferred list (discoverable via `tool_search`, erroring on call)
+        // until process exit.
+        let deferred: Vec<String> =
+            router.deferred_tool_specs().into_iter().map(|spec| spec.name).collect();
+        assert_eq!(deferred, ["plugin__enabled_plugin__go"]);
+
+        // Re-enabling flips the disabled proxy back into the projections —
+        // same sync path, no unregister/register churn.
+        let mut all_enabled = HashSet::new();
+        all_enabled.insert("enabled-plugin".to_owned());
+        all_enabled.insert("disabled-plugin".to_owned());
+        super::sync_plugin_capability_tools(
+            &router,
+            Arc::new(CapturingPort::new(json!({}))),
+            &sources,
+            &all_enabled,
+        );
+        let mut deferred: Vec<String> =
+            router.deferred_tool_specs().into_iter().map(|spec| spec.name).collect();
+        deferred.sort();
+        assert_eq!(deferred, ["plugin__disabled_plugin__nope", "plugin__enabled_plugin__go"]);
+    }
+
+    #[test]
+    fn sync_sweeps_proxies_of_uninstalled_plugins() {
+        let router = ToolRouter::new();
+        let port = || Arc::new(CapturingPort::new(json!({}))) as Arc<dyn PluginToolPort>;
+        let only = |id: &str| {
+            let mut enabled = HashSet::new();
+            enabled.insert(id.to_owned());
+            enabled
+        };
+
+        // A previous sync registered plugin-a's proxy…
+        super::sync_plugin_capability_tools(
+            &router,
+            port(),
+            &[source("plugin-a", vec![tool_cap("t", None)], false)],
+            &only("plugin-a"),
+        );
+        // …plus a stray registration that sync may have left behind.
+        router.register(Box::new(PluginCapabilityProxyTool::new(
+            port(),
+            CapabilityDescriptor {
+                plugin_id: "ghost-plugin".to_owned(),
+                capability_id: "gone".to_owned(),
+                description: "gone".to_owned(),
+                input_schema: Value::Null,
+                trust: None,
+            },
+        )));
+        assert!(router.get("plugin__plugin_a__t").is_some());
+        assert!(router.get("plugin__ghost_plugin__gone").is_some());
+
+        // Sync with only plugin-b installed: both stale proxies are swept;
+        // plugin-b's proxy is registered and visible.
+        super::sync_plugin_capability_tools(
+            &router,
+            port(),
+            &[source("plugin-b", vec![tool_cap("t", None)], false)],
+            &only("plugin-b"),
+        );
+        assert!(router.get("plugin__plugin_a__t").is_none(), "uninstalled plugin swept");
+        assert!(router.get("plugin__ghost_plugin__gone").is_none(), "stray proxy swept");
+        assert!(router.capability_of("plugin__ghost_plugin__gone").is_none());
+        assert!(router.get("plugin__plugin_b__t").is_some());
     }
 }

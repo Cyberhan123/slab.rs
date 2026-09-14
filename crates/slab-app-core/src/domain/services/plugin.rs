@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -404,15 +404,19 @@ impl PluginService {
         Ok(plugins)
     }
 
-    /// Enabled plugins that declare at least one agent capability, with their
-    /// manifests (B-7). **Read-only**: scans the plugins directory + reads
-    /// plugin state but never upserts, so a background agent-runtime reload
-    /// cannot race (and clobber) a host- or test-seeded plugin state. The
-    /// capability proxy registration only needs the manifests, not a state sync.
-    pub(crate) async fn enabled_capability_sources_readonly(
+    /// ALL installed plugins that declare at least one agent capability, plus
+    /// the set of currently enabled plugin ids (B-7). **Read-only**: scans the
+    /// plugins directory + reads plugin state but never upserts, so a
+    /// background agent-runtime reload cannot race (and clobber) a host- or
+    /// test-seeded plugin state. The runtime reloader registers proxies for
+    /// every installed plugin and gates them per-plugin on the enable state
+    /// (`ToolServiceKey::PluginEnabled`).
+    pub(crate) async fn capability_sources_with_enablement_readonly(
         &self,
-    ) -> Result<Vec<crate::infra::agent::plugin_capability::PluginCapabilitySource>, AppCoreError>
-    {
+    ) -> Result<
+        (Vec<crate::infra::agent::plugin_capability::PluginCapabilitySource>, HashSet<String>),
+        AppCoreError,
+    > {
         let scans = scan_plugins(&self.state.config().plugins_dir)?;
         let enabled: HashMap<String, bool> = self
             .state
@@ -423,10 +427,9 @@ impl PluginService {
             .map(|record| (record.plugin_id, record.enabled))
             .collect();
 
-        let plugins = scans
+        let sources = scans
             .into_iter()
             .filter(|scan| scan.valid)
-            .filter(|scan| enabled.get(&scan.id).copied().unwrap_or(true))
             .filter_map(|scan| {
                 let manifest = scan.manifest?;
                 Some(crate::infra::agent::plugin_capability::PluginCapabilitySource {
@@ -435,8 +438,15 @@ impl PluginService {
                 })
             })
             .filter(|plugin| !plugin.manifest.contributes.agent_capabilities.is_empty())
+            .collect::<Vec<_>>();
+
+        // No state record = enabled (matches the enable filter above).
+        let enabled_ids = sources
+            .iter()
+            .map(|source| source.manifest.id.clone())
+            .filter(|id| enabled.get(id).copied().unwrap_or(true))
             .collect();
-        Ok(plugins)
+        Ok((sources, enabled_ids))
     }
 
     /// Dispatch a plugin agent-capability call by resolving `capability_id` to

@@ -76,19 +76,23 @@ impl AgentRuntimeReloader {
         }
         self.runtime.replace_hooks(hooks);
 
-        // B-7: register a `plugin__<id>__<cap>` proxy for every Tool-kind
-        // capability of enabled plugins. Uses a READ-ONLY manifest scan (no
-        // state upsert) so the background reload cannot race a host/test-seeded
-        // plugin state. Re-registering picks up installs / enables / disables.
-        let capability_sources = plugin_service.enabled_capability_sources_readonly().await?;
+        // B-7: sync `plugin__<id>__<cap>` proxies with the installed + enabled
+        // plugin sets. Uses a READ-ONLY manifest scan (no state upsert) so the
+        // background reload cannot race a host/test-seeded plugin state.
+        // Enabled plugins' proxies are active; disabled ones stay registered
+        // but PENDING (projection-gated on `ToolServiceKey::PluginEnabled`);
+        // uninstalled ones are swept.
+        let (capability_sources, enabled_plugin_ids) =
+            plugin_service.capability_sources_with_enablement_readonly().await?;
         let capability_port: Arc<dyn slab_agent::PluginToolPort> =
             Arc::new(crate::infra::agent::plugin_capability::PluginServiceCapabilityPort::new(
                 plugin_service,
             ));
-        crate::infra::agent::plugin_capability::register_plugin_capability_tools(
+        crate::infra::agent::plugin_capability::sync_plugin_capability_tools(
             &self.tool_router,
             capability_port,
             &capability_sources,
+            &enabled_plugin_ids,
         );
         Ok(())
     }
