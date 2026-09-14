@@ -33,7 +33,7 @@ function SetupScaffold({ children }: { children: ReactNode }) {
             className="flex min-h-0 w-shell-rail shrink-0 flex-col items-center bg-sidebar py-6"
             data-testid="setup-sidebar"
           >
-            <WindowControls placement="sidebar" />
+            <WindowControls />
           </aside>
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col">

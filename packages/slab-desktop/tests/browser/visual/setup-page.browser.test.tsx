@@ -135,7 +135,7 @@ describe('SetupPage browser visual regression', () => {
     expect(document.querySelector('header [role="toolbar"]')).toBeNull();
   });
 
-  it('keeps Windows window controls in the setup header', async () => {
+  it('keeps Windows window chrome fully native in the setup shell', async () => {
     mockUseDesktopPlatform.mockReturnValue('windows');
     mockUseSetup.mockReturnValue(createViewModel());
 
@@ -143,13 +143,8 @@ describe('SetupPage browser visual regression', () => {
       portsOverrides: { platformInfo: { desktop: true, mobile: false, os: "windows" } },
     });
 
-    await expect.element(
-      page.getByRole('toolbar', { name: 'Window controls' }),
-    ).toBeVisible();
-    await expect.element(page.getByRole('button', { name: 'Minimize window' })).toBeVisible();
-    await expect.element(page.getByRole('button', { name: 'Maximize window' })).toBeVisible();
-    await expect.element(page.getByRole('button', { name: 'Close window' })).toBeVisible();
+    // Windows runs with native decorations, so no custom controls may render.
     expect(document.querySelector('[data-testid="setup-sidebar"]')).toBeNull();
-    expect(document.querySelector('header [role="toolbar"]')).not.toBeNull();
+    expect(document.querySelector('[role="toolbar"]')).toBeNull();
   });
 });

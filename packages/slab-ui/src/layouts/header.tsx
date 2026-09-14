@@ -3,7 +3,6 @@ import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
 import { Input } from "@slab/components/input"
 import { useHeader } from "@slab/ui/hooks/use-header"
-import { WindowControls } from "@slab/ui/layouts/window-controls"
 import { cn } from "@slab/ui/lib/utils"
 import {
   Select,
@@ -250,7 +249,6 @@ export default function Header() {
           </>
         ) : null}
         {right}
-        <WindowControls placement="header" />
       </div>
     </header>
   )

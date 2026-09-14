@@ -1,20 +1,12 @@
-import { Minus, Plus, Square, X } from "lucide-react"
+import { Minus, Plus, X } from "lucide-react"
 import { toast } from "sonner"
 import { getErrorMessage } from "@slab/api"
 import { useTranslation } from "@slab/i18n"
 
-import { Button } from "@slab/components/button"
-import useDesktopPlatform, { type DesktopPlatform } from "@slab/ui/hooks/use-desktop-platform"
+import useDesktopPlatform from "@slab/ui/hooks/use-desktop-platform"
 import { useSlab } from "@slab/ui/provider/slab-provider"
-import { cn } from "@slab/ui/lib/utils"
 
 type WindowControlAction = "minimize" | "toggleMaximize" | "close"
-type WindowControlsPlacement = "sidebar" | "header"
-type WindowControlsVariant = "mac" | "desktop"
-type WindowControlsConfig = {
-  placement: WindowControlsPlacement
-  variant: WindowControlsVariant
-}
 type Translate = (key: string, options?: Record<string, unknown>) => string
 
 const WINDOW_CONTROL_LABEL_KEYS: Record<WindowControlAction, string> = {
@@ -56,25 +48,6 @@ const MAC_CONTROLS: MacControl[] = [
   },
 ]
 
-const WINDOW_CONTROLS_CONFIG_BY_PLATFORM: Record<DesktopPlatform, WindowControlsConfig> = {
-  macos: {
-    placement: "sidebar",
-    variant: "mac",
-  },
-  windows: {
-    placement: "header",
-    variant: "desktop",
-  },
-  linux: {
-    placement: "header",
-    variant: "desktop",
-  },
-  unknown: {
-    placement: "header",
-    variant: "desktop",
-  },
-}
-
 function getWindowControlLabel(action: WindowControlAction, t: Translate) {
   return t(WINDOW_CONTROL_LABEL_KEYS[action])
 }
@@ -113,16 +86,13 @@ async function runWindowAction(
   }
 }
 
-function MacWindowControls({ placement }: { placement: WindowControlsPlacement }) {
+function MacWindowControls() {
   const { t } = useTranslation()
   const { ports } = useSlab()
 
   return (
     <div
-      className={cn(
-        "[app-region:no-drag] flex items-center gap-2",
-        placement === "sidebar" ? "w-full justify-center px-3" : "pr-2"
-      )}
+      className="[app-region:no-drag] flex w-full items-center justify-center px-3"
       data-tauri-drag-region="false"
       role="toolbar"
       aria-label={t("layouts.header.windowControls.toolbar")}
@@ -149,87 +119,19 @@ function MacWindowControls({ placement }: { placement: WindowControlsPlacement }
   )
 }
 
-function DesktopWindowControls() {
-  const { t } = useTranslation()
-  const { ports } = useSlab()
-  const minimizeLabel = getWindowControlLabel("minimize", t)
-  const toggleMaximizeLabel = getWindowControlLabel("toggleMaximize", t)
-  const closeLabel = getWindowControlLabel("close", t)
-
-  return (
-    <div
-      className="[app-region:no-drag] mr-2 flex items-center gap-1"
-      data-tauri-drag-region="false"
-      role="toolbar"
-      aria-label={t("layouts.header.windowControls.toolbar")}
-    >
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label={minimizeLabel}
-        title={minimizeLabel}
-        className="size-7 rounded-[10px] text-muted-foreground hover:bg-glass-bg-strong hover:text-foreground"
-        onClick={() => {
-          void runWindowAction("minimize", t, ports.windowChrome)
-        }}
-      >
-        <Minus className="size-4" />
-      </Button>
-
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label={toggleMaximizeLabel}
-        title={toggleMaximizeLabel}
-        className="size-7 rounded-[10px] text-muted-foreground hover:bg-glass-bg-strong hover:text-foreground"
-        onClick={() => {
-          void runWindowAction("toggleMaximize", t, ports.windowChrome)
-        }}
-      >
-        <Square className="size-[13px]" />
-      </Button>
-
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label={closeLabel}
-        title={closeLabel}
-        className="size-7 rounded-[10px] text-muted-foreground hover:bg-destructive/12 hover:text-destructive"
-        onClick={() => {
-          void runWindowAction("close", t, ports.windowChrome)
-        }}
-      >
-        <X className="size-4" />
-      </Button>
-    </div>
-  )
-}
-
-type WindowControlsProps = {
-  placement?: WindowControlsPlacement
-}
-
-function getWindowControlsConfig(platform: DesktopPlatform) {
-  return WINDOW_CONTROLS_CONFIG_BY_PLATFORM[platform]
-}
-
-export function WindowControls({
-  placement = "header",
-}: WindowControlsProps) {
+/**
+ * Every desktop platform except macOS runs with native window decorations
+ * (`decorations: true` in the tauri platform configs), so the OS owns the
+ * minimize/maximize/close chrome. macOS alone runs borderless and draws its
+ * traffic lights inside the sidebar rail.
+ */
+export function WindowControls() {
   const isDesktop = useSlab().ports.platformInfo.desktop
   const platform = useDesktopPlatform()
-  const config = getWindowControlsConfig(platform)
 
-  if (!isDesktop || config.placement !== placement) {
+  if (!isDesktop || platform !== "macos") {
     return null
   }
 
-  if (config.variant === "mac") {
-    return <MacWindowControls placement={placement} />
-  }
-
-  return <DesktopWindowControls />
+  return <MacWindowControls />
 }

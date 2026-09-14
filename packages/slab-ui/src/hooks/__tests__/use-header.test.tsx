@@ -85,8 +85,7 @@ const HeaderRenderProbe = memo(function HeaderRenderProbe({
   return <span data-testid="header-render-probe">{history?.title ?? 'none'}</span>;
 });
 
-// The real <Header /> renders WindowControls, which reads the platform info
-// port — mount it inside a SlabProvider like every shell does.
+// Mount the real <Header /> inside a SlabProvider like every shell does.
 function withSlabPorts(children: ReactNode) {
   const queryClient = new QueryClient();
   return (

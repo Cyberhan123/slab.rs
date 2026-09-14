@@ -114,7 +114,7 @@ export function AppSidebar({ routes }: AppSidebarProps) {
     <aside className="flex min-h-0 w-shell-rail shrink-0 flex-col bg-sidebar py-6">
       <div className="flex flex-1 flex-col items-center justify-between">
         <div className="flex flex-col items-center gap-6">
-          <WindowControls placement="sidebar" />
+          <WindowControls />
           <div className="flex h-[54px] w-[59px] items-center justify-center rounded-[16px] bg-card">
             <span className="text-xl font-bold tracking-display text-primary">
               Slab
