@@ -566,13 +566,10 @@ fn schedule_agent_mcp_connections(
                 }
             }
         }
-        if let Some(reloader) = on_settled {
-            if let Err(error) = reloader.reload().await {
-                tracing::warn!(
-                    %error,
-                    "failed to reload agent runtime after MCP connections settled"
-                );
-            }
+        if let Some(reloader) = on_settled
+            && let Err(error) = reloader.reload().await
+        {
+            tracing::warn!(%error, "failed to reload agent runtime after MCP connections settled");
         }
     });
 }

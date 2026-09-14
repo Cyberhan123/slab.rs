@@ -21,6 +21,7 @@ Each tool implements `slab_agent::TypedTool` with a typed `*Args` struct:
 - `execute` receives the parsed struct (the blanket `ToolHandler` adapter parses raw arguments once and maps missing fields to the `missing '<field>' argument` wording).
 - Validation that must keep a specific model-facing message (alias sets, "must be at least 1" bounds, lenient drop rules) stays in `execute` or a field deserializer; schema-only enum mirrors advertise canonical values without narrowing what parsing accepts.
 - Metadata methods (`describe_operation`, `is_concurrency_safe`, `render_turn_item`, …) keep the raw `&Value` arguments on purpose — the dispatch layer calls them where an all-or-nothing typed parse would change behavior.
+- Proxies declare host-service deps where a backing service exists: MCP proxies depend on `ToolServiceKey::McpServer` and go PENDING (hidden from the projections, still callable) while their server is unreachable.
 
 ## Type
 
