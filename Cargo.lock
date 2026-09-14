@@ -15309,6 +15309,7 @@ dependencies = [
  "futures",
  "minijinja",
  "regex",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "slab-agent",

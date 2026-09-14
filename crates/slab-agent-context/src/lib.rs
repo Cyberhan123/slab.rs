@@ -18,6 +18,7 @@ pub mod error;
 pub mod fragment;
 pub mod helper;
 pub mod hooks;
+pub mod memory_instruction;
 pub mod permissions_instruction;
 pub mod reasoning_effort;
 pub mod skill_manager;
@@ -31,6 +32,7 @@ pub use approval_prompt::{ApprovalReviewContext, render_approval_review_prompt};
 pub use environment_instruction::EnvironmentContextFragment;
 pub use error::{ContextError, Result};
 pub use hooks::ContextInstructionHook;
+pub use memory_instruction::MemoryInstructionFragment;
 pub use permissions_instruction::PermissionsInstructionFragment;
 pub use reasoning_effort::ReasoningEffortFragment;
 pub use snapshots::{

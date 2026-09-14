@@ -91,15 +91,18 @@ pub struct PermissionSnapshot {
 
 // ── Memory ────────────────────────────────────────────────────────────────────
 
-/// Folded read-side memory context. `body` is the fully rendered memory
-/// instruction (already wrapped by `slab-agent-memories`); the context hook
-/// injects it verbatim as a `developer` message named `slab_memory`.
-/// `relevant_body` carries the recall-selected rollout summaries (when
-/// recall is enabled and produced a selection); it is injected as a separate
+/// Read-side memory context for the memory fragment. `base_path` is the
+/// absolute per-project memory root and `memory_summary` the v1-gated,
+/// token-truncated `memory_summary.md` body; the context hook renders them
+/// through the bundled `memory` template into a `developer` message named
+/// `slab_memory`. `relevant_body` carries the recall-selected rollout
+/// summaries (when recall is enabled and produced a selection); it stays
+/// fully rendered by `slab-agent-memories` and is injected as a separate
 /// `slab_memory_relevant` developer message so each fragment refreshes
 /// independently by tag.
 #[derive(Debug, Clone, Serialize)]
 pub struct MemoryContext {
-    pub body: String,
+    pub base_path: String,
+    pub memory_summary: String,
     pub relevant_body: Option<String>,
 }

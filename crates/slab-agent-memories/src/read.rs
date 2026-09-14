@@ -1,20 +1,14 @@
-use std::path::{Path, PathBuf};
+//! Read side of the memory workspace: load the injectable summary and parse
+//! the `<oai-mem-citation>` blocks the model appends to final replies.
+//!
+//! The developer-message rendering itself lives in `slab-agent-context` (the
+//! `memory` fragment template); this module only loads the structured inputs.
+
+use std::path::Path;
 
 use regex::Regex;
 
-use crate::{Result, error::fs_error, templates};
-
-#[derive(Debug, Clone)]
-pub struct MemoryReadConfig {
-    pub memory_root: PathBuf,
-    pub inject_hook_instructions: bool,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct MemoryReadArtifacts {
-    pub memory_summary: Option<String>,
-    pub memory: Option<String>,
-}
+use crate::{Result, error::fs_error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryCitation {
@@ -44,39 +38,24 @@ impl MemoryCitationSourceKind {
     }
 }
 
-pub fn load_read_artifacts(memory_root: &Path) -> Result<MemoryReadArtifacts> {
-    let summary_path = memory_root.join("memory_summary.md");
-    let memory_path = memory_root.join("MEMORY.md");
-    Ok(MemoryReadArtifacts {
-        memory_summary: read_optional(&summary_path)?,
-        memory: read_optional(&memory_path)?,
-    })
-}
-
-pub fn render_read_developer_message(config: &MemoryReadConfig) -> Result<Option<String>> {
-    let artifacts = load_read_artifacts(&config.memory_root)?;
-    let Some(memory_summary) = artifacts.memory_summary else {
+/// Load the project's `memory_summary.md` for injection, if the project has a
+/// v1 summary to offer. `None` (missing/empty file, or a summary that does
+/// not start with `v1`) skips the memory fragment entirely.
+///
+/// The summary is bounded to the read token budget (the cut backs off to a
+/// line boundary, so the leading `v1` marker survives) — an over-grown
+/// `memory_summary.md` must not silently inflate every agent start.
+pub fn load_memory_summary(memory_root: &Path) -> Result<Option<String>> {
+    let Some(memory_summary) = read_optional(&memory_root.join("memory_summary.md"))? else {
         return Ok(None);
     };
     if !memory_summary.starts_with("v1") {
         return Ok(None);
     }
-
-    // Bound the injected summary (Codex's 2500-token read limit): an
-    // over-grown memory_summary.md must not silently inflate every agent
-    // start. The cut backs off to a line boundary, so the leading `v1`
-    // marker survives.
-    let memory_summary = crate::recall::truncate_to_token_budget(
+    Ok(Some(crate::recall::truncate_to_token_budget(
         &memory_summary,
         crate::recall::SUMMARY_TOKEN_BUDGET,
-    );
-    let mut rendered =
-        templates::render_memory_read(&config.memory_root.to_string_lossy(), &memory_summary)?;
-    if config.inject_hook_instructions {
-        rendered.push_str("\n\n");
-        rendered.push_str(&templates::render_hook_instructions());
-    }
-    Ok(Some(rendered))
+    )))
 }
 
 pub fn parse_memory_citations(text: &str) -> Vec<MemoryCitation> {
@@ -212,11 +191,21 @@ mod tests {
     #[test]
     fn skips_missing_summary() {
         let root = tempfile::tempdir().expect("tempdir");
-        let config = MemoryReadConfig {
-            memory_root: root.path().to_path_buf(),
-            inject_hook_instructions: false,
-        };
 
-        assert!(render_read_developer_message(&config).expect("read").is_none());
+        assert!(load_memory_summary(root.path()).expect("read").is_none());
+    }
+
+    #[test]
+    fn loads_v1_summary_and_skips_other_markers() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::write(root.path().join("memory_summary.md"), "v1\n# Summary\nbody\n")
+            .expect("write");
+
+        let loaded = load_memory_summary(root.path()).expect("read");
+        assert_eq!(loaded.expect("v1 summary"), "v1\n# Summary\nbody\n");
+
+        std::fs::write(root.path().join("memory_summary.md"), "v2\nschema change\n")
+            .expect("write");
+        assert!(load_memory_summary(root.path()).expect("read").is_none());
     }
 }

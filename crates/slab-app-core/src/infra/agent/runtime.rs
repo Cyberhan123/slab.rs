@@ -166,9 +166,21 @@ impl AgentRuntimeReloader {
             extra_roots.clone(),
         )));
         self.tool_router.register(Box::new(slab_agent_tools::GrepTool::new_with_extra_roots(
-            workspace_root,
+            workspace_root.clone(),
             extra_roots,
         )));
+        // The memory_note tool has no plain fallback — register it at the
+        // current project's notes dir, or retire it outright when memory is
+        // off (same retirement pattern as the workspace git tools above).
+        if config.enabled {
+            self.tool_router.register(Box::new(
+                slab_agent_memories::note_tool::MemoryNoteTool::new(
+                    super::memory_project::memory_notes_dir(memory_root, workspace_root.as_deref()),
+                ),
+            ));
+        } else {
+            self.tool_router.unregister(slab_agent_memories::note_tool::MEMORY_NOTE_TOOL_NAME);
+        }
     }
 
     /// Re-point the live agent at a new workspace root (UI open/close):

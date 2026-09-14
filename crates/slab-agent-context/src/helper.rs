@@ -17,6 +17,7 @@ pub const DEFAULT_DEVELOPER_TEMPLATE: &str = include_str!("../templates/develope
 pub const SKILL_TEMPLATE: &str = include_str!("../templates/skill.jinja");
 pub const AGENTS_MD_TEMPLATE: &str = include_str!("../templates/agents_md.jinja");
 pub const ENVIRONMENT_TEMPLATE: &str = include_str!("../templates/environment.jinja");
+pub const MEMORY_TEMPLATE: &str = include_str!("../templates/memory.jinja");
 pub const PERMISSIONS_TEMPLATE: &str = include_str!("../templates/permissions.jinja");
 pub const REASONING_EFFORT_TEMPLATE: &str = include_str!("../templates/reasoning_effort.jinja");
 /// The read-only `plan` built-in agent's system prompt (Slice 4 Phase F).
@@ -30,6 +31,7 @@ pub const INSTRUCTION_TEMPLATE_NAME: &str = "instruction";
 pub const SKILL_TEMPLATE_NAME: &str = "skill";
 pub const AGENTS_MD_TEMPLATE_NAME: &str = "agents_md";
 pub const ENVIRONMENT_TEMPLATE_NAME: &str = "environment";
+pub const MEMORY_TEMPLATE_NAME: &str = "memory";
 pub const PERMISSIONS_TEMPLATE_NAME: &str = "permissions";
 pub const REASONING_EFFORT_TEMPLATE_NAME: &str = "reasoning_effort";
 pub const PLAN_AGENT_TEMPLATE_NAME: &str = "plan_agent";
@@ -59,6 +61,7 @@ pub fn build_environment() -> Environment<'static> {
     let _ = env.add_template(SKILL_TEMPLATE_NAME, SKILL_TEMPLATE);
     let _ = env.add_template(AGENTS_MD_TEMPLATE_NAME, AGENTS_MD_TEMPLATE);
     let _ = env.add_template(ENVIRONMENT_TEMPLATE_NAME, ENVIRONMENT_TEMPLATE);
+    let _ = env.add_template(MEMORY_TEMPLATE_NAME, MEMORY_TEMPLATE);
     let _ = env.add_template(PERMISSIONS_TEMPLATE_NAME, PERMISSIONS_TEMPLATE);
     let _ = env.add_template(REASONING_EFFORT_TEMPLATE_NAME, REASONING_EFFORT_TEMPLATE);
     let _ = env.add_template(PLAN_AGENT_TEMPLATE_NAME, PLAN_AGENT_TEMPLATE);

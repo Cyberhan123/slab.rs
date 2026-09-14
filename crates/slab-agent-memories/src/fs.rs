@@ -8,6 +8,10 @@ use crate::{Result, error::fs_error, phase1::sanitize_slug, phase2::Phase2Input}
 pub const RAW_MEMORIES_FILE: &str = "raw_memories.md";
 pub const PHASE2_WORKSPACE_DIFF_FILE: &str = "phase2_workspace_diff.md";
 pub const PROJECTS_DIR: &str = "projects";
+/// The ad-hoc notes directory (relative to a project memory root) the
+/// `memory_note` tool writes to; consolidation folds these notes into the
+/// memory files. Single source for the tool's registration path.
+pub const AD_HOC_NOTES_DIR: &str = "extensions/ad_hoc/notes";
 const LEGACY_ADOPTED_MARKER: &str = ".projects-adopted";
 const PROJECT_KEY_MAX_LEN: usize = 120;
 /// MEMORY.md registry guard (Claude's dual truncation): both a line cap and

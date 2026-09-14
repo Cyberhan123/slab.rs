@@ -16,6 +16,11 @@ fragments that frame an agent thread.
 - A model-provided `instruction_template.jinja` (threaded from
   `slab-model-pack` through `slab-app-core`) overrides the bundled default
   developer template.
+- Owns the read-side memory developer prompt (`templates/memory.jinja`,
+  rendered from the structured `MemoryContext` the host bridges from
+  `slab-agent-memories`): memory-workspace routing, the load-bearing
+  `<oai-mem-citation>` contract the host parses out of final replies, and the
+  explicit-request `memory_note` update path.
 
 ## Boundaries
 

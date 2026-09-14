@@ -310,12 +310,8 @@ impl AgentContextSources for AppContextSources {
             tracing::warn!(%error, "memory legacy layout adoption skipped on read side");
         }
         let project_root = memory_fs::project_memory_root(&self.memory_root, &project_key);
-        let config = slab_agent_memories::read::MemoryReadConfig {
-            memory_root: project_root.clone(),
-            inject_hook_instructions: true,
-        };
-        let body = match slab_agent_memories::read::render_read_developer_message(&config) {
-            Ok(Some(body)) => body,
+        let memory_summary = match slab_agent_memories::read::load_memory_summary(&project_root) {
+            Ok(Some(memory_summary)) => memory_summary,
             Ok(None) => return None,
             Err(error) => {
                 tracing::warn!(%error, "memory context render skipped");
@@ -324,7 +320,11 @@ impl AgentContextSources for AppContextSources {
         };
         let relevant_body =
             self.recall_body(thread_id, model_id, input_message, &project_key, &project_root).await;
-        Some(MemoryContext { body, relevant_body })
+        Some(MemoryContext {
+            base_path: project_root.to_string_lossy().into_owned(),
+            memory_summary,
+            relevant_body,
+        })
     }
 
     fn evict_thread(&self, thread_id: &str) {

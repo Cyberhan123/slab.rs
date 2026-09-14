@@ -8,6 +8,7 @@ mod error;
 pub mod fs;
 pub mod git;
 pub mod hooks;
+pub mod note_tool;
 pub mod phase1;
 pub mod phase2;
 pub mod read;

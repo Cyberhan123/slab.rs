@@ -320,7 +320,12 @@ fn build_agent_control(
         )));
         tool_router.register(Box::new(slab_agent_tools::GrepTool::new_with_extra_roots(
             workspace_root.clone(),
-            extra_roots,
+            extra_roots.clone(),
+        )));
+        // The explicit-request memory-update path (see the read-side `memory`
+        // fragment): one tool, baked to the current project's notes dir.
+        tool_router.register(Box::new(slab_agent_memories::note_tool::MemoryNoteTool::new(
+            super::memory_project::memory_notes_dir(&memory_root, workspace_root.as_deref()),
         )));
     }
     let memory_pipeline = super::memory::AgentMemoryPipeline::new(

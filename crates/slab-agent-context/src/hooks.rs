@@ -27,6 +27,7 @@ use crate::environment_instruction::EnvironmentContextFragment;
 use crate::error::Result;
 use crate::fragment::ContextFragment;
 use crate::helper::{build_environment, build_skill_roots};
+use crate::memory_instruction::MemoryInstructionFragment;
 use crate::permissions_instruction::PermissionsInstructionFragment;
 use crate::reasoning_effort::ReasoningEffortFragment;
 use crate::skill_manager::scan_skills;
@@ -116,15 +117,18 @@ impl ContextInstructionHook {
             }
             messages.push(tagged(developer.render(&env)?, "slab_skills"));
         }
-        // 6. Folded read-side memory (developer, preserves the `slab_memory` name).
+        // 6. Read-side memory instructions (developer, preserves the
+        //    `slab_memory` name): the structured summary + base path render
+        //    through the bundled `memory` template.
         if let Some(memory) = self.sources.memory_context(thread_id, model, input_message).await {
-            messages.push(ConversationMessage {
-                role: "developer".to_owned(),
-                content: ConversationMessageContent::Text(memory.body),
-                name: Some("slab_memory".to_owned()),
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-            });
+            messages.push(tagged(
+                MemoryInstructionFragment {
+                    base_path: memory.base_path,
+                    memory_summary: memory.memory_summary,
+                }
+                .render(&env)?,
+                "slab_memory",
+            ));
             // 6b. Recall-selected rollout summaries (developer): a separate
             // tag so the summary fragment and the per-task recall refresh
             // independently between runs.
@@ -220,8 +224,7 @@ mod tests {
         agents_md: PathBuf,
         template: Option<String>,
         permission: PermissionSnapshot,
-        memory: Option<String>,
-        relevant: Option<String>,
+        memory: Option<crate::snapshots::MemoryContext>,
         evicted: std::sync::Mutex<Vec<String>>,
     }
 
@@ -267,10 +270,7 @@ mod tests {
             _model_id: &str,
             _input_message: Option<&str>,
         ) -> Option<crate::snapshots::MemoryContext> {
-            self.memory.as_ref().map(|body| crate::snapshots::MemoryContext {
-                body: body.clone(),
-                relevant_body: self.relevant.clone(),
-            })
+            self.memory.clone()
         }
         fn evict_thread(&self, thread_id: &str) {
             self.evicted.lock().expect("evicted lock").push(thread_id.to_owned());
@@ -299,7 +299,6 @@ mod tests {
             template: None,
             permission,
             memory: None,
-            relevant: None,
             evicted: std::sync::Mutex::new(Vec::new()),
         }
     }
@@ -505,7 +504,11 @@ mod tests {
     async fn folds_memory_read_context_as_slab_memory_developer_message() {
         let ws = tempfile::TempDir::new().unwrap();
         let mut sources = mock_sources(Some(ws.path().to_path_buf()));
-        sources.memory = Some("memory summary body".to_owned());
+        sources.memory = Some(crate::snapshots::MemoryContext {
+            base_path: "/memories/projects/p".to_owned(),
+            memory_summary: "memory summary body".to_owned(),
+            relevant_body: None,
+        });
         let hook = ContextInstructionHook::new(Arc::new(sources));
 
         let outcome = hook.on_event(&start_event(AgentConfig::default())).await;
@@ -518,15 +521,23 @@ mod tests {
             .find(|m| m.name.as_deref() == Some("slab_memory"))
             .expect("folded memory message should be injected");
         assert_eq!(memory_msg.role, "developer");
-        assert!(memory_msg.content.rendered_text().contains("memory summary body"));
+        // The structured fields render through the memory template: the
+        // summary is wrapped and the base path reaches the layout routes.
+        let body = memory_msg.content.rendered_text();
+        assert!(body.contains("========= MEMORY_SUMMARY BEGINS ========="));
+        assert!(body.contains("memory summary body"));
+        assert!(body.contains("/memories/projects/p/MEMORY.md"));
     }
 
     #[tokio::test]
     async fn folds_relevant_memory_as_slab_memory_relevant_fragment() {
         let ws = tempfile::TempDir::new().unwrap();
         let mut sources = mock_sources(Some(ws.path().to_path_buf()));
-        sources.memory = Some("memory summary body".to_owned());
-        sources.relevant = Some("relevant rollout summaries".to_owned());
+        sources.memory = Some(crate::snapshots::MemoryContext {
+            base_path: "/memories/projects/p".to_owned(),
+            memory_summary: "memory summary body".to_owned(),
+            relevant_body: Some("relevant rollout summaries".to_owned()),
+        });
         let hook = ContextInstructionHook::new(Arc::new(sources));
 
         let outcome = hook.on_event(&start_event(AgentConfig::default())).await;

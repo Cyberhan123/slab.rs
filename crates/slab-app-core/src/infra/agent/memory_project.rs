@@ -36,6 +36,15 @@ pub(crate) fn resolve_project_key(workspace_root: Option<&Path>) -> String {
         .clone()
 }
 
+/// The per-project ad-hoc notes directory the `memory_note` tool writes to
+/// (`<memory_root>/projects/<key>/extensions/ad_hoc/notes`). Resolved at
+/// tool-registration time (bootstrap + workspace refresh) so the tool bakes
+/// in the current project's notes dir and can write nowhere else.
+pub(crate) fn memory_notes_dir(memory_root: &Path, workspace_root: Option<&Path>) -> PathBuf {
+    let project_key = resolve_project_key(workspace_root);
+    memory_fs::project_memory_root(memory_root, &project_key).join(memory_fs::AD_HOC_NOTES_DIR)
+}
+
 fn git_root_or_self(root: &Path) -> String {
     let output =
         Command::new("git").arg("-C").arg(root).args(["rev-parse", "--show-toplevel"]).output();
