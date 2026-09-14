@@ -131,6 +131,19 @@ pub trait ToolHandler: Send + Sync {
         default_tool_turn_item(render)
     }
 
+    /// Release resources held by this tool (background tasks, subscriptions,
+    /// caches). The registry calls this when the handler is replaced or
+    /// removed — always OUTSIDE the registry locks, in reverse registration
+    /// order for bulk removals. Dispose must not call back into the registry
+    /// (`register`/`unregister`/projections): doing so would deadlock on the
+    /// internal locks.
+    ///
+    /// Semantics: dispose releases resources but does NOT wait for in-flight
+    /// [`execute`](Self::execute) calls — the handler stays memory-safe
+    /// through its `Arc` and must tolerate being executed after dispose (the
+    /// port layer then surfaces a clean error). The default is a no-op.
+    fn dispose(&self) {}
+
     /// Execute the tool with the given parsed arguments.
     async fn execute(
         &self,

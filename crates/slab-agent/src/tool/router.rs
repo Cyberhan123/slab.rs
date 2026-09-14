@@ -34,21 +34,35 @@ impl ToolRouter {
     }
 
     /// Register a tool handler.  A handler with the same name replaces any
-    /// previously registered handler. Its [`ToolCapability`] is cached once so
+    /// previously registered handler (the replaced handler is disposed — see
+    /// [`ToolHandler::dispose`]). Its [`ToolCapability`] is cached once so
     /// the projection need not re-query the handler each turn.
     pub fn register(&self, handler: Box<dyn ToolHandler>) {
         let handler: Arc<dyn ToolHandler> = handler.into();
         let name = handler.name().to_owned();
         let capability = handler.capability();
-        let mut handlers = self.handlers.write().expect("tool registry lock poisoned");
-        handlers.insert(name.clone(), handler);
+        let replaced = {
+            let mut handlers = self.handlers.write().expect("tool registry lock poisoned");
+            handlers.insert(name.clone(), handler)
+        };
         self.capabilities.write().expect("tool registry lock poisoned").insert(name, capability);
+        // Dispose the replaced handler OUTSIDE the registry locks: a dispose
+        // that re-entered the registry would deadlock on the write locks.
+        if let Some(old) = replaced {
+            old.dispose();
+        }
     }
 
-    /// Remove a registered tool handler by name.
+    /// Remove a registered tool handler by name. The removed handler is
+    /// disposed outside the registry locks; the returned `Arc` stays
+    /// memory-safe but the handler's resources are released.
     pub fn unregister(&self, name: &str) -> Option<Arc<dyn ToolHandler>> {
         self.capabilities.write().expect("tool registry lock poisoned").remove(name);
-        self.handlers.write().expect("tool registry lock poisoned").remove(name)
+        let removed = self.handlers.write().expect("tool registry lock poisoned").remove(name);
+        if let Some(handler) = &removed {
+            handler.dispose();
+        }
+        removed
     }
 
     /// Look up a handler by tool name.

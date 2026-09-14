@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::*;
 use crate::TypedTool;
@@ -292,4 +294,75 @@ fn unregister_drops_capability_cache() {
     router.unregister("deferred_read");
     assert!(router.capability_of("deferred_read").is_none());
     assert!(router.get("deferred_read").is_none());
+}
+
+// ── dispose lifecycle ──────────────────────────────────────────────────────
+
+/// TypedTool stub that records dispose calls on a shared flag.
+struct DisposeTrackingTool {
+    name: &'static str,
+    disposed: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl TypedTool for DisposeTrackingTool {
+    type Input = serde_json::Value;
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn description(&self) -> &str {
+        "dispose tracking"
+    }
+    async fn execute(
+        &self,
+        _: &ToolContext,
+        _: serde_json::Value,
+    ) -> Result<ToolOutput, crate::error::AgentError> {
+        noop_output()
+    }
+
+    fn dispose(&self) {
+        self.disposed.store(true, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn replacing_a_registration_disposes_the_old_handler() {
+    let router = ToolRouter::new();
+    let first_disposed = Arc::new(AtomicBool::new(false));
+    router.register(Box::new(DisposeTrackingTool {
+        name: "tracked",
+        disposed: Arc::clone(&first_disposed),
+    }));
+    assert!(!first_disposed.load(Ordering::SeqCst));
+
+    // Re-registering under the same name replaces (and disposes) the old one.
+    router.register(Box::new(DisposeTrackingTool {
+        name: "tracked",
+        disposed: Arc::new(AtomicBool::new(false)),
+    }));
+    assert!(first_disposed.load(Ordering::SeqCst), "replaced handler must be disposed");
+    assert!(router.get("tracked").is_some(), "the replacement is live");
+}
+
+#[test]
+fn unregister_disposes_the_removed_handler() {
+    let router = ToolRouter::new();
+    let disposed = Arc::new(AtomicBool::new(false));
+    router.register(Box::new(DisposeTrackingTool {
+        name: "tracked",
+        disposed: Arc::clone(&disposed),
+    }));
+    router.unregister("tracked");
+    assert!(disposed.load(Ordering::SeqCst), "unregistered handler must be disposed");
+    assert!(router.get("tracked").is_none());
+}
+
+#[test]
+fn default_dispose_is_a_noop() {
+    // The built-in stubs (no dispose override) flow through
+    // register/unregister/replace without panicking.
+    let router = router_with_all_visibilities();
+    router.register(Box::new(StubTool));
+    router.unregister("stub");
 }

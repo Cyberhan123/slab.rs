@@ -154,6 +154,10 @@ pub trait TypedTool: Send + Sync {
         default_tool_turn_item(render)
     }
 
+    /// Release resources held by this tool; see [`crate::ToolHandler::dispose`].
+    /// The default is a no-op.
+    fn dispose(&self) {}
+
     /// Execute the tool with the parsed input.
     async fn execute(
         &self,
@@ -209,6 +213,10 @@ where
 
     fn render_turn_item(&self, render: &ToolCallRender<'_>) -> TurnItem {
         TypedTool::render_turn_item(self, render)
+    }
+
+    fn dispose(&self) {
+        TypedTool::dispose(self)
     }
 
     async fn execute(
