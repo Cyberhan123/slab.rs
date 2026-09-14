@@ -25,8 +25,8 @@ use serde_json::Value;
 use crate::error::AgentError;
 use crate::protocol::TurnItem;
 use crate::tool::{
-    ToolCallRender, ToolContext, ToolHandler, ToolNamespace, ToolOutput, ToolVisibility,
-    default_tool_turn_item,
+    ToolCallRender, ToolContext, ToolHandler, ToolNamespace, ToolOutput, ToolServiceKey,
+    ToolVisibility, default_tool_turn_item,
 };
 
 /// JSON Schema for a typed tool input, normalized to the shape the previous
@@ -158,6 +158,12 @@ pub trait TypedTool: Send + Sync {
     /// The default is a no-op.
     fn dispose(&self) {}
 
+    /// Host-service keys this tool depends on; see
+    /// [`crate::ToolHandler::service_deps`]. The default is no dependencies.
+    fn service_deps(&self) -> Vec<ToolServiceKey> {
+        Vec::new()
+    }
+
     /// Execute the tool with the parsed input.
     async fn execute(
         &self,
@@ -217,6 +223,10 @@ where
 
     fn dispose(&self) {
         TypedTool::dispose(self)
+    }
+
+    fn service_deps(&self) -> Vec<crate::tool::ToolServiceKey> {
+        TypedTool::service_deps(self)
     }
 
     async fn execute(

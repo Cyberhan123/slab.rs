@@ -8,6 +8,7 @@ use crate::protocol::TurnItem;
 
 use super::capability::{ToolCapability, ToolNamespace, ToolVisibility};
 use super::context::{ToolContext, ToolOutput};
+use super::dep::ToolServiceKey;
 
 /// Inputs to [`ToolHandler::render_turn_item`]: everything a tool needs to build
 /// its harness [`TurnItem`] for a given call. Bundled into a struct so the
@@ -143,6 +144,18 @@ pub trait ToolHandler: Send + Sync {
     /// through its `Arc` and must tolerate being executed after dispose (the
     /// port layer then surfaces a clean error). The default is a no-op.
     fn dispose(&self) {}
+
+    /// Host-service keys this tool depends on; empty (the default) means the
+    /// tool is always active. The registry caches the declared keys at
+    /// registration and filters the model-facing projections while any key
+    /// is unsatisfied — a PENDING state that flips to visible when the host
+    /// marks the key satisfied (see [`crate::ToolRouter::set_dep_satisfied`]),
+    /// without re-registration. Dispatch via [`crate::ToolRouter::get`] is
+    /// NOT gated (mirroring [`ToolVisibility::Hidden`]): a pending tool
+    /// stays callable and its port layer surfaces a clean error.
+    fn service_deps(&self) -> Vec<ToolServiceKey> {
+        Vec::new()
+    }
 
     /// Execute the tool with the given parsed arguments.
     async fn execute(

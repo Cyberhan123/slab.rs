@@ -8,7 +8,25 @@ use std::{
 use crate::port::ToolSpec;
 
 use super::capability::{ToolCapability, ToolVisibility};
+use super::dep::ToolServiceKey;
 use super::handler::ToolHandler;
+
+/// Cached registration metadata: the static capability plus the tool's
+/// declared host-service dependencies, both captured once at registration so
+/// the per-turn projections never re-query handlers.
+#[derive(Clone)]
+struct Entry {
+    capability: ToolCapability,
+    service_deps: Vec<ToolServiceKey>,
+}
+
+impl Entry {
+    /// Whether every declared service dep is currently satisfied (an empty
+    /// declaration is always satisfied).
+    fn active(&self, satisfied: &HashSet<ToolServiceKey>) -> bool {
+        self.service_deps.iter().all(|key| satisfied.contains(key))
+    }
+}
 
 /// Registry of available tools for a given agent thread.
 ///
@@ -23,10 +41,15 @@ use super::handler::ToolHandler;
 #[derive(Clone)]
 pub struct ToolRouter {
     handlers: Arc<RwLock<HashMap<String, Arc<dyn ToolHandler>>>>,
-    capabilities: Arc<RwLock<HashMap<String, ToolCapability>>>,
+    entries: Arc<RwLock<HashMap<String, Entry>>>,
     /// Registration order (first-registration position survives re-registration)
     /// so bulk disposal can run newest-first.
     order: Arc<RwLock<Vec<String>>>,
+    /// Host-service keys currently marked satisfied (see
+    /// [`ToolRouter::set_dep_satisfied`]). Tools whose declared deps are not
+    /// all in here are filtered from the model-facing projections (PENDING)
+    /// but stay dispatchable.
+    satisfied: Arc<RwLock<HashSet<ToolServiceKey>>>,
 }
 
 impl ToolRouter {
@@ -34,8 +57,9 @@ impl ToolRouter {
     pub fn new() -> Self {
         Self {
             handlers: Arc::new(RwLock::new(HashMap::new())),
-            capabilities: Arc::new(RwLock::new(HashMap::new())),
+            entries: Arc::new(RwLock::new(HashMap::new())),
             order: Arc::new(RwLock::new(Vec::new())),
+            satisfied: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -50,15 +74,13 @@ impl ToolRouter {
     pub fn register(&self, handler: Box<dyn ToolHandler>) -> ToolRegistration {
         let handler: Arc<dyn ToolHandler> = handler.into();
         let name = handler.name().to_owned();
-        let capability = handler.capability();
+        let entry =
+            Entry { capability: handler.capability(), service_deps: handler.service_deps() };
         let replaced = {
             let mut handlers = self.handlers.write().expect("tool registry lock poisoned");
             handlers.insert(name.clone(), handler)
         };
-        self.capabilities
-            .write()
-            .expect("tool registry lock poisoned")
-            .insert(name.clone(), capability);
+        self.entries.write().expect("tool registry lock poisoned").insert(name.clone(), entry);
         {
             // A re-registration keeps its original position; only new names
             // append to the order.
@@ -79,7 +101,7 @@ impl ToolRouter {
     /// disposed outside the registry locks; the returned `Arc` stays
     /// memory-safe but the handler's resources are released.
     pub fn unregister(&self, name: &str) -> Option<Arc<dyn ToolHandler>> {
-        self.capabilities.write().expect("tool registry lock poisoned").remove(name);
+        self.entries.write().expect("tool registry lock poisoned").remove(name);
         let removed = self.handlers.write().expect("tool registry lock poisoned").remove(name);
         self.order
             .write()
@@ -102,9 +124,10 @@ impl ToolRouter {
         mut pred: impl FnMut(&str, &ToolCapability) -> bool,
     ) -> Vec<String> {
         let matched: HashSet<String> = {
-            let caps = self.capabilities.read().expect("tool registry lock poisoned");
-            caps.iter()
-                .filter(|(name, cap)| pred(name, cap))
+            let entries = self.entries.read().expect("tool registry lock poisoned");
+            entries
+                .iter()
+                .filter(|(name, entry)| pred(name, &entry.capability))
                 .map(|(name, _)| name.clone())
                 .collect()
         };
@@ -114,14 +137,14 @@ impl ToolRouter {
         let mut removed: Vec<Arc<dyn ToolHandler>> = Vec::new();
         let removed_names: Vec<String> = {
             let mut handlers = self.handlers.write().expect("tool registry lock poisoned");
-            let mut caps = self.capabilities.write().expect("tool registry lock poisoned");
+            let mut entries = self.entries.write().expect("tool registry lock poisoned");
             let mut order = self.order.write().expect("tool registration order lock poisoned");
             let mut removed_names = Vec::new();
             order.retain(|name| {
                 if !matched.contains(name) {
                     return true;
                 }
-                caps.remove(name);
+                entries.remove(name);
                 match handlers.remove(name) {
                     Some(handler) => {
                         removed_names.push(name.clone());
@@ -164,19 +187,37 @@ impl ToolRouter {
 
     /// The cached [`ToolCapability`] for a registered tool, if any.
     pub fn capability_of(&self, name: &str) -> Option<ToolCapability> {
-        self.capabilities.read().expect("tool registry lock poisoned").get(name).cloned()
+        self.entries
+            .read()
+            .expect("tool registry lock poisoned")
+            .get(name)
+            .map(|entry| entry.capability.clone())
     }
 
     /// Map every registered tool name to its exposure category. Used by the
     /// turn loop to filter the tool list by the current permission behavior
     /// without leaking categories onto the LLM-facing [`ToolSpec`].
     pub fn categories(&self) -> HashMap<String, slab_exec_policy::OperationCategory> {
-        self.capabilities
+        self.entries
             .read()
             .expect("tool registry lock poisoned")
             .iter()
-            .map(|(name, cap)| (name.clone(), cap.category))
+            .map(|(name, entry)| (name.clone(), entry.capability.category))
             .collect()
+    }
+
+    /// Mark a host-service key satisfied (or not). Tools whose declared
+    /// [`ToolHandler::service_deps`] include the key re-enter the
+    /// model-facing projections on the next turn (PENDING → active) — or are
+    /// filtered out again when it flips back to unsatisfied. Dispatchability
+    /// via [`Self::get`] is unchanged.
+    pub fn set_dep_satisfied(&self, key: ToolServiceKey, satisfied: bool) {
+        let mut set = self.satisfied.write().expect("tool service-dep lock poisoned");
+        if satisfied {
+            set.insert(key);
+        } else {
+            set.remove(&key);
+        }
     }
 
     /// Project the model-facing tool list for a turn: applies both the
@@ -198,18 +239,21 @@ impl ToolRouter {
         injected_deferred: &HashSet<String>,
     ) -> Vec<ToolSpec> {
         let handlers = self.handlers.read().expect("tool registry lock poisoned");
-        let caps = self.capabilities.read().expect("tool registry lock poisoned");
+        let entries = self.entries.read().expect("tool registry lock poisoned");
+        let satisfied = self.satisfied.read().expect("tool service-dep lock poisoned");
         let all_exposed = exposure == slab_exec_policy::ToolExposure::all();
         handlers
             .values()
             .filter_map(|handler| {
                 let name = handler.name();
-                let visibility =
-                    caps.get(name).map(|cap| cap.visibility).unwrap_or(ToolVisibility::Direct);
-                let category = caps
-                    .get(name)
-                    .map(|cap| cap.category)
-                    .unwrap_or(slab_exec_policy::OperationCategory::ReadOnly);
+                let entry = entries.get(name)?;
+                // PENDING tools (unsatisfied service deps) stay out of the
+                // projections; they remain dispatchable via `get`.
+                if !entry.active(&satisfied) {
+                    return None;
+                }
+                let visibility = entry.capability.visibility;
+                let category = entry.capability.category;
                 let exposed = all_exposed || exposure.contains(category);
                 let include = match visibility {
                     ToolVisibility::Hidden => false,
@@ -231,14 +275,16 @@ impl ToolRouter {
     /// [`Self::visible_tool_specs`]).
     pub fn deferred_tool_specs(&self) -> Vec<ToolSpec> {
         let handlers = self.handlers.read().expect("tool registry lock poisoned");
-        let caps = self.capabilities.read().expect("tool registry lock poisoned");
+        let entries = self.entries.read().expect("tool registry lock poisoned");
+        let satisfied = self.satisfied.read().expect("tool service-dep lock poisoned");
         handlers
             .values()
             .filter_map(|handler| {
                 let name = handler.name();
-                let visibility =
-                    caps.get(name).map(|cap| cap.visibility).unwrap_or(ToolVisibility::Direct);
-                (visibility == ToolVisibility::Deferred).then(|| ToolSpec {
+                let entry = entries.get(name)?;
+                let is_deferred = entry.capability.visibility == ToolVisibility::Deferred
+                    && entry.active(&satisfied);
+                is_deferred.then(|| ToolSpec {
                     name: handler.name().to_owned(),
                     description: handler.description().to_owned(),
                     parameters_schema: handler.parameters_schema(),

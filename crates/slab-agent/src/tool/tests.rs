@@ -498,3 +498,89 @@ fn re_registration_keeps_its_position_for_bulk_dispose() {
     // replacement moved to the end, the log would be reversed.)
     assert_eq!(*log.lock().expect("dispose log lock poisoned"), ["plugin_second", "plugin_first"]);
 }
+
+// ── service-dep gating ─────────────────────────────────────────────────────
+
+/// TypedTool stub with configurable service deps and Deferred visibility
+/// (the shape plugin/MCP proxies use).
+struct DepGatedTool {
+    name: &'static str,
+    deps: Vec<ToolServiceKey>,
+}
+
+#[async_trait::async_trait]
+impl TypedTool for DepGatedTool {
+    type Input = serde_json::Value;
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn description(&self) -> &str {
+        "dep gated"
+    }
+    fn visibility(&self) -> ToolVisibility {
+        ToolVisibility::Deferred
+    }
+    fn service_deps(&self) -> Vec<ToolServiceKey> {
+        self.deps.clone()
+    }
+    async fn execute(
+        &self,
+        _: &ToolContext,
+        _: serde_json::Value,
+    ) -> Result<ToolOutput, crate::error::AgentError> {
+        noop_output()
+    }
+}
+
+#[test]
+fn service_deps_gate_projections_but_not_dispatch() {
+    let router = ToolRouter::new();
+    router.register(Box::new(DepGatedTool {
+        name: "plugin__p__cap",
+        deps: vec![ToolServiceKey::PluginEnabled("p".to_owned())],
+    }));
+    router.register(Box::new(ReadOnlyDirectTool));
+
+    // Unsatisfied: hidden from every projection, still dispatchable.
+    assert!(router.get("plugin__p__cap").is_some());
+    assert!(router.deferred_tool_specs().is_empty());
+    let mut injected = HashSet::new();
+    injected.insert("plugin__p__cap".to_owned());
+    let specs = router.visible_tool_specs(slab_exec_policy::ToolExposure::all(), &injected);
+    assert_eq!(names(&specs), ["read_direct"]);
+
+    // Satisfied: re-enters the projections (PENDING → active).
+    router.set_dep_satisfied(ToolServiceKey::PluginEnabled("p".to_owned()), true);
+    assert_eq!(names(&router.deferred_tool_specs()), ["plugin__p__cap"]);
+    let specs = router.visible_tool_specs(slab_exec_policy::ToolExposure::all(), &injected);
+    assert_eq!(names(&specs), ["plugin__p__cap", "read_direct"]);
+
+    // Unsatisfied again: hidden again, without re-registration.
+    router.set_dep_satisfied(ToolServiceKey::PluginEnabled("p".to_owned()), false);
+    assert!(router.deferred_tool_specs().is_empty());
+}
+
+#[test]
+fn all_declared_deps_must_be_satisfied() {
+    let router = ToolRouter::new();
+    router.register(Box::new(DepGatedTool {
+        name: "needs_both",
+        deps: vec![
+            ToolServiceKey::PluginEnabled("a".to_owned()),
+            ToolServiceKey::McpServer("b".to_owned()),
+        ],
+    }));
+    router.set_dep_satisfied(ToolServiceKey::PluginEnabled("a".to_owned()), true);
+    assert!(router.deferred_tool_specs().is_empty(), "one of two deps satisfied → still PENDING");
+    router.set_dep_satisfied(ToolServiceKey::McpServer("b".to_owned()), true);
+    assert_eq!(names(&router.deferred_tool_specs()), ["needs_both"]);
+}
+
+#[test]
+fn tools_with_no_service_deps_ignore_the_satisfied_set() {
+    let router = router_with_all_visibilities();
+    // Satisfied-set entries for keys nobody declares must not affect tools.
+    router.set_dep_satisfied(ToolServiceKey::McpServer("ghost".to_owned()), true);
+    let specs = router.visible_tool_specs(slab_exec_policy::ToolExposure::all(), &HashSet::new());
+    assert_eq!(names(&specs), ["read_direct", "shell_direct"]);
+}

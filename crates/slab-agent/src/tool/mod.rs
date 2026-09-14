@@ -2,6 +2,7 @@
 
 mod capability;
 mod context;
+mod dep;
 mod handler;
 mod router;
 
@@ -10,6 +11,7 @@ pub use context::{
     AgentThreadContext, PlanRef, ToolApprovalRequest, ToolContext, ToolContextBuilder, ToolOutput,
     ToolOutputObserver, ToolOutputStream, WorkspaceRef, WorkspaceScopeRef,
 };
+pub use dep::ToolServiceKey;
 pub use handler::{ToolCallRender, ToolHandler, default_tool_turn_item};
 pub use router::{ToolDiscoveryState, ToolRegistration, ToolRouter};
 
