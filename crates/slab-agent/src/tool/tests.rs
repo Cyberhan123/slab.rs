@@ -366,3 +366,135 @@ fn default_dispose_is_a_noop() {
     router.register(Box::new(StubTool));
     router.unregister("stub");
 }
+
+// ── registration handles and bulk removal ──────────────────────────────────
+
+#[test]
+fn registration_handle_dispose_unregisters() {
+    let router = ToolRouter::new();
+    let disposed = Arc::new(AtomicBool::new(false));
+    let registration = router.register(Box::new(DisposeTrackingTool {
+        name: "tracked",
+        disposed: Arc::clone(&disposed),
+    }));
+    assert_eq!(registration.name(), "tracked");
+    assert!(router.get("tracked").is_some());
+
+    registration.dispose();
+    assert!(disposed.load(Ordering::SeqCst), "handle dispose must dispose the handler");
+    assert!(router.get("tracked").is_none());
+    assert!(router.capability_of("tracked").is_none());
+}
+
+#[test]
+fn dropping_a_registration_handle_keeps_the_tool_registered() {
+    let router = ToolRouter::new();
+    let disposed = Arc::new(AtomicBool::new(false));
+    {
+        let _registration = router.register(Box::new(DisposeTrackingTool {
+            name: "tracked",
+            disposed: Arc::clone(&disposed),
+        }));
+    } // handle dropped — no Drop-based auto-unregister by design.
+    assert!(router.get("tracked").is_some(), "dropped handle must NOT unregister");
+    assert!(!disposed.load(Ordering::SeqCst));
+}
+
+/// TypedTool stub that appends its name to a shared dispose log and carries a
+/// configurable namespace (so bulk predicates can select it).
+struct OrderedDisposeTool {
+    name: &'static str,
+    namespace: &'static str,
+    log: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl TypedTool for OrderedDisposeTool {
+    type Input = serde_json::Value;
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn description(&self) -> &str {
+        "ordered dispose"
+    }
+    fn namespace(&self) -> ToolNamespace {
+        ToolNamespace::new(self.namespace)
+    }
+    async fn execute(
+        &self,
+        _: &ToolContext,
+        _: serde_json::Value,
+    ) -> Result<ToolOutput, crate::error::AgentError> {
+        noop_output()
+    }
+
+    fn dispose(&self) {
+        self.log.lock().expect("dispose log lock poisoned").push(self.name.to_owned());
+    }
+}
+
+#[test]
+fn unregister_where_disposes_in_reverse_registration_order() {
+    let router = ToolRouter::new();
+    let log: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let tool = |name: &'static str, namespace: &'static str| {
+        Box::new(OrderedDisposeTool { name, namespace, log: Arc::clone(&log) })
+            as Box<dyn ToolHandler>
+    };
+    // Registration order: builtin_a, plugin_x, plugin_y, builtin_b.
+    router.register(tool("builtin_a", "builtin"));
+    router.register(tool("plugin_x", "plugin"));
+    router.register(tool("plugin_y", "plugin"));
+    router.register(tool("builtin_b", "builtin"));
+
+    let removed = router.unregister_where(|_name, cap| cap.namespace.as_str() == "plugin");
+
+    // Removed names come back in registration order…
+    assert_eq!(removed, ["plugin_x", "plugin_y"]);
+    // …while disposal ran in REVERSE registration order.
+    assert_eq!(*log.lock().expect("dispose log lock poisoned"), ["plugin_y", "plugin_x"]);
+    // Non-matching registrations are untouched.
+    assert!(router.get("builtin_a").is_some());
+    assert!(router.get("builtin_b").is_some());
+    assert!(router.get("plugin_x").is_none());
+    assert!(router.get("plugin_y").is_none());
+    assert!(router.capability_of("plugin_x").is_none());
+}
+
+#[test]
+fn re_registration_keeps_its_position_for_bulk_dispose() {
+    let router = ToolRouter::new();
+    let log: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    router.register(Box::new(OrderedDisposeTool {
+        name: "plugin_first",
+        namespace: "plugin",
+        log: Arc::clone(&log),
+    }));
+    router.register(Box::new(OrderedDisposeTool {
+        name: "plugin_second",
+        namespace: "plugin",
+        log: Arc::clone(&log),
+    }));
+    // Replace `plugin_first` (registered first) with a fresh handler; the
+    // replacement must inherit the original earliest position. The replace
+    // itself disposes the v1 handler (logged), so clear the log to isolate
+    // the bulk-dispose ordering under test.
+    router.register(Box::new(OrderedDisposeTool {
+        name: "plugin_first",
+        namespace: "plugin",
+        log: Arc::clone(&log),
+    }));
+    assert_eq!(
+        log.lock().expect("dispose log lock poisoned").as_slice(),
+        ["plugin_first"],
+        "the replace disposed the v1 handler"
+    );
+    log.lock().expect("dispose log lock poisoned").clear();
+
+    let removed = router.unregister_where(|_name, cap| cap.namespace.as_str() == "plugin");
+    assert_eq!(removed, ["plugin_first", "plugin_second"]);
+    // The replacement inherited the original (earliest) position, so it is
+    // disposed LAST even though it was registered most recently. (Had the
+    // replacement moved to the end, the log would be reversed.)
+    assert_eq!(*log.lock().expect("dispose log lock poisoned"), ["plugin_second", "plugin_first"]);
+}

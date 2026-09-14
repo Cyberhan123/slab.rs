@@ -15,13 +15,18 @@ use super::handler::ToolHandler;
 /// Acts as both the dispatch table (name → [`ToolHandler`]) and the source of
 /// the model-facing spec projection. It caches each tool's static
 /// [`ToolCapability`] (category / visibility / namespace / risk) at
-/// registration so the per-turn projection never re-queries handlers. A future
-/// refactor may physically split dispatch (`ToolRegistry`) from projection
-/// (`ToolSpecProvider`); until then both live here behind a stable facade.
+/// registration so the per-turn projection never re-queries handlers, and
+/// tracks registration order so bulk removals ([`ToolRouter::unregister_where`])
+/// can tear handlers down in reverse. A future refactor may physically split
+/// dispatch (`ToolRegistry`) from projection (`ToolSpecProvider`); until then
+/// both live here behind a stable facade.
 #[derive(Clone)]
 pub struct ToolRouter {
     handlers: Arc<RwLock<HashMap<String, Arc<dyn ToolHandler>>>>,
     capabilities: Arc<RwLock<HashMap<String, ToolCapability>>>,
+    /// Registration order (first-registration position survives re-registration)
+    /// so bulk disposal can run newest-first.
+    order: Arc<RwLock<Vec<String>>>,
 }
 
 impl ToolRouter {
@@ -30,6 +35,7 @@ impl ToolRouter {
         Self {
             handlers: Arc::new(RwLock::new(HashMap::new())),
             capabilities: Arc::new(RwLock::new(HashMap::new())),
+            order: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -37,7 +43,11 @@ impl ToolRouter {
     /// previously registered handler (the replaced handler is disposed — see
     /// [`ToolHandler::dispose`]). Its [`ToolCapability`] is cached once so
     /// the projection need not re-query the handler each turn.
-    pub fn register(&self, handler: Box<dyn ToolHandler>) {
+    ///
+    /// Returns a [`ToolRegistration`] handle. Dropping the handle does NOT
+    /// unregister (the common fire-and-forget registrations just ignore it);
+    /// scoped registrations call [`ToolRegistration::dispose`] explicitly.
+    pub fn register(&self, handler: Box<dyn ToolHandler>) -> ToolRegistration {
         let handler: Arc<dyn ToolHandler> = handler.into();
         let name = handler.name().to_owned();
         let capability = handler.capability();
@@ -45,12 +55,24 @@ impl ToolRouter {
             let mut handlers = self.handlers.write().expect("tool registry lock poisoned");
             handlers.insert(name.clone(), handler)
         };
-        self.capabilities.write().expect("tool registry lock poisoned").insert(name, capability);
+        self.capabilities
+            .write()
+            .expect("tool registry lock poisoned")
+            .insert(name.clone(), capability);
+        {
+            // A re-registration keeps its original position; only new names
+            // append to the order.
+            let mut order = self.order.write().expect("tool registration order lock poisoned");
+            if replaced.is_none() && !order.contains(&name) {
+                order.push(name.clone());
+            }
+        }
         // Dispose the replaced handler OUTSIDE the registry locks: a dispose
         // that re-entered the registry would deadlock on the write locks.
         if let Some(old) = replaced {
             old.dispose();
         }
+        ToolRegistration { router: self.clone(), name }
     }
 
     /// Remove a registered tool handler by name. The removed handler is
@@ -59,10 +81,64 @@ impl ToolRouter {
     pub fn unregister(&self, name: &str) -> Option<Arc<dyn ToolHandler>> {
         self.capabilities.write().expect("tool registry lock poisoned").remove(name);
         let removed = self.handlers.write().expect("tool registry lock poisoned").remove(name);
+        self.order
+            .write()
+            .expect("tool registration order lock poisoned")
+            .retain(|registered| registered != name);
         if let Some(handler) = &removed {
             handler.dispose();
         }
         removed
+    }
+
+    /// Remove every registration whose cached [`ToolCapability`] matches
+    /// `pred`, disposing each removed handler in REVERSE registration order
+    /// (registrations made later are torn down first). Returns the removed
+    /// tool names in registration order.
+    ///
+    /// `pred` runs under the capability read lock — keep it cheap and pure.
+    pub fn unregister_where(
+        &self,
+        mut pred: impl FnMut(&str, &ToolCapability) -> bool,
+    ) -> Vec<String> {
+        let matched: HashSet<String> = {
+            let caps = self.capabilities.read().expect("tool registry lock poisoned");
+            caps.iter()
+                .filter(|(name, cap)| pred(name, cap))
+                .map(|(name, _)| name.clone())
+                .collect()
+        };
+        if matched.is_empty() {
+            return Vec::new();
+        }
+        let mut removed: Vec<Arc<dyn ToolHandler>> = Vec::new();
+        let removed_names: Vec<String> = {
+            let mut handlers = self.handlers.write().expect("tool registry lock poisoned");
+            let mut caps = self.capabilities.write().expect("tool registry lock poisoned");
+            let mut order = self.order.write().expect("tool registration order lock poisoned");
+            let mut removed_names = Vec::new();
+            order.retain(|name| {
+                if !matched.contains(name) {
+                    return true;
+                }
+                caps.remove(name);
+                match handlers.remove(name) {
+                    Some(handler) => {
+                        removed_names.push(name.clone());
+                        removed.push(handler);
+                        false
+                    }
+                    None => true,
+                }
+            });
+            removed_names
+        };
+        // `order.retain` walks in registration order, so `removed` is too;
+        // tear down in reverse so later registrations go first.
+        for handler in removed.iter().rev() {
+            handler.dispose();
+        }
+        removed_names
     }
 
     /// Look up a handler by tool name.
@@ -169,6 +245,31 @@ impl ToolRouter {
                 })
             })
             .collect()
+    }
+}
+
+/// Owned handle to a [`ToolRouter`] registration, returned by
+/// [`ToolRouter::register`].
+///
+/// `dispose()` unregisters the tool and runs its [`ToolHandler::dispose`].
+/// Dropping the handle does NOT unregister — fire-and-forget registrations
+/// (the common case) simply ignore the return value, and scoped registrations
+/// (plugin proxies, workspace-bound tools) close over the handle and dispose
+/// it explicitly when their owner goes away.
+pub struct ToolRegistration {
+    router: ToolRouter,
+    name: String,
+}
+
+impl ToolRegistration {
+    /// Unregister the tool and dispose its handler.
+    pub fn dispose(self) {
+        self.router.unregister(&self.name);
+    }
+
+    /// The registered tool name.
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 

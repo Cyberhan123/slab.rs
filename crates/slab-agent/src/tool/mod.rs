@@ -11,7 +11,7 @@ pub use context::{
     ToolOutputObserver, ToolOutputStream, WorkspaceRef, WorkspaceScopeRef,
 };
 pub use handler::{ToolCallRender, ToolHandler, default_tool_turn_item};
-pub use router::{ToolDiscoveryState, ToolRouter};
+pub use router::{ToolDiscoveryState, ToolRegistration, ToolRouter};
 
 #[cfg(test)]
 mod tests;
