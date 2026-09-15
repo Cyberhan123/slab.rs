@@ -51,6 +51,26 @@ describe("conversationPool", () => {
     expect(disposeSpy).not.toHaveBeenCalled()
   })
 
+  // Render safety: the React host calls acquire from a useMemo factory (i.e.
+  // during render). start() runs reconnect(), whose first commit() fires
+  // store listeners synchronously — a render-phase setState. Acquire must
+  // stay bookkeeping-only; starting is the mount effect's job.
+  it("acquire does not start the controller (render-phase safety)", () => {
+    const controller = conversationPool.acquire("s1")
+    conversationPool.release(controller)
+    const startSpy = vi.spyOn(controller, "start")
+
+    const revived = conversationPool.acquire("s1")
+    expect(revived).toBe(controller)
+    expect(startSpy).not.toHaveBeenCalled()
+
+    const fresh = conversationPool.acquire("s2")
+    const freshStartSpy = vi.spyOn(fresh, "start")
+    expect(conversationPool.acquire("s2")).toBe(fresh)
+    expect(freshStartSpy).not.toHaveBeenCalled()
+    fresh.dispose()
+  })
+
   it("release of a superseded controller arms nothing for the live entry", () => {
     const old = conversationPool.acquire("s1")
     conversationPool.release(old)

@@ -110,6 +110,24 @@ describe("ConversationController", () => {
     expect(events).toHaveLength(1)
   })
 
+  // A dispose while the restore machine is mid-flight invalidates the run
+  // (its finally only clears the loading flag for the current generation).
+  // The final snapshot must not strand isHistoryLoading: true — every
+  // busy-gate derived from it (submit, model switch, session selection)
+  // would stay locked forever.
+  it("dispose during an in-flight restore clears isHistoryLoading", async () => {
+    const controller = makeController("s1")
+    controller.start()
+    // reconnect() sets the flag synchronously before its first await.
+    expect(controller.getState().isHistoryLoading).toBe(true)
+
+    controller.dispose()
+    expect(controller.getState().isHistoryLoading).toBe(false)
+
+    await flush()
+    expect(controller.getState().isHistoryLoading).toBe(false)
+  })
+
   // ── restore machine (ported 1:1 from the former hook tests) ──────────────
 
   it("restores a resumed thread into messages and binds the thread id", async () => {

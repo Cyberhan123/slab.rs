@@ -89,6 +89,14 @@ export function useHarnessConversation(
   }, [controller, model])
 
   useEffect(() => {
+    // Re-acquire FIRST: a StrictMode dev cycle (mount → cleanup → mount) runs
+    // the cleanup's `release` between this effect's invocations, arming the
+    // pool's idle-disposal timer for a controller that is about to be live
+    // again. Nothing else cancels that timer — five minutes later the pool
+    // would dispose the controller UNDER the mounted view (socket closed,
+    // notification feed dead mid-session). Acquire is idempotent and (since
+    // the start() removal) render-safe, so claiming liveness here is exact.
+    conversationPool.acquire(controller.sessionId)
     controller.start()
     return () => {
       // Release, not dispose: the pool owns the teardown after the idle

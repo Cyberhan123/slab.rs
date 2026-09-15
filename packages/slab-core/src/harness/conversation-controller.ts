@@ -1313,6 +1313,16 @@ export class ConversationController {
   dispose(): void {
     this.disposed = true
     this.generation += 1
+    // A dispose mid-restore invalidates the in-flight `reconnect` (its
+    // `finally` only clears the flag for the CURRENT generation), which used
+    // to strand `isHistoryLoading: true` on the final snapshot — every
+    // busy-gate derived from it (submit, model switch, session selection)
+    // stayed locked forever. Clear the flag while listeners still exist so
+    // subscribers observe the settled state, then tear down.
+    if (this.isHistoryLoading) {
+      this.isHistoryLoading = false
+      this.commit()
+    }
     if (this.liveTextFlushTimer !== null) {
       clearTimeout(this.liveTextFlushTimer)
       this.liveTextFlushTimer = null

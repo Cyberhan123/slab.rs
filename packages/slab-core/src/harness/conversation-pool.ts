@@ -30,9 +30,15 @@ class ConversationControllerPool {
 
   /**
    * Get (or create) the controller for `sessionId`. A pooled controller is
-   * revived in place: its pending idle disposal is cancelled and `start()`
-   * (idempotent) re-arms its subscriptions after a dispose-free idle window
-   * has passed without disposal.
+   * revived in place: its pending idle disposal is cancelled.
+   *
+   * Deliberately side-effect-free beyond pool bookkeeping: the React host
+   * calls this from a `useMemo` factory (during render), where touching the
+   * controller — `start()` runs `reconnect()`, whose first `commit()` fires
+   * store listeners synchronously — mutated the external store DURING RENDER
+   * ("Cannot update a component while rendering a different component", and
+   * a re-render cascade risk under StrictMode). Starting the controller is
+   * the mount effect's job (see `useHarnessConversation`).
    */
   acquire(sessionId: string | undefined): ConversationController {
     const key = sessionId ?? ""
@@ -42,7 +48,6 @@ class ConversationControllerPool {
         clearTimeout(existing.idleTimer)
         existing.idleTimer = null
       }
-      existing.controller.start()
       return existing.controller
     }
     const controller = new ConversationController({ sessionId })
