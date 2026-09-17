@@ -24,7 +24,12 @@ Rust binary (axum HTTP server).
 ```sh
 cargo test -p slab-server
 cargo check -p slab-server
+bun run test:server
 ```
+
+`bun run test:server` (from the repo root) builds the binary and runs the
+Vitest suite in `tests/`; see `tests/README.md` for the harness behavior and
+smoke coverage-map conventions.
 
 ## Boundaries
 

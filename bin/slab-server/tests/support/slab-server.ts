@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +18,7 @@ const cleanupRetryDelayMs = 100;
 const cleanupRetryLimit = 20;
 const serverBinaryName = globalThis.process.platform === "win32" ? "slab-server.exe" : "slab-server";
 const serverBinaryPath = resolveServerBinaryPath();
+const canonicalServerBinaryPath = resolve(repoRoot, "target", "debug", serverBinaryName);
 
 function resolveServerBinaryPath(): string {
   const override = process.env.SLAB_SERVER_TEST_BINARY?.trim();
@@ -238,31 +239,14 @@ export async function startSlabServerHarness(
   writeFileSync(join(workspaceRoot, "config.json"), "{\n  \"smoke\": true\n}\n", "utf8");
   writeTestSettings(settingsPath, bindAddress, options.adminToken);
 
-  const prebuiltBinary = canUsePrebuiltBinary();
-  const command = prebuiltBinary ? serverBinaryPath : "cargo";
-  const args = prebuiltBinary
-    ? [
-        "--settings-path",
-        settingsPath,
-        "--database-url",
-        databaseUrl,
-        "--model-config-dir",
-        modelConfigDir
-      ]
-    : [
-        "--config",
-        "build.rustc-wrapper=\"\"",
-        "run",
-        "--bin",
-        "slab-server",
-        "--",
-        "--settings-path",
-        settingsPath,
-        "--database-url",
-        databaseUrl,
-        "--model-config-dir",
-        modelConfigDir
-      ];
+  const serverArgs = [
+    "--settings-path",
+    settingsPath,
+    "--database-url",
+    databaseUrl,
+    "--model-config-dir",
+    modelConfigDir
+  ];
   const childEnv: NodeJS.ProcessEnv = {
     ...cargoEnv(),
     SLAB_BIND: bindAddress,
@@ -279,12 +263,6 @@ export async function startSlabServerHarness(
   childEnv.CARGO_BUILD_RUSTC_WRAPPER = "";
   delete childEnv.RUSTC_WRAPPER;
 
-  const child = spawn(command, args, {
-    cwd: repoRoot,
-    env: childEnv,
-    stdio: "pipe"
-  });
-
   const rememberOutput = (chunk: Buffer) => {
     for (const line of splitLines(chunk.toString("utf8"))) {
       logLines.push(line);
@@ -293,6 +271,50 @@ export async function startSlabServerHarness(
       }
     }
   };
+
+  const prebuiltUsable = canUsePrebuiltBinary();
+  if (!prebuiltUsable) {
+    // No usable prebuilt binary: build it, then spawn the binary directly
+    // below. The invocation mirrors `bun ./scripts/cargo/run.ts build -p
+    // slab-server` exactly (same cwd, env, and args) so the target cache
+    // stays shared — after `bun run test:server`'s own build step this is a
+    // no-op. The build MUST keep cwd inside the repo so .cargo/config.toml
+    // (msvc rustflags) still applies — cargo config discovery follows the
+    // invocation cwd, not --manifest-path — and a `cargo run` here would
+    // also hand the server the repo as its cwd, which the spawn below avoids.
+    const build = spawnSync("cargo", ["build", "-p", "slab-server"], {
+      cwd: repoRoot,
+      env: cargoEnv(),
+      stdio: "pipe"
+    });
+    for (const output of [build.stdout, build.stderr]) {
+      if (output) {
+        rememberOutput(output);
+      }
+    }
+    if (build.error || build.status !== 0) {
+      const details = build.error ? String(build.error) : `exit code ${build.status ?? "unknown"}`;
+      const message = `Building slab-server failed (${details}). Recent cargo output:\n${logLines.join("\n")}`;
+      await removeTreeWithRetry(rootDir).catch((error: unknown) => {
+        console.warn(`Failed to remove slab-server test temp directory ${rootDir}: ${error}`);
+      });
+      throw new Error(message);
+    }
+  }
+
+  // cargo always emits to the canonical target path; the
+  // SLAB_SERVER_TEST_BINARY override is only honored when it actually runs.
+  const serverProcessPath = prebuiltUsable ? serverBinaryPath : canonicalServerBinaryPath;
+  const child = spawn(serverProcessPath, serverArgs, {
+    // Spawn OUTSIDE any workspace checkout: the server's CWD-ancestor
+    // workspace fallback (workspace_root_from_config) must stay inert so
+    // closed-workspace semantics hold. This is the out-of-process mirror
+    // of the in-process harness's set_cwd_workspace_fallback_enabled(false)
+    // (bin/slab-server/src/api/test_support.rs).
+    cwd: rootDir,
+    env: childEnv,
+    stdio: "pipe"
+  });
 
   child.stdout.on("data", rememberOutput);
   child.stderr.on("data", rememberOutput);

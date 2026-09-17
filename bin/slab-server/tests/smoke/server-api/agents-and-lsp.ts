@@ -75,6 +75,21 @@ export function registerAgentsAndLspSmoke(getServer: () => SlabServerTestHarness
       const oldAgentRoute = await server.request("/v1/agents/missing-agent/events");
       expect(oldAgentRoute.status).toBe(404);
 
+      // Rollout debug viewer (read-only): the session list serves on a fresh
+      // server; thread-scoped reads 404 for an unknown thread id.
+      const rollouts = await expectJson<Schema["RolloutSessionEntry"][]>(
+        server,
+        "/v1/agents/rollouts"
+      );
+      expect(rollouts.response.ok).toBe(true);
+      expect(Array.isArray(rollouts.body)).toBe(true);
+
+      await Promise.all([
+        expectError(server, "/v1/agents/rollouts/missing-thread/lines", 404),
+        expectError(server, "/v1/agents/rollouts/missing-thread/timeline", 404),
+        expectError(server, "/v1/agents/rollouts/missing-thread/trace", 404)
+      ]);
+
       const workspaceState = await expectJson<Schema["WorkspaceStateResponse"]>(
         server,
         "/v1/workspace"

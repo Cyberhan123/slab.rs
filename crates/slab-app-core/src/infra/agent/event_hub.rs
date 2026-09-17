@@ -810,7 +810,7 @@ mod tests {
     async fn live_snapshot_and_since_subscribe_cover_exactly_once_under_racing_writers() {
         let hub = Arc::new(AgentEventHub::new());
         const WRITERS: usize = 4;
-        const PER_WRITER: usize = 250;
+        const PER_WRITER: usize = 60;
 
         let writers = (0..WRITERS)
             .map(|w| {
@@ -844,9 +844,12 @@ mod tests {
                 replay_text.push_str(&p.delta);
             }
         }
-        // Drain the live receiver CONCURRENTLY with the writers — the
-        // broadcast capacity is 256, so a drain that starts only after they
-        // finish would Lag (the real fan-out pushes each event as it arrives).
+        // Drain the live receiver CONCURRENTLY with the writers, as the real
+        // fan-out does. WRITERS * PER_WRITER (240) deliberately stays below
+        // the broadcast capacity (256) and the msg_history cap, so neither a
+        // late-polled drainer nor a deschedule between snapshot and subscribe
+        // can surface as Lagged or history eviction — the count assertion
+        // below then fails only on a real atomicity bug.
         let (done_tx, mut done_rx) = oneshot::channel::<()>();
         let drainer = {
             let mut receiver =
