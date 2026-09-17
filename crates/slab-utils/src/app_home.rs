@@ -12,6 +12,28 @@ fn app_home_dir_from_roots(config_root: Option<PathBuf>, home_root: Option<PathB
     config_root.or(home_root).unwrap_or_else(|| PathBuf::from(".")).join(APP_ID)
 }
 
+/// User-visible root for global (workspace-less) session artifacts:
+/// `<Documents>/slab`. Sessions created without a project workspace get a
+/// per-session directory under this root (recorded in
+/// `chat_sessions.state_path`), so their file-tool output lands somewhere the
+/// user can find instead of the process cwd. Falls back to the home directory
+/// when the OS reports no Documents folder.
+///
+/// `SLAB_GLOBAL_SESSIONS_DIR` overrides the root (the test harnesses point it
+/// at a tempdir so spawned servers never touch the real Documents tree).
+pub fn global_sessions_root() -> PathBuf {
+    if let Some(root) =
+        std::env::var_os("SLAB_GLOBAL_SESSIONS_DIR").filter(|value| !value.is_empty())
+    {
+        return PathBuf::from(root);
+    }
+    global_sessions_root_from_documents(dirs::document_dir())
+}
+
+fn global_sessions_root_from_documents(documents_root: Option<PathBuf>) -> PathBuf {
+    documents_root.or_else(dirs::home_dir).unwrap_or_else(|| PathBuf::from(".")).join("slab")
+}
+
 pub fn settings_path() -> PathBuf {
     app_home_dir().join("settings.json")
 }
@@ -99,6 +121,18 @@ mod tests {
                 Some(PathBuf::from("C:/Users/example"))
             ),
             config_root.join(APP_ID)
+        );
+    }
+
+    #[test]
+    fn global_sessions_root_uses_documents_then_home() {
+        assert_eq!(
+            global_sessions_root_from_documents(Some(PathBuf::from("C:/Users/example/Documents"))),
+            PathBuf::from("C:/Users/example/Documents/slab")
+        );
+        assert_eq!(
+            global_sessions_root_from_documents(None),
+            dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join("slab")
         );
     }
 

@@ -294,10 +294,23 @@ impl TestAppCore {
         Self::new_with_gpu_probe(Arc::new(slab_gpu_memory_scheduler::NoopGpuProbe)).await
     }
 
+    /// Test app whose config carries an explicit workspace root (or `None`
+    /// for the workspace-less/global shape, the default).
+    pub(crate) async fn new_with_workspace_root(workspace_root: Option<PathBuf>) -> Self {
+        Self::new_inner(Arc::new(slab_gpu_memory_scheduler::NoopGpuProbe), workspace_root).await
+    }
+
     /// Test app whose GPU scheduler probes a scripted backend instead of the
     /// disabled noop — admission/pressure tests inject a [`FixedGpuProbe`].
     pub(crate) async fn new_with_gpu_probe(
         probe: Arc<dyn slab_gpu_memory_scheduler::GpuProbe>,
+    ) -> Self {
+        Self::new_inner(probe, None).await
+    }
+
+    async fn new_inner(
+        probe: Arc<dyn slab_gpu_memory_scheduler::GpuProbe>,
+        workspace_root: Option<PathBuf>,
     ) -> Self {
         let temp_dir = tempfile::tempdir().expect("test app-core temp dir");
         let root = temp_dir.path();
@@ -354,7 +367,7 @@ impl TestAppCore {
             session_state_dir: session_state_dir.to_string_lossy().into_owned(),
             settings_path,
             settings_overlay_path: None,
-            workspace_root: None,
+            workspace_root,
             model_config_dir: model_config_dir.clone(),
             plugins_dir,
             exec_rules_dir,

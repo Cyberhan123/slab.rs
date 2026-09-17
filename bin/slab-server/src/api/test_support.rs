@@ -59,6 +59,19 @@ impl TestServer {
         slab_app_core::domain::services::WorkspaceService::set_cwd_workspace_fallback_enabled(
             false,
         );
+        // Hermetic global-session artifacts: workspace-less sessions allocate
+        // their artifacts dir under `<Documents>/slab` in production; route
+        // tests must not touch the developer's real Documents tree. Idempotent
+        // process-global pin (set BEFORE the AppState builds its services).
+        if std::env::var_os("SLAB_GLOBAL_SESSIONS_DIR").is_none() {
+            let root = std::env::temp_dir()
+                .join(format!("slab-server-test-global-sessions-{}", std::process::id()));
+            std::fs::create_dir_all(&root).expect("create test global sessions root");
+            // SAFETY: tests in this process neither spawn threads that read
+            // this var concurrently nor rely on its absence; set once before
+            // any session-allocating service is constructed.
+            unsafe { std::env::set_var("SLAB_GLOBAL_SESSIONS_DIR", root) };
+        }
         let temp_dir = tempfile::tempdir().expect("test server temp dir");
         let root = temp_dir.path();
         let settings_dir = root.join("config");

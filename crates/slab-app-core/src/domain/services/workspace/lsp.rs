@@ -243,6 +243,21 @@ pub fn workspace_root_from_config(config: &AppConfig) -> Option<PathBuf> {
         })
 }
 
+/// The workspace root WITHOUT the CWD-ancestor heuristic: only an explicitly
+/// configured root (`config.workspace_root` or a `.slab`-relative settings
+/// path) counts. This is the AGENT-tool root — a workspace-less process must
+/// not silently adopt the checkout its cwd happens to sit in; global chat
+/// sessions instead root each thread at their per-session artifacts dir
+/// (`chat_sessions.state_path` → `AgentConfig::workspace_root`). The CWD
+/// fallback in [`workspace_root_from_config`] stays reserved for LSP and
+/// workspace-UI resolution.
+pub fn workspace_root_from_config_explicit(config: &AppConfig) -> Option<PathBuf> {
+    config
+        .workspace_root
+        .clone()
+        .or_else(|| workspace_root_from_settings_path(&config.settings_path))
+}
+
 fn normalize_language_id(language_id: &str) -> String {
     language_id.trim().to_lowercase()
 }

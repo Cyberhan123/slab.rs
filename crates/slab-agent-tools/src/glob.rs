@@ -89,7 +89,7 @@ impl TypedTool for FileGlobTool {
         let search_root = crate::fs::resolve_scoped_agent_path(
             ctx,
             "search files",
-            self.workspace_root.as_deref(),
+            crate::fs::effective_workspace_root(self.workspace_root.as_deref(), ctx),
             &self.extra_roots,
             &args.path,
         )?;

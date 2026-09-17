@@ -94,6 +94,16 @@ pub(crate) async fn turn_start(
     // turn, making the persisted config the chokepoint.
     let max_turns = session.state().context.pmid.config().agent.runtime.limits.clamped().max_turns;
 
+    // Global-session fallback: with no workspace open, root the thread's file
+    // tools at the session's artifacts dir (`chat_sessions.state_path`)
+    // instead of letting the rootless registration degrade relative paths to
+    // the process cwd.
+    let session_workspace = if session.state().workspace_root().is_none() {
+        session.state().services.session.global_session_dir(session.session_id()).await
+    } else {
+        None
+    };
+
     let mut queued = false;
     match session.existing_real(&params.thread_id) {
         Some(real_id) => {
@@ -121,6 +131,14 @@ pub(crate) async fn turn_start(
                 .set_thread_max_turns(&real_id, max_turns)
                 .await
                 .map_err(|e| e.to_string())?;
+            // Re-apply the global-session root every turn: resumes re-read the
+            // persisted config, so this both carries it into the next run and
+            // self-heals threads created before the session dir was recorded.
+            session
+                .service()
+                .set_thread_workspace_root(&real_id, session_workspace.clone())
+                .await
+                .map_err(|e| e.to_string())?;
             let known_skills = scan_known_skills(session.state().workspace_root().as_deref());
             // Structured input carries image parts (VLM) through to
             // `send_input_message`; empty input is a silent no-op, mirroring the
@@ -142,6 +160,9 @@ pub(crate) async fn turn_start(
                 ..Default::default()
             }
             .into();
+            // Seed the global-session root directly into the fresh config —
+            // it persists with the thread and every later resume re-reads it.
+            config.workspace_root = session_workspace.clone();
             if let Some(def) = &agent_def {
                 config.agent_type = Some(def.agent_type.clone());
                 config.system_prompt = Some(def.system_prompt.clone());

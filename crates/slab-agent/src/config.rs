@@ -116,6 +116,18 @@ pub struct AgentConfig {
     /// `#[serde(default)]` keeps older snapshots deserializing as `None`.
     #[serde(default)]
     pub workspace_scope: Option<String>,
+    /// Per-thread workspace root for workspace-LESS processes (global chat
+    /// sessions). The host records the session's artifacts directory here
+    /// (from `chat_sessions.state_path`); `AgentControl::start_thread` swaps
+    /// it into the thread's context, so the file tools — registered without a
+    /// process-level root in global mode — resolve relative paths against the
+    /// session directory instead of the process cwd. `None` keeps the shared
+    /// thread-context template (the normal workspace-bound case). Persisted so
+    /// resumes re-read it from the config and forks/subagents inherit it via
+    /// the cloned/spawned config; `#[serde(default)]` keeps older snapshots
+    /// deserializing as `None`.
+    #[serde(default)]
+    pub workspace_root: Option<std::path::PathBuf>,
 }
 
 impl Default for AgentConfig {
@@ -146,6 +158,7 @@ impl Default for AgentConfig {
             transient: false,
             agent_type: None,
             workspace_scope: None,
+            workspace_root: None,
         }
     }
 }
@@ -195,6 +208,11 @@ mod tests {
     }
 
     #[test]
+    fn default_workspace_root_is_none() {
+        assert_eq!(AgentConfig::default().workspace_root, None);
+    }
+
+    #[test]
     fn workspace_scope_deserializes_as_none_for_older_snapshots() {
         let json = r#"{
             "model": "default",
@@ -212,5 +230,6 @@ mod tests {
         }"#;
         let config: AgentConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.workspace_scope, None);
+        assert_eq!(config.workspace_root, None);
     }
 }

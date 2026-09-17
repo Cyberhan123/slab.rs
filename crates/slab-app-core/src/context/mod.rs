@@ -119,8 +119,13 @@ impl AppState {
             runtime_host,
         ));
 
+        // Explicit-only initial root: a workspace-less process must not adopt
+        // the checkout its cwd sits in (the CWD-ancestor fallback stays
+        // LSP/workspace-UI only). Global chat sessions root their threads at
+        // per-session artifacts dirs instead — see SessionService's state_path
+        // allocation and the harness turn/start fallback.
         let workspace_root = Arc::new(RwLock::new(
-            crate::domain::services::workspace_root_from_config(config.as_ref()),
+            crate::domain::services::workspace_root_from_config_explicit(config.as_ref()),
         ));
 
         Self { context, services, workspace_root }

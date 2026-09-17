@@ -114,7 +114,7 @@ impl TypedTool for ReadFileTool {
         let path = resolve_scoped_agent_path(
             ctx,
             "read file",
-            self.workspace_root.as_deref(),
+            effective_workspace_root(self.workspace_root.as_deref(), ctx),
             &self.extra_roots,
             &args.path,
         )?;
@@ -368,7 +368,7 @@ impl TypedTool for WriteFileTool {
         let path = resolve_scoped_agent_path(
             ctx,
             "write file",
-            self.workspace_root.as_deref(),
+            effective_workspace_root(self.workspace_root.as_deref(), ctx),
             &self.extra_roots,
             &args.path,
         )?;
@@ -442,7 +442,7 @@ impl TypedTool for ListDirTool {
         let path = resolve_scoped_agent_path(
             ctx,
             "list directory",
-            self.workspace_root.as_deref(),
+            effective_workspace_root(self.workspace_root.as_deref(), ctx),
             &self.extra_roots,
             &args.path,
         )?;
@@ -458,6 +458,20 @@ impl TypedTool for ListDirTool {
             metadata: None,
         })
     }
+}
+
+/// The root a file tool resolves relative paths against: its registration
+/// root, or — when the router registered the tool without one (global chat
+/// sessions run the process workspace-less) — the calling thread's
+/// per-session workspace from the tool context (the session artifacts dir the
+/// host recorded in the thread config). A registered root always wins; the
+/// context only fills the degraded `None` case, so workspace-bound processes
+/// are unchanged.
+pub(crate) fn effective_workspace_root<'a>(
+    workspace_root: Option<&'a std::path::Path>,
+    ctx: &'a ToolContext,
+) -> Option<&'a std::path::Path> {
+    workspace_root.or_else(|| ctx.workspace.as_ref().map(|workspace| workspace.root.as_path()))
 }
 
 pub(crate) fn resolve_agent_path(
@@ -1040,6 +1054,42 @@ mod tests {
         assert!(root.join("src").join("inside.txt").exists());
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    /// Global-session fallback: a tool registered WITHOUT a workspace root
+    /// (the process runs workspace-less) resolves relative paths against the
+    /// thread's per-session workspace from the tool context — the session
+    /// artifacts dir — instead of the process cwd. (A cwd-relative write
+    /// would leave the session-dir read below failing: `resolve_path(None, …)`
+    /// passes relative paths through verbatim, so the OS cwd anchors them.)
+    #[tokio::test]
+    async fn rootless_tool_falls_back_to_context_workspace_not_cwd() {
+        let session_dir = temp_root("session_dir");
+        // Rootless registration: `WriteFileTool::new(None)` is the global-mode
+        // shape (see `register_all_tools` without a workspace root).
+        let write = WriteFileTool::new(None);
+        let ctx = ToolContext::for_thread("global-session-thread")
+            .workspace(slab_agent::WorkspaceRef {
+                root: session_dir.clone(),
+                session_id: Some("session-1".to_owned()),
+            })
+            .build();
+
+        ToolHandler::execute(
+            &write,
+            &ctx,
+            &json!({"path": "notes/answer.md", "content": "session artifact"}),
+        )
+        .await
+        .expect("rootless write with context workspace");
+
+        assert_eq!(
+            fs::read_to_string(session_dir.join("notes").join("answer.md"))
+                .expect("file under the session dir"),
+            "session artifact"
+        );
+
+        let _ = fs::remove_dir_all(session_dir);
     }
 }
 

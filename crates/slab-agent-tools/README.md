@@ -12,6 +12,7 @@ Built-in tool adapters for `slab-agent`.
 - Host layers can depend on this crate without moving storage, transport, or business logic into `slab-agent`.
 - Built-in tool outputs are bounded by the context-budget system: grep enforces three byte caps (line/match-preview/response), `read_file` caps content at 48 KB, shell output at 30 KB head/tail — every cut carries an explicit omission marker, results past the cap spill their full payload to `.slab/artifacts/<thread_id>/`, and searches prune `.git` / `node_modules` / `vendor` / `dist` / lockfiles by default.
 - Subagent delegation is asynchronous by default: `delegate_subagent` returns a background-task id immediately, the detached watcher (tracked in the shared `BackgroundTaskRegistry` as kind `subagent`) delivers the result to the parent via the host's `SubagentTaskSink`, and `subagent_status` / `subagent_message` / `subagent_stop` communicate with a running delegation. `background=false` keeps the legacy inline (blocking) shape.
+- File tools (`read_file` / `write_file` / `list_dir` / `file_glob` / `grep` / `apply_patch`) resolve relative paths against their registration root, falling back to the calling thread's per-session workspace from the `ToolContext` when they were registered without one (global chat sessions root each thread at its artifacts directory); only a context-less rootless call degrades to the process cwd.
 
 ## Tool authoring
 

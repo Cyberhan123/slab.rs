@@ -2,7 +2,7 @@ mod file_system;
 mod lsp;
 
 pub use lsp::WorkspaceLspService;
-pub(crate) use lsp::workspace_root_from_config;
+pub(crate) use lsp::workspace_root_from_config_explicit;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};

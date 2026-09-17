@@ -5823,6 +5823,56 @@ async fn replace_thread_context_points_new_threads_at_new_workspace() {
     assert_eq!(seen.lock().unwrap().clone(), Some(root), "new threads see the swapped workspace");
 }
 
+/// `AgentConfig::workspace_root` (the global-session carrier) overrides the
+/// shared thread context per thread: a spawn whose config carries a root sees
+/// it in the ToolContext even though the control-level context stays
+/// workspace-less — the per-session artifacts dir replacing the process cwd
+/// for rootless-registered file tools.
+#[tokio::test]
+async fn config_workspace_root_points_thread_at_session_dir() {
+    let seen = Arc::new(Mutex::new(None));
+    let llm = Arc::new(AlwaysEchoLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(WorkspaceProbeTool { seen: Arc::clone(&seen) }));
+    let approval = Arc::clone(&Arc::new(NoopNotify));
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
+
+    let root = PathBuf::from(if cfg!(windows) {
+        "C:\\Users\\example\\Documents\\slab\\2026-09-17\\10-30-my-chat-a1b2c3d4"
+    } else {
+        "/home/example/Documents/slab/2026-09-17/10-30-my-chat-a1b2c3d4"
+    });
+    let config = AgentConfig {
+        model: "mock".into(),
+        max_turns: 3,
+        workspace_root: Some(root.clone()),
+        ..AgentConfig::default()
+    };
+
+    // The shared context stays workspace-less; only the config carries a root.
+    let thread_id = control
+        .spawn("session-dir-probe-1".into(), config, vec![user_text_message("probe")])
+        .await
+        .expect("spawn");
+    run_to_terminal(&control, &store, &thread_id).await;
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        Some(root),
+        "config-carried root must reach the thread's ToolContext"
+    );
+}
+
 #[tokio::test]
 async fn queued_input_on_idle_thread_signals_needs_resume() {
     let llm = Arc::new(MockLlm::new());

@@ -223,7 +223,12 @@ fn build_agent_control(
     // by rollout via store_adapter.
     let memory_store = Arc::clone(&store);
     let exec_db = Arc::clone(&store);
-    let workspace_root = crate::domain::services::workspace_root_from_config(&ctx.config);
+    // Explicit-only root: the agent tool suite must not adopt the checkout
+    // the process cwd sits in (that fallback stays LSP/workspace-UI only).
+    // Workspace-less processes register the file tools rootless; global chat
+    // sessions then root each thread at their per-session artifacts dir via
+    // `AgentConfig::workspace_root`.
+    let workspace_root = crate::domain::services::workspace_root_from_config_explicit(&ctx.config);
     // Derive the sandbox policy from the configured permission baseline so the
     // two guardrail systems agree (a ReadOnly baseline yields a ReadOnly
     // sandbox). Previously this was hardcoded to `WorkspaceWrite`, which left the

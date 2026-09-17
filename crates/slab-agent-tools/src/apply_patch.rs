@@ -91,14 +91,18 @@ impl TypedTool for ApplyPatchTool {
         let patch = args.patch;
 
         // `workspace_root` may be relative (e.g. registration tests pass "."),
-        // and is absent entirely when no workspace is bound — then relative
-        // patch paths resolve against the process cwd, matching the degraded
+        // and is absent entirely when no workspace is bound — then the
+        // thread's per-session workspace from the tool context applies first
+        // (global chat sessions root at their artifacts dir), and only a
+        // context-less call degrades to the process cwd, matching the
         // semantics of the other file tools (`WriteFileTool` et al). Either
         // way, absolutize the root infallibly against the process cwd. `cwd`
         // and the sandbox `workspace_root` MUST be the same absolute path: the
         // engine strips `cwd` to form a relative path string and the local
         // filesystem adapter re-anchors it via `resolve_path(workspace_root, …)`.
-        let root_arg = self.workspace_root.clone().unwrap_or_else(|| PathBuf::from("."));
+        let root_arg = crate::fs::effective_workspace_root(self.workspace_root.as_deref(), ctx)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
         let base = std::env::current_dir().map_err(|error| {
             crate::error::io_tool_error("resolve current directory", &root_arg, &error)
         })?;

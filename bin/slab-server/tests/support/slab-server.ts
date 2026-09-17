@@ -224,6 +224,7 @@ export async function startSlabServerHarness(
   const logFile = join(rootDir, "logs", "slab-server.log");
   const modelConfigDir = join(settingsDir, "models");
   const workspaceRoot = join(rootDir, "workspace");
+  const globalSessionsDir = join(rootDir, "global-sessions");
   const settingsPath = join(settingsDir, "settings.json");
   const databasePath = join(rootDir, "slab.db");
   const databaseUrl = sqliteUrlForPath(databasePath);
@@ -232,6 +233,7 @@ export async function startSlabServerHarness(
   const logLines: string[] = [];
 
   mkdirSync(modelConfigDir, { recursive: true });
+  mkdirSync(globalSessionsDir, { recursive: true });
   mkdirSync(workspaceRoot, { recursive: true });
   writeFileSync(join(workspaceRoot, "config.json"), "{\n  \"smoke\": true\n}\n", "utf8");
   writeTestSettings(settingsPath, bindAddress, options.adminToken);
@@ -269,6 +271,9 @@ export async function startSlabServerHarness(
     SLAB_LOG_FILE: logFile,
     SLAB_LOG: process.env.SLAB_LOG ?? "warn",
     SLAB_ENABLE_SWAGGER: "true",
+    // Keep global-session artifacts (workspace-less sessions allocate a dir
+    // under <Documents>/slab in production) inside the per-run tempdir.
+    SLAB_GLOBAL_SESSIONS_DIR: globalSessionsDir,
     NO_COLOR: "1"
   };
   childEnv.CARGO_BUILD_RUSTC_WRAPPER = "";

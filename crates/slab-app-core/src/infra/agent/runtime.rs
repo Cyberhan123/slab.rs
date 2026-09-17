@@ -6,7 +6,7 @@ use slab_agent_rollout::RolloutFileStore;
 use slab_config::AgentMemoriesConfig;
 
 use crate::context::ModelState;
-use crate::domain::services::{PluginService, workspace_root_from_config};
+use crate::domain::services::{PluginService, workspace_root_from_config_explicit};
 use crate::error::AppCoreError;
 
 use super::rollout_store::RolloutBackedAgentStore;
@@ -135,7 +135,7 @@ impl AgentRuntimeReloader {
     }
 
     fn refresh_memory_tools(&self, config: &AgentMemoriesConfig, memory_root: &Path) {
-        let workspace_root = workspace_root_from_config(self.state.config());
+        let workspace_root = workspace_root_from_config_explicit(self.state.config());
         self.refresh_memory_tools_at(config, memory_root, workspace_root);
     }
 

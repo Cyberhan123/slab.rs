@@ -80,13 +80,16 @@ pub fn register_all_tools(
 ) {
     // Fail loud(er): a missing workspace root silently degrades the suite —
     // the file tools (apply_patch included) lose their path constraint and
-    // resolve relatives against the PROCESS cwd instead, and the git tools
-    // stay unregistered (while `tool_search` keeps advertising discovery). A
-    // warn in the log beats a model silently working against the wrong root.
+    // the git tools stay unregistered (while `tool_search` keeps advertising
+    // discovery). Threads carrying a per-session workspace root (global chat
+    // sessions, see `AgentConfig::workspace_root`) still resolve against
+    // their session dir; only context-less calls degrade to the process cwd.
+    // A warn in the log beats a model silently working against the wrong root.
     if workspace_root.is_none() {
         tracing::warn!(
             "registering agent tools WITHOUT a workspace root: file tools (apply_patch included) \
-             resolve relative paths against the process cwd, and the git tools are not registered"
+             resolve relative paths against the thread workspace (global sessions) or the process \
+             cwd, and the git tools are not registered"
         );
     }
     router.register(Box::new(

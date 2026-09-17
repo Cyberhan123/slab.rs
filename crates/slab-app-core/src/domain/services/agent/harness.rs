@@ -291,6 +291,24 @@ impl HarnessService {
             .map_err(AppCoreError::from)
     }
 
+    /// Apply (or clear) the per-thread workspace root for the next run on a
+    /// thread (flows from the harness `turn/start` global-session fallback:
+    /// the session's artifacts dir recorded in `chat_sessions.state_path`).
+    /// Re-applied every turn like the other config overrides so resumes carry
+    /// it and legacy threads self-heal on their next user message.
+    pub async fn set_thread_workspace_root(
+        &self,
+        thread_id: &str,
+        workspace_root: Option<std::path::PathBuf>,
+    ) -> Result<(), AppCoreError> {
+        self.0
+            .runtime()
+            .control()
+            .set_thread_workspace_root(thread_id, workspace_root)
+            .await
+            .map_err(AppCoreError::from)
+    }
+
     /// Send an approval decision for a pending tool-call.
     ///
     /// Both `thread_id` (from the URL path) and `call_id` must match so that

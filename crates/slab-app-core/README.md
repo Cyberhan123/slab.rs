@@ -32,6 +32,44 @@ Settings document ownership, PMID catalog behavior, settings file migration, hos
 
 SQLx migrations live in `migrations/`.
 
+## Global Session Artifacts Directory (全局会话产物目录)
+
+Chat sessions created while NO workspace is open ("global" sessions) get a
+per-session artifacts directory recorded in the existing
+`chat_sessions.state_path` column (no schema change):
+
+```
+{user Documents}/slab/{YYYY}-{MM}-{DD}/{hh}-{mm}-{sanitize(name)}-{sessionId 前 8 位}
+```
+
+- Allocation happens in `SessionService::create_session` only when the
+  EXPLICIT workspace root (`workspace_root_from_config_explicit`: the
+  configured root or a `.slab`-relative settings path) is absent — the
+  CWD-ancestor fallback in `workspace_root_from_config` is reserved for LSP
+  and workspace-UI resolution and never decides agent tool rooting.
+- `sanitize` strips the characters illegal in Windows/Linux names
+  (`/\:*?"<>|` plus control characters), collapses whitespace runs to `-`,
+  caps the component at 50 chars, and falls back to `untitled`.
+- The directory is created eagerly; if creation fails the session row simply
+  keeps `state_path = NULL` (session creation never hard-fails on an
+  unwritable Documents folder) and the thread keeps the historical
+  cwd-relative degradation.
+- Renaming a session never migrates the directory; the allocation runs only
+  as a backfill when `state_path` is still empty (legacy rows, or sessions
+  auto-created by direct chat-completions use).
+- Deleting a session does not remove the directory (consistent with rollouts
+  and traces, which deletion also leaves in place).
+- The harness (`bin/slab-server` `turn/start`) roots a workspace-less
+  session's threads at this directory: the path is seeded into
+  `slab_agent::AgentConfig::workspace_root` on the first turn and re-applied
+  per turn, so the file tools (`crates/slab-agent-tools`) — registered
+  without a process-level root in global mode — resolve relative paths
+  against the session directory instead of the process cwd. Git tools stay
+  unregistered and the sandbox/shell guardrails are unchanged.
+- `SLAB_GLOBAL_SESSIONS_DIR` overrides the Documents-derived root; the server
+  test harnesses point it at a tempdir so spawned test servers never touch
+  the developer's real Documents tree.
+
 ## FFmpeg Runtime Notes
 
 `slab-app-core` now runs FFmpeg conversion through `ffmpeg-next` static/build mode only.

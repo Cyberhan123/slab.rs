@@ -24,7 +24,7 @@ use crate::domain::models::{
     ChatCompletionCommand, ChatCompletionOutput, ChatStreamOptions, CloudChatParams,
     CommonChatParams, LocalChatParams,
 };
-use crate::domain::services::{ChatService, workspace_root_from_config};
+use crate::domain::services::{ChatService, workspace_root_from_config_explicit};
 use crate::infra::db::AnyStore;
 
 use super::memory_project::{backfill_project_key, resolve_project_key};
@@ -87,7 +87,7 @@ impl AgentMemoryPipeline {
     /// workspace can move between agent starts). `None` when unbound; memory
     /// then routes to the `_global` project store.
     fn current_workspace_root(&self) -> Option<PathBuf> {
-        workspace_root_from_config(self.model_state.config())
+        workspace_root_from_config_explicit(self.model_state.config())
     }
 
     pub fn start_background(&self, fallback_model: String) {

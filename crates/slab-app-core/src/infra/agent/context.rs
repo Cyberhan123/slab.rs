@@ -22,7 +22,9 @@ use slab_agent_context::{
 use slab_agent_memories::{fs as memory_fs, recall, templates as memory_templates};
 
 use crate::context::ModelState;
-use crate::domain::services::{resolve_local_chat_prompt_profile, workspace_root_from_config};
+use crate::domain::services::{
+    resolve_local_chat_prompt_profile, workspace_root_from_config_explicit,
+};
 
 use super::memory::memory_chat_json;
 use super::memory_project::resolve_project_key;
@@ -240,7 +242,7 @@ fn map_baseline(baseline: slab_exec_policy::PermissionBaseline) -> PermissionBas
 #[async_trait]
 impl AgentContextSources for AppContextSources {
     fn workspace_root(&self) -> Option<PathBuf> {
-        workspace_root_from_config(self.model_state.config())
+        workspace_root_from_config_explicit(self.model_state.config())
     }
 
     /// Single source of truth: the LIVE tool router, not a re-derivation of

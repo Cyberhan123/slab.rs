@@ -76,9 +76,11 @@ impl From<AgentConfigInput> for AgentConfig {
             structured_output: v.structured_output.map(Into::into),
             transient: v.transient.unwrap_or(defaults.transient),
             agent_type: None,
-            // INTERNAL fields — set only by delegate_subagent, never by the
-            // public config input surface.
+            // INTERNAL fields — set only by delegate_subagent / the harness
+            // global-session fallback, never by the public config input
+            // surface.
             workspace_scope: None,
+            workspace_root: None,
         }
     }
 }

@@ -37,7 +37,7 @@ pub use system::SystemService;
 pub use task::TaskApplicationService;
 pub use ui_state::UiStateService;
 pub use video::VideoService;
-pub(crate) use workspace::workspace_root_from_config;
+pub(crate) use workspace::workspace_root_from_config_explicit;
 pub use workspace::{WorkspaceLspService, WorkspaceService};
 
 use std::sync::Arc;

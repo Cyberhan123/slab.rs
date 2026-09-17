@@ -25,7 +25,7 @@ use crate::{
     risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
     state::ThreadStateMachine,
     thread::{AgentThread, AgentThreadRuntime},
-    tool::{AgentThreadContext, ToolDiscoveryState, ToolRouter},
+    tool::{AgentThreadContext, ToolDiscoveryState, ToolRouter, WorkspaceRef},
 };
 
 // ── Internal handle stored per active thread ─────────────────────────────────
@@ -418,7 +418,7 @@ impl AgentControl {
     pub async fn spawn_child_for_parent(
         &self,
         parent_thread_id: &str,
-        config: AgentConfig,
+        mut config: AgentConfig,
         messages: Vec<ConversationMessage>,
     ) -> Result<String, AgentError> {
         let parent = self
@@ -436,6 +436,13 @@ impl AgentControl {
                 current: depth,
                 max: parent_config.max_depth,
             });
+        }
+        // Subagents of a global-session thread inherit its per-thread
+        // workspace root: without it the child's file tools would degrade
+        // back to cwd-relative while the parent resolves against the session
+        // artifacts dir.
+        if config.workspace_root.is_none() {
+            config.workspace_root = parent_config.workspace_root.clone();
         }
         self.spawn_child(parent.session_id, parent.id, depth, config, messages).await
     }
@@ -591,6 +598,35 @@ impl AgentControl {
                 AgentError::Internal(format!("failed to deserialize agent config: {e}"))
             })?;
         config.max_turns = max_turns;
+        let config_json = serde_json::to_string(&config)
+            .map_err(|e| AgentError::Internal(format!("failed to serialize agent config: {e}")))?;
+        let updated = ThreadSnapshot { config_json, ..snapshot };
+        self.store.upsert_thread(&updated).await?;
+        Ok(())
+    }
+
+    /// Apply (or clear) the per-thread workspace root for the next run on a
+    /// thread (flows from the harness `turn/start` global-session fallback:
+    /// the session's artifacts dir recorded in `chat_sessions.state_path`).
+    /// Same read-modify-write as [`Self::set_thread_max_turns`]: `resume_thread`
+    /// re-reads the persisted `config_json` every turn, so re-applying each
+    /// turn both carries the root into every run and self-heals legacy
+    /// threads created before the session dir was recorded.
+    pub async fn set_thread_workspace_root(
+        &self,
+        thread_id: &str,
+        workspace_root: Option<std::path::PathBuf>,
+    ) -> Result<(), AgentError> {
+        let snapshot = self
+            .store
+            .get_thread(thread_id)
+            .await?
+            .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+        let mut config =
+            serde_json::from_str::<AgentConfig>(&snapshot.config_json).map_err(|e| {
+                AgentError::Internal(format!("failed to deserialize agent config: {e}"))
+            })?;
+        config.workspace_root = workspace_root;
         let config_json = serde_json::to_string(&config)
             .map_err(|e| AgentError::Internal(format!("failed to serialize agent config: {e}")))?;
         let updated = ThreadSnapshot { config_json, ..snapshot };
@@ -1063,6 +1099,19 @@ impl AgentControl {
         let trace_dir = self.trace_dir.clone();
         let thread_context =
             self.thread_context.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        // Per-thread workspace root (global chat sessions): a config-carried
+        // root replaces the shared template's workspace for THIS thread's
+        // lifetime, so rootless-registered file tools resolve relative paths
+        // against the session artifacts dir instead of the process cwd. The
+        // config is the carrier: resumes re-read it from the persisted
+        // snapshot, and forks/subagents inherit it via the cloned config.
+        let thread_context = match thread.config.workspace_root.clone() {
+            Some(root) => AgentThreadContext {
+                workspace: Some(WorkspaceRef { root, session_id: None }),
+                ..thread_context
+            },
+            None => thread_context,
+        };
         let cancellation = CancellationToken::new();
         let pending_input: Arc<std::sync::Mutex<VecDeque<ConversationMessage>>> =
             Arc::new(std::sync::Mutex::new(VecDeque::new()));
