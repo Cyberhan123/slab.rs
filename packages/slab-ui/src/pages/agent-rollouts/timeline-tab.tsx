@@ -8,6 +8,7 @@
 import api from "@slab/api"
 import type { UIMessage } from "ai"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@slab/components/collapsible"
+import { MessageScrollerProvider } from "@slab/components/message-scroller"
 import { ScrollArea } from "@slab/components/scroll-area"
 import { ChevronRightIcon } from "lucide-react"
 import { useMemo } from "react"
@@ -47,9 +48,14 @@ export function TimelineTab({ threadId }: { threadId: string }) {
           </p>
         ) : (
           <div className="space-y-2">
-            {messages.map((message) => (
-              <MessageItem key={message.id} message={message} />
-            ))}
+            {/* `MessageItem` wraps each row in `MessageScrollerItem`, which
+                throws outside a scroller context; the provider alone (no
+                Viewport/Root) keeps the rows inert inside this ScrollArea. */}
+            <MessageScrollerProvider>
+              {messages.map((message) => (
+                <MessageItem key={message.id} message={message} />
+              ))}
+            </MessageScrollerProvider>
           </div>
         )}
 
