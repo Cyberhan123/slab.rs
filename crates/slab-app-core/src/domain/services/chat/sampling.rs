@@ -84,20 +84,9 @@ pub(crate) fn clamp_thinking_budget(raw: Option<u32>, max_tokens: u32) -> Option
     (ceiling >= 64).then(|| raw.min(ceiling))
 }
 
-/// Built-in-only budget derivation for paths that deliberately skip the model
-/// preset lookup (the `/responses` single-shot local path, which mirrors
-/// `chat::mod` resolution without a DB round-trip — same rationale as its
-/// `DEFAULT_RESPONSE_MAX_TOKENS` handling).
-pub(crate) fn resolve_local_thinking_budget(
-    effort: Option<ChatReasoningEffort>,
-    max_tokens: u32,
-) -> Option<u32> {
-    clamp_thinking_budget(built_in_thinking_budget_for_effort(effort), max_tokens)
-}
-
 /// Resolved sampling values for one chat call.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct ResolvedSampling {
+pub(crate) struct ResolvedSampling {
     pub max_tokens: u32,
     /// The max-tokens value only when it was *deliberately* chosen — supplied
     /// by the request or authored in the model's runtime presets, never filled
@@ -120,7 +109,9 @@ pub(super) struct ResolvedSampling {
 
 /// Resolve sampling for a chat call. Precedence per field:
 /// request (`common`) > model effort-preset > built-in effort preset.
-pub(super) fn resolve_sampling(
+/// `pub(crate)`: the chat completion paths and the `/responses` streaming path
+/// both resolve here so their sampling semantics cannot drift.
+pub(crate) fn resolve_sampling(
     common: &CommonChatParams,
     effort: Option<ChatReasoningEffort>,
     model_presets: Option<&RuntimePresets>,

@@ -34,6 +34,7 @@ use crate::domain::models::{
 use crate::domain::services::agent::{AgentCore, maybe_compact_messages};
 use crate::domain::services::chat::ChatService;
 use crate::domain::services::chat::local::{LocalChatRequestConfig, build_local_runtime_request};
+use crate::domain::services::chat::sampling::{ResolvedSampling, resolve_sampling};
 use crate::domain::services::llm::cloud::{
     CloudChatRequestConfig, CloudDelta, cloud_chat_stream, resolve_cloud_model,
 };
@@ -325,7 +326,29 @@ pub(crate) fn synthesize_envelopes(
 
 /// Single-shot `/responses` generation fallback — the workspace-wide default
 /// (`slab-types`), previously a local 1024 twin of the chat path's 512.
-const DEFAULT_RESPONSE_MAX_TOKENS: u32 = slab_types::chat::DEFAULT_COMPLETION_MAX_TOKENS;
+/// Chat-common params for a `/responses` call, built from the resolved agent
+/// config. Shared by the non-streaming command and the streaming sampling
+/// resolution so both sub-paths of this API speak the same input shape.
+///
+/// No forced max-tokens default here: `resolve_sampling` owns the fallback
+/// chain (request > model effort-preset > built-in > workspace default) — a
+/// pre-filled 1024 would masquerade as an explicit request cap and clamp the
+/// thinking budget.
+fn common_params_from_config(config: &AgentConfig, stream: bool) -> CommonChatParams {
+    CommonChatParams {
+        max_tokens: config.max_tokens,
+        temperature: config.temperature,
+        top_p: config.top_p,
+        top_k: config.top_k,
+        min_p: config.min_p,
+        presence_penalty: config.presence_penalty,
+        repetition_penalty: config.repetition_penalty,
+        n: 1,
+        stream,
+        stop: Vec::new(),
+        stream_options: Default::default(),
+    }
+}
 
 fn now_rfc3339() -> String {
     Utc::now().to_rfc3339()
@@ -409,19 +432,7 @@ fn build_command(
         tools: req.function_tools(),
         agent_trace: None,
         continue_generation: false,
-        common: CommonChatParams {
-            max_tokens: config.max_tokens.or(Some(DEFAULT_RESPONSE_MAX_TOKENS)),
-            temperature: config.temperature,
-            top_p: config.top_p,
-            top_k: config.top_k,
-            min_p: config.min_p,
-            presence_penalty: config.presence_penalty,
-            repetition_penalty: config.repetition_penalty,
-            n: 1,
-            stream: false,
-            stop: Vec::new(),
-            stream_options: Default::default(),
-        },
+        common: common_params_from_config(config, false),
         local: LocalChatParams {
             gbnf: None,
             structured_output: config.structured_output.clone(),
@@ -633,15 +644,19 @@ struct StreamAccumulator {
     next_id: u64,
 }
 
-/// Build the cloud chat request config from the `/responses` request + resolved
-/// agent config (mirrors `chat/mod.rs`'s `CloudChatRequestConfig` mapping).
-/// No implicit max-tokens cap: cloud reasoning models spend it on reasoning
-/// first, and an accidental cap truncates the model mid-thought.
-fn cloud_stream_config(req: &OpenAICreateRequest, config: &AgentConfig) -> CloudChatRequestConfig {
+/// Build the cloud chat request config from the `/responses` request + the
+/// resolved sampling (mirrors `chat/mod.rs`'s `CloudChatRequestConfig` mapping).
+/// Only the *explicit* max-tokens goes on the wire: cloud reasoning models
+/// spend implicit caps on reasoning first, truncating the model mid-thought.
+fn cloud_stream_config(
+    req: &OpenAICreateRequest,
+    config: &AgentConfig,
+    sampling: &ResolvedSampling,
+) -> CloudChatRequestConfig {
     CloudChatRequestConfig {
-        max_tokens: config.max_tokens,
-        temperature: config.temperature.unwrap_or(0.7),
-        top_p: config.top_p,
+        max_tokens: sampling.explicit_max_tokens,
+        temperature: sampling.temperature,
+        top_p: sampling.top_p,
         structured_output: config.structured_output.clone(),
         reasoning_effort: config.reasoning_effort,
         verbosity: config.verbosity,
@@ -651,31 +666,26 @@ fn cloud_stream_config(req: &OpenAICreateRequest, config: &AgentConfig) -> Cloud
     }
 }
 
-/// Build the local chat request config. Defaults mirror `chat/mod.rs`
-/// (`temperature` 0.7, `max_tokens` DEFAULT_RESPONSE_MAX_TOKENS).
-fn local_stream_config(req: &OpenAICreateRequest, config: &AgentConfig) -> LocalChatRequestConfig {
-    let max_tokens = config
-        .max_tokens
-        .or(Some(DEFAULT_RESPONSE_MAX_TOKENS))
-        .unwrap_or(DEFAULT_RESPONSE_MAX_TOKENS);
+/// Build the local chat request config from the resolved sampling — the same
+/// `resolve_sampling` the chat completion path uses, so `/responses` streaming
+/// inherits model effort-presets and effort-biased sampling.
+fn local_stream_config(
+    req: &OpenAICreateRequest,
+    config: &AgentConfig,
+    sampling: &ResolvedSampling,
+) -> LocalChatRequestConfig {
     LocalChatRequestConfig {
         session_id: None,
-        max_tokens,
-        temperature: config.temperature.unwrap_or(0.7),
-        top_p: config.top_p,
-        top_k: config.top_k,
-        min_p: config.min_p,
-        presence_penalty: config.presence_penalty,
-        repetition_penalty: config.repetition_penalty,
+        max_tokens: sampling.max_tokens,
+        temperature: sampling.temperature,
+        top_p: sampling.top_p,
+        top_k: sampling.top_k,
+        min_p: sampling.min_p,
+        presence_penalty: sampling.presence_penalty,
+        repetition_penalty: sampling.repetition_penalty,
         reasoning_effort: config.reasoning_effort,
         verbosity: config.verbosity,
-        // Built-in-only budget derivation: this path deliberately skips the
-        // model preset lookup (same rationale as `DEFAULT_RESPONSE_MAX_TOKENS`
-        // above — no DB round-trip for a single-shot response).
-        thinking_budget: crate::domain::services::chat::sampling::resolve_local_thinking_budget(
-            config.reasoning_effort,
-            max_tokens,
-        ),
+        thinking_budget: sampling.thinking_budget,
         reasoning_guidance_in_context: false,
         gbnf: None,
         structured_output: config.structured_output.clone(),
@@ -698,9 +708,23 @@ async fn build_delta_events(
     config: &AgentConfig,
 ) -> Result<BoxStream<'static, DeltaEvent>, AppCoreError> {
     let model = req.model.clone().unwrap_or_default();
+    // Resolve sampling exactly like the non-streaming sub-path (which goes
+    // through `create_chat_completion_with_state`): request > model
+    // effort-preset > built-in. One store read buys both /responses
+    // sub-paths identical sampling semantics.
+    let resolved_model =
+        crate::domain::services::chat::resolve_requested_model(state, &model).await?;
+    let model_presets =
+        crate::domain::services::model::runtime_presets_for(state, &resolved_model).await;
+    let sampling = resolve_sampling(
+        &common_params_from_config(config, true),
+        config.reasoning_effort,
+        model_presets.as_ref(),
+    );
+
     if should_route_to_cloud(state, &model).await? {
         let target = resolve_cloud_model(state, &model).await?;
-        let cfg = cloud_stream_config(req, config);
+        let cfg = cloud_stream_config(req, config, &sampling);
         let trace_http = state.pmid().config().server.cloud_http_trace;
         let raw = cloud_chat_stream(&target, &input.messages, cfg, trace_http).await?;
         let mapped = raw.filter_map(|item| match item {
@@ -717,7 +741,7 @@ async fn build_delta_events(
         });
         Ok(Box::pin(mapped))
     } else {
-        let cfg = local_stream_config(req, config);
+        let cfg = local_stream_config(req, config, &sampling);
         let built = build_local_runtime_request(state, &model, &input.messages, &cfg).await?;
         let (raw, guard) = local_chat_stream(state, built.backend_id, built.request).await?;
         let mapped = raw.flat_map(|item| match item {
@@ -1059,6 +1083,78 @@ mod tests {
             TerminalKind::from_outcome(&SingleShotOutcome::Empty),
             TerminalKind::Completed
         ));
+    }
+
+    #[test]
+    fn streaming_local_config_consumes_resolve_sampling() {
+        // The streaming sub-path must be a pure projection of the SAME
+        // resolve_sampling the non-streaming sub-path (and chat completions)
+        // run — including model effort-preset injection and the clamped
+        // thinking budget.
+        let req = OpenAICreateRequest::default();
+        let config = AgentConfig {
+            model: "test-model".to_owned(),
+            reasoning_effort: Some(slab_types::ChatReasoningEffort::High),
+            ..Default::default()
+        };
+
+        let sampling = resolve_sampling(
+            &common_params_from_config(&config, true),
+            config.reasoning_effort,
+            None,
+        );
+        let cfg = local_stream_config(&req, &config, &sampling);
+
+        assert_eq!(cfg.max_tokens, sampling.max_tokens);
+        assert_eq!(cfg.temperature, sampling.temperature);
+        assert_eq!(cfg.top_p, sampling.top_p);
+        assert_eq!(cfg.thinking_budget, sampling.thinking_budget);
+        assert_eq!(cfg.reasoning_effort, config.reasoning_effort);
+
+        // A model effort-preset flows through the same resolution: its flat
+        // thinking budget wins over the built-in table.
+        let preset = crate::domain::models::RuntimePresets {
+            thinking_budget: Some(64),
+            ..Default::default()
+        };
+        let sampling = resolve_sampling(
+            &common_params_from_config(&config, true),
+            config.reasoning_effort,
+            Some(&preset),
+        );
+        let cfg = local_stream_config(&req, &config, &sampling);
+        assert_eq!(cfg.thinking_budget, Some(64));
+    }
+
+    #[test]
+    fn streaming_cloud_config_sends_only_explicit_caps() {
+        let req = OpenAICreateRequest::default();
+        let config = AgentConfig { model: "test-model".to_owned(), ..Default::default() };
+        let sampling = resolve_sampling(
+            &common_params_from_config(&config, true),
+            config.reasoning_effort,
+            None,
+        );
+
+        // No explicit cap anywhere (request + presets empty): the built-in /
+        // fallback caps stay OFF the cloud wire so provider defaults apply.
+        let cfg = cloud_stream_config(&req, &config, &sampling);
+        assert_eq!(cfg.max_tokens, sampling.explicit_max_tokens);
+        assert_eq!(cfg.max_tokens, None);
+
+        // A request-level cap is explicit and transmits.
+        let capped = AgentConfig {
+            model: "test-model".to_owned(),
+            max_tokens: Some(1200),
+            ..Default::default()
+        };
+        let sampling = resolve_sampling(
+            &common_params_from_config(&capped, true),
+            capped.reasoning_effort,
+            None,
+        );
+        let cfg = cloud_stream_config(&req, &capped, &sampling);
+        assert_eq!(cfg.max_tokens, Some(1200));
     }
 
     #[test]
