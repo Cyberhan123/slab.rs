@@ -674,6 +674,12 @@ mod tests {
     };
     use slab_proto::slab::ipc::v1 as pb;
 
+    // Zero/false/empty sentinels stay EXPLICIT in these constructions: the
+    // point of the tests is that `Some(0)` / `Some(false)` / `Some("")` /
+    // `Some(vec![])` survive the decode round-trip instead of collapsing into
+    // the proto default. Everything else falls into `..Default::default()`,
+    // so adding a proto field no longer breaks the exhaustiveness here.
+
     #[test]
     fn ggml_llama_request_preserves_zero_false_and_empty_values() {
         let decoded = decode_ggml_llama_chat_request(&pb::GgmlLlamaChatRequest {
@@ -690,9 +696,8 @@ mod tests {
             stop_sequences: Some(pb::StringList { values: Vec::new() }),
             ignore_eos: Some(false),
             logit_bias_json: Some(Vec::new()),
-            agent_trace_json: None,
-            image_parts: Vec::new(),
             thinking_budget: Some(1024),
+            ..Default::default()
         })
         .expect("decode should succeed");
 
@@ -712,9 +717,9 @@ mod tests {
     fn onnx_embedding_request_preserves_empty_binary_payload() {
         let decoded = decode_onnx_embedding_request(&pb::OnnxEmbeddingRequest {
             image: Some(pb::BinaryPayload {
-                data: Vec::new(),
                 mime_type: Some(String::new()),
                 file_name: Some(String::new()),
+                ..Default::default()
             }),
         })
         .expect("decode should succeed");
@@ -723,9 +728,9 @@ mod tests {
             decoded,
             OnnxEmbeddingRequest {
                 image: Some(BinaryPayload {
-                    data: Vec::new(),
                     mime_type: Some(String::new()),
                     file_name: Some(String::new()),
+                    ..Default::default()
                 }),
             }
         );
@@ -737,8 +742,7 @@ mod tests {
             backend: "onnx.text".to_owned(),
             status: "loaded".to_owned(),
             context_length: Some(4096),
-            training_context_length: None,
-            chat_template: None,
+            ..Default::default()
         });
 
         assert_eq!(encoded.backend, "onnx.text");
