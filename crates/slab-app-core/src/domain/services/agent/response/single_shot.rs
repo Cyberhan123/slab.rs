@@ -323,7 +323,9 @@ pub(crate) fn synthesize_envelopes(
 // terminal is `Incomplete { ToolCalls }` and the client drives the tool loop by
 // POSTing again with `previous_response_id` + `function_call_output` input.
 
-const DEFAULT_RESPONSE_MAX_TOKENS: u32 = 1024;
+/// Single-shot `/responses` generation fallback — the workspace-wide default
+/// (`slab-types`), previously a local 1024 twin of the chat path's 512.
+const DEFAULT_RESPONSE_MAX_TOKENS: u32 = slab_types::chat::DEFAULT_COMPLETION_MAX_TOKENS;
 
 fn now_rfc3339() -> String {
     Utc::now().to_rfc3339()

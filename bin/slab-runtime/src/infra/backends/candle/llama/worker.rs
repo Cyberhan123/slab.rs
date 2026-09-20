@@ -230,8 +230,13 @@ fn build_text_request(prompt: String, options: TextGenerationOptions) -> TextGen
         options.repetition_penalty.unwrap_or_else(|| SamplingConfig::default().repeat_penalty);
 
     TextGenerationRequest {
+        // Fallback only (upstream chat resolution always supplies one) —
+        // aligned with the workspace-wide default instead of a private 256.
+        max_tokens: options
+            .max_tokens
+            .and_then(|value| usize::try_from(value).ok())
+            .unwrap_or(slab_types::chat::DEFAULT_COMPLETION_MAX_TOKENS as usize),
         prompt,
-        max_tokens: options.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256),
         sampling: SamplingConfig {
             temperature: options.temperature.map(f64::from),
             top_p: options.top_p.map(f64::from),

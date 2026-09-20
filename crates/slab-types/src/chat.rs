@@ -7,6 +7,12 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Workspace-wide fallback generation length when neither the request nor a
+/// model preset supplies one. Cross-crate contract: the app-core chat paths
+/// and the runtime workers' `max_tokens` fallbacks all default to this single
+/// value so the effective default cannot drift per layer.
+pub const DEFAULT_COMPLETION_MAX_TOKENS: u32 = 1024;
+
 /// A single message in a conversation.
 ///
 /// The schema is intentionally richer than plain `role + text` so higher layers

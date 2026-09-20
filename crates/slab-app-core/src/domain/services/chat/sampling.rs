@@ -14,10 +14,10 @@ use slab_types::ChatReasoningEffort;
 
 use crate::domain::models::{CommonChatParams, RuntimePresets};
 
-/// Fallback max-tokens when nothing else supplies one. Identical to the legacy
-/// hardcoded fallback so behavior is unchanged for models without presets and
-/// requests without overrides.
-pub(super) const DEFAULT_COMPLETION_MAX_TOKENS: u32 = 512;
+/// Fallback max-tokens when nothing else supplies one — the workspace-wide
+/// contract constant in `slab-types` (also the runtime workers' fallback).
+/// Re-exported here so the `chat::sampling` path keeps a single name.
+pub(super) use slab_types::chat::DEFAULT_COMPLETION_MAX_TOKENS;
 
 /// Built-in sampling preset for an effort level, used when neither the request
 /// nor the model's runtime preset supplies a given field. "High effort" biases
@@ -183,7 +183,7 @@ mod tests {
     #[test]
     fn no_preset_no_effort_keeps_legacy_defaults() {
         let resolved = resolve_sampling(&common(None, None), None, None);
-        assert_eq!(resolved.max_tokens, 512);
+        assert_eq!(resolved.max_tokens, DEFAULT_COMPLETION_MAX_TOKENS);
         assert_eq!(resolved.explicit_max_tokens, None);
         assert!((resolved.temperature - 0.7).abs() < f32::EPSILON);
     }
