@@ -78,6 +78,21 @@ pub struct ChatModelOption {
     pub provider_name: Option<String>,
 }
 
+/// Local chat model summary for the harness model/list surface. The
+/// reasoning-effort set is derived here (chat template + runtime presets) so
+/// the support rule lives once; the harness layer projects it onto the wire
+/// enum. Efforts use the domain enum: `None` = "thinking off" is always
+/// offered; the low/medium/high tiers appear only when the model can honor
+/// them.
+#[derive(Debug, Clone)]
+pub struct LocalChatModelDetails {
+    pub id: String,
+    pub display_name: String,
+    pub description: Option<String>,
+    pub downloaded: bool,
+    pub reasoning_efforts: Vec<ChatReasoningEffort>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CommonChatParams {
     pub max_tokens: Option<u32>,

@@ -9,6 +9,11 @@ mod session;
 mod streaming;
 mod template;
 
+// Single-symbol re-export: the model catalog uses the template's
+// `enable_thinking` reference as the "supports reasoning effort tiers"
+// capability signal for the harness model/list surface.
+pub(crate) use template::template_supports_thinking;
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

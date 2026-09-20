@@ -19,6 +19,7 @@ use serde_json::Value;
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot, TurnStateRecord};
 use slab_agent::protocol::{Thread, Turn, TurnItem, UserMessageContent};
 use slab_app_core::context::AppState;
+use slab_app_core::domain::models::{ChatReasoningEffort, LocalChatModelDetails};
 use slab_app_core::domain::services::HarnessService;
 use slab_cloud_provider::CloudModelSpec;
 use slab_jsonrpc::JSONRPCMessage;
@@ -502,6 +503,53 @@ fn standard_reasoning_efforts() -> Vec<ReasoningEffortOption> {
     .collect()
 }
 
+/// Project a catalog-derived [`LocalChatModelDetails`] into the harness
+/// [`ModelInfo`] wire type. Local entries use the bare catalog id — the same
+/// shape as REST `/v1/chat/models`, and what `resolve_requested_model`
+/// accepts; cloud ids are always `{provider_id}:{remote_model_id}`, so the
+/// namespaces stay disjoint as long as local ids avoid `:`.
+fn model_info_from_local(details: LocalChatModelDetails) -> ModelInfo {
+    if details.id.contains(':') {
+        tracing::warn!(
+            model_id = %details.id,
+            "local model id contains ':' and may be confused with a cloud provider-namespaced id"
+        );
+    }
+    let supports_effort_tiers = details.reasoning_efforts.len() > 1;
+    ModelInfo {
+        id: details.id.clone(),
+        model: details.id,
+        display_name: details.display_name,
+        description: details.description.unwrap_or_else(|| "Local model".to_owned()),
+        supported_reasoning_efforts: details
+            .reasoning_efforts
+            .into_iter()
+            .map(|effort| ReasoningEffortOption {
+                reasoning_effort: harness_reasoning_effort_from_chat(effort),
+                description: format!("{effort:?}").to_lowercase(),
+            })
+            .collect(),
+        default_reasoning_effort: if supports_effort_tiers {
+            ReasoningEffort::Medium
+        } else {
+            ReasoningEffort::Off
+        },
+        is_default: false,
+    }
+}
+
+/// Inverse of [`chat_reasoning_effort_from_proto`] for the local-model effort
+/// sets: the domain `Minimal` variant has no wire tier (never advertised by
+/// the catalog) and collapses to the nearest one.
+fn harness_reasoning_effort_from_chat(effort: ChatReasoningEffort) -> ReasoningEffort {
+    match effort {
+        ChatReasoningEffort::None => ReasoningEffort::Off,
+        ChatReasoningEffort::Minimal | ChatReasoningEffort::Low => ReasoningEffort::Low,
+        ChatReasoningEffort::Medium => ReasoningEffort::Medium,
+        ChatReasoningEffort::High => ReasoningEffort::High,
+    }
+}
+
 /// Map the harness wire [`ReasoningEffort`] onto the agent-config enum the
 /// LLM adapter consumes. `xhigh` clamps to `High` — the config enum has no
 /// xhigh variant (same closed set the REST `parse_reasoning_effort` accepts).
@@ -867,6 +915,61 @@ mod tests {
         assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::High), Config::High);
         // No xhigh variant on the config side — clamped to High.
         assert_eq!(chat_reasoning_effort_from_proto(ReasoningEffort::Xhigh), Config::High);
+    }
+
+    #[test]
+    fn model_info_from_local_uses_bare_id_and_derived_efforts() {
+        let info = model_info_from_local(LocalChatModelDetails {
+            id: "Qwen3.5-9B".to_owned(),
+            display_name: "Qwen3.5 9B".to_owned(),
+            description: None,
+            downloaded: true,
+            reasoning_efforts: vec![
+                ChatReasoningEffort::None,
+                ChatReasoningEffort::Low,
+                ChatReasoningEffort::Medium,
+                ChatReasoningEffort::High,
+            ],
+        });
+
+        // Local ids stay bare (REST /v1/chat/models shape); cloud ids are the
+        // only ones namespaced as `{provider}:{model}`.
+        assert_eq!(info.id, "Qwen3.5-9B");
+        assert_eq!(info.model, "Qwen3.5-9B");
+        assert_eq!(info.display_name, "Qwen3.5 9B");
+        assert_eq!(info.description, "Local model");
+        assert!(!info.is_default);
+        assert_eq!(info.default_reasoning_effort, ReasoningEffort::Medium);
+
+        // Tier-capable models advertise off/low/medium/high — no Xhigh (the
+        // server folds it into High) and no Minimal (no wire tier).
+        let efforts: Vec<ReasoningEffort> =
+            info.supported_reasoning_efforts.into_iter().map(|o| o.reasoning_effort).collect();
+        assert_eq!(
+            efforts,
+            vec![
+                ReasoningEffort::Off,
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+            ]
+        );
+    }
+
+    #[test]
+    fn model_info_from_local_off_only_model_defaults_to_off() {
+        let info = model_info_from_local(LocalChatModelDetails {
+            id: "Qwen2.5-0.5B-Instruct".to_owned(),
+            display_name: "Qwen2.5 0.5B".to_owned(),
+            description: None,
+            downloaded: true,
+            reasoning_efforts: vec![ChatReasoningEffort::None],
+        });
+
+        assert_eq!(info.default_reasoning_effort, ReasoningEffort::Off);
+        let efforts: Vec<ReasoningEffort> =
+            info.supported_reasoning_efforts.into_iter().map(|o| o.reasoning_effort).collect();
+        assert_eq!(efforts, vec![ReasoningEffort::Off]);
     }
 
     #[test]

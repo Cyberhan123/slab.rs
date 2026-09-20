@@ -10,10 +10,10 @@ use crate::context::ModelState;
 use crate::domain::models::{
     AvailableModelsQuery, AvailableModelsView, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
     CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION, ChatModelCapabilities, ChatModelOption,
-    ChatModelSource, CreateModelCommand, DeletedModelView, ListModelsFilter, ManagedModelBackendId,
-    ModelPackSelection, ModelSpec, RuntimePresets, UnifiedModel, UnifiedModelKind,
-    UnifiedModelStatus, UpdateModelCommand, UpdateModelConfigSelectionCommand,
-    normalize_model_capabilities,
+    ChatModelSource, ChatReasoningEffort, CreateModelCommand, DeletedModelView, ListModelsFilter,
+    LocalChatModelDetails, ManagedModelBackendId, ModelPackSelection, ModelSpec, RuntimePresets,
+    UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
+    UpdateModelConfigSelectionCommand, normalize_model_capabilities,
 };
 use crate::domain::services::cloud_activation;
 use crate::error::AppCoreError;
@@ -243,6 +243,53 @@ impl ModelService {
     pub async fn list_chat_models(&self) -> Result<Vec<ChatModelOption>, AppCoreError> {
         cloud_activation::reconcile_catalogs_for_read(self, &self.model_state).await;
         list_chat_models_from_state(&self.model_state).await
+    }
+
+    /// Local chat models with per-model reasoning-effort support, for the
+    /// harness model/list surface. Effort support is derived from the chat
+    /// template (native `enable_thinking`) and the runtime presets, so the
+    /// rule lives in app-core and harness only projects it onto the wire enum.
+    ///
+    /// The template lookup prefers the pack template and falls back to the
+    /// GGUF-embedded template of a *loaded* model — a never-loaded model
+    /// without a pack template may therefore report only the "off" tier until
+    /// its first load (the derivation is deliberately load-state-dependent,
+    /// not a static per-family table).
+    pub async fn list_local_chat_models_for_harness(
+        &self,
+    ) -> Result<Vec<LocalChatModelDetails>, AppCoreError> {
+        let records = load_models_from_state(
+            &self.model_state,
+            ListModelsFilter { capability: Some(Capability::ChatGeneration) },
+        )
+        .await?;
+
+        let mut items = Vec::new();
+        for model in records {
+            if !is_local_chat_model(&model) {
+                continue;
+            }
+            // Resolve failures (e.g. non-llama backends) degrade to "no
+            // template known" — the model still lists, with the off-only
+            // effort set unless its presets carry a thinking signal.
+            let template_source =
+                runtime::resolve_local_chat_prompt_profile(&self.model_state, &model.id)
+                    .await
+                    .ok()
+                    .and_then(|profile| profile.chat_template_source);
+            items.push(LocalChatModelDetails {
+                id: model.id.clone(),
+                display_name: model.display_name.clone(),
+                description: None,
+                downloaded: local_chat_model_downloaded(&model),
+                reasoning_efforts: local_harness_reasoning_efforts(
+                    &model,
+                    template_source.as_deref(),
+                ),
+            });
+        }
+
+        Ok(items)
     }
 
     /// Bootstrap-time cloud catalog sync: curated models are activated inline; live `/models`
@@ -597,6 +644,36 @@ fn local_chat_model_downloaded(model: &UnifiedModel) -> bool {
 
 fn local_chat_model_pending(model: &UnifiedModel) -> bool {
     matches!(model.status, UnifiedModelStatus::Downloading)
+}
+
+/// Effort tiers a local model actually supports, for the harness model/list
+/// surface. A native thinking template (`enable_thinking`, e.g. Qwen3.5) or an
+/// explicit author signal in the runtime presets (a `thinking_budget` or
+/// per-effort overrides) unlocks the low/medium/high tiers; otherwise only
+/// "off" is meaningful. `Minimal`/`Xhigh` are never advertised: the harness
+/// wire enum has no minimal tier, and the server folds Xhigh into High when
+/// mapping turns, so listing either would misrepresent the model.
+pub(super) fn local_harness_reasoning_efforts(
+    model: &UnifiedModel,
+    chat_template_source: Option<&str>,
+) -> Vec<ChatReasoningEffort> {
+    let native_template =
+        crate::domain::services::chat::template_supports_thinking(chat_template_source);
+    let presets_signal = model
+        .runtime_presets
+        .as_ref()
+        .is_some_and(|presets| presets.thinking_budget.is_some() || !presets.efforts.is_empty());
+
+    if native_template || presets_signal {
+        vec![
+            ChatReasoningEffort::None,
+            ChatReasoningEffort::Low,
+            ChatReasoningEffort::Medium,
+            ChatReasoningEffort::High,
+        ]
+    } else {
+        vec![ChatReasoningEffort::None]
+    }
 }
 
 pub(super) fn build_local_chat_model_option(model: &UnifiedModel) -> Option<ChatModelOption> {

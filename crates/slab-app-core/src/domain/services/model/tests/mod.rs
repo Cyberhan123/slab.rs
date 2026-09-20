@@ -5,14 +5,15 @@ use slab_hub::HubErrorKind;
 use slab_types::{ArtifactFormat, Capability, ModelFamily, RuntimeBackendId};
 
 use crate::domain::models::{
-    ChatModelSource, ModelSpec, RuntimePresets, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
-    default_model_capabilities,
+    ChatModelSource, ChatReasoningEffort, ModelSpec, RuntimePresets, UnifiedModel,
+    UnifiedModelKind, UnifiedModelStatus, default_model_capabilities,
 };
 use crate::error::AppCoreError;
 
 use super::catalog::{
     build_cloud_chat_model_option, build_local_chat_model_option, canonicalize_model_spec,
-    canonicalize_runtime_presets, map_hub_client_error, normalize_required_text,
+    canonicalize_runtime_presets, local_harness_reasoning_efforts, map_hub_client_error,
+    normalize_required_text,
 };
 use super::pack::build_local_model_command_from_pack_preset;
 use super::runtime::validate_and_normalize_model_workers;
@@ -194,6 +195,67 @@ fn local_chat_picker_only_includes_llama_models() {
     assert_eq!(option.backend_id, Some(crate::domain::models::ManagedModelBackendId::GgmlLlama));
     assert!(option.pending);
     assert!(!option.downloaded);
+}
+
+#[test]
+fn local_harness_efforts_unlock_tiers_on_native_thinking_template() {
+    let model = make_model(
+        UnifiedModelKind::Local,
+        Some("ggml.llama"),
+        None,
+        None,
+        UnifiedModelStatus::Ready,
+        None,
+    );
+
+    // Qwen3.5-style template: the `enable_thinking` switch unlocks the tiers.
+    let native = "{%- if enable_thinking is defined and enable_thinking is false %}";
+    assert_eq!(
+        local_harness_reasoning_efforts(&model, Some(native)),
+        vec![
+            ChatReasoningEffort::None,
+            ChatReasoningEffort::Low,
+            ChatReasoningEffort::Medium,
+            ChatReasoningEffort::High
+        ]
+    );
+
+    // Plain template without the switch: only "off" is meaningful.
+    assert_eq!(
+        local_harness_reasoning_efforts(&model, Some("{{ messages[0] }}")),
+        vec![ChatReasoningEffort::None]
+    );
+    assert_eq!(local_harness_reasoning_efforts(&model, None), vec![ChatReasoningEffort::None]);
+}
+
+#[test]
+fn local_harness_efforts_unlock_tiers_on_runtime_preset_signal() {
+    // An explicit author signal (thinking_budget or per-effort overrides)
+    // unlocks the tiers even without a native template — the budget is
+    // enforced in the decode loop, independent of the template.
+    let mut model = make_model(
+        UnifiedModelKind::Local,
+        Some("ggml.llama"),
+        None,
+        None,
+        UnifiedModelStatus::Ready,
+        None,
+    );
+    model.runtime_presets =
+        Some(RuntimePresets { thinking_budget: Some(4096), ..Default::default() });
+    assert_eq!(
+        local_harness_reasoning_efforts(&model, None),
+        vec![
+            ChatReasoningEffort::None,
+            ChatReasoningEffort::Low,
+            ChatReasoningEffort::Medium,
+            ChatReasoningEffort::High
+        ]
+    );
+
+    // Empty presets carry no signal.
+    model.runtime_presets = Some(RuntimePresets::default());
+    assert_eq!(local_harness_reasoning_efforts(&model, None), vec![ChatReasoningEffort::None]);
 }
 
 #[test]

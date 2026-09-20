@@ -34,8 +34,8 @@ use super::session::HarnessSession;
 use super::transform::Established;
 use super::{
     build_user_message_from_input, chat_reasoning_effort_from_proto, messages_from_input,
-    model_info_from_spec, scan_known_skills, thread_from_snapshot, thread_from_snapshot_with_id,
-    thread_from_timeline,
+    model_info_from_local, model_info_from_spec, scan_known_skills, thread_from_snapshot,
+    thread_from_snapshot_with_id, thread_from_timeline,
 };
 use crate::api::v1::agent::schema::AgentConfigInput;
 
@@ -400,9 +400,14 @@ pub(crate) async fn model_list(
     session: HarnessSession,
     params: ModelListParams,
 ) -> Result<ModelListResult, String> {
-    // Curated catalog of *configured* providers only.
+    // Cloud entries come from the curated catalog of *configured* providers;
+    // local entries come from the model catalog with derived effort support.
+    // Local models answer to the pseudo provider id "local" for filtering,
+    // mirroring the per-cloud-provider filter below.
     let providers = &session.state().context.pmid.config().chat.providers;
-    let data: Vec<ModelInfo> = providers
+    let include_local =
+        params.model_providers.as_ref().is_none_or(|ids| ids.iter().any(|id| id == "local"));
+    let mut data: Vec<ModelInfo> = providers
         .iter()
         .filter(|provider| match params.model_providers.as_ref() {
             Some(ids) => ids.iter().any(|id| id == &provider.id),
@@ -415,6 +420,18 @@ pub(crate) async fn model_list(
                 .map(move |spec| model_info_from_spec(&provider_id, &spec))
         })
         .collect();
+
+    if include_local {
+        let local = session
+            .state()
+            .services
+            .model
+            .list_local_chat_models_for_harness()
+            .await
+            .map_err(|error| error.to_string())?;
+        data.extend(local.into_iter().map(model_info_from_local));
+    }
+
     Ok(ModelListResult { data, next_cursor: None })
 }
 

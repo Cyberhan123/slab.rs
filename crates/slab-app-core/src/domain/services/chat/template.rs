@@ -71,7 +71,10 @@ pub(super) fn trailing_stop_markers(chat_template_source: Option<&str>) -> Vec<S
 /// controls thinking behaviour (e.g. Qwen3, DeepSeek-R1) and external
 /// reasoning-guidance system messages should be skipped to avoid confusing
 /// the model.
-pub(super) fn template_supports_thinking(chat_template_source: Option<&str>) -> bool {
+///
+/// `pub(crate)`: the model catalog also uses this as the "supports reasoning
+/// effort tiers" capability signal for the harness model/list surface.
+pub(crate) fn template_supports_thinking(chat_template_source: Option<&str>) -> bool {
     chat_template_source
         .map(str::trim)
         .filter(|v| !v.is_empty())
