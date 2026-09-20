@@ -1046,9 +1046,32 @@ impl InferenceWorkerState {
             } else if let Some(last_token) = session.last_token
                 && (batch.n_tokens() as usize) < batch_capacity
             {
-                if let Err(error) = Self::ensure_window_capacity(context_length, session.n_past, 1)
-                {
-                    Self::fail_session_stream(session, error.to_string());
+                if Self::ensure_window_capacity(context_length, session.n_past, 1).is_err() {
+                    // Context window exhausted mid-generation (prompt +
+                    // generated tokens reached n_ctx). Mirror the max-token
+                    // exhaustion path: flush the buffer and finish cleanly
+                    // instead of failing the stream — an oversized cap (e.g. a
+                    // budget-derived one on a small-context model) must
+                    // degrade to truncation, not an error. A prompt that
+                    //itself cannot fit still hard-fails in the pending-tokens
+                    // branch above.
+                    let flush = match session.pending_output.finish() {
+                        Ok(flush) => flush,
+                        Err(error) => {
+                            Self::fail_session_stream(session, error.to_string());
+                            continue;
+                        }
+                    };
+                    if flush.dropped_incomplete_tail {
+                        warn!(
+                            session_id,
+                            seq_id = session.seq_id,
+                            "llama generation ended with an incomplete UTF-8 tail; dropping trailing bytes"
+                        );
+                    }
+                    if Self::finish_session_stream(session, flush.text, None).is_err() {
+                        session.stream_tx = None;
+                    }
                     continue;
                 }
 
