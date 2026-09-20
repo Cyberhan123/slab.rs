@@ -14,5 +14,6 @@ pub mod pty;
 pub mod session_snapshot;
 pub mod sleep_inhibitor;
 pub mod string;
+pub mod thinking_markers;
 pub mod time;
 pub mod uds;

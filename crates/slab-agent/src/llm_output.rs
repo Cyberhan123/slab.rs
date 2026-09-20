@@ -364,8 +364,11 @@ impl StreamVisibilityGate {
         // `>`/whitespace yet is matched by neither `find_think_open` nor the
         // exclusive partial scan, but the next chunk must be able to complete
         // it into a tag.
-        let held_tail = trailing_partial_marker_len(content, COMMON_TOOL_CALL_OPEN)
-            .max(trailing_partial_think_marker_len(content));
+        let held_tail = slab_utils::thinking_markers::trailing_partial_marker_len(
+            content,
+            COMMON_TOOL_CALL_OPEN,
+        )
+        .max(trailing_partial_think_marker_len(content));
         end = end.min(rest.len().saturating_sub(held_tail));
 
         if end == 0 {
@@ -416,15 +419,10 @@ fn stream_prefix_needs_buffering(buffer: &str) -> bool {
     language.is_empty() || language.eq_ignore_ascii_case("json")
 }
 
-fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
-    let max = raw.len().min(marker.len().saturating_sub(1));
-    (1..=max).rev().find(|len| raw.ends_with(&marker[..*len])).unwrap_or(0)
-}
-
-/// [`trailing_partial_marker_len`] for the think OPEN marker, inclusive of the
-/// full `<think` run: unlike `<tool_call>`, the tag is not complete at the
-/// marker itself (it still needs `>` or whitespace), so the whole marker is a
-/// holdable partial.
+/// [`slab_utils::thinking_markers::trailing_partial_marker_len`] for the think
+/// OPEN marker, inclusive of the full `<think` run: unlike `<tool_call>`, the
+/// tag is not complete at the marker itself (it still needs `>` or
+/// whitespace), so the whole marker is a holdable partial.
 fn trailing_partial_think_marker_len(raw: &str) -> usize {
     let marker = crate::turn::THINK_OPEN_MARKER;
     let max = raw.len().min(marker.len());
@@ -438,7 +436,8 @@ fn parse_tool_json(content: &str) -> Option<Value> {
 
 fn unparsed_stream_buffer_should_remain_hidden(content: &str) -> bool {
     let trimmed = content.trim_start();
-    if trailing_partial_marker_len(content, COMMON_TOOL_CALL_OPEN) > 0 {
+    if slab_utils::thinking_markers::trailing_partial_marker_len(content, COMMON_TOOL_CALL_OPEN) > 0
+    {
         return true;
     }
     if trimmed.contains(COMMON_TOOL_CALL_OPEN) {
@@ -546,10 +545,10 @@ fn parse_qwen_tool_call_output(content: &str) -> RenderedToolCallOutput {
 }
 
 fn strip_reasoning_prefix(content: &str) -> &str {
-    let Some(close_start) = content.find("</think>") else {
+    let Some(close_start) = content.find(crate::turn::THINK_CLOSE_TAG) else {
         return content.trim();
     };
-    let after_reasoning = content[close_start + "</think>".len()..].trim_start();
+    let after_reasoning = content[close_start + crate::turn::THINK_CLOSE_TAG.len()..].trim_start();
     if after_reasoning.contains(COMMON_TOOL_CALL_OPEN) || after_reasoning.starts_with('{') {
         after_reasoning
     } else {

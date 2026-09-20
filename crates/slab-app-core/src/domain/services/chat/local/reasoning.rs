@@ -1,4 +1,5 @@
 use serde_json::Value;
+use slab_utils::thinking_markers::parse_thinking_output;
 
 use crate::domain::models::{
     ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
@@ -6,14 +7,6 @@ use crate::domain::models::{
 };
 
 const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
-const THINK_OPEN_MARKER: &str = "<think";
-const THINK_CLOSE_TAG: &str = "</think>";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ParsedThinkingOutput {
-    content: String,
-    reasoning: String,
-}
 
 #[derive(Debug, Default)]
 pub(super) struct ContentStopState {
@@ -32,54 +25,6 @@ pub(super) struct StopEmission {
 pub(super) struct StreamDeltaRouting {
     pub(super) content: String,
     pub(super) reasoning: Option<String>,
-}
-
-fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
-    let max = raw.len().min(marker.len().saturating_sub(1));
-    (1..=max).rev().find(|len| raw.ends_with(&marker[..*len])).unwrap_or(0)
-}
-
-fn normalize_thinking_content_prefix(prefix: &str) -> &str {
-    if prefix.trim().is_empty() { "" } else { prefix }
-}
-
-fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
-    let Some(open_start) = raw.find(THINK_OPEN_MARKER) else {
-        // No <think found - treat all text as content.
-        return ParsedThinkingOutput { content: raw.to_owned(), reasoning: String::new() };
-    };
-
-    let content_prefix = normalize_thinking_content_prefix(&raw[..open_start]).to_owned();
-    let after_open_marker = &raw[open_start..];
-    let Some(open_end_rel) = after_open_marker.find('>') else {
-        return ParsedThinkingOutput {
-            content: if complete { raw.to_owned() } else { content_prefix },
-            reasoning: String::new(),
-        };
-    };
-
-    let reasoning_start = open_start + open_end_rel + 1;
-    let after_open = &raw[reasoning_start..];
-    if let Some(close_rel) = after_open.find(THINK_CLOSE_TAG) {
-        let close_start = reasoning_start + close_rel;
-        let close_end = close_start + THINK_CLOSE_TAG.len();
-        let mut content = content_prefix;
-        content.push_str(&raw[close_end..]);
-        return ParsedThinkingOutput {
-            content,
-            reasoning: raw[reasoning_start..close_start].to_owned(),
-        };
-    }
-
-    let stable_reasoning_end = if complete {
-        raw.len()
-    } else {
-        raw.len().saturating_sub(trailing_partial_marker_len(raw, THINK_CLOSE_TAG))
-    };
-    ParsedThinkingOutput {
-        content: content_prefix,
-        reasoning: raw[reasoning_start..stable_reasoning_end].to_owned(),
-    }
 }
 
 pub(super) fn reasoning_content_from_metadata(metadata: &JsonOptions) -> Option<&str> {
@@ -338,12 +283,13 @@ pub(super) fn apply_local_reasoning_controls_to_prompt(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use slab_utils::thinking_markers::{ParsedThinkingOutput, parse_thinking_output};
 
     use super::{
-        ContentStopState, ParsedThinkingOutput, StopEmission, apply_local_reasoning_controls,
+        ContentStopState, StopEmission, apply_local_reasoning_controls,
         apply_local_reasoning_controls_to_prompt, attach_reasoning_metadata,
-        local_reasoning_guidance, parse_thinking_output, reasoning_content_from_metadata,
-        route_stream_delta, suppress_reasoning_output, trim_trailing_stop_markers,
+        local_reasoning_guidance, reasoning_content_from_metadata, route_stream_delta,
+        suppress_reasoning_output, trim_trailing_stop_markers,
     };
     use crate::domain::models::{
         ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
@@ -363,12 +309,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_thinking_output_no_think_tag_passes_through() {
-        // Without <think>, all text is content - no hold-back.
+    fn parse_thinking_output_no_think_tag_holds_partial_open() {
+        // Without a completed <think>, stable text is content; a trailing
+        // partial open-marker run is held back (the shared slab-utils parser
+        // is streaming-safe; the old local copy passed it through).
         let parsed = parse_thinking_output("answer<th", false);
         assert_eq!(
             parsed,
-            ParsedThinkingOutput { content: "answer<th".to_owned(), reasoning: String::new() }
+            ParsedThinkingOutput { content: "answer".to_owned(), reasoning: String::new() }
         );
     }
 

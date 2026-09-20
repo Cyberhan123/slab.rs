@@ -70,15 +70,7 @@ pub(crate) struct LlamaDispatchOutput {
     pub metadata: TextGenerationMetadata,
 }
 
-const THINK_OPEN_MARKER: &str = "<think";
-const THINK_CLOSE_TAG: &str = "</think>";
 const SESSION_BINDING_BUSY_TTL: Duration = Duration::from_secs(10 * 60);
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct ParsedThinkingOutput {
-    content: String,
-    reasoning: String,
-}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ThinkingDelta {
@@ -94,128 +86,27 @@ struct ThinkingStreamState {
     prefilled_thinking: bool,
 }
 
-fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
-    let max = raw.len().min(marker.len().saturating_sub(1));
-    (1..=max).rev().find(|len| raw.ends_with(&marker[..*len])).unwrap_or(0)
-}
-
-fn normalize_thinking_content_prefix(prefix: &str) -> &str {
-    if prefix.trim().is_empty() { "" } else { prefix }
-}
-
-#[cfg(test)]
-fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
-    parse_thinking_output_with_prefill(raw, complete, false)
-}
-
+/// Parse generated output against the prompt it continues: when the prompt
+/// prefilled an open `<think>` block the whole output is reasoning until the
+/// close tag (see `slab_utils::thinking_markers`).
 fn parse_generated_thinking_output(
     prompt: &str,
     raw: &str,
     complete: bool,
-) -> ParsedThinkingOutput {
-    parse_thinking_output_with_prefill(raw, complete, prompt_has_prefilled_thinking(prompt))
-}
-
-fn prompt_has_prefilled_thinking(prompt: &str) -> bool {
-    let Some(open_start) = prompt.rfind(THINK_OPEN_MARKER) else {
-        return false;
-    };
-    if let Some(close_start) = prompt.rfind(THINK_CLOSE_TAG)
-        && close_start > open_start
-    {
-        return false;
-    }
-
-    let after_open_marker = &prompt[open_start..];
-    let Some(open_end_rel) = after_open_marker.find('>') else {
-        return false;
-    };
-    after_open_marker[open_end_rel + 1..].trim().is_empty()
-}
-
-fn parse_thinking_output_with_prefill(
-    raw: &str,
-    complete: bool,
-    prefilled_thinking: bool,
-) -> ParsedThinkingOutput {
-    if prefilled_thinking {
-        return parse_prefilled_thinking_output(raw, complete);
-    }
-
-    let Some(open_start) = raw.find(THINK_OPEN_MARKER) else {
-        if complete {
-            return ParsedThinkingOutput { content: raw.to_owned(), reasoning: String::new() };
-        }
-
-        let stable_end =
-            raw.len().saturating_sub(trailing_partial_marker_len(raw, THINK_OPEN_MARKER));
-        let stable_content = &raw[..stable_end];
-        return ParsedThinkingOutput {
-            content: if stable_content.trim().is_empty() {
-                String::new()
-            } else {
-                stable_content.to_owned()
-            },
-            reasoning: String::new(),
-        };
-    };
-
-    let content_prefix = normalize_thinking_content_prefix(&raw[..open_start]).to_owned();
-    let after_open_marker = &raw[open_start..];
-    let Some(open_end_rel) = after_open_marker.find('>') else {
-        return ParsedThinkingOutput {
-            content: if complete { raw.to_owned() } else { content_prefix },
-            reasoning: String::new(),
-        };
-    };
-
-    let reasoning_start = open_start + open_end_rel + 1;
-    let after_open = &raw[reasoning_start..];
-    if let Some(close_rel) = after_open.find(THINK_CLOSE_TAG) {
-        let close_start = reasoning_start + close_rel;
-        let close_end = close_start + THINK_CLOSE_TAG.len();
-        let mut content = content_prefix;
-        content.push_str(&raw[close_end..]);
-        return ParsedThinkingOutput {
-            content,
-            reasoning: raw[reasoning_start..close_start].to_owned(),
-        };
-    }
-
-    let stable_reasoning_end = if complete {
-        raw.len()
-    } else {
-        raw.len().saturating_sub(trailing_partial_marker_len(raw, THINK_CLOSE_TAG))
-    };
-    ParsedThinkingOutput {
-        content: content_prefix,
-        reasoning: raw[reasoning_start..stable_reasoning_end].to_owned(),
-    }
-}
-
-fn parse_prefilled_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
-    if let Some(close_start) = raw.find(THINK_CLOSE_TAG) {
-        let close_end = close_start + THINK_CLOSE_TAG.len();
-        return ParsedThinkingOutput {
-            content: raw[close_end..].to_owned(),
-            reasoning: raw[..close_start].to_owned(),
-        };
-    }
-
-    let stable_reasoning_end = if complete {
-        raw.len()
-    } else {
-        raw.len().saturating_sub(trailing_partial_marker_len(raw, THINK_CLOSE_TAG))
-    };
-    ParsedThinkingOutput {
-        content: String::new(),
-        reasoning: raw[..stable_reasoning_end].to_owned(),
-    }
+) -> slab_utils::thinking_markers::ParsedThinkingOutput {
+    slab_utils::thinking_markers::parse_thinking_output_with_prefill(
+        raw,
+        complete,
+        slab_utils::thinking_markers::prompt_has_prefilled_thinking(prompt),
+    )
 }
 
 impl ThinkingStreamState {
     fn for_prompt(prompt: &str) -> Self {
-        Self { prefilled_thinking: prompt_has_prefilled_thinking(prompt), ..Default::default() }
+        Self {
+            prefilled_thinking: slab_utils::thinking_markers::prompt_has_prefilled_thinking(prompt),
+            ..Default::default()
+        }
     }
 
     fn ingest(&mut self, delta: &str) -> ThinkingDelta {
@@ -231,8 +122,11 @@ impl ThinkingStreamState {
     }
 
     fn emit(&mut self, complete: bool) -> ThinkingDelta {
-        let parsed =
-            parse_thinking_output_with_prefill(&self.raw, complete, self.prefilled_thinking);
+        let parsed = slab_utils::thinking_markers::parse_thinking_output_with_prefill(
+            &self.raw,
+            complete,
+            self.prefilled_thinking,
+        );
         let content = parsed.content.get(self.emitted_content_len..).unwrap_or_default().to_owned();
         let reasoning =
             parsed.reasoning.get(self.emitted_reasoning_len..).unwrap_or_default().to_owned();
@@ -290,7 +184,9 @@ fn resolve_dispatch_thinking_budget(
     }
     request.thinking_budget.map(|budget| ThinkingBudget {
         budget,
-        starts_in_thinking: prompt_has_prefilled_thinking(full_prompt),
+        starts_in_thinking: slab_utils::thinking_markers::prompt_has_prefilled_thinking(
+            full_prompt,
+        ),
     })
 }
 
@@ -1934,11 +1830,11 @@ fn reasoning_event_payload(reasoning: String) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        ParsedThinkingOutput, SESSION_BINDING_BUSY_TTL, SessionBinding, SessionReusePlan,
-        ThinkingDelta, ThinkingStreamState, parse_generated_thinking_output, parse_thinking_output,
-        plan_session_reuse,
+        SESSION_BINDING_BUSY_TTL, SessionBinding, SessionReusePlan, ThinkingDelta,
+        ThinkingStreamState, parse_generated_thinking_output, plan_session_reuse,
     };
     use slab_llama::LlamaSessionSnapshot;
+    use slab_utils::thinking_markers::{ParsedThinkingOutput, parse_thinking_output};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 

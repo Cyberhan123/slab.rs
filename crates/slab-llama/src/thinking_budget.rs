@@ -11,11 +11,14 @@
 //! loop stays the only place that touches llama.cpp.
 
 /// The reasoning close tag whose tokens get injected when the budget trips.
-pub const THINK_CLOSE_TAG: &str = "</think>";
+/// Single-sourced in `slab_utils::thinking_markers`; re-exported so the
+/// decode loop's `slab_llama::thinking_budget::THINK_CLOSE_TAG` path is
+/// stable.
+pub use slab_utils::thinking_markers::THINK_CLOSE_TAG;
 
 /// Attribute-tolerant open marker (`<think>`, `<think\n>`, …), matching the
-/// looser `<think` prefix the app-side and engine-side parsers use.
-const THINK_OPEN_MARKER: &str = "<think";
+/// looser `<think` prefix the shared parsers use.
+use slab_utils::thinking_markers::THINK_OPEN_MARKER;
 
 /// How many trailing bytes the tracker keeps between ingests. Markers can be
 /// split across token pieces (multibyte UTF-8 neighbors make pieces arbitrary

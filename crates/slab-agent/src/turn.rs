@@ -1322,8 +1322,11 @@ async fn emit_reasoning_completed(
     notify.on_event_msg(thread_id, &msg).await;
 }
 
-pub(crate) const THINK_OPEN_MARKER: &str = "<think";
-pub(crate) const THINK_CLOSE_TAG: &str = "</think>";
+// Single-sourced markers (re-exported so `crate::turn::THINK_*` paths stay
+// stable for llm_output). Note `find_think_open` below is deliberately
+// STRICTER than the shared loose-prefix parsers: it requires the char after
+// `<think` to be `>` or whitespace so `<thinking>` is not matched.
+pub(crate) use slab_utils::thinking_markers::{THINK_CLOSE_TAG, THINK_OPEN_MARKER};
 
 /// Find the start of a `<think …>` open tag whose next char is `>` or
 /// whitespace (so `<thinking>` and friends are not matched). A marker at the

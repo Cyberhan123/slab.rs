@@ -169,8 +169,7 @@ fn render_minijinja_template(
     })
 }
 
-const THINK_OPEN_MARKER: &str = "<think";
-const THINK_CLOSE_TAG: &str = "</think>";
+use slab_utils::thinking_markers::{THINK_CLOSE_TAG, THINK_OPEN_MARKER};
 
 fn infer_eos_token(source: &str) -> &'static str {
     if source.contains("<|im_end|>") {
