@@ -620,7 +620,7 @@ fn build_genai_chat_options(
     if let Some(top_p) = config.top_p {
         options = options.with_top_p(f64::from(top_p));
     }
-    if let Some(reasoning_effort) = config.reasoning_effort {
+    if let Some(reasoning_effort) = transmit_reasoning_effort(config.reasoning_effort) {
         options = options.with_reasoning_effort(map_reasoning_effort(reasoning_effort));
     }
     if let Some(verbosity) = config.verbosity {
@@ -646,6 +646,15 @@ fn map_reasoning_effort(value: ChatReasoningEffort) -> GenaiReasoningEffort {
         ChatReasoningEffort::High => GenaiReasoningEffort::High,
         ChatReasoningEffort::Minimal => GenaiReasoningEffort::Minimal,
     }
+}
+
+/// `ChatReasoningEffort::None` means the user disabled thinking — a slab-local
+/// concept with no wire representation. Third-party endpoints reject
+/// `"reasoning_effort": "none"` (and genai's OpenAI-compat adapter would pass
+/// it through verbatim), so the disabled variant must not leave the process.
+/// Config and trace payloads keep `Some(None)` to record the user's choice.
+fn transmit_reasoning_effort(effort: Option<ChatReasoningEffort>) -> Option<ChatReasoningEffort> {
+    effort.filter(|value| !matches!(value, ChatReasoningEffort::None))
 }
 
 fn map_verbosity(value: ChatVerbosity) -> GenaiVerbosity {
@@ -826,7 +835,7 @@ fn build_cloud_http_request_body(
     if let Some(top_p) = config.top_p {
         payload["top_p"] = json!(f64::from(top_p));
     }
-    if let Some(reasoning_effort) = config.reasoning_effort {
+    if let Some(reasoning_effort) = transmit_reasoning_effort(config.reasoning_effort) {
         payload["reasoning_effort"] = json!(reasoning_effort.as_str());
     }
     if let Some(verbosity) = config.verbosity {
@@ -915,7 +924,7 @@ fn build_responses_http_request_body(
     if let Some(top_p) = config.top_p {
         payload["top_p"] = json!(f64::from(top_p));
     }
-    if let Some(reasoning_effort) = config.reasoning_effort {
+    if let Some(reasoning_effort) = transmit_reasoning_effort(config.reasoning_effort) {
         payload["reasoning"] = json!({ "effort": reasoning_effort.as_str() });
     }
     // Responses-API structured output is flattened under text.format (no chat-style
@@ -1267,15 +1276,16 @@ fn redact_secret_json(value: &Value) -> String {
 #[cfg(test)]
 mod test {
     use super::{
-        CloudChatRequestConfig, GenaiChatResponseFormat, RESPONSES_PROBE_FAILURE_BACKOFF,
-        RESPONSES_PROBE_SUCCESS_TTL, ResolvedCloudModel, adapter_kind_from_probe_result,
-        build_cloud_http_request_body, build_openai_chat_completions_url, build_openai_request_url,
-        ensure_genai_endpoint_base, extract_reasoning_content_from_raw_body, redact_header_value,
-        responses_probe_fresh, structured_output_to_genai_response_format,
+        CloudChatRequestConfig, GenaiChatResponseFormat, GenaiReasoningEffort,
+        RESPONSES_PROBE_FAILURE_BACKOFF, RESPONSES_PROBE_SUCCESS_TTL, ResolvedCloudModel,
+        adapter_kind_from_probe_result, build_cloud_http_request_body, build_genai_chat_options,
+        build_openai_chat_completions_url, build_openai_request_url, ensure_genai_endpoint_base,
+        extract_reasoning_content_from_raw_body, redact_header_value, responses_probe_fresh,
+        structured_output_to_genai_response_format,
     };
     use crate::domain::models::{
-        ConversationMessage as DomainConversationMessage, ConversationMessageContent,
-        StructuredOutput, StructuredOutputJsonSchema,
+        ChatReasoningEffort, ConversationMessage as DomainConversationMessage,
+        ConversationMessageContent, StructuredOutput, StructuredOutputJsonSchema,
     };
     use genai::adapter::AdapterKind;
     use serde_json::json;
@@ -1485,6 +1495,66 @@ mod test {
         // No explicit cap → the field must be omitted entirely so the provider
         // default applies (reasoning models spend max_tokens on reasoning first).
         assert!(payload.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn disabled_reasoning_effort_is_not_transmitted_to_cloud_payloads() {
+        // `None` effort is the slab-local "thinking off" state; third-party
+        // endpoints have no such wire value (chat/completions and responses
+        // both 400 on "none"), so every egress shape must drop it.
+        let disabled_config = CloudChatRequestConfig {
+            max_tokens: None,
+            temperature: 0.7,
+            top_p: None,
+            structured_output: None,
+            reasoning_effort: Some(ChatReasoningEffort::None),
+            verbosity: None,
+            tools: Vec::new(),
+            stream: false,
+            include_usage: false,
+        };
+
+        let chat_payload = build_cloud_http_request_body(
+            &make_target(),
+            &[make_message("user", "hello")],
+            &disabled_config,
+        );
+        assert!(
+            chat_payload.get("reasoning_effort").is_none(),
+            "chat/completions must not carry the disabled variant: {chat_payload}"
+        );
+
+        let responses_target =
+            ResolvedCloudModel { adapter_kind: AdapterKind::OpenAIResp, ..make_target() };
+        let responses_payload = build_cloud_http_request_body(
+            &responses_target,
+            &[make_message("user", "hello")],
+            &disabled_config,
+        );
+        assert!(
+            responses_payload.get("reasoning").is_none(),
+            "responses must not carry the disabled variant: {responses_payload}"
+        );
+
+        let options = build_genai_chat_options(&disabled_config, false);
+        assert!(
+            options.reasoning_effort.is_none(),
+            "genai-managed adapters must not carry the disabled variant"
+        );
+
+        // Real effort levels still transmit on both wire shapes.
+        let enabled_config = CloudChatRequestConfig {
+            reasoning_effort: Some(ChatReasoningEffort::Low),
+            ..disabled_config
+        };
+        let chat_with_effort = build_cloud_http_request_body(
+            &make_target(),
+            &[make_message("user", "hello")],
+            &enabled_config,
+        );
+        assert_eq!(chat_with_effort["reasoning_effort"], "low");
+        let options_with_effort = build_genai_chat_options(&enabled_config, false);
+        assert!(matches!(options_with_effort.reasoning_effort, Some(GenaiReasoningEffort::Low)));
     }
 
     fn make_target() -> ResolvedCloudModel {

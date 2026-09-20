@@ -9,6 +9,8 @@ import { createUiStateStorage } from './ui-state-storage';
 type SessionLabelMap = Record<string, string>;
 export type AssistantReasoningEffort = components['schemas']['ChatReasoningEffort'];
 export type AssistantToolChoice = components['schemas']['AgentToolChoiceInput'];
+/** Composer thinking tiers selectable in the UI (the wire-visible levels). */
+export type AssistantThinkingLevel = Exclude<AssistantReasoningEffort, 'none' | 'minimal'>;
 
 const PERMISSION_MODES: ReadonlyArray<PermissionMode> = [
   'request_approval',
@@ -35,9 +37,16 @@ type PersistedAssistantUiState = {
 
 type AssistantUiState = PersistedAssistantUiState & {
   hasHydrated: boolean;
+  /**
+   * Last tier the user picked in the composer's reasoning-effort group, so
+   * toggling deep-think back on restores it. Session-only: never persisted
+   * (the effective on/off choice lives in `reasoningEffort`).
+   */
+  lastThinkingLevel: AssistantThinkingLevel;
   setHasHydrated: (hasHydrated: boolean) => void;
   setCurrentSessionId: (sessionId: string) => void;
   setReasoningEffort: (reasoningEffort: AssistantReasoningEffort) => void;
+  setLastThinkingLevel: (level: AssistantThinkingLevel) => void;
   setSystemPrompt: (systemPrompt: string) => void;
   setToolConcurrency: (toolConcurrency: number) => void;
   setToolChoice: (toolChoice: AssistantToolChoice) => void;
@@ -134,6 +143,7 @@ export const useAssistantUiStore = create<AssistantUiState>()(
   persist(
     (set) => ({
       hasHydrated: false,
+      lastThinkingLevel: 'medium',
       ...initialPersistedState,
       setHasHydrated: (hasHydrated) => set({ hasHydrated }),
       setCurrentSessionId: (sessionId) =>
@@ -141,6 +151,7 @@ export const useAssistantUiStore = create<AssistantUiState>()(
           currentSessionId: sessionId.trim(),
         }),
       setReasoningEffort: (reasoningEffort) => set({ reasoningEffort }),
+      setLastThinkingLevel: (level) => set({ lastThinkingLevel: level }),
       setSystemPrompt: (systemPrompt) => set({ systemPrompt }),
       setToolConcurrency: (toolConcurrency) =>
         set({

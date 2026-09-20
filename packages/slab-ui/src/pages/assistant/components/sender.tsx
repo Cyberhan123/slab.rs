@@ -54,7 +54,10 @@ import type {
   ReasoningEffort,
 } from "@slab/api/harness"
 import type { ApprovalRequest } from "@slab/core/harness"
-import { useAssistantUiStore } from "@slab/ui/store/useAssistantUiStore"
+import {
+  useAssistantUiStore,
+  type AssistantThinkingLevel,
+} from "@slab/ui/store/useAssistantUiStore"
 import { resolveCommandDispatch } from "../lib/assistant-commands"
 import { ApprovalCard } from "./approval-banner"
 import { ApprovalReviewDialog } from "./approval-review-dialog"
@@ -67,7 +70,8 @@ export const PERMISSION_MODES: ReadonlyArray<{ value: PermissionMode; label: str
   { value: "custom", label: "pages.assistant.composer.permission.custom" },
 ]
 
-type EffortLevel = "low" | "medium" | "high"
+/** Wire tier for the composer's reasoning-effort group (store level minus off/minimal shapes). */
+type EffortLevel = AssistantThinkingLevel
 
 interface Attachment {
   id: string
@@ -194,8 +198,16 @@ function Sender({
   const isTauri = ports.platformInfo.desktop
   const [value, setValue] = useState(initialValue ?? "")
   const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [thinkingEnabled, setThinkingEnabled] = useState(false)
-  const [effortLevel, setEffortLevel] = useState<EffortLevel>("high")
+  // The thinking toggle lives in the persisted assistant UI store so the
+  // chosen level survives remounts and restarts (matching permissionMode).
+  // `lastThinkingLevel` remembers the tier across off/on round trips.
+  const reasoningEffort = useAssistantUiStore((state) => state.reasoningEffort)
+  const setReasoningEffort = useAssistantUiStore((state) => state.setReasoningEffort)
+  const lastThinkingLevel = useAssistantUiStore((state) => state.lastThinkingLevel)
+  const setLastThinkingLevel = useAssistantUiStore((state) => state.setLastThinkingLevel)
+  const thinkingEnabled = reasoningEffort !== "none"
+  const toggleThinking = (on: boolean) =>
+    setReasoningEffort(on ? lastThinkingLevel : "none")
   // Permission mode (and the "approve for me" reviewer config) live in the
   // persisted assistant UI store so they survive remounts and restarts.
   const permissionMode = useAssistantUiStore((state) => state.permissionMode)
@@ -248,7 +260,14 @@ function Sender({
   // leading "/", as one unified popover above the input.
   const isSlashCommand = value.trimStart().startsWith("/")
 
-  const effort: ReasoningEffort = thinkingEnabled ? effortLevel : "off"
+  // Store level → harness wire level: 'none' means "thinking off" (wire: "off");
+  // 'minimal' has no wire tier and collapses to the nearest one.
+  const effort: ReasoningEffort =
+    reasoningEffort === "none"
+      ? "off"
+      : reasoningEffort === "minimal"
+        ? "low"
+        : reasoningEffort
   const isGenerating = loading
   const showStop = Boolean(isGenerating && onStop)
   // Steerable turns keep submit enabled while generating; plain turns lock it.
@@ -548,11 +567,17 @@ function Sender({
                   <ToggleGroup
                     variant="outline"
                     type="single"
-                    value={effortLevel}
+                    value={
+                      reasoningEffort === "none"
+                        ? ""
+                        : reasoningEffort === "minimal"
+                          ? "low"
+                          : reasoningEffort
+                    }
                     onValueChange={(level) => {
                       if (level) {
-                        setEffortLevel(level as EffortLevel)
-                        setThinkingEnabled(true)
+                        setLastThinkingLevel(level as EffortLevel)
+                        setReasoningEffort(level as EffortLevel)
                       }
                     }}
                   >
@@ -571,14 +596,14 @@ function Sender({
                 <DropdownMenuItem
                   onSelect={(event) => {
                     event.preventDefault()
-                    setThinkingEnabled((prev) => !prev)
+                    toggleThinking(!thinkingEnabled)
                   }}
                 >
                   <Sparkle />
                   {t("pages.assistant.composer.deepThink")}
                   <Switch
                     checked={thinkingEnabled}
-                    onCheckedChange={setThinkingEnabled}
+                    onCheckedChange={toggleThinking}
                   />
                 </DropdownMenuItem>
               </DropdownMenuGroup>

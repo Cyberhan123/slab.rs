@@ -21,6 +21,7 @@ describe('useAssistantUiStore', () => {
       approvalReviewModel: '',
       approvalReviewPrompt: '',
       hasHydrated: false,
+      lastThinkingLevel: 'medium',
     });
   });
 
@@ -62,6 +63,20 @@ describe('useAssistantUiStore', () => {
     expect(useAssistantUiStore.getState().toolConcurrency).toBe(4);
     expect(useAssistantUiStore.getState().toolChoice).toEqual({ type: 'required' });
     expect(useAssistantUiStore.getState().advancedPanelOpen).toBe(true);
+  });
+
+  it('should track the last thinking level without persisting it', () => {
+    useAssistantUiStore.getState().setLastThinkingLevel('high');
+    expect(useAssistantUiStore.getState().lastThinkingLevel).toBe('high');
+
+    // The persisted contract never carries the session-only tier memory —
+    // only the effective effort survives restarts (partialize whitelist).
+    const migrated = migrateAssistantUiState({
+      reasoningEffort: 'none',
+      lastThinkingLevel: 'high',
+    });
+    expect(migrated.reasoningEffort).toBe('none');
+    expect(migrated).not.toHaveProperty('lastThinkingLevel');
   });
 
   it('should set session label', () => {

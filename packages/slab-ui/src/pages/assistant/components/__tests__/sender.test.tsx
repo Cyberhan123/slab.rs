@@ -64,6 +64,10 @@ const COMMANDS: CommandInfo[] = [
 ]
 
 describe("Sender", () => {
+  beforeEach(() => {
+    useAssistantUiStore.setState({ reasoningEffort: "medium", lastThinkingLevel: "medium" })
+  })
+
   it("submits trimmed text and clears the textarea", async () => {
     const onSubmit = vi.fn()
 
@@ -75,9 +79,11 @@ describe("Sender", () => {
     await userEvent.type(textarea, "  hello slab  ")
     await userEvent.click(screen.getByRole("button", { name: "Send" }))
 
+    // The thinking level lives in the persisted store; the default tier is
+    // medium, so submits carry it unless the user switches thinking off.
     expect(onSubmit).toHaveBeenCalledWith(
       "hello slab",
-      expect.objectContaining({ files: [], effort: "off", agentType: undefined }),
+      expect.objectContaining({ files: [], effort: "medium", agentType: undefined }),
       expect.anything(),
     )
     await expect.element(textarea).toHaveValue("")
@@ -270,6 +276,80 @@ describe("Sender plan-mode toggle", () => {
     expect(onSubmit).toHaveBeenCalledWith(
       "plan this",
       expect.objectContaining({ agentType: "plan" }),
+      expect.anything(),
+    )
+  })
+})
+
+describe("Sender thinking toggle", () => {
+  beforeEach(() => {
+    useAssistantUiStore.setState({ reasoningEffort: "medium", lastThinkingLevel: "medium" })
+  })
+
+  it("persists a tier picked in the effort group and submits it", async () => {
+    const onSubmit = vi.fn()
+
+    const screen = await renderSender(
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Commands" }))
+    await userEvent.click(screen.getByLabelText("Toggle high"))
+
+    const store = useAssistantUiStore.getState()
+    expect(store.reasoningEffort).toBe("high")
+    expect(store.lastThinkingLevel).toBe("high")
+
+    await userEvent.type(screen.getByLabelText("Message"), "think hard")
+    await userEvent.click(screen.getByRole("button", { name: "Send" }))
+    expect(onSubmit).toHaveBeenCalledWith(
+      "think hard",
+      expect.objectContaining({ effort: "high" }),
+      expect.anything(),
+    )
+  })
+
+  it("switching deep-think off maps to the wire 'off' level and back on restores the tier", async () => {
+    const onSubmit = vi.fn()
+
+    const screen = await renderSender(
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Commands" }))
+    await userEvent.click(screen.getByLabelText("Toggle high"))
+    // Off: the store records 'none' but remembers the tier for re-enabling.
+    await userEvent.click(screen.getByRole("switch"))
+    expect(useAssistantUiStore.getState().reasoningEffort).toBe("none")
+
+    await userEvent.type(screen.getByLabelText("Message"), "quiet")
+    await userEvent.click(screen.getByRole("button", { name: "Send" }))
+    expect(onSubmit).toHaveBeenCalledWith(
+      "quiet",
+      expect.objectContaining({ effort: "off" }),
+      expect.anything(),
+    )
+
+    // Back on: the remembered tier (not the default) is restored (the menu
+    // closed when focus moved to the textarea, so reopen it first).
+    await userEvent.click(screen.getByRole("button", { name: "Commands" }))
+    await userEvent.click(screen.getByRole("switch"))
+    expect(useAssistantUiStore.getState().reasoningEffort).toBe("high")
+  })
+
+  it("collapses a persisted 'minimal' level to the nearest wire tier on submit", async () => {
+    const onSubmit = vi.fn()
+    useAssistantUiStore.setState({ reasoningEffort: "minimal" })
+
+    const screen = await renderSender(
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    await userEvent.type(screen.getByLabelText("Message"), "brief")
+    await userEvent.click(screen.getByRole("button", { name: "Send" }))
+    expect(onSubmit).toHaveBeenCalledWith(
+      "brief",
+      expect.objectContaining({ effort: "low" }),
       expect.anything(),
     )
   })
