@@ -652,12 +652,13 @@ fn cloud_stream_config(req: &OpenAICreateRequest, config: &AgentConfig) -> Cloud
 /// Build the local chat request config. Defaults mirror `chat/mod.rs`
 /// (`temperature` 0.7, `max_tokens` DEFAULT_RESPONSE_MAX_TOKENS).
 fn local_stream_config(req: &OpenAICreateRequest, config: &AgentConfig) -> LocalChatRequestConfig {
+    let max_tokens = config
+        .max_tokens
+        .or(Some(DEFAULT_RESPONSE_MAX_TOKENS))
+        .unwrap_or(DEFAULT_RESPONSE_MAX_TOKENS);
     LocalChatRequestConfig {
         session_id: None,
-        max_tokens: config
-            .max_tokens
-            .or(Some(DEFAULT_RESPONSE_MAX_TOKENS))
-            .unwrap_or(DEFAULT_RESPONSE_MAX_TOKENS),
+        max_tokens,
         temperature: config.temperature.unwrap_or(0.7),
         top_p: config.top_p,
         top_k: config.top_k,
@@ -666,6 +667,13 @@ fn local_stream_config(req: &OpenAICreateRequest, config: &AgentConfig) -> Local
         repetition_penalty: config.repetition_penalty,
         reasoning_effort: config.reasoning_effort,
         verbosity: config.verbosity,
+        // Built-in-only budget derivation: this path deliberately skips the
+        // model preset lookup (same rationale as `DEFAULT_RESPONSE_MAX_TOKENS`
+        // above — no DB round-trip for a single-shot response).
+        thinking_budget: crate::domain::services::chat::sampling::resolve_local_thinking_budget(
+            config.reasoning_effort,
+            max_tokens,
+        ),
         reasoning_guidance_in_context: false,
         gbnf: None,
         structured_output: config.structured_output.clone(),

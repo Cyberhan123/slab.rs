@@ -202,6 +202,7 @@ fn build_inference_params(
             .into_iter()
             .map(|part| TextGenerationImagePart { data: part.data, mime_type: part.mime_type })
             .collect(),
+        thinking_budget: request.thinking_budget,
     })
 }
 
@@ -218,6 +219,7 @@ mod tests {
             stop_sequences: Some(vec!["</think>".to_owned(), "###".to_owned()]),
             ignore_eos: Some(true),
             logit_bias_json: Some(br#"{"42":false,"hello":1.5}"#.to_vec()),
+            thinking_budget: Some(1024),
             ..Default::default()
         })
         .expect("request should map");
@@ -226,5 +228,6 @@ mod tests {
         assert!(options.ignore_eos);
         assert_eq!(options.stop_sequences, vec!["</think>".to_owned(), "###".to_owned()]);
         assert_eq!(options.logit_bias, Some(serde_json::json!({ "42": false, "hello": 1.5 })));
+        assert_eq!(options.thinking_budget, Some(1024));
     }
 }

@@ -55,6 +55,7 @@ pub(crate) fn decode_ggml_llama_chat_request(
                 mime_type: part.mime_type.clone(),
             })
             .collect(),
+        thinking_budget: request.thinking_budget,
     })
 }
 

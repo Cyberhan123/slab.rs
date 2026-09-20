@@ -258,6 +258,9 @@ pub(crate) struct GgmlLlamaChatRequest {
     pub logit_bias_json: Option<Vec<u8>>,
     pub agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
     pub image_parts: Vec<LlamaChatImagePart>,
+    /// Thinking-token budget for the `<think>` segment; `None` = no
+    /// enforcement (resolved app-side from `reasoning_effort`).
+    pub thinking_budget: Option<u32>,
 }
 
 /// Encoded image bytes for a multimodal chat turn.
@@ -689,6 +692,7 @@ mod tests {
             logit_bias_json: Some(Vec::new()),
             agent_trace_json: None,
             image_parts: Vec::new(),
+            thinking_budget: Some(1024),
         })
         .expect("decode should succeed");
 
@@ -701,6 +705,7 @@ mod tests {
         assert_eq!(decoded.ignore_eos, Some(false));
         assert_eq!(decoded.stop_sequences, Some(Vec::new()));
         assert_eq!(decoded.logit_bias_json, Some(Vec::new()));
+        assert_eq!(decoded.thinking_budget, Some(1024));
     }
 
     #[test]

@@ -48,6 +48,10 @@ pub struct RuntimeTextGenerationRequest {
     /// runtime substitutes the projector's real marker before tokenizing.
     /// Empty for text-only turns (the common path — leaves behaviour unchanged).
     pub image_parts: Vec<RuntimeChatImagePart>,
+    /// Thinking-token budget enforced on the local `<think>` segment
+    /// (resolved from `reasoning_effort`; `None` = no enforcement). Cloud
+    /// requests never set this — the native provider param carries effort.
+    pub thinking_budget: Option<u32>,
 }
 
 /// An image input accompanying a multimodal chat turn.

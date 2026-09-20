@@ -114,6 +114,7 @@ pub(crate) fn runtime_request_payload(request: &RuntimeTextGenerationRequest) ->
         "stream": request.stream,
         "gbnf": request.gbnf,
         "stop_sequences": request.stop_sequences,
+        "thinking_budget": request.thinking_budget,
     })
 }
 

@@ -200,6 +200,10 @@ pub(crate) struct TextGenerationOptions {
     /// Encoded image bytes for a multimodal (mtmd) turn. Empty for text-only.
     #[serde(default)]
     pub image_parts: Vec<TextGenerationImagePart>,
+    /// Thinking-token budget for the `<think>` segment; `None` = no
+    /// enforcement. See `slab_llama::thinking_budget`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
 }
 
 /// An image input accompanying a multimodal text-generation turn.

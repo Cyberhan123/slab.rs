@@ -218,6 +218,11 @@ pub struct RuntimePresets {
     pub presence_penalty: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repetition_penalty: Option<f32>,
+    /// Default thinking-token budget for the local `<think>` segment when
+    /// `reasoning_effort` is set (see `chat::sampling`). Per-effort overrides
+    /// live in `efforts.<key>.thinking_budget` and win over this flat default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
     /// Per-effort sampling overrides (keys: `minimal` / `low` / `medium` /
     /// `high`). Empty for the legacy flat payload shape (backward compatible:
     /// such presets serialize byte-identically). Each override's set fields win
@@ -244,8 +249,18 @@ impl RuntimePresets {
             min_p,
             presence_penalty,
             repetition_penalty,
+            thinking_budget: None,
             efforts: BTreeMap::new(),
         }
+    }
+
+    /// Chainable thinking-budget setter. `new()` deliberately keeps its
+    /// long-stable 7-arg signature (an 8th would trip clippy's
+    /// `too_many_arguments` under the workspace `-D warnings` gate) so its
+    /// existing call sites stay untouched.
+    pub fn with_thinking_budget(mut self, thinking_budget: Option<u32>) -> Self {
+        self.thinking_budget = thinking_budget;
+        self
     }
 
     pub fn from_optional_fields(
@@ -294,7 +309,9 @@ impl RuntimePresets {
             return result.into_non_empty();
         }
 
-        // Legacy flat shape: { "temperature": ..., "top_p": ... }.
+        // Legacy flat shape: { "temperature": ..., "top_p": ... }. The flat
+        // thinking budget would be dropped by `from_optional_fields`, so it is
+        // re-attached here.
         Self::from_optional_fields(
             options.get("max_tokens").and_then(json_value_to_u32),
             options.get("temperature").and_then(json_value_to_f32),
@@ -304,6 +321,9 @@ impl RuntimePresets {
             options.get("presence_penalty").and_then(json_value_to_f32),
             options.get("repetition_penalty").and_then(json_value_to_f32),
         )
+        .map(|presets| {
+            presets.with_thinking_budget(options.get("thinking_budget").and_then(json_value_to_u32))
+        })
     }
 
     /// Resolve the effective flat preset for an effort level: the matching
@@ -329,9 +349,12 @@ impl RuntimePresets {
             override_preset.presence_penalty.or(self.presence_penalty),
             override_preset.repetition_penalty.or(self.repetition_penalty),
         )
+        .with_thinking_budget(override_preset.thinking_budget.or(self.thinking_budget))
     }
 
     fn flat_clone(&self) -> RuntimePresets {
+        // Must carry the flat thinking budget too — without it an effort
+        // without its own override would silently lose the model's budget.
         RuntimePresets::new(
             self.max_tokens,
             self.temperature,
@@ -341,6 +364,7 @@ impl RuntimePresets {
             self.presence_penalty,
             self.repetition_penalty,
         )
+        .with_thinking_budget(self.thinking_budget)
     }
 
     pub fn into_non_empty(self) -> Option<Self> {
@@ -355,6 +379,7 @@ impl RuntimePresets {
             && self.min_p.is_none()
             && self.presence_penalty.is_none()
             && self.repetition_penalty.is_none()
+            && self.thinking_budget.is_none()
             && self.efforts.is_empty()
     }
 }
@@ -369,6 +394,7 @@ fn parse_flat_map(map: &serde_json::Map<String, Value>) -> RuntimePresets {
         map.get("presence_penalty").and_then(json_value_to_f32),
         map.get("repetition_penalty").and_then(json_value_to_f32),
     )
+    .with_thinking_budget(map.get("thinking_budget").and_then(json_value_to_u32))
 }
 
 fn json_value_to_f32(value: &Value) -> Option<f32> {
@@ -930,6 +956,41 @@ mod tests {
         // Low (no override) falls back to the flat default.
         let low = presets.resolve_for_effort(Some(slab_types::ChatReasoningEffort::Low));
         assert_eq!(low.temperature, Some(0.6));
+    }
+
+    #[test]
+    fn runtime_presets_parses_thinking_budget_in_both_shapes() {
+        // Structured shape: flat default + a per-effort override.
+        let options: BTreeMap<String, serde_json::Value> = json!({
+            "default": { "thinking_budget": 2048 },
+            "efforts": { "high": { "thinking_budget": 8192 } }
+        })
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+        let presets = RuntimePresets::from_json_options(&options).expect("structured parses");
+        assert_eq!(presets.thinking_budget, Some(2048));
+        let high = presets.resolve_for_effort(Some(slab_types::ChatReasoningEffort::High));
+        assert_eq!(high.thinking_budget, Some(8192), "high override budget wins");
+        // An effort without its own override inherits the flat budget.
+        let low = presets.resolve_for_effort(Some(slab_types::ChatReasoningEffort::Low));
+        assert_eq!(low.thinking_budget, Some(2048));
+
+        // Legacy flat shape: the budget must survive the from_optional_fields
+        // round-trip (it is re-attached, not dropped).
+        let options: BTreeMap<String, serde_json::Value> =
+            json!({ "thinking_budget": 512, "temperature": 0.6 })
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+        let presets = RuntimePresets::from_json_options(&options).expect("flat parses");
+        assert_eq!(presets.thinking_budget, Some(512));
+        // A budget-only preset is not empty.
+        assert!(!presets.is_empty());
     }
 
     #[test]

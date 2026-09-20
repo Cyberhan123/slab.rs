@@ -2820,6 +2820,13 @@ export interface components {
             temperature?: number | null;
             /**
              * Format: int32
+             * @description Default thinking-token budget enforced on the local `<think>` segment
+             *     when `reasoning_effort` is set; overridden per-effort by pack-provided
+             *     `efforts.*.thinking_budget`. Unset = built-in effort table.
+             */
+            thinking_budget?: number | null;
+            /**
+             * Format: int32
              * @description Top-k sampling limit.
              */
             top_k?: number | null;
@@ -2841,6 +2848,8 @@ export interface components {
             repetition_penalty?: number | null;
             /** Format: float */
             temperature?: number | null;
+            /** Format: int32 */
+            thinking_budget?: number | null;
             /** Format: int32 */
             top_k?: number | null;
             /** Format: float */

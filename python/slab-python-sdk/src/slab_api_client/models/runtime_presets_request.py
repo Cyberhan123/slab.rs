@@ -21,6 +21,9 @@ class RuntimePresetsRequest:
         presence_penalty (float | None | Unset): Presence penalty.
         repetition_penalty (float | None | Unset): Repetition penalty.
         temperature (float | None | Unset): Sampling temperature.
+        thinking_budget (int | None | Unset): Default thinking-token budget enforced on the local `<think>` segment
+            when `reasoning_effort` is set; overridden per-effort by pack-provided
+            `efforts.*.thinking_budget`. Unset = built-in effort table.
         top_k (int | None | Unset): Top-k sampling limit.
         top_p (float | None | Unset): Top-p nucleus sampling probability.
     """
@@ -30,6 +33,7 @@ class RuntimePresetsRequest:
     presence_penalty: float | None | Unset = UNSET
     repetition_penalty: float | None | Unset = UNSET
     temperature: float | None | Unset = UNSET
+    thinking_budget: int | None | Unset = UNSET
     top_k: int | None | Unset = UNSET
     top_p: float | None | Unset = UNSET
 
@@ -64,6 +68,12 @@ class RuntimePresetsRequest:
         else:
             temperature = self.temperature
 
+        thinking_budget: int | None | Unset
+        if isinstance(self.thinking_budget, Unset):
+            thinking_budget = UNSET
+        else:
+            thinking_budget = self.thinking_budget
+
         top_k: int | None | Unset
         if isinstance(self.top_k, Unset):
             top_k = UNSET
@@ -89,6 +99,8 @@ class RuntimePresetsRequest:
             field_dict["repetition_penalty"] = repetition_penalty
         if temperature is not UNSET:
             field_dict["temperature"] = temperature
+        if thinking_budget is not UNSET:
+            field_dict["thinking_budget"] = thinking_budget
         if top_k is not UNSET:
             field_dict["top_k"] = top_k
         if top_p is not UNSET:
@@ -147,6 +159,15 @@ class RuntimePresetsRequest:
 
         temperature = _parse_temperature(d.pop("temperature", UNSET))
 
+        def _parse_thinking_budget(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        thinking_budget = _parse_thinking_budget(d.pop("thinking_budget", UNSET))
+
         def _parse_top_k(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -171,6 +192,7 @@ class RuntimePresetsRequest:
             presence_penalty=presence_penalty,
             repetition_penalty=repetition_penalty,
             temperature=temperature,
+            thinking_budget=thinking_budget,
             top_k=top_k,
             top_p=top_p,
         )

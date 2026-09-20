@@ -51,6 +51,49 @@ pub(super) fn built_in_for_effort(effort: Option<ChatReasoningEffort>) -> Runtim
     }
 }
 
+/// Built-in thinking-token budget per effort level, used when the model's
+/// runtime presets don't override `efforts.<key>.thinking_budget` (or the flat
+/// `thinking_budget`). Mirrors llama.cpp `--reasoning-budget` semantics: when
+/// the `<think>` segment reaches this many generated tokens the decode loop
+/// force-closes it by injecting the model's `</think>` tokens, so generation
+/// continues with the visible answer. `None` (effort absent or the `None`
+/// variant) means no enforcement — the `None` effort disables thinking via the
+/// chat template's `enable_thinking=false` instead, and a budget there would
+/// fight the pre-closed `<think></think>` the template emits.
+pub(crate) fn built_in_thinking_budget_for_effort(
+    effort: Option<ChatReasoningEffort>,
+) -> Option<u32> {
+    match effort {
+        Some(ChatReasoningEffort::Minimal) => Some(512),
+        Some(ChatReasoningEffort::Low) => Some(1024),
+        Some(ChatReasoningEffort::Medium) => Some(4096),
+        Some(ChatReasoningEffort::High) => Some(16384),
+        Some(ChatReasoningEffort::None) | None => None,
+    }
+}
+
+/// Clamp the thinking budget so a forced close always leaves room for a
+/// visible answer: effective = min(raw, max_tokens - 256). When the ceiling
+/// itself is tiny (< 64) enforcement is pointless — the injected close tag plus
+/// a couple of answer tokens would immediately hit the length limit — so it is
+/// skipped entirely.
+pub(crate) fn clamp_thinking_budget(raw: Option<u32>, max_tokens: u32) -> Option<u32> {
+    let raw = raw?;
+    let ceiling = max_tokens.saturating_sub(256);
+    (ceiling >= 64).then(|| raw.min(ceiling))
+}
+
+/// Built-in-only budget derivation for paths that deliberately skip the model
+/// preset lookup (the `/responses` single-shot local path, which mirrors
+/// `chat::mod` resolution without a DB round-trip — same rationale as its
+/// `DEFAULT_RESPONSE_MAX_TOKENS` handling).
+pub(crate) fn resolve_local_thinking_budget(
+    effort: Option<ChatReasoningEffort>,
+    max_tokens: u32,
+) -> Option<u32> {
+    clamp_thinking_budget(built_in_thinking_budget_for_effort(effort), max_tokens)
+}
+
 /// Resolved sampling values for one chat call.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ResolvedSampling {
@@ -62,6 +105,10 @@ pub(super) struct ResolvedSampling {
     /// truncate cloud reasoning models mid-thought (reasoning tokens count
     /// against `max_tokens`) and surface as "empty assistant content".
     pub explicit_max_tokens: Option<u32>,
+    /// Local-only thinking-token budget (model effort-preset > built-in table;
+    /// never request-sourced — the wire API has no per-request budget field).
+    /// Already clamped against the resolved `max_tokens`.
+    pub thinking_budget: Option<u32>,
     pub temperature: f32,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
@@ -81,11 +128,18 @@ pub(super) fn resolve_sampling(
         model_presets.map(|presets| presets.resolve_for_effort(effort)).unwrap_or_default();
     let built_in = built_in_for_effort(effort);
     let explicit_max_tokens = common.max_tokens.or(effort_preset.max_tokens);
+    let max_tokens =
+        explicit_max_tokens.or(built_in.max_tokens).unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
     ResolvedSampling {
-        max_tokens: explicit_max_tokens
-            .or(built_in.max_tokens)
-            .unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS),
+        max_tokens,
         explicit_max_tokens,
+        // The clamp uses the FINAL resolved max-tokens (request caps included)
+        // so a small deliberate cap can never leave a budget larger than the
+        // answer floor.
+        thinking_budget: clamp_thinking_budget(
+            effort_preset.thinking_budget.or_else(|| built_in_thinking_budget_for_effort(effort)),
+            max_tokens,
+        ),
         temperature: common
             .temperature
             .or(effort_preset.temperature)
@@ -183,5 +237,69 @@ mod tests {
         assert!((resolved.temperature - 0.3).abs() < f32::EPSILON);
         // top_p not set on the override, so the flat default (0.95) fills in.
         assert!((resolved.top_p.unwrap() - 0.95).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn built_in_thinking_budget_table() {
+        use super::{built_in_thinking_budget_for_effort, clamp_thinking_budget};
+        assert_eq!(
+            built_in_thinking_budget_for_effort(Some(ChatReasoningEffort::Minimal)),
+            Some(512)
+        );
+        assert_eq!(built_in_thinking_budget_for_effort(Some(ChatReasoningEffort::Low)), Some(1024));
+        assert_eq!(
+            built_in_thinking_budget_for_effort(Some(ChatReasoningEffort::Medium)),
+            Some(4096)
+        );
+        assert_eq!(
+            built_in_thinking_budget_for_effort(Some(ChatReasoningEffort::High)),
+            Some(16384)
+        );
+        // No enforcement for the disable variant or an absent effort.
+        assert_eq!(built_in_thinking_budget_for_effort(Some(ChatReasoningEffort::None)), None);
+        assert_eq!(built_in_thinking_budget_for_effort(None), None);
+        // Clamp: raw budget vs the answer floor (max_tokens - 256).
+        assert_eq!(clamp_thinking_budget(Some(16384), 4096), Some(3840));
+        assert_eq!(clamp_thinking_budget(Some(1024), 1024), Some(768));
+        // A ceiling below 64 leaves no room for a forced close + answer.
+        assert_eq!(clamp_thinking_budget(Some(1024), 300), None);
+        assert_eq!(clamp_thinking_budget(None, 4096), None);
+    }
+
+    #[test]
+    fn resolve_sampling_thinking_budget_uses_built_in_then_clamps() {
+        // High effort without a request cap: built-in max_tokens 4096 clamps
+        // the 16384 budget to 4096 - 256.
+        let resolved = resolve_sampling(&common(None, None), Some(ChatReasoningEffort::High), None);
+        assert_eq!(resolved.thinking_budget, Some(3840));
+        // A small explicit request cap becomes the clamp base.
+        let mut params = common(None, None);
+        params.max_tokens = Some(512);
+        let resolved = resolve_sampling(&params, Some(ChatReasoningEffort::Low), None);
+        assert_eq!(resolved.thinking_budget, Some(256));
+        // Absent effort keeps today's behaviour: no budget at all.
+        let resolved = resolve_sampling(&common(None, None), None, None);
+        assert_eq!(resolved.thinking_budget, None);
+    }
+
+    #[test]
+    fn model_preset_thinking_budget_overrides_built_in() {
+        // Flat model budget applies when the effort has no override…
+        let model = RuntimePresets::new(None, None, None, None, None, None, None)
+            .with_thinking_budget(Some(64));
+        let resolved =
+            resolve_sampling(&common(None, None), Some(ChatReasoningEffort::High), Some(&model));
+        assert_eq!(resolved.thinking_budget, Some(64));
+        // …and the per-effort override wins over both flat and built-in.
+        let mut model = RuntimePresets::new(None, None, None, None, None, None, None)
+            .with_thinking_budget(Some(64));
+        model.efforts.insert(
+            "high".to_owned(),
+            RuntimePresets::new(None, None, None, None, None, None, None)
+                .with_thinking_budget(Some(128)),
+        );
+        let resolved =
+            resolve_sampling(&common(None, None), Some(ChatReasoningEffort::High), Some(&model));
+        assert_eq!(resolved.thinking_budget, Some(128));
     }
 }

@@ -4,7 +4,7 @@ mod cloud;
 mod gbnf;
 pub(crate) mod local;
 mod params;
-mod sampling;
+pub(crate) mod sampling;
 mod session;
 mod streaming;
 mod template;
@@ -232,6 +232,7 @@ async fn create_chat_completion_with_state(
                     repetition_penalty: sampling.repetition_penalty,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
+                    thinking_budget: sampling.thinking_budget,
                     reasoning_guidance_in_context: command.local.reasoning_guidance_in_context,
                     gbnf: command.local.gbnf.clone(),
                     structured_output: command.local.structured_output.clone(),
@@ -333,6 +334,7 @@ async fn create_chat_completion_with_state(
                     repetition_penalty: sampling.repetition_penalty,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
+                    thinking_budget: sampling.thinking_budget,
                     reasoning_guidance_in_context: command.local.reasoning_guidance_in_context,
                     gbnf: command.local.gbnf.clone(),
                     structured_output: command.local.structured_output.clone(),
@@ -610,6 +612,7 @@ async fn create_text_completion_with_state(
                     repetition_penalty: sampling.repetition_penalty,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
+                    thinking_budget: sampling.thinking_budget,
                     gbnf: command.local.gbnf.clone(),
                     structured_output: command.local.structured_output.clone(),
                 },

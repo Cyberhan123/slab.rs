@@ -50,6 +50,7 @@ mod model_params;
 mod perf;
 pub mod quantize;
 pub mod runtime;
+mod thinking_budget;
 mod token;
 
 pub use chat_template::LlamaChatMessage;
@@ -70,6 +71,9 @@ pub use runtime::{
     LlamaInferenceOutput, LlamaInferenceParams, LlamaLoadConfig, LlamaLogitBias, LlamaRuntime,
     LlamaRuntimeError, LlamaSamplingOptions, LlamaSessionSnapshot, LlamaStopInfo, RunContext,
     RunWithContextFn, SessionId, StreamChunk, StreamHandle,
+};
+pub use thinking_budget::{
+    THINK_CLOSE_TAG, ThinkingBudget, ThinkingBudgetAction, ThinkingBudgetTracker,
 };
 pub use token::{LlamaPos, LlamaSeqId, LlamaToken};
 

@@ -6,10 +6,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::{
     LlamaBatch, LlamaContext, LlamaContextParams, LlamaError, LlamaModel, LlamaSeqId, LlamaToken,
+    THINK_CLOSE_TAG, ThinkingBudget, ThinkingBudgetAction, ThinkingBudgetTracker,
 };
 
 const fn default_flash_attn_enabled() -> bool {
@@ -281,6 +282,7 @@ enum GlobalCommand {
     GenerateStream {
         session_id: SessionId,
         max_new_tokens: usize,
+        thinking_budget: Option<ThinkingBudget>,
         stream_tx: mpsc::Sender<StreamChunk>,
         reply_tx: oneshot::Sender<Result<(), LlamaRuntimeError>>,
     },
@@ -449,6 +451,7 @@ impl MasterWorkerState {
                 GlobalCommand::GenerateStream {
                     session_id,
                     max_new_tokens,
+                    thinking_budget,
                     stream_tx,
                     reply_tx,
                 } => match self.session_map.get(&session_id) {
@@ -462,6 +465,7 @@ impl MasterWorkerState {
                             .send(WorkerCommand::GenerateStream {
                                 session_id,
                                 max_new_tokens,
+                                thinking_budget,
                                 stream_tx,
                                 reply_tx: ack_tx,
                             })
@@ -592,6 +596,7 @@ pub(super) enum WorkerCommand {
     GenerateStream {
         session_id: SessionId,
         max_new_tokens: usize,
+        thinking_budget: Option<ThinkingBudget>,
         stream_tx: mpsc::Sender<StreamChunk>,
         reply_tx: oneshot::Sender<Result<(), LlamaRuntimeError>>,
     },
@@ -624,6 +629,11 @@ struct SessionState {
     remaining_tokens: usize,
     last_token: Option<LlamaToken>,
     cancelled: bool,
+    /// Thinking-budget tracker for the CURRENT generation only. Replaced on
+    /// every `GenerateStream` (a reused session's next turn restarts counting
+    /// from a fresh budget), so it is per-generation state parked on the
+    /// session rather than session identity.
+    thinking_budget: Option<ThinkingBudgetTracker>,
 }
 
 struct InferenceWorkerState {
@@ -669,6 +679,33 @@ impl InferenceWorkerState {
         session.pending_output.clear();
         session.remaining_tokens = 0;
         session.last_token = None;
+    }
+
+    /// Push one token's raw piece through the UTF-8 buffer and emit whatever
+    /// flushes to the session stream. Returns `false` when the session was
+    /// failed (buffer error) or reset (stream channel closed) and the caller
+    /// must skip its normal token bookkeeping. Shared by the sampled-token
+    /// path and the thinking-budget close-tag injection.
+    fn emit_piece(session: &mut SessionState, piece: &[u8]) -> bool {
+        let text = match session.pending_output.push(piece) {
+            Ok(text) => text,
+            Err(error) => {
+                Self::fail_session_stream(session, error.to_string());
+                return false;
+            }
+        };
+
+        if let Some(tx) = session.stream_tx.as_ref()
+            && let Some(text) = text
+            && tx.blocking_send(StreamChunk::Token(text)).is_err()
+        {
+            session.stream_tx = None;
+            session.pending_output.clear();
+            session.remaining_tokens = 0;
+            session.last_token = None;
+            return false;
+        }
+        true
     }
 
     fn build_stop_info(
@@ -791,6 +828,7 @@ impl InferenceWorkerState {
                     remaining_tokens: 0,
                     last_token: None,
                     cancelled: false,
+                    thinking_budget: None,
                 };
 
                 if let Some(snapshot) = snapshot {
@@ -852,20 +890,24 @@ impl InferenceWorkerState {
                 }
             }
 
-            WorkerCommand::GenerateStream { session_id, max_new_tokens, stream_tx, reply_tx } => {
-                match self.sessions.get_mut(&session_id) {
-                    None => {
-                        let _ =
-                            reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
-                    }
-                    Some(session) => {
-                        session.stream_tx = Some(stream_tx);
-                        session.remaining_tokens = max_new_tokens;
-                        session.cancelled = false;
-                        let _ = reply_tx.send(Ok(()));
-                    }
+            WorkerCommand::GenerateStream {
+                session_id,
+                max_new_tokens,
+                thinking_budget,
+                stream_tx,
+                reply_tx,
+            } => match self.sessions.get_mut(&session_id) {
+                None => {
+                    let _ = reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
                 }
-            }
+                Some(session) => {
+                    session.stream_tx = Some(stream_tx);
+                    session.remaining_tokens = max_new_tokens;
+                    session.cancelled = false;
+                    session.thinking_budget = thinking_budget.map(ThinkingBudgetTracker::new);
+                    let _ = reply_tx.send(Ok(()));
+                }
+            },
 
             WorkerCommand::EndSession { session_id, reply_tx } => {
                 match self.sessions.remove(&session_id) {
@@ -1091,22 +1133,80 @@ impl InferenceWorkerState {
 
             match self.model.token_to_piece_bytes(token, true) {
                 Ok(piece) => {
-                    let text = match session.pending_output.push(&piece) {
-                        Ok(text) => text,
-                        Err(error) => {
-                            Self::fail_session_stream(session, error.to_string());
-                            continue;
-                        }
-                    };
+                    if !Self::emit_piece(session, &piece) {
+                        continue;
+                    }
 
-                    if let Some(tx) = session.stream_tx.as_ref()
-                        && let Some(text) = text
-                        && tx.blocking_send(StreamChunk::Token(text)).is_err()
-                    {
-                        session.stream_tx = None;
-                        session.pending_output.clear();
-                        session.remaining_tokens = 0;
-                        session.last_token = None;
+                    // Thinking-budget enforcement (decode-loop hard cap): one
+                    // tracker ingest per sampled token, on raw bytes so marker
+                    // detection is independent of the UTF-8 buffer's flush
+                    // timing. The budget-tripping token's piece is already
+                    // emitted above; the injection queues [token, </think>
+                    // tokens…] as pending input and clears `last_token`, so
+                    // the next step routes through the pending-tokens branch
+                    // which decodes them with logits only on the final close
+                    // token — generation resumes exactly as if the model had
+                    // closed its own think block.
+                    let forced_close = session.thinking_budget.as_mut().is_some_and(|tracker| {
+                        tracker.ingest_bytes(&piece) == ThinkingBudgetAction::InjectClose
+                    });
+                    if forced_close {
+                        match self.model.tokenize(THINK_CLOSE_TAG, false, true) {
+                            Ok(close_tokens)
+                                if !close_tokens.is_empty()
+                                    && session.remaining_tokens > close_tokens.len() + 1 =>
+                            {
+                                // Injected tokens count against the request's
+                                // max-token budget like any generated token.
+                                session.pending_tokens.push(token);
+                                session.remaining_tokens =
+                                    session.remaining_tokens.saturating_sub(1);
+                                let mut aborted = false;
+                                for close_token in close_tokens {
+                                    // `llama_sampler_sample` already accepted
+                                    // the sampled token internally; injected
+                                    // tokens must be accepted explicitly so
+                                    // penalty state stays in sync.
+                                    if let Some(sampler) = session.sampler.as_mut() {
+                                        sampler.accept(close_token);
+                                    }
+                                    match self.model.token_to_piece_bytes(close_token, true) {
+                                        Ok(close_piece) => {
+                                            if !Self::emit_piece(session, &close_piece) {
+                                                aborted = true;
+                                                break;
+                                            }
+                                        }
+                                        Err(error) => {
+                                            Self::fail_session_stream(session, error.to_string());
+                                            aborted = true;
+                                            break;
+                                        }
+                                    }
+                                    session.pending_tokens.push(close_token);
+                                    session.remaining_tokens =
+                                        session.remaining_tokens.saturating_sub(1);
+                                }
+                                if !aborted {
+                                    session.last_token = None;
+                                    debug!(
+                                        session_id,
+                                        budget_forced_close = true,
+                                        "thinking budget exhausted; forced </think> to end reasoning"
+                                    );
+                                }
+                            }
+                            _ => {
+                                // Defensive only: the app-side clamp (budget
+                                // <= max_tokens - 256) keeps enough headroom,
+                                // but the worker must never wedge mid-injection
+                                // — degrade to no enforcement instead.
+                                warn!(
+                                    session_id,
+                                    "thinking budget close-tag injection skipped; continuing unbounded"
+                                );
+                            }
+                        }
                         continue;
                     }
 
@@ -1290,15 +1390,25 @@ impl LlamaRuntime {
         reply_rx.await.map_err(|_| LlamaRuntimeError::WorkerShutdown)?
     }
 
+    /// Start streaming generation for a session, optionally with a
+    /// thinking-token budget enforced on the `<think>` segment (see
+    /// [`crate::thinking_budget`]).
     pub async fn generate_stream(
         &self,
         session_id: SessionId,
         max_new_tokens: usize,
+        thinking_budget: Option<ThinkingBudget>,
     ) -> Result<StreamHandle, LlamaRuntimeError> {
         let (stream_tx, stream_rx) = mpsc::channel::<StreamChunk>(64);
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
-            .send(GlobalCommand::GenerateStream { session_id, max_new_tokens, stream_tx, reply_tx })
+            .send(GlobalCommand::GenerateStream {
+                session_id,
+                max_new_tokens,
+                thinking_budget,
+                stream_tx,
+                reply_tx,
+            })
             .await
             .map_err(|_| LlamaRuntimeError::WorkerShutdown)?;
         reply_rx.await.map_err(|_| LlamaRuntimeError::WorkerShutdown)??;

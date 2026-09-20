@@ -3,7 +3,7 @@ use slab_agent_tracing::record_json_from_context;
 use slab_llama::{
     Llama, LlamaContextParams, LlamaFtype, LlamaInferenceOutput, LlamaLogitBias, LlamaModel,
     LlamaModelParams, LlamaQuantizeParams, LlamaRuntime, LlamaSamplingOptions,
-    LlamaSessionSnapshot, LlamaStopInfo,
+    LlamaSessionSnapshot, LlamaStopInfo, ThinkingBudget,
 };
 use slab_runtime_core::backend::{
     StreamChunk as BaseStreamChunk, StreamHandle as BaseStreamHandle,
@@ -45,6 +45,12 @@ pub(crate) struct LlamaDispatchRequest {
     /// (the common path). When non-empty AND a projector is loaded, the prompt
     /// is expected to carry one [`MTMD_MEDIA_SENTINEL`] per image.
     pub image_parts: Vec<crate::domain::models::TextGenerationImagePart>,
+    /// Thinking-token budget for the `<think>` segment (None = no
+    /// enforcement). Per-generation state, deliberately NOT part of session
+    /// identity: two requests differing only in budget share the KV cache, and
+    /// an injected `</think>` lands in `generated` so the next turn's
+    /// suffix-extension reuse stays consistent.
+    pub thinking_budget: Option<u32>,
 }
 
 /// Stable sentinel substituted for each image by the app-core prompt renderer.
@@ -262,6 +268,29 @@ fn llama_request_payload(request: &LlamaDispatchRequest) -> serde_json::Value {
         "ignore_eos": request.ignore_eos,
         "logit_bias": request.logit_bias,
         "stop_sequences": request.stop_sequences,
+        "thinking_budget": request.thinking_budget,
+    })
+}
+
+/// Resolve the per-generation thinking-budget spec for a dispatch. A GBNF
+/// grammar disables enforcement: a JSON-valued grammar cannot accept the
+/// literal `</think>` tag, and force-accepting a non-matching token into a
+/// grammar sampler wedges its internal state. Prefill detection runs against
+/// the FULL prompt — with KV-cache reuse the delta prompt is only the new turn
+/// and never contains the open `<think>` the template prefilled.
+fn resolve_dispatch_thinking_budget(
+    request: &LlamaDispatchRequest,
+    full_prompt: &str,
+) -> Option<ThinkingBudget> {
+    if request.gbnf.is_some() {
+        if request.thinking_budget.is_some() {
+            tracing::debug!("thinking budget skipped: gbnf grammar active");
+        }
+        return None;
+    }
+    request.thinking_budget.map(|budget| ThinkingBudget {
+        budget,
+        starts_in_thinking: prompt_has_prefilled_thinking(full_prompt),
     })
 }
 
@@ -990,6 +1019,7 @@ impl GGMLLlamaEngine {
         }
         let logit_bias = self.resolve_logit_bias(request.logit_bias.as_ref())?;
         let prepared = self.prepare_managed_session(&request, prompt, &logit_bias).await?;
+        let thinking_budget = resolve_dispatch_thinking_budget(&request, &prepared.full_prompt);
 
         match self
             .inference(
@@ -1000,6 +1030,7 @@ impl GGMLLlamaEngine {
                 request.ignore_eos,
                 &logit_bias,
                 &request.image_parts,
+                thinking_budget,
             )
             .await
         {
@@ -1113,6 +1144,7 @@ impl GGMLLlamaEngine {
         }
         let logit_bias = self.resolve_logit_bias(request.logit_bias.as_ref())?;
         let prepared = self.prepare_managed_session(&request, prompt, &logit_bias).await?;
+        let thinking_budget = resolve_dispatch_thinking_budget(&request, &prepared.full_prompt);
 
         let (mut llama_rx, sid) = match self
             .inference_stream(
@@ -1123,6 +1155,7 @@ impl GGMLLlamaEngine {
                 request.ignore_eos,
                 &logit_bias,
                 &request.image_parts,
+                thinking_budget,
             )
             .await
         {
@@ -1546,15 +1579,17 @@ impl GGMLLlamaEngine {
             .map_err(Into::into)
     }
 
-    /// Start streaming generation for a session.
+    /// Start streaming generation for a session, optionally enforcing a
+    /// thinking-token budget on the `<think>` segment.
     pub async fn generate_stream(
         &self,
         session_id: SessionId,
         max_new_tokens: usize,
+        thinking_budget: Option<ThinkingBudget>,
     ) -> Result<StreamHandle, ggml::EngineError> {
         let engine = self.require_engine()?;
         engine
-            .generate_stream(session_id, max_new_tokens)
+            .generate_stream(session_id, max_new_tokens, thinking_budget)
             .await
             .map_err(GGMLLlamaEngineError::from)
             .map_err(Into::into)
@@ -1684,6 +1719,7 @@ impl GGMLLlamaEngine {
         ignore_eos: bool,
         logit_bias: &[LlamaLogitBias],
         image_parts: &[crate::domain::models::TextGenerationImagePart],
+        thinking_budget: Option<ThinkingBudget>,
     ) -> Result<LlamaInferenceOutput, ggml::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
@@ -1711,7 +1747,7 @@ impl GGMLLlamaEngine {
             return Err(error);
         }
 
-        let mut stream = match self.generate_stream(sid, max_tokens).await {
+        let mut stream = match self.generate_stream(sid, max_tokens, thinking_budget).await {
             Ok(stream) => stream,
             Err(error) => {
                 if should_end {
@@ -1774,6 +1810,7 @@ impl GGMLLlamaEngine {
         ignore_eos: bool,
         logit_bias: &[LlamaLogitBias],
         image_parts: &[crate::domain::models::TextGenerationImagePart],
+        thinking_budget: Option<ThinkingBudget>,
     ) -> Result<(StreamHandle, SessionId), ggml::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
@@ -1800,7 +1837,7 @@ impl GGMLLlamaEngine {
             return Err(error);
         }
 
-        let stream = match self.generate_stream(sid, max_tokens).await {
+        let stream = match self.generate_stream(sid, max_tokens, thinking_budget).await {
             Ok(stream) => stream,
             Err(error) => {
                 if session_id.is_none() {

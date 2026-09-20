@@ -54,6 +54,7 @@ pub fn encode_chat_request(request: &RuntimeTextGenerationRequest) -> pb::GgmlLl
                 })
                 .collect()
         },
+        thinking_budget: request.thinking_budget,
     }
 }
 
@@ -495,6 +496,27 @@ fn non_empty_string(value: Option<&str>) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn encode_chat_request_carries_thinking_budget() {
+        let request = RuntimeTextGenerationRequest {
+            model: "fixture".to_owned(),
+            prompt: "hello".to_owned(),
+            thinking_budget: Some(1024),
+            ..Default::default()
+        };
+
+        let encoded = encode_chat_request(&request);
+
+        assert_eq!(encoded.thinking_budget, Some(1024));
+        // Unset stays unset on the wire (no enforcement downstream).
+        let unset = encode_chat_request(&RuntimeTextGenerationRequest {
+            model: "fixture".to_owned(),
+            prompt: "hello".to_owned(),
+            ..Default::default()
+        });
+        assert_eq!(unset.thinking_budget, None);
+    }
 
     #[test]
     fn decode_chat_response_prefers_structured_metadata() {

@@ -127,6 +127,11 @@ pub struct RuntimePresetsRequest {
     /// Repetition penalty.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub repetition_penalty: Option<f32>,
+    /// Default thinking-token budget enforced on the local `<think>` segment
+    /// when `reasoning_effort` is set; overridden per-effort by pack-provided
+    /// `efforts.*.thinking_budget`. Unset = built-in effort table.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub thinking_budget: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -453,6 +458,8 @@ pub struct RuntimePresetsResponse {
     pub presence_penalty: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repetition_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -720,6 +727,7 @@ impl From<DomainRuntimePresets> for RuntimePresetsResponse {
             min_p: presets.min_p,
             presence_penalty: presets.presence_penalty,
             repetition_penalty: presets.repetition_penalty,
+            thinking_budget: presets.thinking_budget,
         }
     }
 }
@@ -1042,6 +1050,7 @@ impl From<RuntimePresetsRequest> for DomainRuntimePresets {
             req.presence_penalty,
             req.repetition_penalty,
         )
+        .with_thinking_budget(req.thinking_budget)
     }
 }
 

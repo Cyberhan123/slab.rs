@@ -57,6 +57,11 @@ message GgmlLlamaChatRequest {
   // runtime substitutes the projector's marker before tokenizing. Ignored when
   // no mmproj is loaded.
   repeated LlamaChatImagePart image_parts = 15;
+  // Thinking-token budget for the <think> segment: when the generated
+  // reasoning reaches this many tokens the runtime force-closes it by
+  // injecting the model's </think> tokens and continues with the visible
+  // answer (mirrors llama.cpp --reasoning-budget N). Unset = no enforcement.
+  optional uint32 thinking_budget = 16;
 }
 
 // A single image input for multimodal chat.

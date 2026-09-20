@@ -57,6 +57,7 @@ struct InferenceOptions {
     stop_sequences: Vec<String>,
     agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
     image_parts: Vec<crate::domain::models::TextGenerationImagePart>,
+    thinking_budget: Option<u32>,
 }
 
 impl InferenceOptions {
@@ -80,6 +81,7 @@ impl InferenceOptions {
             stop_sequences: params.stop_sequences,
             agent_trace: params.agent_trace,
             image_parts: params.image_parts,
+            thinking_budget: params.thinking_budget,
         }
     }
 }
@@ -226,6 +228,7 @@ impl LlamaWorker {
             stop_sequences,
             agent_trace,
             image_parts,
+            thinking_budget,
         } = options;
         let engine = self
             .engine
@@ -248,6 +251,7 @@ impl LlamaWorker {
             stop_sequences,
             agent_trace,
             image_parts,
+            thinking_budget,
         };
         let LlamaDispatchOutput { text, usage, finish_reason, metadata } = engine
             .dispatch_inference(request)
@@ -297,6 +301,7 @@ impl LlamaWorker {
             stop_sequences,
             agent_trace,
             image_parts,
+            thinking_budget,
         } = options;
         let engine = self
             .engine
@@ -319,6 +324,7 @@ impl LlamaWorker {
             stop_sequences,
             agent_trace,
             image_parts,
+            thinking_budget,
         };
         engine.dispatch_inference_stream(request, cancel.0).await.map_err(
             |error: crate::infra::backends::ggml::EngineError| {
@@ -377,10 +383,12 @@ mod tests {
             max_tokens: Some(32),
             ignore_eos: true,
             logit_bias: Some(serde_json::json!({ "42": false })),
+            thinking_budget: Some(1024),
             ..Default::default()
         });
 
         assert!(options.ignore_eos);
         assert_eq!(options.logit_bias, Some(serde_json::json!({ "42": false })));
+        assert_eq!(options.thinking_budget, Some(1024));
     }
 }

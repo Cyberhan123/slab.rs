@@ -50,6 +50,9 @@ pub(crate) struct LocalChatRequestConfig {
     pub(crate) repetition_penalty: Option<f32>,
     pub(crate) reasoning_effort: Option<ChatReasoningEffort>,
     pub(crate) verbosity: Option<ChatVerbosity>,
+    /// Thinking-token budget resolved from `reasoning_effort` (model preset >
+    /// built-in table, clamped against `max_tokens`). `None` = no enforcement.
+    pub(crate) thinking_budget: Option<u32>,
     pub(crate) reasoning_guidance_in_context: bool,
     pub(crate) gbnf: Option<String>,
     pub(crate) structured_output: Option<StructuredOutput>,
@@ -71,6 +74,8 @@ pub(super) struct LocalTextRequestConfig {
     pub(super) repetition_penalty: Option<f32>,
     pub(super) reasoning_effort: Option<ChatReasoningEffort>,
     pub(super) verbosity: Option<ChatVerbosity>,
+    /// See [`LocalChatRequestConfig::thinking_budget`].
+    pub(super) thinking_budget: Option<u32>,
     pub(super) gbnf: Option<String>,
     pub(super) structured_output: Option<StructuredOutput>,
 }
@@ -209,6 +214,7 @@ pub(crate) async fn build_local_runtime_request(
                 "guidance": injected_guidance,
                 "reasoning_effort": config.reasoning_effort,
                 "verbosity": config.verbosity,
+                "thinking_budget": config.thinking_budget,
             }),
         );
     }
@@ -272,6 +278,7 @@ pub(crate) async fn build_local_runtime_request(
         stop_sequences: effective_stop.clone(),
         agent_trace: config.agent_trace.clone(),
         image_parts,
+        thinking_budget: config.thinking_budget,
     };
     if let Some(trace_context) = config.agent_trace.as_ref() {
         record_json_from_context(
@@ -659,6 +666,7 @@ pub(super) async fn create_text_completion(
         stop_sequences: Vec::new(),
         agent_trace: None,
         image_parts: Vec::new(),
+        thinking_budget: config.thinking_budget,
     };
 
     let mut response = text_response_from_runtime(local_chat(state, backend_id, request).await?);

@@ -1,7 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use minijinja::value::{Value as MiniJinjaValue, ValueKind, from_args};
-use minijinja::{Environment, Error, ErrorKind, UndefinedBehavior, context};
+use minijinja::{Environment, Error, ErrorKind, UndefinedBehavior};
 use serde_json::{Map, Value};
 
 use crate::domain::models::{
@@ -15,11 +15,17 @@ pub(super) fn build_prompt(
     reasoning_effort: Option<ChatReasoningEffort>,
     tools: &[slab_proto::openai::FunctionTool],
 ) -> Result<String, AppCoreError> {
+    // The `None` effort means "disable thinking" — only the boolean
+    // `enable_thinking` carries that; no effort string is exposed for it.
+    let effort_str = reasoning_effort
+        .filter(|value| !matches!(value, ChatReasoningEffort::None))
+        .map(|value| value.as_str());
     match chat_template_source.map(str::trim).filter(|value| !value.is_empty()) {
         Some(source) => render_minijinja_template(
             source,
             messages,
             reasoning_effort.map(|value| !matches!(value, ChatReasoningEffort::None)),
+            effort_str,
             tools,
         ),
         None => Ok(render_raw_chat(messages, tools)),
@@ -76,6 +82,7 @@ fn render_minijinja_template(
     source: &str,
     messages: &[DomainConversationMessage],
     enable_thinking: Option<bool>,
+    reasoning_effort: Option<&str>,
     tools: &[slab_proto::openai::FunctionTool],
 ) -> Result<String, AppCoreError> {
     let mut env = Environment::new();
@@ -124,33 +131,37 @@ fn render_minijinja_template(
     )
     .unwrap_or_else(|_| Value::Array(Vec::new()));
 
-    let render_result = match enable_thinking {
-        Some(enable_thinking) => template.render(context! {
-            messages => &template_messages,
-            add_generation_prompt => !has_assistant_prefill,
-            continue_final_message => has_assistant_prefill,
-            bos_token => "",
-            eos_token => eos_token,
-            unk_token => "",
-            pad_token => "",
-            tools => template_tools.clone(),
-            documents => Vec::<Value>::new(),
-            enable_thinking => enable_thinking,
-        }),
-        None => template.render(context! {
-            messages => &template_messages,
-            add_generation_prompt => !has_assistant_prefill,
-            continue_final_message => has_assistant_prefill,
-            bos_token => "",
-            eos_token => eos_token,
-            unk_token => "",
-            pad_token => "",
-            tools => template_tools,
-            documents => Vec::<Value>::new(),
-        }),
-    };
+    // The context is assembled as a JSON map with CONDITIONAL key insertion:
+    // `enable_thinking` / `reasoning_effort` appear only when set, keeping
+    // `{% if x is defined %}` semantics exact (a null value would make
+    // `is defined` true and change Qwen3.5-class templates). Strict undefined
+    // behaviour makes the EXTRA `reasoning_effort` key safe for templates that
+    // never read it — the forward-compat hook for gpt-oss-harmony /
+    // Qwen3.8-style templates that consume it natively.
+    let mut render_context = serde_json::Map::new();
+    render_context.insert(
+        "messages".to_owned(),
+        serde_json::to_value(&template_messages).map_err(|error| {
+            AppCoreError::Internal(format!("template messages failed to serialize: {error}"))
+        })?,
+    );
+    render_context.insert("add_generation_prompt".to_owned(), Value::Bool(!has_assistant_prefill));
+    render_context.insert("continue_final_message".to_owned(), Value::Bool(has_assistant_prefill));
+    render_context.insert("bos_token".to_owned(), Value::String(String::new()));
+    render_context.insert("eos_token".to_owned(), Value::String(eos_token.to_owned()));
+    render_context.insert("unk_token".to_owned(), Value::String(String::new()));
+    render_context.insert("pad_token".to_owned(), Value::String(String::new()));
+    render_context.insert("tools".to_owned(), template_tools);
+    render_context.insert("documents".to_owned(), Value::Array(Vec::new()));
+    if let Some(enable_thinking) = enable_thinking {
+        render_context.insert("enable_thinking".to_owned(), Value::Bool(enable_thinking));
+    }
+    if let Some(reasoning_effort) = reasoning_effort {
+        render_context
+            .insert("reasoning_effort".to_owned(), Value::String(reasoning_effort.to_owned()));
+    }
 
-    render_result.map_err(|error| {
+    template.render(render_context).map_err(|error| {
         AppCoreError::BadRequest(format!("configured chat_template failed to render: {error}"))
     })
 }
@@ -563,6 +574,36 @@ mod tests {
         .expect("template prompt");
 
         assert_eq!(rendered, "<think></think>");
+    }
+
+    #[test]
+    fn minijinja_template_exposes_reasoning_effort_only_when_set() {
+        let template =
+            "{% if reasoning_effort is defined %}{{ reasoning_effort }}{% else %}unset{% endif %}";
+
+        let rendered = build_prompt(
+            &[message("user", "hello")],
+            Some(template),
+            Some(ChatReasoningEffort::Medium),
+            &[],
+        )
+        .expect("template prompt");
+        assert_eq!(rendered, "medium");
+
+        // The `None` variant is "disable thinking", not an effort level — no
+        // string is exposed to the template.
+        let rendered = build_prompt(
+            &[message("user", "hello")],
+            Some(template),
+            Some(ChatReasoningEffort::None),
+            &[],
+        )
+        .expect("template prompt");
+        assert_eq!(rendered, "unset");
+
+        let rendered = build_prompt(&[message("user", "hello")], Some(template), None, &[])
+            .expect("template prompt");
+        assert_eq!(rendered, "unset");
     }
 
     #[test]

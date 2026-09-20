@@ -22,6 +22,7 @@ class RuntimePresetsResponse:
         presence_penalty (float | None | Unset):
         repetition_penalty (float | None | Unset):
         temperature (float | None | Unset):
+        thinking_budget (int | None | Unset):
         top_k (int | None | Unset):
         top_p (float | None | Unset):
     """
@@ -31,6 +32,7 @@ class RuntimePresetsResponse:
     presence_penalty: float | None | Unset = UNSET
     repetition_penalty: float | None | Unset = UNSET
     temperature: float | None | Unset = UNSET
+    thinking_budget: int | None | Unset = UNSET
     top_k: int | None | Unset = UNSET
     top_p: float | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -66,6 +68,12 @@ class RuntimePresetsResponse:
         else:
             temperature = self.temperature
 
+        thinking_budget: int | None | Unset
+        if isinstance(self.thinking_budget, Unset):
+            thinking_budget = UNSET
+        else:
+            thinking_budget = self.thinking_budget
+
         top_k: int | None | Unset
         if isinstance(self.top_k, Unset):
             top_k = UNSET
@@ -91,6 +99,8 @@ class RuntimePresetsResponse:
             field_dict["repetition_penalty"] = repetition_penalty
         if temperature is not UNSET:
             field_dict["temperature"] = temperature
+        if thinking_budget is not UNSET:
+            field_dict["thinking_budget"] = thinking_budget
         if top_k is not UNSET:
             field_dict["top_k"] = top_k
         if top_p is not UNSET:
@@ -149,6 +159,15 @@ class RuntimePresetsResponse:
 
         temperature = _parse_temperature(d.pop("temperature", UNSET))
 
+        def _parse_thinking_budget(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        thinking_budget = _parse_thinking_budget(d.pop("thinking_budget", UNSET))
+
         def _parse_top_k(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -173,6 +192,7 @@ class RuntimePresetsResponse:
             presence_penalty=presence_penalty,
             repetition_penalty=repetition_penalty,
             temperature=temperature,
+            thinking_budget=thinking_budget,
             top_k=top_k,
             top_p=top_p,
         )
