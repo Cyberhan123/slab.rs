@@ -170,10 +170,12 @@ API Layer (5 Sessions)
    └─> Master routes to assigned worker
    └─> Worker tokenizes text, stores in pending_tokens
 
-3. generate_stream(session_id, max_new_tokens)
+3. generate_stream(session_id, max_new_tokens, thinking_budget)
    └─> Worker builds batch with pending_tokens
    └─> run_inference_step() prefills + generates
    └─> Tokens streamed to caller
+   (thinking_budget: Option<ThinkingBudget> — force-closes the <think>
+    segment at the token budget by injecting </think>; None = no cap)
 
 4. end_session(session_id)
    └─> Worker frees session

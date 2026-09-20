@@ -85,9 +85,9 @@ let pipeline = PipelineBuilder::new("chat")
     .gpu_stream("llama-generate", move |input| {
         let service = llama_service.clone();
         async move {
-            let session = service.create_session().await?;
+            let session = service.create_session_with_options(/* session options */).await?;
             service.append_input(session, input).await?;
-            let stream = service.generate_stream(session, 512).await?;
+            let stream = service.generate_stream(session, 512, None).await?;
             Ok(BackendReply::Stream(stream))
         }
     })
