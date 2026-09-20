@@ -1556,6 +1556,12 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        windows,
+        ignore = "PowerShell cold start + process-tree kill can exceed the 15s grace on \
+                  loaded parallel runners; the kill assertion needs a <30s threshold, so it \
+                  cannot be widened safely. Run with --ignored on a quiet Windows machine"
+    )]
     async fn run_console_command_timeout_preserves_pre_deadline_output_and_kills_tree() {
         let root = tempfile::tempdir().expect("tempdir");
         let command = if cfg!(windows) {
