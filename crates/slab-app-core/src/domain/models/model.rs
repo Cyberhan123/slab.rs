@@ -232,56 +232,14 @@ pub struct RuntimePresets {
 }
 
 impl RuntimePresets {
-    pub fn new(
-        max_tokens: Option<u32>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        top_k: Option<i32>,
-        min_p: Option<f32>,
-        presence_penalty: Option<f32>,
-        repetition_penalty: Option<f32>,
-    ) -> Self {
-        Self {
-            max_tokens,
-            temperature,
-            top_p,
-            top_k,
-            min_p,
-            presence_penalty,
-            repetition_penalty,
-            thinking_budget: None,
-            efforts: BTreeMap::new(),
-        }
-    }
-
-    /// Chainable thinking-budget setter. `new()` deliberately keeps its
-    /// long-stable 7-arg signature (an 8th would trip clippy's
-    /// `too_many_arguments` under the workspace `-D warnings` gate) so its
-    /// existing call sites stay untouched.
+    /// Chainable thinking-budget setter. Construction otherwise goes through
+    /// struct literals + `Default` (`RuntimePresets { temperature: Some(0.6),
+    /// ..Default::default() }`) — a positional constructor with 7+ `Option`
+    /// params reads poorly at call sites and trips clippy's
+    /// `too_many_arguments` under the workspace `-D warnings` gate.
     pub fn with_thinking_budget(mut self, thinking_budget: Option<u32>) -> Self {
         self.thinking_budget = thinking_budget;
         self
-    }
-
-    pub fn from_optional_fields(
-        max_tokens: Option<u32>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        top_k: Option<i32>,
-        min_p: Option<f32>,
-        presence_penalty: Option<f32>,
-        repetition_penalty: Option<f32>,
-    ) -> Option<Self> {
-        Self::new(
-            max_tokens,
-            temperature,
-            top_p,
-            top_k,
-            min_p,
-            presence_penalty,
-            repetition_penalty,
-        )
-        .into_non_empty()
     }
 
     pub fn from_json_options(options: &BTreeMap<String, Value>) -> Option<Self> {
@@ -309,21 +267,19 @@ impl RuntimePresets {
             return result.into_non_empty();
         }
 
-        // Legacy flat shape: { "temperature": ..., "top_p": ... }. The flat
-        // thinking budget would be dropped by `from_optional_fields`, so it is
-        // re-attached here.
-        Self::from_optional_fields(
-            options.get("max_tokens").and_then(json_value_to_u32),
-            options.get("temperature").and_then(json_value_to_f32),
-            options.get("top_p").and_then(json_value_to_f32),
-            options.get("top_k").and_then(json_value_to_i32),
-            options.get("min_p").and_then(json_value_to_f32),
-            options.get("presence_penalty").and_then(json_value_to_f32),
-            options.get("repetition_penalty").and_then(json_value_to_f32),
-        )
-        .map(|presets| {
-            presets.with_thinking_budget(options.get("thinking_budget").and_then(json_value_to_u32))
-        })
+        // Legacy flat shape: { "temperature": ..., "top_p": ... }.
+        RuntimePresets {
+            max_tokens: options.get("max_tokens").and_then(json_value_to_u32),
+            temperature: options.get("temperature").and_then(json_value_to_f32),
+            top_p: options.get("top_p").and_then(json_value_to_f32),
+            top_k: options.get("top_k").and_then(json_value_to_i32),
+            min_p: options.get("min_p").and_then(json_value_to_f32),
+            presence_penalty: options.get("presence_penalty").and_then(json_value_to_f32),
+            repetition_penalty: options.get("repetition_penalty").and_then(json_value_to_f32),
+            thinking_budget: options.get("thinking_budget").and_then(json_value_to_u32),
+            efforts: BTreeMap::new(),
+        }
+        .into_non_empty()
     }
 
     /// Resolve the effective flat preset for an effort level: the matching
@@ -340,31 +296,33 @@ impl RuntimePresets {
         let Some(override_preset) = self.efforts.get(key) else {
             return self.flat_clone();
         };
-        RuntimePresets::new(
-            override_preset.max_tokens.or(self.max_tokens),
-            override_preset.temperature.or(self.temperature),
-            override_preset.top_p.or(self.top_p),
-            override_preset.top_k.or(self.top_k),
-            override_preset.min_p.or(self.min_p),
-            override_preset.presence_penalty.or(self.presence_penalty),
-            override_preset.repetition_penalty.or(self.repetition_penalty),
-        )
-        .with_thinking_budget(override_preset.thinking_budget.or(self.thinking_budget))
+        RuntimePresets {
+            max_tokens: override_preset.max_tokens.or(self.max_tokens),
+            temperature: override_preset.temperature.or(self.temperature),
+            top_p: override_preset.top_p.or(self.top_p),
+            top_k: override_preset.top_k.or(self.top_k),
+            min_p: override_preset.min_p.or(self.min_p),
+            presence_penalty: override_preset.presence_penalty.or(self.presence_penalty),
+            repetition_penalty: override_preset.repetition_penalty.or(self.repetition_penalty),
+            thinking_budget: override_preset.thinking_budget.or(self.thinking_budget),
+            efforts: BTreeMap::new(),
+        }
     }
 
     fn flat_clone(&self) -> RuntimePresets {
         // Must carry the flat thinking budget too — without it an effort
         // without its own override would silently lose the model's budget.
-        RuntimePresets::new(
-            self.max_tokens,
-            self.temperature,
-            self.top_p,
-            self.top_k,
-            self.min_p,
-            self.presence_penalty,
-            self.repetition_penalty,
-        )
-        .with_thinking_budget(self.thinking_budget)
+        RuntimePresets {
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            top_p: self.top_p,
+            top_k: self.top_k,
+            min_p: self.min_p,
+            presence_penalty: self.presence_penalty,
+            repetition_penalty: self.repetition_penalty,
+            thinking_budget: self.thinking_budget,
+            efforts: BTreeMap::new(),
+        }
     }
 
     pub fn into_non_empty(self) -> Option<Self> {
@@ -385,16 +343,17 @@ impl RuntimePresets {
 }
 
 fn parse_flat_map(map: &serde_json::Map<String, Value>) -> RuntimePresets {
-    RuntimePresets::new(
-        map.get("max_tokens").and_then(json_value_to_u32),
-        map.get("temperature").and_then(json_value_to_f32),
-        map.get("top_p").and_then(json_value_to_f32),
-        map.get("top_k").and_then(json_value_to_i32),
-        map.get("min_p").and_then(json_value_to_f32),
-        map.get("presence_penalty").and_then(json_value_to_f32),
-        map.get("repetition_penalty").and_then(json_value_to_f32),
-    )
-    .with_thinking_budget(map.get("thinking_budget").and_then(json_value_to_u32))
+    RuntimePresets {
+        max_tokens: map.get("max_tokens").and_then(json_value_to_u32),
+        temperature: map.get("temperature").and_then(json_value_to_f32),
+        top_p: map.get("top_p").and_then(json_value_to_f32),
+        top_k: map.get("top_k").and_then(json_value_to_i32),
+        min_p: map.get("min_p").and_then(json_value_to_f32),
+        presence_penalty: map.get("presence_penalty").and_then(json_value_to_f32),
+        repetition_penalty: map.get("repetition_penalty").and_then(json_value_to_f32),
+        thinking_budget: map.get("thinking_budget").and_then(json_value_to_u32),
+        efforts: BTreeMap::new(),
+    }
 }
 
 fn json_value_to_f32(value: &Value) -> Option<f32> {
@@ -978,8 +937,8 @@ mod tests {
         let low = presets.resolve_for_effort(Some(slab_types::ChatReasoningEffort::Low));
         assert_eq!(low.thinking_budget, Some(2048));
 
-        // Legacy flat shape: the budget must survive the from_optional_fields
-        // round-trip (it is re-attached, not dropped).
+        // Legacy flat shape: the flat budget must survive the parse (it is
+        // carried on the struct, not dropped).
         let options: BTreeMap<String, serde_json::Value> =
             json!({ "thinking_budget": 512, "temperature": 0.6 })
                 .as_object()

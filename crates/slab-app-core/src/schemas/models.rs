@@ -1041,16 +1041,17 @@ impl From<ModelSpecRequest> for DomainModelSpec {
 
 impl From<RuntimePresetsRequest> for DomainRuntimePresets {
     fn from(req: RuntimePresetsRequest) -> Self {
-        Self::new(
-            req.max_tokens,
-            req.temperature,
-            req.top_p,
-            req.top_k,
-            req.min_p,
-            req.presence_penalty,
-            req.repetition_penalty,
-        )
-        .with_thinking_budget(req.thinking_budget)
+        Self {
+            max_tokens: req.max_tokens,
+            temperature: req.temperature,
+            top_p: req.top_p,
+            top_k: req.top_k,
+            min_p: req.min_p,
+            presence_penalty: req.presence_penalty,
+            repetition_penalty: req.repetition_penalty,
+            thinking_budget: req.thinking_budget,
+            efforts: std::collections::BTreeMap::new(),
+        }
     }
 }
 

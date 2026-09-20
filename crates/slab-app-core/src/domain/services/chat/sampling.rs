@@ -24,30 +24,31 @@ pub(super) const DEFAULT_COMPLETION_MAX_TOKENS: u32 = 512;
 /// toward convergent sampling.
 pub(super) fn built_in_for_effort(effort: Option<ChatReasoningEffort>) -> RuntimePresets {
     match effort {
-        Some(ChatReasoningEffort::High) => RuntimePresets::new(
-            Some(4096u32),
-            Some(0.3f32),
-            Some(0.98f32),
-            Some(40i32),
-            Some(0.05f32),
-            None,
-            None,
-        ),
-        Some(ChatReasoningEffort::Medium) => {
-            RuntimePresets::new(Some(2048u32), Some(0.6f32), Some(0.95f32), None, None, None, None)
-        }
-        Some(ChatReasoningEffort::Low) | Some(ChatReasoningEffort::Minimal) => {
-            RuntimePresets::new(Some(1024u32), Some(0.5f32), Some(0.9f32), None, None, None, None)
-        }
-        Some(ChatReasoningEffort::None) | None => RuntimePresets::new(
-            Some(DEFAULT_COMPLETION_MAX_TOKENS),
-            Some(0.7f32),
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
+        Some(ChatReasoningEffort::High) => RuntimePresets {
+            max_tokens: Some(4096u32),
+            temperature: Some(0.3f32),
+            top_p: Some(0.98f32),
+            top_k: Some(40i32),
+            min_p: Some(0.05f32),
+            ..Default::default()
+        },
+        Some(ChatReasoningEffort::Medium) => RuntimePresets {
+            max_tokens: Some(2048u32),
+            temperature: Some(0.6f32),
+            top_p: Some(0.95f32),
+            ..Default::default()
+        },
+        Some(ChatReasoningEffort::Low) | Some(ChatReasoningEffort::Minimal) => RuntimePresets {
+            max_tokens: Some(1024u32),
+            temperature: Some(0.5f32),
+            top_p: Some(0.9f32),
+            ..Default::default()
+        },
+        Some(ChatReasoningEffort::None) | None => RuntimePresets {
+            max_tokens: Some(DEFAULT_COMPLETION_MAX_TOKENS),
+            temperature: Some(0.7f32),
+            ..Default::default()
+        },
     }
 }
 
@@ -200,7 +201,7 @@ mod tests {
         params.max_tokens = Some(1200);
         assert_eq!(resolve_sampling(&params, None, None).explicit_max_tokens, Some(1200));
 
-        let model = RuntimePresets::new(Some(2048), None, None, None, None, None, None);
+        let model = RuntimePresets { max_tokens: Some(2048), ..Default::default() };
         assert_eq!(
             resolve_sampling(&common(None, None), None, Some(&model)).explicit_max_tokens,
             Some(2048)
@@ -209,7 +210,8 @@ mod tests {
 
     #[test]
     fn request_overrides_model_preset() {
-        let model = RuntimePresets::new(None, Some(0.6), Some(0.95), None, None, None, None);
+        let model =
+            RuntimePresets { temperature: Some(0.6), top_p: Some(0.95), ..Default::default() };
         let resolved = resolve_sampling(&common(Some(0.2), None), None, Some(&model));
         assert!((resolved.temperature - 0.2).abs() < f32::EPSILON);
         assert!((resolved.top_p.unwrap() - 0.95).abs() < f32::EPSILON);
@@ -226,10 +228,11 @@ mod tests {
     #[test]
     fn effort_override_wins_over_model_default() {
         // Model ships a flat default temp 0.6 plus a `high` override temp 0.3.
-        let mut model = RuntimePresets::new(None, Some(0.6), Some(0.95), None, None, None, None);
+        let mut model =
+            RuntimePresets { temperature: Some(0.6), top_p: Some(0.95), ..Default::default() };
         model.efforts.insert(
             "high".to_owned(),
-            RuntimePresets::new(None, Some(0.3), None, None, None, None, None),
+            RuntimePresets { temperature: Some(0.3), ..Default::default() },
         );
         let resolved =
             resolve_sampling(&common(None, None), Some(ChatReasoningEffort::High), Some(&model));
@@ -285,19 +288,15 @@ mod tests {
     #[test]
     fn model_preset_thinking_budget_overrides_built_in() {
         // Flat model budget applies when the effort has no override…
-        let model = RuntimePresets::new(None, None, None, None, None, None, None)
-            .with_thinking_budget(Some(64));
+        let model = RuntimePresets::default().with_thinking_budget(Some(64));
         let resolved =
             resolve_sampling(&common(None, None), Some(ChatReasoningEffort::High), Some(&model));
         assert_eq!(resolved.thinking_budget, Some(64));
         // …and the per-effort override wins over both flat and built-in.
-        let mut model = RuntimePresets::new(None, None, None, None, None, None, None)
-            .with_thinking_budget(Some(64));
-        model.efforts.insert(
-            "high".to_owned(),
-            RuntimePresets::new(None, None, None, None, None, None, None)
-                .with_thinking_budget(Some(128)),
-        );
+        let mut model = RuntimePresets::default().with_thinking_budget(Some(64));
+        model
+            .efforts
+            .insert("high".to_owned(), RuntimePresets::default().with_thinking_budget(Some(128)));
         let resolved =
             resolve_sampling(&common(None, None), Some(ChatReasoningEffort::High), Some(&model));
         assert_eq!(resolved.thinking_budget, Some(128));
