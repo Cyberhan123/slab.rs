@@ -148,22 +148,29 @@ fn stop_info_to_metadata(stop: &LlamaStopInfo) -> TextGenerationMetadata {
 }
 
 fn llama_request_payload(request: &LlamaDispatchRequest) -> serde_json::Value {
-    serde_json::json!({
-        "prompt": request.prompt,
-        "max_tokens": request.max_tokens,
-        "session_key": request.session_key,
-        "gbnf": request.gbnf,
-        "temperature": request.temperature,
-        "top_p": request.top_p,
-        "top_k": request.top_k,
-        "min_p": request.min_p,
-        "repetition_penalty": request.repetition_penalty,
-        "presence_penalty": request.presence_penalty,
-        "ignore_eos": request.ignore_eos,
-        "logit_bias": request.logit_bias,
-        "stop_sequences": request.stop_sequences,
-        "thinking_budget": request.thinking_budget,
-    })
+    use slab_types::generation_trace::GenerationSamplingTracePayload;
+
+    // Shared sampling fields come from the slab-types contract (same set the
+    // app-layer `runtime_request` event traces); the engine adds only its own
+    // sampler internals.
+    let mut extras = serde_json::Map::new();
+    extras.insert("ignore_eos".to_owned(), serde_json::json!(request.ignore_eos));
+    extras.insert("logit_bias".to_owned(), serde_json::json!(request.logit_bias));
+    GenerationSamplingTracePayload {
+        prompt: &request.prompt,
+        max_tokens: Some(u32::try_from(request.max_tokens).unwrap_or(u32::MAX)),
+        temperature: request.temperature,
+        top_p: request.top_p,
+        top_k: request.top_k,
+        min_p: request.min_p,
+        presence_penalty: request.presence_penalty,
+        repetition_penalty: request.repetition_penalty,
+        session_key: request.session_key.as_deref(),
+        gbnf: request.gbnf.as_deref(),
+        stop_sequences: &request.stop_sequences,
+        thinking_budget: request.thinking_budget,
+    }
+    .into_trace_value(extras)
 }
 
 /// Resolve the per-generation thinking-budget spec for a dispatch. A GBNF
@@ -1830,8 +1837,9 @@ fn reasoning_event_payload(reasoning: String) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        SESSION_BINDING_BUSY_TTL, SessionBinding, SessionReusePlan, ThinkingDelta,
-        ThinkingStreamState, parse_generated_thinking_output, plan_session_reuse,
+        LlamaDispatchRequest, SESSION_BINDING_BUSY_TTL, SessionBinding, SessionReusePlan,
+        ThinkingDelta, ThinkingStreamState, llama_request_payload, parse_generated_thinking_output,
+        plan_session_reuse,
     };
     use slab_llama::LlamaSessionSnapshot;
     use slab_utils::thinking_markers::{ParsedThinkingOutput, parse_thinking_output};
@@ -1840,6 +1848,41 @@ mod tests {
 
     fn snapshot() -> LlamaSessionSnapshot {
         LlamaSessionSnapshot { worker_id: 1, n_past: 12, state: Arc::from([1_u8, 2, 3, 4]) }
+    }
+
+    #[test]
+    fn llama_request_payload_merges_shared_contract_with_sampler_extras() {
+        let request = LlamaDispatchRequest {
+            prompt: "prompt".to_owned(),
+            max_tokens: 1024,
+            session_key: Some("session".to_owned()),
+            gbnf: None,
+            temperature: Some(0.6),
+            top_p: None,
+            top_k: None,
+            min_p: None,
+            repetition_penalty: None,
+            presence_penalty: None,
+            ignore_eos: true,
+            logit_bias: None,
+            stop_sequences: Vec::new(),
+            agent_trace: None,
+            image_parts: Vec::new(),
+            thinking_budget: Some(4096),
+        };
+
+        let payload = llama_request_payload(&request);
+
+        // Engine-layer sampler extras (the app's `runtime_request` event has
+        // none of these).
+        assert_eq!(payload["ignore_eos"], true);
+        assert!(payload["logit_bias"].is_null());
+        // Shared sampling fields — the slab-types contract both layers trace.
+        assert_eq!(payload["prompt"], "prompt");
+        assert_eq!(payload["max_tokens"], 1024);
+        assert_eq!(payload["session_key"], "session");
+        assert_eq!(payload["thinking_budget"], 4096);
+        assert!(payload.get("model").is_none(), "app-side extras stay app-side");
     }
 
     #[test]

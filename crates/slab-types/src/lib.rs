@@ -7,6 +7,7 @@
 //! - [`common`] universal building blocks: [`common::Id`], [`common::JsonOptions`],
 //!   [`common::Timestamp`].
 //! - [`error`] crate-level error type.
+//! - [`generation_trace`] shared field set of the generation agent-trace payloads.
 //! - [`i18n`] server-to-frontend internationalization references.
 //! - [`plugin`] shared plugin manifest and contribution contracts.
 //! - [`plugin_runtime`] shared JS plugin runtime JSON-RPC contracts.
@@ -23,6 +24,7 @@ mod defaults;
 pub mod desktop_api;
 pub mod device;
 pub mod error;
+pub mod generation_trace;
 pub mod i18n;
 pub mod load_config;
 pub mod plugin;

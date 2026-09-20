@@ -98,24 +98,34 @@ pub(crate) fn text_usage_from_runtime(usage: RuntimeTextGenerationUsage) -> Text
 }
 
 pub(crate) fn runtime_request_payload(request: &RuntimeTextGenerationRequest) -> serde_json::Value {
-    serde_json::json!({
-        "model": request.model,
-        "backend_id": request.backend_id.map(|backend| backend.canonical_id()),
-        "prompt": request.prompt,
-        "system_prompt": request.system_prompt,
-        "max_tokens": request.max_tokens,
-        "temperature": request.temperature,
-        "top_p": request.top_p,
-        "top_k": request.top_k,
-        "min_p": request.min_p,
-        "presence_penalty": request.presence_penalty,
-        "repetition_penalty": request.repetition_penalty,
-        "session_key": request.session_key,
-        "stream": request.stream,
-        "gbnf": request.gbnf,
-        "stop_sequences": request.stop_sequences,
-        "thinking_budget": request.thinking_budget,
-    })
+    use slab_types::generation_trace::GenerationSamplingTracePayload;
+
+    // Shared sampling fields come from the slab-types contract (same set the
+    // engine-layer `llama_request` event traces); the app layer adds only its
+    // routing view.
+    let mut extras = serde_json::Map::new();
+    extras.insert("model".to_owned(), serde_json::json!(request.model));
+    extras.insert(
+        "backend_id".to_owned(),
+        serde_json::json!(request.backend_id.map(|backend| backend.canonical_id())),
+    );
+    extras.insert("system_prompt".to_owned(), serde_json::json!(request.system_prompt));
+    extras.insert("stream".to_owned(), serde_json::json!(request.stream));
+    GenerationSamplingTracePayload {
+        prompt: &request.prompt,
+        max_tokens: request.max_tokens,
+        temperature: request.temperature,
+        top_p: request.top_p,
+        top_k: request.top_k,
+        min_p: request.min_p,
+        presence_penalty: request.presence_penalty,
+        repetition_penalty: request.repetition_penalty,
+        session_key: request.session_key.as_deref(),
+        gbnf: request.gbnf.as_deref(),
+        stop_sequences: &request.stop_sequences,
+        thinking_budget: request.thinking_budget,
+    }
+    .into_trace_value(extras)
 }
 
 pub(crate) fn runtime_response_payload(
@@ -150,4 +160,35 @@ pub(crate) fn runtime_usage_payload(usage: &RuntimeTextGenerationUsage) -> serde
         },
         "estimated": usage.estimated,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_request_payload_merges_shared_contract_with_routing_extras() {
+        let request = RuntimeTextGenerationRequest {
+            model: "Qwen3.5-9B".to_owned(),
+            prompt: "prompt".to_owned(),
+            max_tokens: Some(1024),
+            temperature: Some(0.6),
+            session_key: Some("session".to_owned()),
+            thinking_budget: Some(4096),
+            ..Default::default()
+        };
+
+        let payload = runtime_request_payload(&request);
+
+        // App-layer routing extras (the engine's `llama_request` event has none
+        // of these).
+        assert_eq!(payload["model"], "Qwen3.5-9B");
+        assert_eq!(payload["stream"], false);
+        // Shared sampling fields — the slab-types contract both layers trace.
+        assert_eq!(payload["prompt"], "prompt");
+        assert_eq!(payload["max_tokens"], 1024);
+        assert_eq!(payload["session_key"], "session");
+        assert_eq!(payload["thinking_budget"], 4096);
+        assert!(payload.get("ignore_eos").is_none(), "engine-side extras stay engine-side");
+    }
 }
