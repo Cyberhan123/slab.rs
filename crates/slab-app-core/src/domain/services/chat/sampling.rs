@@ -19,36 +19,36 @@ use crate::domain::models::{CommonChatParams, RuntimePresets};
 /// Re-exported here so the `chat::sampling` path keeps a single name.
 pub(super) use slab_types::chat::DEFAULT_COMPLETION_MAX_TOKENS;
 
+/// Visible-answer headroom added on top of the thinking budget when the effort
+/// derives the generation cap (see [`resolve_sampling`]). The cap covers
+/// thinking + answer, so the budget alone would leave no room to answer.
+const ANSWER_ALLOWANCE_TOKENS: u32 = 2048;
+
 /// Built-in sampling preset for an effort level, used when neither the request
 /// nor the model's runtime preset supplies a given field. "High effort" biases
-/// toward convergent sampling.
+/// toward convergent sampling. Deliberately carries **no** max-tokens dial:
+/// effort strength is expressed by the thinking budget (which derives its own
+/// cap, budget + [`ANSWER_ALLOWANCE_TOKENS`]) — the old per-effort caps
+/// self-clamped High's 16384 budget down to its own 4096 minus the answer
+/// floor.
 pub(super) fn built_in_for_effort(effort: Option<ChatReasoningEffort>) -> RuntimePresets {
     match effort {
         Some(ChatReasoningEffort::High) => RuntimePresets {
-            max_tokens: Some(4096u32),
             temperature: Some(0.3f32),
             top_p: Some(0.98f32),
             top_k: Some(40i32),
             min_p: Some(0.05f32),
             ..Default::default()
         },
-        Some(ChatReasoningEffort::Medium) => RuntimePresets {
-            max_tokens: Some(2048u32),
-            temperature: Some(0.6f32),
-            top_p: Some(0.95f32),
-            ..Default::default()
-        },
-        Some(ChatReasoningEffort::Low) | Some(ChatReasoningEffort::Minimal) => RuntimePresets {
-            max_tokens: Some(1024u32),
-            temperature: Some(0.5f32),
-            top_p: Some(0.9f32),
-            ..Default::default()
-        },
-        Some(ChatReasoningEffort::None) | None => RuntimePresets {
-            max_tokens: Some(DEFAULT_COMPLETION_MAX_TOKENS),
-            temperature: Some(0.7f32),
-            ..Default::default()
-        },
+        Some(ChatReasoningEffort::Medium) => {
+            RuntimePresets { temperature: Some(0.6f32), top_p: Some(0.95f32), ..Default::default() }
+        }
+        Some(ChatReasoningEffort::Low) | Some(ChatReasoningEffort::Minimal) => {
+            RuntimePresets { temperature: Some(0.5f32), top_p: Some(0.9f32), ..Default::default() }
+        }
+        Some(ChatReasoningEffort::None) | None => {
+            RuntimePresets { temperature: Some(0.7f32), ..Default::default() }
+        }
     }
 }
 
@@ -120,8 +120,20 @@ pub(crate) fn resolve_sampling(
         model_presets.map(|presets| presets.resolve_for_effort(effort)).unwrap_or_default();
     let built_in = built_in_for_effort(effort);
     let explicit_max_tokens = common.max_tokens.or(effort_preset.max_tokens);
-    let max_tokens =
-        explicit_max_tokens.or(built_in.max_tokens).unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
+    let raw_budget =
+        effort_preset.thinking_budget.or_else(|| built_in_thinking_budget_for_effort(effort));
+    // Effort owns the thinking budget; the generation cap follows from it
+    // (budget + answer allowance) unless something explicit overrides. The
+    // clamp below therefore never bites in the derived branch — it only
+    // guards small *deliberate* caps.
+    let thinking_on = matches!(effort, Some(e) if !matches!(e, ChatReasoningEffort::None));
+    let max_tokens = match explicit_max_tokens {
+        Some(explicit) => explicit,
+        None if thinking_on && raw_budget.is_some() => {
+            raw_budget.unwrap_or(0) + ANSWER_ALLOWANCE_TOKENS
+        }
+        None => DEFAULT_COMPLETION_MAX_TOKENS,
+    };
     ResolvedSampling {
         max_tokens,
         explicit_max_tokens,
@@ -180,10 +192,45 @@ mod tests {
     }
 
     #[test]
-    fn built_in_effort_caps_are_not_explicit() {
+    fn derived_effort_caps_are_not_explicit() {
+        // Effort derives the cap from the budget (budget + answer allowance);
+        // it is a fallback, never an explicit cap.
         let resolved = resolve_sampling(&common(None, None), Some(ChatReasoningEffort::High), None);
-        assert_eq!(resolved.max_tokens, 4096);
+        assert_eq!(resolved.max_tokens, 16384 + 2048);
         assert_eq!(resolved.explicit_max_tokens, None);
+    }
+
+    #[test]
+    fn effort_derives_cap_from_budget_plus_answer_allowance() {
+        let budget_and_cap = |effort| {
+            let resolved = resolve_sampling(&common(None, None), Some(effort), None);
+            (resolved.thinking_budget, resolved.max_tokens)
+        };
+        assert_eq!(budget_and_cap(ChatReasoningEffort::Minimal), (Some(512), 512 + 2048));
+        assert_eq!(budget_and_cap(ChatReasoningEffort::Low), (Some(1024), 1024 + 2048));
+        assert_eq!(budget_and_cap(ChatReasoningEffort::Medium), (Some(4096), 4096 + 2048));
+        assert_eq!(budget_and_cap(ChatReasoningEffort::High), (Some(16384), 16384 + 2048));
+        // No thinking (disabled variant or absent effort): the workspace-wide
+        // default, and no budget at all.
+        assert_eq!(
+            budget_and_cap(ChatReasoningEffort::None),
+            (None, DEFAULT_COMPLETION_MAX_TOKENS)
+        );
+        let resolved = resolve_sampling(&common(None, None), None, None);
+        assert_eq!(resolved.thinking_budget, None);
+        assert_eq!(resolved.max_tokens, DEFAULT_COMPLETION_MAX_TOKENS);
+    }
+
+    #[test]
+    fn explicit_cap_overrides_derivation_and_clamps_budget() {
+        // A deliberate request cap wins over the budget-derived cap and clamps
+        // the budget to the answer floor (cap - 256).
+        let mut params = common(None, None);
+        params.max_tokens = Some(4096);
+        let resolved = resolve_sampling(&params, Some(ChatReasoningEffort::High), None);
+        assert_eq!(resolved.max_tokens, 4096);
+        assert_eq!(resolved.explicit_max_tokens, Some(4096));
+        assert_eq!(resolved.thinking_budget, Some(3840));
     }
 
     #[test]
@@ -261,11 +308,11 @@ mod tests {
     }
 
     #[test]
-    fn resolve_sampling_thinking_budget_uses_built_in_then_clamps() {
-        // High effort without a request cap: built-in max_tokens 4096 clamps
-        // the 16384 budget to 4096 - 256.
+    fn resolve_sampling_thinking_budget_uses_built_in_unclamped_when_derived() {
+        // High effort without a request cap: the budget survives whole — the
+        // derived cap (budget + allowance) always leaves answer room.
         let resolved = resolve_sampling(&common(None, None), Some(ChatReasoningEffort::High), None);
-        assert_eq!(resolved.thinking_budget, Some(3840));
+        assert_eq!(resolved.thinking_budget, Some(16384));
         // A small explicit request cap becomes the clamp base.
         let mut params = common(None, None);
         params.max_tokens = Some(512);
