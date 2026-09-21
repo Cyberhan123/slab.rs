@@ -162,7 +162,7 @@
     "@streamdown/mermaid": "^1.0.2",
     "@streamdown/math": "^1.0.2",
     "@streamdown/cjk": "^1.0.3",
-    "motion": "^13.1.1",
+    "motion": "^13.4.0",
     "@ai-sdk/react": "^4.0.74",
     "@hookform/resolvers": "^5.9.1",
     "ai": "^7.0.71",
