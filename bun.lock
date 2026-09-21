@@ -577,7 +577,7 @@
     "motion": "^13.1.1",
     "nanoid": "^6.0.1",
     "next-themes": "^0.4.6",
-    "openai": "^7.5.0",
+    "openai": "^7.18.0",
     "openapi-fetch": "^0.17.0",
     "openapi-react-query": "^0.5.4",
     "openapi-typescript": "^7.13.0",
