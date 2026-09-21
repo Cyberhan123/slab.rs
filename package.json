@@ -218,7 +218,7 @@
     "playwright": "^1.62.1",
     "postcss": "^8.5.26",
     "radix-ui": "^1.6.7",
-    "react": "^19.2.8",
+    "react": "^19.3.0",
     "react-arborist": "^3.6.1",
     "react-day-picker": "^10.0.1",
     "react-hook-form": "^7.86.0",
