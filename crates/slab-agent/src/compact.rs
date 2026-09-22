@@ -275,13 +275,31 @@ fn estimate_part_chars(part: &ConversationContentPart) -> usize {
     }
 }
 
+/// Fixed per-call char overhead for a serialized tool call — the JSON wrapper
+/// (`{"id":…,"type":"function","function":{…}}`) around the counted
+/// id/name/arguments payload.
+const TOOL_CALL_OVERHEAD_CHARS: usize = 24;
+
 pub fn estimate_message_chars(message: &ConversationMessage) -> usize {
-    match &message.content {
+    let content_chars = match &message.content {
         ConversationMessageContent::Text(text) => text.chars().count(),
         ConversationMessageContent::Parts(parts) => {
             parts.iter().map(estimate_part_chars).sum::<usize>()
         }
-    }
+    };
+    // Tool-call arguments are real prompt material (a write-file call carries
+    // the whole payload); counting only `content` silently dropped them.
+    let tool_call_chars = message
+        .tool_calls
+        .iter()
+        .map(|call| {
+            TOOL_CALL_OVERHEAD_CHARS
+                + call.id.as_deref().map_or(0, |id| id.chars().count())
+                + call.function.name.chars().count()
+                + call.function.arguments.chars().count()
+        })
+        .sum::<usize>();
+    content_chars + tool_call_chars
 }
 
 pub fn trailing_window(
@@ -411,6 +429,38 @@ mod tests {
         ]);
 
         assert_eq!(estimate_message_chars(&message), expected);
+    }
+
+    /// Assistant tool-call arguments are real prompt material (a write-file
+    /// call carries the whole payload) — they must count toward the estimate,
+    /// not just `content`.
+    #[test]
+    fn tool_call_arguments_count_toward_char_estimate() {
+        use slab_types::{ConversationToolCall, ConversationToolFunction};
+
+        let mut message = parts_message(vec![ConversationContentPart::Text {
+            text: "writing the file now".to_owned(),
+        }]);
+        message.tool_calls = vec![ConversationToolCall {
+            id: Some("call-9".to_owned()),
+            r#type: "function".to_owned(),
+            function: ConversationToolFunction {
+                name: "write_file".to_owned(),
+                arguments: "x".repeat(12_000),
+            },
+        }];
+
+        let expected = "writing the file now".chars().count()
+            + TOOL_CALL_OVERHEAD_CHARS
+            + "call-9".chars().count()
+            + "write_file".chars().count()
+            + 12_000;
+        assert_eq!(estimate_message_chars(&message), expected);
+
+        // No tool calls → unchanged legacy behavior.
+        let plain =
+            parts_message(vec![ConversationContentPart::Text { text: "just text".to_owned() }]);
+        assert_eq!(estimate_message_chars(&plain), "just text".chars().count());
     }
 
     fn text_message(role: &str, text: &str) -> ConversationMessage {

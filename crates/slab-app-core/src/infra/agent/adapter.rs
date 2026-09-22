@@ -630,6 +630,10 @@ impl From<crate::domain::models::TextGenerationUsage> for LlmUsage {
             prompt_tokens: value.prompt_tokens,
             completion_tokens: value.completion_tokens,
             total_tokens: value.total_tokens,
+            // The domain detail is `u32` with 0 meaning "not reported" — keep
+            // the port-level `Option` clean so the wire omits the field.
+            cached_tokens: (value.prompt_tokens_details.cached_tokens > 0)
+                .then_some(value.prompt_tokens_details.cached_tokens),
             estimated: value.estimated,
         }
     }
@@ -725,6 +729,35 @@ fn parsed_tool_calls_payload(tool_calls: &[ParsedToolCall]) -> Vec<Value> {
 mod tests {
     use super::*;
     use crate::domain::models::ChatResultChoice;
+
+    /// Cache-hit counts (engine kv-cache reuse / provider prompt-cache hits)
+    /// survive the domain -> port conversion; an unreported 0 becomes `None`
+    /// so `TurnUsage` omits the field on the wire.
+    #[test]
+    fn llm_usage_conversion_keeps_cached_tokens() {
+        let reported = crate::domain::models::TextGenerationUsage {
+            prompt_tokens: 1024,
+            completion_tokens: 8,
+            total_tokens: 1032,
+            prompt_tokens_details: crate::domain::models::TextPromptTokensDetails {
+                cached_tokens: 512,
+            },
+            estimated: false,
+        };
+        let converted = LlmUsage::from(reported);
+        assert_eq!(converted.cached_tokens, Some(512));
+
+        let unreported = crate::domain::models::TextGenerationUsage {
+            prompt_tokens: 10,
+            completion_tokens: 1,
+            total_tokens: 11,
+            prompt_tokens_details: crate::domain::models::TextPromptTokensDetails {
+                cached_tokens: 0,
+            },
+            estimated: true,
+        };
+        assert_eq!(LlmUsage::from(unreported).cached_tokens, None);
+    }
 
     fn text_message(role: &str, content: &str) -> ConversationMessage {
         ConversationMessage {

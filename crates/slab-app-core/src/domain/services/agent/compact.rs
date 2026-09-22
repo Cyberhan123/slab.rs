@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use slab_agent::{
-    CompactContext, CompactOutcome, CompactPort, SlidingWindowCompactPort, estimate_message_tokens,
+    CompactContext, CompactOutcome, CompactPort, SlidingWindowCompactPort, estimate_message_chars,
     estimate_tokens,
 };
 use slab_types::{ConversationMessage, ConversationMessageContent};
@@ -154,6 +154,22 @@ impl SummarizingCompactPort {
             calibration: std::sync::Mutex::new(1.0),
         }
     }
+
+    /// Per-message token cost at the current calibration ratio — the same
+    /// scale `estimate_tokens` applies to the whole-set estimate. Every
+    /// budget inside `compact` (gates, keep window, stub-stop accounting)
+    /// must measure on ONE scale: a raw chars/4 keep window under a CJK
+    /// calibration of ~2.5x kept ~1.5xW real tokens, so the "compacted"
+    /// result still overflowed the window and the calibrated next-turn gate
+    /// re-fired compaction every turn. The ratio is snapshotted once per
+    /// compact call so a concurrent `note_usage` cannot shift budgets
+    /// mid-flight.
+    fn calibrated_message_cost(&self) -> impl Fn(&ConversationMessage) -> usize + '_ {
+        let ratio = self.calibration.lock().map(|value| *value).unwrap_or(1.0);
+        move |message: &ConversationMessage| {
+            ((estimate_message_chars(message) as f64 * ratio) / 4.0).ceil() as usize
+        }
+    }
 }
 
 #[async_trait]
@@ -223,7 +239,10 @@ impl CompactPort for SummarizingCompactPort {
         // verbatim, pairing untouched (only message CONTENT shrinks, so no
         // orphan tool results can appear). Progressive: oldest batches first,
         // stopping at the stub-stop budget so mid-region results survive.
-        let (micro, stubbed) = micro_compact(messages, stub_stop);
+        // Budgets measure on the CALIBRATED scale — the same scale as the
+        // entry and escalate gates.
+        let cost = self.calibrated_message_cost();
+        let (micro, stubbed) = micro_compact(messages, stub_stop, &cost);
         let micro_estimate = self.estimate_tokens(&micro);
 
         // Tier 2 (LLM summarize): only when the deterministic pass is not
@@ -246,8 +265,11 @@ impl CompactPort for SummarizingCompactPort {
 
         let system_msg = micro.first().filter(|message| message.role == "system").cloned();
         let system_end = if system_msg.is_some() { 1 } else { 0 };
-        let keep_start = skip_orphan_tool_results(&micro, recent_window_start(&micro, keep_target))
-            .max(system_end);
+        let keep_start = skip_orphan_tool_results(
+            &micro,
+            recent_window_start_with_cost(&micro, keep_target, &cost),
+        )
+        .max(system_end);
 
         // Nothing older than the kept window to summarize — the deterministic
         // pass may still have shrunk the set.
@@ -442,12 +464,18 @@ pub async fn maybe_compact_messages(
 }
 
 /// Index of the first message in the trailing window that fits within
-/// `target_tokens` (inclusive). Returns `messages.len()` when nothing fits.
-fn recent_window_start(messages: &[ConversationMessage], target_tokens: usize) -> usize {
+/// `target_tokens` (inclusive), measured by `cost` — pass the calibrated
+/// per-message cost so the keep window lands on the same scale as the
+/// thresholds. Returns `messages.len()` when nothing fits.
+fn recent_window_start_with_cost(
+    messages: &[ConversationMessage],
+    target_tokens: usize,
+    cost: &impl Fn(&ConversationMessage) -> usize,
+) -> usize {
     let mut tokens = 0usize;
     let mut start = messages.len();
     for (index, message) in messages.iter().enumerate().rev() {
-        let message_tokens = estimate_message_tokens(message);
+        let message_tokens = cost(message);
         if start != messages.len() && tokens + message_tokens > target_tokens {
             break;
         }
@@ -480,10 +508,15 @@ fn skip_orphan_tool_results(messages: &[ConversationMessage], mut start: usize) 
 /// results can appear) and conversation text is preserved verbatim — this
 /// tier never rewrites user/assistant messages.
 ///
+/// `cost` is the per-message token measure used for the running budget — pass
+/// the calibrated cost so the stub-stop target (a fraction of the real context
+/// window) and the accounting share one scale.
+///
 /// Returns the new message set and how many tool results were stubbed.
 fn micro_compact(
     messages: &[ConversationMessage],
     stop_tokens: usize,
+    cost: &impl Fn(&ConversationMessage) -> usize,
 ) -> (Vec<ConversationMessage>, usize) {
     // Tool messages carry only `tool_call_id`; resolve tool names from the
     // assistant `tool_calls` that produced them.
@@ -512,13 +545,11 @@ fn micro_compact(
         .copied()
         .unwrap_or(usize::MAX);
 
-    // Raw (uncalibrated, per-message-ceil) accounting: the deterministic tier
-    // must not depend on the process-global EMA. The entry gate and the
-    // escalate check in `compact` re-measure with the calibrated estimator —
-    // under heavy calibration drift the gate may fire while this raw sum sits
-    // below the stop target, in which case nothing is stubbed and the
-    // summarize tier is the relief valve.
-    let mut running = messages.iter().map(estimate_message_tokens).sum::<usize>();
+    // Calibrated accounting on the same scale as the entry gate and stub-stop
+    // target: a raw chars/4 sum under-estimates CJK-heavy content by the full
+    // calibration ratio, stopping stubbing early and leaving real tokens above
+    // the budget the tier was asked to reach.
+    let mut running = messages.iter().map(cost).sum::<usize>();
 
     let mut stubbed = 0usize;
     let mut compacted = Vec::with_capacity(messages.len());
@@ -535,9 +566,7 @@ fn micro_compact(
             && !tool.is_some_and(|name| PROTECTED_TOOLS.contains(&name))
         {
             let stub = stub_tool_message(message, &text, tool.unwrap_or("unknown"));
-            running = running
-                .saturating_sub(estimate_message_tokens(message))
-                .saturating_add(estimate_message_tokens(&stub));
+            running = running.saturating_sub(cost(message)).saturating_add(cost(&stub));
             compacted.push(stub);
             stubbed += 1;
         } else {
@@ -734,6 +763,7 @@ fn effective_limits(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use slab_agent::estimate_message_tokens;
 
     fn text_message(role: &str, text: &str) -> ConversationMessage {
         ConversationMessage {
@@ -754,14 +784,32 @@ mod tests {
             text_message("user", "again more text"), // 4 tokens
         ];
         // Budget of 6 tokens keeps the trailing two messages (2 + 4 = 6).
-        let start = recent_window_start(&messages, 6);
+        let start = recent_window_start_with_cost(&messages, 6, &estimate_message_tokens);
         assert_eq!(start, 2, "expected keep_start = 2 (keeps indices 2..4)");
     }
 
     #[test]
     fn recent_window_start_returns_len_when_nothing_fits() {
         let messages = vec![text_message("user", &"x".repeat(200))];
-        assert_eq!(recent_window_start(&messages, 1), 0);
+        assert_eq!(recent_window_start_with_cost(&messages, 1, &estimate_message_tokens), 0);
+    }
+
+    /// The cost parameter actually drives the window size: doubling the
+    /// per-message cost must halve how many trailing messages fit.
+    #[test]
+    fn recent_window_start_with_cost_respects_custom_costs() {
+        let messages = vec![
+            text_message("system", "sys"),     // 1 raw token
+            text_message("user", "four"),      // 1 raw token
+            text_message("assistant", "five"), // 1 raw token
+            text_message("user", "sixx"),      // 1 raw token
+        ];
+        let doubled = |message: &ConversationMessage| estimate_message_tokens(message) * 2;
+
+        // Raw budget of 3 keeps the trailing 3 one-token messages.
+        assert_eq!(recent_window_start_with_cost(&messages, 3, &estimate_message_tokens), 1);
+        // Doubled costs: each message costs 2, so the same budget keeps 1.
+        assert_eq!(recent_window_start_with_cost(&messages, 3, &doubled), 3);
     }
 
     #[test]
@@ -1627,6 +1675,63 @@ mod tests {
         for (batch, text) in tool_texts.iter().enumerate().take(8).skip(3) {
             assert_eq!(*text, tool_result_text(batch, 100), "recent batch {batch} verbatim");
         }
+    }
+
+    /// The CJK regression: with the estimator calibrated to ~2.45x (chars/4
+    /// under-estimates CJK), a RAW-measured keep window used to retain
+    /// ~0.6·ratio×W real tokens (~1.5×W) — the "compacted" result still
+    /// overflowed the real window and the calibrated gate re-fired compaction
+    /// on the next turn. The keep window must measure on the calibrated scale:
+    /// first pass lands under the macro threshold (and the real window), the
+    /// second pass quiesces.
+    #[tokio::test]
+    async fn calibrated_keep_window_quiesces_under_cjk_ratio() {
+        use crate::domain::ports::RuntimeTextGenerationResponse;
+        use crate::test_support::TestAppCore;
+
+        let app = TestAppCore::new().await;
+        app.runtime.set_scripted_chat(RuntimeTextGenerationResponse {
+            text: "recap of the earlier turns".to_owned(),
+            ..Default::default()
+        });
+        ledger_window(&app, "cjk-model", 8192).await;
+        let port = SummarizingCompactPort::new(app.model_state.clone());
+
+        // Converge the EMA to ~2.45 (15 samples of a 2.5x ratio).
+        for _ in 0..15 {
+            port.note_usage(1_000, 2_500);
+        }
+
+        // CJK-heavy text-only history: 6 user turns of 8000 chars = 2000 raw
+        // tokens each (~12k raw, ~29k calibrated — far above the ~6.5k macro
+        // threshold). Nothing to micro-compact, so the summarize tier's keep
+        // window is the only thing standing between the result and a
+        // re-firing loop.
+        let mut messages = vec![text_message("system", "sys")];
+        for turn in 0..6 {
+            messages.push(text_message("user", &format!("{}{}", "任务".repeat(4000), turn)));
+        }
+        assert!(port.estimate_tokens(&messages) > 6_553, "fixture must cross the macro gate");
+
+        let first = port.compact(&messages, &auto_ctx("cjk-model")).await.expect("first compact");
+        let CompactOutcome::Replaced { messages: compacted, output_tokens, .. } = first else {
+            panic!("calibrated history above the macro gate must compact: {first:?}");
+        };
+        assert!(
+            output_tokens < 6_553,
+            "calibrated keep window must land under the macro threshold: {output_tokens}"
+        );
+        assert!(
+            output_tokens < 8_192,
+            "calibrated keep window must fit the REAL window: {output_tokens}"
+        );
+
+        let second =
+            port.compact(&compacted, &auto_ctx("cjk-model")).await.expect("second compact");
+        assert!(
+            matches!(second, CompactOutcome::Skipped { .. }),
+            "calibrated compaction must quiesce instead of re-firing: {second:?}"
+        );
     }
 
     /// Progressive stubbing: only the oldest batches are stubbed, and the pass

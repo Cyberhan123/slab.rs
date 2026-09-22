@@ -258,7 +258,7 @@ mod tests {
                 cwd: self.workspace.as_ref().map(|p| p.to_string_lossy().into_owned()),
                 shell: ShellKind::Bash,
                 os: OsKind::Linux,
-                timestamp: "2026-07-24T00:00:00Z".to_owned(),
+                timestamp: "2026-07-24".to_owned(),
             }
         }
         fn permission_snapshot(&self, _thread_id: &str) -> PermissionSnapshot {

@@ -493,6 +493,7 @@ impl LlmPort for BudgetedToolCallLlm {
                 prompt_tokens: 3,
                 completion_tokens: 4,
                 total_tokens: 7,
+                cached_tokens: None,
                 estimated: false,
             }),
         })
@@ -5401,6 +5402,7 @@ impl LlmPort for BudgetExhaustingToolCallLlm {
                 prompt_tokens: 60,
                 completion_tokens: 40,
                 total_tokens: 100,
+                cached_tokens: None,
                 estimated: false,
             }),
         })
@@ -6578,6 +6580,7 @@ impl LlmPort for OneToolCallWithUsageLlm {
                     prompt_tokens: 130,
                     completion_tokens: 5,
                     total_tokens: 135,
+                    cached_tokens: None,
                     estimated: false,
                 }),
             });
@@ -6595,6 +6598,7 @@ impl LlmPort for OneToolCallWithUsageLlm {
                 prompt_tokens: 100,
                 completion_tokens: 20,
                 total_tokens: 120,
+                cached_tokens: None,
                 estimated: false,
             }),
         })

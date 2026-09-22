@@ -275,7 +275,7 @@ impl AgentContextSources for AppContextSources {
             cwd: self.workspace_root().map(|root| root.to_string_lossy().into_owned()),
             shell: self.shell,
             os: Self::os_kind(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: environment_timestamp(),
         }
     }
 
@@ -363,6 +363,17 @@ fn evict_oldest_cache_entry(cache: &DashMap<String, RecallCacheEntry>) {
     }
 }
 
+/// UTC calendar date (`YYYY-MM-DD`) for the environment fragment. Date — not
+/// datetime — granularity on purpose: the fragment is merged IN PLACE on every
+/// run (`merge_injected_messages`), and a second-precision timestamp changed
+/// the prompt prefix at message #2 each user turn, defeating the engine's
+/// kv-cache prefix reuse (the per-thread `agent_kv_session_key` exists exactly
+/// to enable that reuse). Same-day runs stay byte-identical; the model loses
+/// only time-of-day precision, matching the "today's date is…" convention.
+fn environment_timestamp() -> String {
+    chrono::Utc::now().format("%Y-%m-%d").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,6 +385,22 @@ mod tests {
     fn shell_kind_auto_with_bash_path_reports_bash() {
         let exe = std::env::current_exe().expect("current exe");
         assert_eq!(shell_kind(slab_config::ShellLauncherKind::Auto, Some(exe)), ShellKind::Bash);
+    }
+
+    /// Date-granularity is what keeps the environment fragment byte-stable
+    /// across same-day runs (kv-cache prefix reuse); anything with
+    /// time-of-day precision would churn it every user turn.
+    #[test]
+    fn environment_timestamp_is_utc_date_stamp() {
+        let stamp = environment_timestamp();
+        assert!(
+            stamp.len() == 10
+                && stamp.as_bytes()[4] == b'-'
+                && stamp.as_bytes()[7] == b'-'
+                && stamp.chars().all(|c| c.is_ascii_digit() || c == '-'),
+            "expected YYYY-MM-DD, got {stamp}"
+        );
+        assert_eq!(stamp, chrono::Utc::now().format("%Y-%m-%d").to_string());
     }
 
     #[test]

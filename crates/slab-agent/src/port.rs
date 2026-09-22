@@ -43,6 +43,12 @@ pub struct LlmUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
+    /// Input tokens served from a cache (local kv-cache prefix reuse reported
+    /// by the engine, provider prompt-cache hits for cloud models). `None`
+    /// when the backend did not report any. `#[serde(default)]` keeps
+    /// persisted `LlmResponse` records from older builds deserializable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_tokens: Option<u32>,
     pub estimated: bool,
 }
 

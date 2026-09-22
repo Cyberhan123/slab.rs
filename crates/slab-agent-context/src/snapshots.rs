@@ -50,7 +50,10 @@ pub struct EnvironmentSnapshot {
     pub cwd: Option<String>,
     pub shell: ShellKind,
     pub os: OsKind,
-    /// RFC 3339 timestamp the session started at.
+    /// UTC calendar date (`YYYY-MM-DD`) the session is running on. Date — not
+    /// datetime — granularity keeps the fragment byte-stable across same-day
+    /// runs, preserving the prompt prefix for kv-cache reuse (the host
+    /// merges the fragment in place every run).
     pub timestamp: String,
 }
 

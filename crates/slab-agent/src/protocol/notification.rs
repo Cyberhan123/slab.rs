@@ -82,9 +82,14 @@ pub struct TurnUsage {
 
 impl From<crate::port::LlmUsage> for TurnUsage {
     fn from(usage: crate::port::LlmUsage) -> Self {
-        let crate::port::LlmUsage { prompt_tokens, completion_tokens, total_tokens, estimated } =
-            usage;
-        Self { prompt_tokens, completion_tokens, total_tokens, cached_tokens: None, estimated }
+        let crate::port::LlmUsage {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            cached_tokens,
+            estimated,
+        } = usage;
+        Self { prompt_tokens, completion_tokens, total_tokens, cached_tokens, estimated }
     }
 }
 
@@ -350,4 +355,33 @@ pub struct FileChangeApprovalChange {
     pub change_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The port-level usage carries cache-hit counts (engine kv-cache reuse /
+    /// provider prompt-cache hits); the wire conversion must not drop them —
+    /// `cachedTokens` on `TurnCompleted` was permanently `None` before.
+    #[test]
+    fn turn_usage_carries_cached_tokens() {
+        let usage = crate::port::LlmUsage {
+            prompt_tokens: 1024,
+            completion_tokens: 8,
+            total_tokens: 1032,
+            cached_tokens: Some(512),
+            estimated: false,
+        };
+        assert_eq!(TurnUsage::from(usage).cached_tokens, Some(512));
+
+        let bare = crate::port::LlmUsage {
+            prompt_tokens: 10,
+            completion_tokens: 1,
+            total_tokens: 11,
+            cached_tokens: None,
+            estimated: true,
+        };
+        assert_eq!(TurnUsage::from(bare).cached_tokens, None);
+    }
 }

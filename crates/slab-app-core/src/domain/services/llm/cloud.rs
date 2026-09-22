@@ -38,7 +38,8 @@ use crate::context::ModelState;
 use crate::domain::models::{
     ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
     ConversationToolCall, ConversationToolFunction, JsonOptions, StructuredOutput,
-    TextGenerationResponse, UnifiedModel, UnifiedModelKind,
+    TextGenerationResponse, TextGenerationUsage, TextPromptTokensDetails, UnifiedModel,
+    UnifiedModelKind,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::ModelStore;
@@ -324,10 +325,12 @@ pub(crate) enum CloudDelta {
     /// Terminal event from the provider stream: the complete native tool calls
     /// (genai accumulates them server-side of the stream — intermediate
     /// `ToolCallChunk`s are snapshots, so they are skipped in favor of the
-    /// finalized calls) plus the provider-reported stop reason, when captured.
+    /// finalized calls) plus the provider-reported stop reason, when captured,
+    /// and the provider-reported token usage when `capture_usage` was enabled.
     Completed {
         tool_calls: Vec<ConversationToolCall>,
         stop_reason: Option<String>,
+        usage: Option<TextGenerationUsage>,
     },
 }
 
@@ -390,7 +393,11 @@ pub(crate) async fn cloud_chat_completion(
     if text.is_empty() && tool_calls.is_empty() {
         return Err(AppCoreError::Internal(empty_cloud_content_detail(&response)));
     }
-    let usage = super::build_estimated_usage(&render_messages_for_usage(messages), &text, None);
+    // Provider-reported usage wins (real prompt/completion counts, cache-hit
+    // detail); estimation is only the fallback for providers that report none.
+    let usage = genai_usage_to_text_usage(&response.usage).unwrap_or_else(|| {
+        super::build_estimated_usage(&render_messages_for_usage(messages), &text, None)
+    });
     let finish_reason =
         response.stop_reason.as_ref().map(ToString::to_string).unwrap_or_else(|| {
             if tool_calls.is_empty() {
@@ -467,10 +474,12 @@ pub(crate) async fn cloud_chat_stream(
             Ok(GenaiChatStreamEvent::End(end)) => {
                 let stop_reason =
                     end.captured_stop_reason.as_ref().map(|reason| reason.raw().to_owned());
+                // Read before `captured_into_tool_calls` consumes `end`.
+                let usage = end.captured_usage.as_ref().and_then(genai_usage_to_text_usage);
                 let captured = end.captured_into_tool_calls().unwrap_or_default();
                 let tool_calls =
                     captured.iter().map(genai_tool_call_to_conversation).collect::<Vec<_>>();
-                Some(Ok(CloudDelta::Completed { tool_calls, stop_reason }))
+                Some(Ok(CloudDelta::Completed { tool_calls, stop_reason, usage }))
             }
             Ok(GenaiChatStreamEvent::ToolCallChunk(_))
             | Ok(GenaiChatStreamEvent::ThoughtSignatureChunk(_))
@@ -597,6 +606,38 @@ fn genai_tool_call_to_conversation(tool_call: &GenaiToolCall) -> ConversationToo
     }
 }
 
+/// Map a provider-reported genai `Usage` into a neutral `TextGenerationUsage`
+/// (`estimated: false`). `None` when the provider reported no token counts at
+/// all — genai defaults every field to `None` for a null/absent usage block,
+/// and the caller falls back to estimation.
+fn genai_usage_to_text_usage(usage: &genai::chat::Usage) -> Option<TextGenerationUsage> {
+    let count = |value: Option<i32>| {
+        value.filter(|value| *value > 0).map_or(0, |value| u32::try_from(value).unwrap_or(0))
+    };
+    let prompt_tokens = count(usage.prompt_tokens);
+    let completion_tokens = count(usage.completion_tokens);
+    let total_tokens = count(usage.total_tokens.or_else(|| {
+        // Fall back to the sum when the provider omits the total.
+        usage.prompt_tokens.zip(usage.completion_tokens).map(|(p, c)| p.saturating_add(c))
+    }));
+    if prompt_tokens == 0 && completion_tokens == 0 && total_tokens == 0 {
+        return None;
+    }
+    let cached_tokens = usage
+        .prompt_tokens_details
+        .as_ref()
+        .and_then(|details| details.cached_tokens)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(0);
+    Some(TextGenerationUsage {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        prompt_tokens_details: TextPromptTokensDetails { cached_tokens },
+        estimated: false,
+    })
+}
+
 pub(crate) fn render_messages_for_usage(messages: &[DomainConversationMessage]) -> String {
     messages
         .iter()
@@ -633,6 +674,13 @@ fn build_genai_chat_options(
     }
     if !config.tools.is_empty() {
         options = options.with_capture_tool_calls(true);
+    }
+
+    // Provider-reported usage for streams: genai only captures `StreamEnd`
+    // usage (OpenAI-style providers then send `stream_options.include_usage`)
+    // when this flag is set.
+    if config.include_usage {
+        options = options.with_capture_usage(true);
     }
 
     if capture_raw_body { options.with_capture_raw_body(true) } else { options }
@@ -1280,8 +1328,8 @@ mod test {
         RESPONSES_PROBE_FAILURE_BACKOFF, RESPONSES_PROBE_SUCCESS_TTL, ResolvedCloudModel,
         adapter_kind_from_probe_result, build_cloud_http_request_body, build_genai_chat_options,
         build_openai_chat_completions_url, build_openai_request_url, ensure_genai_endpoint_base,
-        extract_reasoning_content_from_raw_body, redact_header_value, responses_probe_fresh,
-        structured_output_to_genai_response_format,
+        extract_reasoning_content_from_raw_body, genai_usage_to_text_usage, redact_header_value,
+        responses_probe_fresh, structured_output_to_genai_response_format,
     };
     use crate::domain::models::{
         ChatReasoningEffort, ConversationMessage as DomainConversationMessage,
@@ -1495,6 +1543,70 @@ mod test {
         // No explicit cap → the field must be omitted entirely so the provider
         // default applies (reasoning models spend max_tokens on reasoning first).
         assert!(payload.get("max_tokens").is_none());
+    }
+
+    /// Provider-reported usage maps to the neutral usage with `estimated:
+    /// false` and the cache-hit detail preserved; an all-absent usage block
+    /// (genai's null-usage default) maps to `None` so callers estimate.
+    #[test]
+    fn genai_usage_maps_to_reported_text_usage() {
+        use genai::chat::{PromptTokensDetails, Usage as GenaiUsage};
+
+        let reported = GenaiUsage {
+            prompt_tokens: Some(1024),
+            prompt_tokens_details: Some(PromptTokensDetails {
+                cached_tokens: Some(512),
+                ..PromptTokensDetails::default()
+            }),
+            completion_tokens: Some(8),
+            total_tokens: Some(1032),
+            ..GenaiUsage::default()
+        };
+        let mapped = genai_usage_to_text_usage(&reported).expect("reported usage maps");
+        assert_eq!(mapped.prompt_tokens, 1024);
+        assert_eq!(mapped.completion_tokens, 8);
+        assert_eq!(mapped.total_tokens, 1032);
+        assert_eq!(mapped.prompt_tokens_details.cached_tokens, 512);
+        assert!(!mapped.estimated);
+
+        // Total falls back to the sum when the provider omits it.
+        let summed = GenaiUsage {
+            prompt_tokens: Some(30),
+            completion_tokens: Some(12),
+            total_tokens: None,
+            ..GenaiUsage::default()
+        };
+        assert_eq!(genai_usage_to_text_usage(&summed).expect("summed").total_tokens, 42);
+
+        // Absent block → None (caller estimates).
+        assert!(genai_usage_to_text_usage(&GenaiUsage::default()).is_none());
+    }
+
+    /// `capture_usage` must follow `include_usage`: genai only populates
+    /// `StreamEnd.captured_usage` (and OpenAI-style providers only send the
+    /// terminal usage chunk) when the flag is set.
+    #[test]
+    fn chat_options_capture_usage_follows_include_usage() {
+        let base = CloudChatRequestConfig {
+            max_tokens: None,
+            temperature: 0.7,
+            top_p: None,
+            structured_output: None,
+            reasoning_effort: None,
+            verbosity: None,
+            tools: Vec::new(),
+            stream: true,
+            include_usage: false,
+        };
+
+        let off = build_genai_chat_options(&base, false);
+        assert_ne!(off.capture_usage, Some(true), "capture_usage must be off by default");
+
+        let on = build_genai_chat_options(
+            &CloudChatRequestConfig { include_usage: true, ..base },
+            false,
+        );
+        assert_eq!(on.capture_usage, Some(true), "capture_usage must follow include_usage");
     }
 
     #[test]
