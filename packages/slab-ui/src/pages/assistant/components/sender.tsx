@@ -840,6 +840,23 @@ function Sender({
             </DropdownMenuContent>
           </DropdownMenu>
           {workspaceSlot}
+          {/* The plan chip marks the composer state — it sits in the LEFT
+              toolbar group (before the ml-auto send cluster), never to the
+              right of the send button. */}
+          {planMode ? (
+            <InputGroupButton
+              aria-label={t("pages.assistant.planMode.exit")}
+              data-testid="assistant-plan-mode-chip"
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onPlanModeChange(false)}
+            >
+              <ListChecksIcon className="size-3.5" />
+              {t("pages.assistant.composer.interaction.plan")}
+              <XIcon className="size-3" />
+            </InputGroupButton>
+          ) : null}
           <div className="ml-auto flex items-center gap-1">
             <InputGroupButton
               aria-label={stopMode ? t("pages.assistant.composer.stopGeneratingResponse") : "Send"}
@@ -864,20 +881,6 @@ function Sender({
                   : t("pages.assistant.composer.sendMessage")}
               </span>
             </InputGroupButton>
-            {planMode ? (
-              <InputGroupButton
-                aria-label={t("pages.assistant.planMode.exit")}
-                data-testid="assistant-plan-mode-chip"
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => onPlanModeChange(false)}
-              >
-                <ListChecksIcon className="size-3.5" />
-                {t("pages.assistant.composer.interaction.plan")}
-                <XIcon className="size-3" />
-              </InputGroupButton>
-            ) : null}
           </div>
         </InputGroupAddon>
       </InputGroup>
