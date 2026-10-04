@@ -145,6 +145,7 @@ mod tests {
         ("/v1/subtitles/render", "post"),
         ("/v1/system/diagnostics", "get"),
         ("/v1/system/diagnostics/agent-stats", "get"),
+        ("/v1/system/diagnostics/memories", "get"),
         ("/v1/system/gpu", "get"),
         ("/v1/system/gpu/ledger", "get"),
         ("/v1/tasks", "get"),

@@ -4,6 +4,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod exec_rule;
 pub mod media_task;
+pub mod memories;
 pub mod model;
 pub mod model_config_state;
 pub mod model_download;
