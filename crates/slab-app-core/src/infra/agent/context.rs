@@ -155,7 +155,7 @@ impl AppContextSources {
         let system = memory_templates::render_recall_select(recall::RECALL_TOP_K)
             .map_err(|error| tracing::warn!(%error, "memory recall prompt render failed"))
             .ok()?;
-        let user = recall::render_manifest_prompt(
+        let user = memory_templates::render_recall_manifest_prompt(
             &manifest,
             input,
             &self
@@ -163,7 +163,9 @@ impl AppContextSources {
                 .map(|root| root.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             chrono::Utc::now(),
-        );
+        )
+        .map_err(|error| tracing::warn!(%error, "memory recall manifest prompt render failed"))
+        .ok()?;
         let query = memory_chat_json(&self.model_state, &model, &system, &user);
         let output =
             match tokio::time::timeout(Duration::from_secs(RECALL_QUERY_TIMEOUT_SECS), query).await
@@ -320,13 +322,23 @@ impl AgentContextSources for AppContextSources {
                 return None;
             }
         };
+        // The complete `slab_memory` developer body is rendered by
+        // slab-agent-memories (it owns every memory prompt); the context hook
+        // injects it verbatim. `base_path` keeps the platform separators
+        // exactly as before (`to_string_lossy`, no normalization).
+        let summary_body = match memory_templates::render_memory_read(
+            &project_root.to_string_lossy(),
+            &memory_summary,
+        ) {
+            Ok(body) => body,
+            Err(error) => {
+                tracing::warn!(%error, "memory context render skipped");
+                return None;
+            }
+        };
         let relevant_body =
             self.recall_body(thread_id, model_id, input_message, &project_key, &project_root).await;
-        Some(MemoryContext {
-            base_path: project_root.to_string_lossy().into_owned(),
-            memory_summary,
-            relevant_body,
-        })
+        Some(MemoryContext { summary_body, relevant_body })
     }
 
     fn evict_thread(&self, thread_id: &str) {

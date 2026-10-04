@@ -163,34 +163,6 @@ fn parse_raw_memories_manifest(raw: &str) -> Vec<RecallManifestEntry> {
     entries
 }
 
-/// Render the side-query user prompt: manifest lines + the request.
-pub fn render_manifest_prompt(
-    entries: &[RecallManifestEntry],
-    input_message: &str,
-    cwd: &str,
-    now: DateTime<Utc>,
-) -> String {
-    let mut prompt = String::from("Memory manifest (newest first):\n");
-    for entry in entries {
-        prompt.push_str(&format!(
-            "- {} | {} | keywords: {} | cwd: {} | {}\n",
-            entry.filename,
-            if entry.title.is_empty() { "(no description)" } else { &entry.title },
-            if entry.keywords.is_empty() { "-" } else { &entry.keywords },
-            if entry.cwd.is_empty() { "-" } else { &entry.cwd },
-            freshness_label(entry.updated_at, now),
-        ));
-    }
-    prompt.push_str(&format!(
-        "\nWorkspace: {cwd}\n\nUser request:\n{input_message}\n\n\
-         Reply ONLY with JSON: {{\"filenames\": [...]}} listing up to {RECALL_TOP_K} \
-         manifest filenames most relevant to the request, most relevant first. \
-         Use EXACT filenames from the manifest; if none are relevant reply \
-         with an empty list."
-    ));
-    prompt
-}
-
 /// Parse the side-query model output into a valid selection.
 ///
 /// Accepts either a bare JSON array or `{"filenames": [...]}`. Hallucinated
