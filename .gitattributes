@@ -26,3 +26,11 @@ patches/*.patch text eol=lf
 # platform so a Windows core.autocrlf checkout cannot flip the file to CRLF
 # and fail `generated_document_schema_matches_checked_in_file`.
 docs/public/manifests/v1/settings-document.schema.json text eol=lf
+
+# Memory prompt templates render into byte-pinned prompt bodies. read.md's full
+# rendered output is pinned by test (slab_memory kv-cache prefix stability) and
+# stays CRLF, matching the historical memory.jinja bytes; recall-manifest.md
+# renders LF to stay byte-identical to the former hardcoded formatter. Pin both
+# so Windows core.autocrlf checkouts cannot flip them.
+crates/slab-agent-memories/templates/memories/read.md text eol=crlf
+crates/slab-agent-memories/templates/memories/recall-manifest.md text eol=lf

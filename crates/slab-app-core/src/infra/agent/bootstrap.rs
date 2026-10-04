@@ -145,6 +145,7 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         rollout,
         rollout_store,
         background_tasks,
+        Arc::clone(&subagent_bridge) as Arc<dyn slab_agent_tools::SubagentTaskSink>,
         mcp_client.clone(),
     );
     schedule_agent_runtime_reload(runtime.clone());
@@ -340,6 +341,8 @@ fn build_agent_control(
         Arc::clone(&ctx.model_state),
         memory_config.clone(),
         memory_root.clone(),
+        Arc::clone(&background_tasks),
+        Arc::clone(&subagent_bridge) as Arc<dyn slab_agent_tools::SubagentTaskSink>,
     );
     let exec_policy = super::exec_policy::build_exec_policy_engine(
         exec_baseline,

@@ -53,7 +53,8 @@ pub use slab_shell_command::{
 };
 pub use subagent::{
     DelegateSubagentTool, MAX_NOTIFICATION_RESULT_CHARS, NoopSubagentTaskSink,
-    SubagentFinishedEvent, SubagentSpawnedEvent, SubagentTaskSink,
+    SubagentFinishedEvent, SubagentSpawnedEvent, SubagentSpawner, SubagentTaskSink,
+    SystemSubagentHandle, SystemSubagentRequest,
 };
 pub use subagent_tools::{SubagentMessageTool, SubagentStatusTool, SubagentStopTool};
 pub use task_complete::{TASK_COMPLETE_METADATA_KEY, TASK_COMPLETE_TOOL_NAME, TaskCompleteTool};

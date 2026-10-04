@@ -48,10 +48,14 @@ pub const MAX_NOTIFICATION_RESULT_CHARS: usize = 8_000;
 const KILL_GRANDCHILD_RESCAN_ATTEMPTS: usize = 5;
 const KILL_GRANDCHILD_RESCAN_DELAY: Duration = Duration::from_millis(100);
 
-/// A subagent was spawned (both background and inline delegations report
-/// this — the host uses it to attach rollout persistence to the child).
+/// A subagent was spawned (model delegations and host-launched system
+/// subagents both report this — the host uses it to attach rollout
+/// persistence to the child).
 pub struct SubagentSpawnedEvent {
-    pub parent_thread_id: String,
+    /// Delegating parent thread, or `None` for a system subagent
+    /// (host-launched with no parent agent — the sink keeps rollout
+    /// persistence but skips parent relay / watchdog / notification).
+    pub parent_thread_id: Option<String>,
     pub child_thread_id: String,
     /// Whether the parent auto-resume is suppressed for this delegation.
     pub no_resume: bool,
@@ -60,7 +64,9 @@ pub struct SubagentSpawnedEvent {
 /// A subagent reached a natural terminal state (explicit stops are NOT
 /// reported — the stopper already knows).
 pub struct SubagentFinishedEvent {
-    pub parent_thread_id: String,
+    /// Delegating parent thread, or `None` for a system subagent (nothing to
+    /// notify; the registry task and the child rollout carry the outcome).
+    pub parent_thread_id: Option<String>,
     pub child_thread_id: String,
     pub task_id: String,
     /// One-line task summary (same text the registry status listing shows).
@@ -91,8 +97,10 @@ impl SubagentTaskSink for NoopSubagentTaskSink {
 }
 
 /// Terminal data shared between the watcher future and the inline wait.
+/// `pub` because [`register_subagent_task`] (pub(crate)) names it in its
+/// return type; not part of the crate's stable surface.
 #[derive(Debug, Clone)]
-struct SubagentTerminalData {
+pub struct SubagentTerminalData {
     child_thread_id: String,
     status: slab_types::AgentThreadStatus,
     completion_text: Option<String>,
@@ -338,250 +346,22 @@ impl TypedTool for DelegateSubagentTool {
         // through the registry (status visibility + cascade stop) — the
         // inline mode just additionally parks on the watcher's oneshot.
         let no_resume = args.no_resume.unwrap_or(false);
-        self.sink.on_subagent_spawned(SubagentSpawnedEvent {
-            parent_thread_id: ctx.thread_id.clone(),
-            child_thread_id: child_thread_id.clone(),
-            no_resume,
-        });
-
         let workspace_root: Option<PathBuf> =
             ctx.workspace.as_ref().map(|workspace| workspace.root.clone());
-        let task_id = self.registry.alloc_task_id();
-        let (filled_tx, filled_rx) = tokio::sync::oneshot::channel::<SubagentTerminalData>();
-        let terminal_data: Arc<std::sync::Mutex<Option<SubagentTerminalData>>> =
-            Arc::new(std::sync::Mutex::new(None));
-
-        // Watcher future: waits for the child's terminal snapshot, strips the
-        // LLM-grade reasoning, spills the artifact, then publishes the
-        // terminal outcome. Runs detached from the parent turn — an inline
-        // caller that is dropped (parent interrupt) does not affect it.
-        //
-        // The `kill_failed` select arm is the stop-failure escape: when the
-        // kill closure could not interrupt the child, the snapshot wait would
-        // park forever (the child keeps running) — converge the watcher on a
-        // synthetic Errored outcome instead, which maps to `Failed` below.
-        let kill_failed = Arc::new(tokio::sync::Notify::new());
-        let wait: DetachedWait = {
-            let control = Arc::clone(&self.control);
-            let child_id = child_thread_id.clone();
-            let artifact_root = workspace_root.clone();
-            let shared = Arc::clone(&terminal_data);
-            let kill_failed = Arc::clone(&kill_failed);
-            Box::pin(async move {
-                let terminal = tokio::select! {
-                    snapshot = control.wait_for_terminal_snapshot(&child_id) => snapshot,
-                    _ = kill_failed.notified() => Err(AgentError::ToolExecution(format!(
-                        "stop failed: the interrupt did not reach subagent {child_id}; \
-                         the child may still be running"
-                    ))),
-                };
-                let data = match terminal {
-                    Ok(snapshot) => {
-                        // Diagnostic anchor: a NON-terminal status here (e.g.
-                        // `Interrupting` from the bounded persisted-snapshot
-                        // wait) is defensively mapped to `Failed` by
-                        // `map_registry_status` — the registry outcome and the
-                        // notify decision key off this line.
-                        tracing::info!(
-                            child_thread_id = %snapshot.id,
-                            status = ?snapshot.status,
-                            "subagent watcher resolved terminal snapshot"
-                        );
-                        // The snapshot's completion_text is LLM-grade (reasoning
-                        // embedded as `<think>` blocks for the next chat-template
-                        // round); the parent conversation and the persisted
-                        // artifact only want the final answer.
-                        let completion_text =
-                            snapshot.completion_text.as_deref().map(slab_agent::strip_think_blocks);
-                        let artifact_refs = write_subagent_artifact(
-                            artifact_root.as_deref(),
-                            &snapshot.id,
-                            &completion_text,
-                        )
-                        .await
-                        .unwrap_or_else(|error| {
-                            tracing::warn!(%error, "failed to write subagent artifact");
-                            Vec::new()
-                        });
-                        // The artifact is the durable record, but a bounded
-                        // result is ALSO inlined so the parent notification,
-                        // the registry summary, and `subagent_status` all
-                        // carry it without a follow-up file read. Only a
-                        // runaway result is dropped to the artifact alone.
-                        // Applied BEFORE `SubagentTerminalData` is built so
-                        // the inline output, the registry result, and the
-                        // sink event all see the same value.
-                        let completion_text = completion_text.filter(|text| {
-                            artifact_refs.is_empty()
-                                || text.chars().count() <= MAX_NOTIFICATION_RESULT_CHARS
-                        });
-                        // Without an artifact there is nowhere for an oversized
-                        // result to live — truncate to the inline bound with an
-                        // explicit marker instead of inlining an unbounded child
-                        // output into the parent context.
-                        let completion_text = if artifact_refs.is_empty() {
-                            completion_text.map(|text| {
-                                if text.chars().count() <= MAX_NOTIFICATION_RESULT_CHARS {
-                                    text
-                                } else {
-                                    let truncated: String =
-                                        text.chars().take(MAX_NOTIFICATION_RESULT_CHARS).collect();
-                                    format!(
-                                        "{truncated}\n(result truncated at {} chars: no \
-                                         workspace artifact is available to hold the full output)",
-                                        MAX_NOTIFICATION_RESULT_CHARS
-                                    )
-                                }
-                            })
-                        } else {
-                            completion_text
-                        };
-                        SubagentTerminalData {
-                            child_thread_id: snapshot.id,
-                            status: snapshot.status,
-                            completion_text,
-                            artifact_refs,
-                        }
-                    }
-                    // The wait itself failed (store/registry error) — surface
-                    // the error text as the task result.
-                    Err(error) => SubagentTerminalData {
-                        child_thread_id: child_id.clone(),
-                        status: slab_types::AgentThreadStatus::Errored,
-                        completion_text: Some(error.to_string()),
-                        artifact_refs: Vec::new(),
-                    },
-                };
-                let outcome = DetachedTaskOutcome::Status {
-                    status: map_registry_status(data.status, data.completion_text.as_deref()),
-                    result: data.completion_text.clone(),
-                };
-                *shared.lock().unwrap_or_else(|p| p.into_inner()) = Some(data.clone());
-                // Inline waiter may be gone (background mode / dropped turn):
-                // the registry is the source of truth either way.
-                let _ = filled_tx.send(data);
-                outcome
-            })
-        };
-
-        let kill: DetachedKill = {
-            let control = Arc::clone(&self.control);
-            let registry = Arc::clone(&self.registry);
-            let child_id = child_thread_id.clone();
-            let task_id = task_id.clone();
-            let kill_failed = Arc::clone(&kill_failed);
-            Box::new(move || {
-                tokio::spawn(async move {
-                    // Releases the stop()'s pending-kill protection on every
-                    // exit path (incl. panic) — until then the Stopped slot
-                    // must survive pruning so the rollback below can find it.
-                    let _pending_kill_guard = crate::background::PendingKillGuard::new(
-                        Arc::clone(&registry),
-                        task_id.clone(),
-                    );
-                    // Grandchildren FIRST: the child-owned delegations must be
-                    // cascade-stopped before the child itself is interrupted.
-                    let stopped = registry.stop_subagent_tasks_for_thread(&child_id);
-                    if !stopped.is_empty() {
-                        tracing::debug!(child = %child_id, count = stopped.len(),
-                            "cascade-stopped grandchild delegations");
-                    }
-                    match control.interrupt(&child_id).await {
-                        Ok(()) => {
-                            // The pre-interrupt scan raced any grandchild
-                            // delegation still between spawn and register —
-                            // close that window before declaring the tree dead.
-                            cascade_stop_late_grandchildren(&registry, &child_id).await;
-                        }
-                        // The child is already gone or terminal — the natural
-                        // watcher path resolves on the persisted snapshot, so
-                        // there is nothing to roll back.
-                        Err(AgentError::ThreadNotFound(_))
-                        | Err(AgentError::InvalidStateTransition { .. }) => {}
-                        Err(error) => {
-                            tracing::warn!(
-                                %error,
-                                "failed to interrupt subagent {child_id}; rolling the task back to Failed"
-                            );
-                            // The registry already flipped to Stopped inside
-                            // `stop()`; a still-running child must not read as
-                            // "stopped". The rollback re-emits the Failed
-                            // lifecycle event, and the notify un-parks the
-                            // watcher so the failure reaches the parent.
-                            if let Err(rollback) = registry
-                                .mark_stop_failed(&task_id, &format!("stop failed: {error}"))
-                            {
-                                tracing::warn!(
-                                    %rollback,
-                                    "failed to roll back subagent task {task_id} after a failed kill"
-                                );
-                            }
-                            kill_failed.notify_one();
-                        }
-                    }
-                });
-            })
-        };
-
-        let sink = Arc::clone(&self.sink);
-        let notify_parent = ctx.thread_id.clone();
-        let notify_child = child_thread_id.clone();
-        let notify_task = task_id.clone();
-        let notify_summary = summarize_task_for_registry(args.task.trim());
-        let shared_terminal = Arc::clone(&terminal_data);
-        let on_terminal: DetachedOnTerminal = Box::new(move |snapshot: BackgroundTaskSnapshot| {
-            // Explicit stops are not reported — the stopper already knows and
-            // the parent asked for the cancellation.
-            if snapshot.status == BackgroundTaskStatus::Stopped {
-                return;
-            }
-            let data = shared_terminal.lock().unwrap_or_else(|p| p.into_inner()).clone();
-            let (completion_text, artifact_refs) = data
-                .map(|data| (data.completion_text, data.artifact_refs))
-                .unwrap_or((None, Vec::new()));
-            sink.on_subagent_finished(SubagentFinishedEvent {
-                parent_thread_id: notify_parent,
-                child_thread_id: notify_child,
-                task_id: notify_task,
-                task_summary: notify_summary,
-                status: snapshot.status,
-                completion_text,
-                artifact_refs,
+        let (task_id, filled_rx) = register_subagent_task(
+            &self.control,
+            &self.registry,
+            &self.sink,
+            SubagentTaskBinding {
+                parent_thread_id: Some(ctx.thread_id.clone()),
+                owner_thread_id: ctx.thread_id.clone(),
+                child_thread_id: child_thread_id.clone(),
+                task_summary: summarize_task_for_registry(args.task.trim()),
                 no_resume,
-            });
-        });
-
-        if let Err(register_error) = self.registry.register_detached(
-            task_id.clone(),
-            DetachedTask {
-                thread_id: ctx.thread_id.clone(),
-                command: summarize_task_for_registry(args.task.trim()),
                 workspace_root,
-                child_thread_id: Some(child_thread_id.clone()),
             },
-            wait,
-            kill,
-            on_terminal,
-        ) {
-            // The child is ALREADY running (spawn happened above) and the
-            // dropped registration took its kill handle with it — without this
-            // interrupt the child would leak with no stop path anywhere.
-            tracing::warn!(
-                %register_error,
-                child_thread_id = %child_thread_id,
-                "subagent registration failed; requesting an interrupt for the running child"
-            );
-            if let Err(interrupt_error) = self.control.interrupt(&child_thread_id).await {
-                tracing::warn!(
-                    %interrupt_error,
-                    "failed to interrupt the unregistered subagent {child_thread_id}"
-                );
-            }
-            return Err(AgentError::ToolExecution(format!(
-                "subagent started but could not be registered ({register_error}); \
-                 an interrupt was requested for the child thread"
-            )));
-        }
+        )
+        .await?;
 
         if args.background.unwrap_or(true) {
             let mut value = serde_json::json!({
@@ -636,6 +416,380 @@ impl TypedTool for DelegateSubagentTool {
         }
         Ok(ToolOutput { content: value.to_string(), metadata: None })
     }
+}
+
+/// Everything the shared post-spawn chain needs to bind a spawned child
+/// thread to the subagent lifecycle.
+pub(crate) struct SubagentTaskBinding {
+    /// Delegating parent thread, or `None` for a system subagent
+    /// (host-launched with no parent agent — the sink keeps rollout
+    /// persistence but skips parent relay / watchdog / notification).
+    pub parent_thread_id: Option<String>,
+    /// Registry / lifecycle owner thread id (always concrete). Model
+    /// delegations use the parent; self-owned system subagents use the child.
+    pub owner_thread_id: String,
+    pub child_thread_id: String,
+    /// One-line task summary for the registry status listing and the sink
+    /// events ([`summarize_task_for_registry`] output).
+    pub task_summary: String,
+    /// Whether the parent auto-resume is suppressed for this delegation.
+    pub no_resume: bool,
+    /// Artifact root for the result.json spill; `None` disables the artifact.
+    pub workspace_root: Option<PathBuf>,
+}
+
+/// The shared post-spawn chain behind every subagent: sink spawn event →
+/// watcher (terminal snapshot, think-strip, artifact spill, inline bound) →
+/// kill closure (grandchild cascade + interrupt + stop-failure rollback) →
+/// terminal event → [`BackgroundTaskRegistry::register_detached`]. Used by
+/// [`DelegateSubagentTool`] (a model-initiated child delegation) and
+/// [`SubagentSpawner::spawn_system`] (a host-initiated system subagent) so
+/// both run through the identical lifecycle. Returns
+/// `(task_id, inline waiter receiver)`; the receiver only matters to inline
+/// callers, background/system callers drop it and read the registry.
+pub(crate) async fn register_subagent_task(
+    control: &Arc<AgentControl>,
+    registry: &Arc<BackgroundTaskRegistry>,
+    sink: &Arc<dyn SubagentTaskSink>,
+    binding: SubagentTaskBinding,
+) -> Result<(String, tokio::sync::oneshot::Receiver<SubagentTerminalData>), AgentError> {
+    let child_thread_id = binding.child_thread_id;
+    sink.on_subagent_spawned(SubagentSpawnedEvent {
+        parent_thread_id: binding.parent_thread_id.clone(),
+        child_thread_id: child_thread_id.clone(),
+        no_resume: binding.no_resume,
+    });
+
+    let workspace_root = binding.workspace_root;
+    let task_id = registry.alloc_task_id();
+    let (filled_tx, filled_rx) = tokio::sync::oneshot::channel::<SubagentTerminalData>();
+    let terminal_data: Arc<std::sync::Mutex<Option<SubagentTerminalData>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    // Watcher future: waits for the child's terminal snapshot, strips the
+    // LLM-grade reasoning, spills the artifact, then publishes the
+    // terminal outcome. Runs detached from the parent turn — an inline
+    // caller that is dropped (parent interrupt) does not affect it.
+    //
+    // The `kill_failed` select arm is the stop-failure escape: when the
+    // kill closure could not interrupt the child, the snapshot wait would
+    // park forever (the child keeps running) — converge the watcher on a
+    // synthetic Errored outcome instead, which maps to `Failed` below.
+    let kill_failed = Arc::new(tokio::sync::Notify::new());
+    let wait: DetachedWait = {
+        let control = Arc::clone(control);
+        let child_id = child_thread_id.clone();
+        let artifact_root = workspace_root.clone();
+        let shared = Arc::clone(&terminal_data);
+        let kill_failed = Arc::clone(&kill_failed);
+        Box::pin(async move {
+            let terminal = tokio::select! {
+                snapshot = control.wait_for_terminal_snapshot(&child_id) => snapshot,
+                _ = kill_failed.notified() => Err(AgentError::ToolExecution(format!(
+                    "stop failed: the interrupt did not reach subagent {child_id}; \
+                     the child may still be running"
+                ))),
+            };
+            let data = match terminal {
+                Ok(snapshot) => {
+                    // Diagnostic anchor: a NON-terminal status here (e.g.
+                    // `Interrupting` from the bounded persisted-snapshot
+                    // wait) is defensively mapped to `Failed` by
+                    // `map_registry_status` — the registry outcome and the
+                    // notify decision key off this line.
+                    tracing::info!(
+                        child_thread_id = %snapshot.id,
+                        status = ?snapshot.status,
+                        "subagent watcher resolved terminal snapshot"
+                    );
+                    // The snapshot's completion_text is LLM-grade (reasoning
+                    // embedded as `<think>` blocks for the next chat-template
+                    // round); the parent conversation and the persisted
+                    // artifact only want the final answer.
+                    let completion_text =
+                        snapshot.completion_text.as_deref().map(slab_agent::strip_think_blocks);
+                    let artifact_refs = write_subagent_artifact(
+                        artifact_root.as_deref(),
+                        &snapshot.id,
+                        &completion_text,
+                    )
+                    .await
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(%error, "failed to write subagent artifact");
+                        Vec::new()
+                    });
+                    // The artifact is the durable record, but a bounded
+                    // result is ALSO inlined so the parent notification,
+                    // the registry summary, and `subagent_status` all
+                    // carry it without a follow-up file read. Only a
+                    // runaway result is dropped to the artifact alone.
+                    // Applied BEFORE `SubagentTerminalData` is built so
+                    // the inline output, the registry result, and the
+                    // sink event all see the same value.
+                    let completion_text = completion_text.filter(|text| {
+                        artifact_refs.is_empty()
+                            || text.chars().count() <= MAX_NOTIFICATION_RESULT_CHARS
+                    });
+                    // Without an artifact there is nowhere for an oversized
+                    // result to live — truncate to the inline bound with an
+                    // explicit marker instead of inlining an unbounded child
+                    // output into the parent context.
+                    let completion_text = if artifact_refs.is_empty() {
+                        completion_text.map(|text| {
+                            if text.chars().count() <= MAX_NOTIFICATION_RESULT_CHARS {
+                                text
+                            } else {
+                                let truncated: String =
+                                    text.chars().take(MAX_NOTIFICATION_RESULT_CHARS).collect();
+                                format!(
+                                    "{truncated}\n(result truncated at {} chars: no \
+                                     workspace artifact is available to hold the full output)",
+                                    MAX_NOTIFICATION_RESULT_CHARS
+                                )
+                            }
+                        })
+                    } else {
+                        completion_text
+                    };
+                    SubagentTerminalData {
+                        child_thread_id: snapshot.id,
+                        status: snapshot.status,
+                        completion_text,
+                        artifact_refs,
+                    }
+                }
+                // The wait itself failed (store/registry error) — surface
+                // the error text as the task result.
+                Err(error) => SubagentTerminalData {
+                    child_thread_id: child_id.clone(),
+                    status: slab_types::AgentThreadStatus::Errored,
+                    completion_text: Some(error.to_string()),
+                    artifact_refs: Vec::new(),
+                },
+            };
+            let outcome = DetachedTaskOutcome::Status {
+                status: map_registry_status(data.status, data.completion_text.as_deref()),
+                result: data.completion_text.clone(),
+            };
+            *shared.lock().unwrap_or_else(|p| p.into_inner()) = Some(data.clone());
+            // Inline waiter may be gone (background mode / dropped turn):
+            // the registry is the source of truth either way.
+            let _ = filled_tx.send(data);
+            outcome
+        })
+    };
+
+    let kill: DetachedKill = {
+        let control = Arc::clone(control);
+        let registry = Arc::clone(registry);
+        let child_id = child_thread_id.clone();
+        let task_id = task_id.clone();
+        let kill_failed = Arc::clone(&kill_failed);
+        Box::new(move || {
+            tokio::spawn(async move {
+                // Releases the stop()'s pending-kill protection on every
+                // exit path (incl. panic) — until then the Stopped slot
+                // must survive pruning so the rollback below can find it.
+                let _pending_kill_guard = crate::background::PendingKillGuard::new(
+                    Arc::clone(&registry),
+                    task_id.clone(),
+                );
+                // Grandchildren FIRST: the child-owned delegations must be
+                // cascade-stopped before the child itself is interrupted.
+                let stopped = registry.stop_subagent_tasks_for_thread(&child_id);
+                if !stopped.is_empty() {
+                    tracing::debug!(child = %child_id, count = stopped.len(),
+                        "cascade-stopped grandchild delegations");
+                }
+                match control.interrupt(&child_id).await {
+                    Ok(()) => {
+                        // The pre-interrupt scan raced any grandchild
+                        // delegation still between spawn and register —
+                        // close that window before declaring the tree dead.
+                        cascade_stop_late_grandchildren(&registry, &child_id).await;
+                    }
+                    // The child is already gone or terminal — the natural
+                    // watcher path resolves on the persisted snapshot, so
+                    // there is nothing to roll back.
+                    Err(AgentError::ThreadNotFound(_))
+                    | Err(AgentError::InvalidStateTransition { .. }) => {}
+                    Err(error) => {
+                        tracing::warn!(
+                            %error,
+                            "failed to interrupt subagent {child_id}; rolling the task back to Failed"
+                        );
+                        // The registry already flipped to Stopped inside
+                        // `stop()`; a still-running child must not read as
+                        // "stopped". The rollback re-emits the Failed
+                        // lifecycle event, and the notify un-parks the
+                        // watcher so the failure reaches the parent.
+                        if let Err(rollback) =
+                            registry.mark_stop_failed(&task_id, &format!("stop failed: {error}"))
+                        {
+                            tracing::warn!(
+                                %rollback,
+                                "failed to roll back subagent task {task_id} after a failed kill"
+                            );
+                        }
+                        kill_failed.notify_one();
+                    }
+                }
+            });
+        })
+    };
+
+    let sink = Arc::clone(sink);
+    let notify_parent = binding.parent_thread_id.clone();
+    let notify_child = child_thread_id.clone();
+    let notify_task = task_id.clone();
+    let notify_summary = binding.task_summary.clone();
+    let shared_terminal = Arc::clone(&terminal_data);
+    let no_resume = binding.no_resume;
+    let on_terminal: DetachedOnTerminal = Box::new(move |snapshot: BackgroundTaskSnapshot| {
+        // Explicit stops are not reported — the stopper already knows and
+        // the parent asked for the cancellation.
+        if snapshot.status == BackgroundTaskStatus::Stopped {
+            return;
+        }
+        let data = shared_terminal.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let (completion_text, artifact_refs) = data
+            .map(|data| (data.completion_text, data.artifact_refs))
+            .unwrap_or((None, Vec::new()));
+        sink.on_subagent_finished(SubagentFinishedEvent {
+            parent_thread_id: notify_parent,
+            child_thread_id: notify_child,
+            task_id: notify_task,
+            task_summary: notify_summary,
+            status: snapshot.status,
+            completion_text,
+            artifact_refs,
+            no_resume,
+        });
+    });
+
+    if let Err(register_error) = registry.register_detached(
+        task_id.clone(),
+        DetachedTask {
+            thread_id: binding.owner_thread_id,
+            command: binding.task_summary,
+            workspace_root,
+            child_thread_id: Some(child_thread_id.clone()),
+        },
+        wait,
+        kill,
+        on_terminal,
+    ) {
+        // The child is ALREADY running (spawn happened above) and the
+        // dropped registration took its kill handle with it — without this
+        // interrupt the child would leak with no stop path anywhere.
+        tracing::warn!(
+            %register_error,
+            child_thread_id = %child_thread_id,
+            "subagent registration failed; requesting an interrupt for the running child"
+        );
+        if let Err(interrupt_error) = control.interrupt(&child_thread_id).await {
+            tracing::warn!(
+                %interrupt_error,
+                "failed to interrupt the unregistered subagent {child_thread_id}"
+            );
+        }
+        return Err(AgentError::ToolExecution(format!(
+            "subagent started but could not be registered ({register_error}); \
+             an interrupt was requested for the child thread"
+        )));
+    }
+
+    Ok((task_id, filled_rx))
+}
+
+/// Host-facing launcher for SYSTEM subagents: the same lifecycle chain as
+/// `delegate_subagent` (BackgroundTaskRegistry visibility / capacity / kill,
+/// [`SubagentTaskSink`] lifecycle events, result.json artifact spill) but
+/// launched by the host instead of a model tool call, and without a parent
+/// agent thread — the child is a root thread.
+///
+/// With `owner_thread_id: None` the registry task is SELF-OWNED (owner = the
+/// child thread id): lifecycle events persist on the child's own rollout
+/// instead of buffering against a synthetic owner, and no parent notification
+/// is attempted. An owning thread id (when given) receives the finished-event
+/// notification like a delegating parent.
+pub struct SubagentSpawner {
+    control: Arc<AgentControl>,
+    registry: Arc<BackgroundTaskRegistry>,
+    sink: Arc<dyn SubagentTaskSink>,
+}
+
+impl SubagentSpawner {
+    pub fn new(
+        control: Arc<AgentControl>,
+        registry: Arc<BackgroundTaskRegistry>,
+        sink: Arc<dyn SubagentTaskSink>,
+    ) -> Self {
+        Self { control, registry, sink }
+    }
+
+    /// Spawn a root thread and attach it to the subagent chain. The config is
+    /// fully resolved by the caller (registry-driven `agent_type`, per-run
+    /// system prompt, per-call model); `transient` is forced on so a system
+    /// child never schedules memory/background work of its own. The caller
+    /// observes the outcome via `AgentControl::subscribe` /
+    /// `wait_for_terminal_snapshot` or the registry snapshot.
+    pub async fn spawn_system(
+        &self,
+        request: SystemSubagentRequest,
+    ) -> Result<SystemSubagentHandle, AgentError> {
+        let mut config = request.config;
+        config.transient = true;
+        let child_thread_id =
+            self.control.spawn(request.session_id, config, request.messages).await?;
+        let owner_thread_id =
+            request.owner_thread_id.clone().unwrap_or_else(|| child_thread_id.clone());
+        let (task_id, _inline_rx) = register_subagent_task(
+            &self.control,
+            &self.registry,
+            &self.sink,
+            SubagentTaskBinding {
+                parent_thread_id: request.owner_thread_id,
+                owner_thread_id,
+                child_thread_id: child_thread_id.clone(),
+                task_summary: request.task_summary,
+                no_resume: false,
+                workspace_root: request.workspace_root,
+            },
+        )
+        .await?;
+        Ok(SystemSubagentHandle { task_id, child_thread_id })
+    }
+}
+
+/// A host request to launch a system subagent
+/// ([`SubagentSpawner::spawn_system`]).
+pub struct SystemSubagentRequest {
+    /// Session id for the root thread. Host pipelines use a recognizable
+    /// prefix (the memory pipeline uses `memory-phase2-<uuid>`) so their own
+    /// scheduling can exclude system sessions.
+    pub session_id: String,
+    /// Owning thread for the registry task and the finished-event
+    /// notification; `None` = self-owned (attributed to the child thread) —
+    /// the shape for host background work with no parent agent.
+    pub owner_thread_id: Option<String>,
+    /// One-line summary for the `subagent_status` listing.
+    pub task_summary: String,
+    /// Fully resolved child config. `transient` is forced on by the spawner.
+    pub config: AgentConfig,
+    /// Initial messages for the child thread.
+    pub messages: Vec<ConversationMessage>,
+    /// Artifact root for the result.json spill; `None` disables the artifact
+    /// (pass `None` when the workspace must stay pristine, e.g. a git
+    /// baselined memory workspace that must not hold `.slab/artifacts/`).
+    pub workspace_root: Option<PathBuf>,
+}
+
+/// A launched system subagent: the registry task id and the child thread.
+#[derive(Debug)]
+pub struct SystemSubagentHandle {
+    pub task_id: String,
+    pub child_thread_id: String,
 }
 
 /// One-line task summary for the registry status listing (single line, ~80
@@ -2410,7 +2564,7 @@ mod tests {
 
         let spawned = sink.spawned.lock().unwrap();
         assert_eq!(spawned.len(), 1);
-        assert_eq!(spawned[0].parent_thread_id, "parent");
+        assert_eq!(spawned[0].parent_thread_id.as_deref(), Some("parent"));
         assert_eq!(spawned[0].child_thread_id, child_id);
 
         let finished = sink.finished.lock().unwrap();
@@ -2682,5 +2836,200 @@ mod tests {
         let spawned = sink.spawned.lock().unwrap();
         assert_eq!(spawned.len(), 1);
         assert!(!spawned[0].no_resume);
+    }
+
+    // ---- host-launched system subagents (SubagentSpawner) ----
+
+    /// LLM double that parks inside the first chat call — keeps the child
+    /// thread deterministically Running until an interrupt cancels it.
+    struct ParkingLlm;
+
+    #[async_trait]
+    impl LlmPort for ParkingLlm {
+        async fn chat_completion(
+            &self,
+            _model: &str,
+            _messages: &[ConversationMessage],
+            _tools: &[ToolSpec],
+            _config: &AgentConfig,
+            _trace_context: &AgentTraceContext,
+        ) -> Result<LlmResponse, AgentError> {
+            std::future::pending::<()>().await;
+            Err(AgentError::Interrupted)
+        }
+    }
+
+    fn system_request(max_turns: u32) -> SystemSubagentRequest {
+        SystemSubagentRequest {
+            session_id: "memory-phase2-system-test".to_owned(),
+            owner_thread_id: None,
+            task_summary: "Consolidate memory workspace".to_owned(),
+            config: AgentConfig { model: "mock".into(), max_turns, ..AgentConfig::default() },
+            messages: vec![ConversationMessage {
+                role: "user".to_owned(),
+                content: slab_types::ConversationMessageContent::Text("consolidate".to_owned()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            }],
+            workspace_root: None,
+        }
+    }
+
+    fn system_spawner(
+        llm: Arc<dyn LlmPort>,
+        store: Arc<MemoryStore>,
+        registry: Arc<BackgroundTaskRegistry>,
+        sink: Arc<RecordingSink>,
+    ) -> SubagentSpawner {
+        let notify = Arc::new(NoopNotify);
+        let control = Arc::new(slab_agent::AgentControl::new_with_hooks(
+            llm,
+            store,
+            notify.clone(),
+            notify,
+            Arc::new(ToolRouter::new()),
+            AgentControlLimits { max_threads: 4, max_depth: 4 },
+            Vec::new(),
+        ));
+        SubagentSpawner::new(control, registry, sink)
+    }
+
+    /// A self-owned system subagent: transient ROOT thread (no parent, depth
+    /// 0), registered in the background-task registry under the CHILD's id as
+    /// owner, firing parentless lifecycle events — the shape the memory
+    /// phase2 pipeline launches.
+    #[tokio::test]
+    async fn spawn_system_registers_self_owned_transient_root_task() {
+        let store = Arc::new(MemoryStore::default());
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        let sink = Arc::new(RecordingSink::default());
+        let spawner =
+            system_spawner(Arc::new(FinalLlm), store.clone(), registry.clone(), sink.clone());
+
+        let handle = spawner.spawn_system(system_request(1)).await.expect("spawn system");
+
+        wait_until(|| {
+            registry
+                .snapshot(&handle.task_id)
+                .is_some_and(|task| task.status == BackgroundTaskStatus::Completed)
+        })
+        .await;
+
+        let child =
+            store.get_thread(&handle.child_thread_id).await.expect("thread").expect("child");
+        assert_eq!(child.parent_id, None, "system subagents are root threads");
+        assert_eq!(child.depth, 0);
+        assert!(child.session_id.starts_with("memory-phase2-"));
+        let child_config: AgentConfig =
+            serde_json::from_str(&child.config_json).expect("child config");
+        assert!(child_config.transient, "the spawner forces transient on");
+        let snapshot = registry
+            .list()
+            .into_iter()
+            .find(|task| task.task_id == handle.task_id)
+            .expect("registered task");
+        // Self-owned: the registry owner is the child thread itself.
+        assert_eq!(snapshot.thread_id, handle.child_thread_id);
+        assert_eq!(snapshot.command, "Consolidate memory workspace");
+        assert!(snapshot.result.is_some_and(|result| result.contains("child result")));
+
+        wait_until(|| !sink.finished.lock().unwrap().is_empty()).await;
+        let finished = sink.finished.lock().unwrap();
+        assert_eq!(finished[0].parent_thread_id, None, "no parent to notify");
+        assert_eq!(finished[0].status, BackgroundTaskStatus::Completed);
+        let spawned = sink.spawned.lock().unwrap();
+        assert_eq!(spawned[0].parent_thread_id, None);
+    }
+
+    /// Stopping a system task goes through the shared kill closure: the child
+    /// thread is interrupted (the registry task reads Stopped and no finished
+    /// event fires — explicit stops are not re-reported).
+    #[tokio::test]
+    async fn stopping_a_system_task_interrupts_the_child() {
+        let store = Arc::new(MemoryStore::default());
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        let sink = Arc::new(RecordingSink::default());
+        // Parking LLM: the child stays deterministically Running (parked in
+        // its first chat call) until the kill closure's interrupt cancels it.
+        let spawner =
+            system_spawner(Arc::new(ParkingLlm), store.clone(), registry.clone(), sink.clone());
+
+        let handle = spawner.spawn_system(system_request(100)).await.expect("spawn system");
+
+        let stopped = registry.stop(&handle.task_id).expect("stop task");
+        assert_eq!(stopped.status, BackgroundTaskStatus::Stopped);
+
+        wait_until(|| {
+            matches!(
+                store.threads.lock().unwrap().get(&handle.child_thread_id).map(|t| t.status),
+                Some(ThreadStatus::Interrupted)
+            )
+        })
+        .await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            sink.finished.lock().unwrap().is_empty(),
+            "explicit stops are not re-reported for system subagents either"
+        );
+    }
+
+    /// The capacity gate applies to system subagents too: when registration
+    /// fails the already-spawned child is interrupted and the error explains
+    /// the spawn-then-register failure.
+    #[tokio::test]
+    async fn spawn_system_at_capacity_fails_and_interrupts_the_child() {
+        let store = Arc::new(MemoryStore::default());
+        let registry = Arc::new(BackgroundTaskRegistry::default());
+        for index in 0..8 {
+            let task_id = registry.alloc_task_id();
+            registry
+                .register_detached(
+                    task_id,
+                    DetachedTask {
+                        thread_id: "filler".to_owned(),
+                        command: format!("filler {index}"),
+                        workspace_root: None,
+                        child_thread_id: Some(format!("filler-child-{index}")),
+                    },
+                    Box::pin(std::future::pending()),
+                    Box::new(|| {}),
+                    Box::new(|_| {}),
+                )
+                .expect("fill the capacity gate");
+        }
+        let sink = Arc::new(RecordingSink::default());
+        let spawner = system_spawner(
+            Arc::new(ParkingLlm),
+            store.clone(),
+            Arc::clone(&registry),
+            sink.clone(),
+        );
+
+        let error = spawner
+            .spawn_system(system_request(100))
+            .await
+            .expect_err("registration must fail at the capacity gate");
+        match error {
+            AgentError::ToolExecution(message) => {
+                assert!(
+                    message.contains("could not be registered"),
+                    "the error explains the spawn-then-register failure: {message}"
+                );
+                assert!(
+                    message.contains("background task limit reached"),
+                    "the underlying gate reason is carried through: {message}"
+                );
+            }
+            other => panic!("expected ToolExecution, got: {other:?}"),
+        }
+
+        wait_until(|| {
+            matches!(
+                store.threads.lock().unwrap().values().next().map(|t| t.status),
+                Some(ThreadStatus::Interrupted)
+            )
+        })
+        .await;
     }
 }
