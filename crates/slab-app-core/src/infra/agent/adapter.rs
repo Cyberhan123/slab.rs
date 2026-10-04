@@ -287,6 +287,15 @@ fn e2e_subagent_response(
         return Some(e2e_text_response(format!("SUBAGENT_RESULT {needle}")));
     }
 
+    // Memory phase2 consolidation child — the fixed first user message from
+    // `AgentMemoryPipeline::run_consolidation_agent`. The scripted memory
+    // suite must observe the task (subagent_status) and stop it before it
+    // completes; the observation window comes from the memory stall branch in
+    // `e2e_slow_ms` (the prompt itself cannot carry a slow marker).
+    if prompt.starts_with("Consolidate the memory workspace") {
+        return Some(e2e_text_response("E2E memory consolidation scripted reply.".to_owned()));
+    }
+
     // Parent turn resumed by the completion notification (`render_notification`).
     if prompt.starts_with("[subagent task finished] task_id=") {
         let task_id = e2e_parse_marker(prompt, "task_id").unwrap_or_else(|| "unknown".to_owned());
@@ -298,6 +307,7 @@ fn e2e_subagent_response(
     let carries_marker = prompt.contains("subagent-e2e/delegate")
         || prompt.contains("subagent-e2e/steer")
         || prompt.contains("subagent-e2e/stop")
+        || prompt.contains("subagent-e2e/status")
         || prompt.contains("subagent-e2e/shell-sleep/");
 
     // Parent follow-up once the delegated/steering tool result is in — close
@@ -333,6 +343,17 @@ fn e2e_subagent_response(
             "subagent_message",
             serde_json::json!({ "task_id": task_id, "message": message }),
         ));
+    }
+
+    // Registry status listing — with a `task_id` the tool returns the single
+    // task snapshot (used to pin a stopped system subagent's terminal state),
+    // without one it lists every registry task (how the memory suite finds the
+    // phase2 consolidation task).
+    if prompt.contains("subagent-e2e/status") && e2e_tool_available(tools, "subagent_status") {
+        let arguments = e2e_parse_marker(prompt, "task_id")
+            .map(|task_id| serde_json::json!({ "task_id": task_id }))
+            .unwrap_or_else(|| serde_json::json!({}));
+        return Some(e2e_tool_call_response("e2e-status", "subagent_status", arguments));
     }
 
     if prompt.contains("subagent-e2e/stop") && e2e_tool_available(tools, "subagent_stop") {
@@ -426,8 +447,30 @@ fn e2e_slow_ms(prompt: &str) -> u64 {
         .or_else(|| {
             prompt.starts_with("Objective:").then(|| e2e_parse_marker_ms(prompt, "slow=")).flatten()
         })
+        .or_else(|| {
+            prompt
+                .starts_with("Consolidate the memory workspace")
+                .then(memory_consolidation_stall_ms)
+                .flatten()
+        })
         .unwrap_or(0);
     requested.min(MAX_SLOW_MS)
+}
+
+/// Scripted stall for the memory phase2 consolidation child: its fixed first
+/// user message cannot carry a slow marker, so the observation window (the
+/// scripted suite must call `subagent_status` / `subagent_stop` before the
+/// child completes) comes from `SLAB_E2E_STALL_MS` — the same knob the
+/// subagent stall watchdog reads; for a self-owned system subagent the
+/// watchdog notice targets the child itself and is warn-only.
+#[cfg(any(test, debug_assertions))]
+fn memory_consolidation_stall_ms() -> Option<u64> {
+    Some(
+        std::env::var("SLAB_E2E_STALL_MS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(30_000),
+    )
 }
 
 /// Parse the ASCII digits immediately following `prefix` as milliseconds.
@@ -954,6 +997,78 @@ mod tests {
             Some("E2E delegated in the background; continuing.")
         );
         assert!(response.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn e2e_parent_status_emits_subagent_status_tool_call() {
+        let response = e2e_llm_response(
+            &[text_message("user", "subagent-e2e/status")],
+            &[subagent_spec("subagent_status")],
+        );
+
+        assert_eq!(response.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(response.tool_calls.len(), 1);
+        let call = &response.tool_calls[0];
+        assert_eq!(call.name, "subagent_status");
+        let arguments: serde_json::Value =
+            serde_json::from_str(&call.arguments).expect("arguments JSON");
+        assert!(arguments.as_object().expect("object").is_empty());
+
+        // With a task_id the tool pins one registry task (the memory suite
+        // uses this to assert a stopped task's terminal snapshot).
+        let pinned = e2e_llm_response(
+            &[text_message("user", "subagent-e2e/status task_id=abc-123")],
+            &[subagent_spec("subagent_status")],
+        );
+        let arguments: serde_json::Value =
+            serde_json::from_str(&pinned.tool_calls[0].arguments).expect("arguments JSON");
+        assert_eq!(arguments["task_id"], "abc-123");
+    }
+
+    #[test]
+    fn e2e_parent_status_closing_text_after_tool_result() {
+        let response = e2e_llm_response(
+            &[text_message("user", "subagent-e2e/status"), text_message("tool", "{\"tasks\":[]}")],
+            &[subagent_spec("subagent_status")],
+        );
+
+        assert_eq!(
+            response.content.as_deref(),
+            Some("E2E delegated in the background; continuing.")
+        );
+        assert!(response.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn e2e_memory_consolidation_child_returns_scripted_reply() {
+        let response = e2e_llm_response(
+            &[text_message(
+                "user",
+                "Consolidate the memory workspace. Read \
+                 C:/mem/projects/demo/phase2_workspace_diff.md first for the git-style diff \
+                 context.",
+            )],
+            &[],
+        );
+
+        assert_eq!(response.content.as_deref(), Some("E2E memory consolidation scripted reply."));
+        assert!(response.tool_calls.is_empty());
+        assert_eq!(response.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn e2e_memory_consolidation_prompt_carries_a_stall_window() {
+        // The consolidation prompt cannot carry an explicit slow marker; the
+        // stall must come from the memory branch (default window > 0, still
+        // capped by MAX_SLOW_MS). SLAB_E2E_STALL_MS is process-global, so the
+        // test only asserts the branch routes a nonzero delay.
+        let stall = e2e_slow_ms(
+            "Consolidate the memory workspace. Read /mem/phase2_workspace_diff.md first.",
+        );
+        assert!(stall > 0, "consolidation prompt must stall the scripted child");
+
+        // Ordinary prompts keep the no-delay default.
+        assert_eq!(e2e_slow_ms("E2E assistant persisted reply."), 0);
     }
 
     #[test]
