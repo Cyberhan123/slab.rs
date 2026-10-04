@@ -1971,9 +1971,15 @@ mod tests {
     async fn delegate_subagent_rejects_symlinked_workspace_scope() {
         let temp_dir = std::env::temp_dir()
             .join(format!("slab-agent-tools-subagent-symlink-{}", std::process::id()));
+        // Independent sibling root: the canonical containment check must
+        // reject a scope whose canonical target is NOT under the canonical
+        // workspace root. A target inside temp_dir resolves back inside the
+        // root and is legitimately allowed — the escape needs a second root.
+        let outside = std::env::temp_dir()
+            .join(format!("slab-agent-tools-subagent-symlink-target-{}", std::process::id()));
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        let _ = tokio::fs::remove_dir_all(&outside).await;
         tokio::fs::create_dir_all(&temp_dir).await.expect("temp workspace");
-        let outside = temp_dir.join("outside");
         tokio::fs::create_dir_all(&outside).await.expect("outside dir");
         let link = temp_dir.join("src");
         #[cfg(unix)]
@@ -1983,6 +1989,7 @@ mod tests {
         if symlink_result.is_err() {
             // Symlink creation needs privileges on some hosts; skip silently.
             let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+            let _ = tokio::fs::remove_dir_all(&outside).await;
             return;
         }
 
@@ -2013,6 +2020,7 @@ mod tests {
         assert!(error.contains("workspace_scope must stay inside the workspace"), "{error}");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        let _ = tokio::fs::remove_dir_all(&outside).await;
     }
 
     /// A scoped agent delegating an explicitly out-of-scope child scope is a
