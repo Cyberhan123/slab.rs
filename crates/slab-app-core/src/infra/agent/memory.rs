@@ -1199,6 +1199,10 @@ async fn build_phase1_input(
                 role: record.message.role,
                 content,
                 created_at: record.created_at,
+                // The tag rides along so filter_memory_relevant_items can
+                // drop harness injections (agents_md fragments, subagent
+                // notices) from the extraction input.
+                name: record.message.name,
             }
         })
         .collect();
