@@ -34,3 +34,8 @@ docs/public/manifests/v1/settings-document.schema.json text eol=lf
 # so Windows core.autocrlf checkouts cannot flip them.
 crates/slab-agent-memories/templates/memories/read.md text eol=crlf
 crates/slab-agent-memories/templates/memories/recall-manifest.md text eol=lf
+
+# agent.md renders into the memory agent's fallback system prompt. No test
+# pins its rendered bytes; pin LF for cross-platform template uniformity
+# alongside the two pinned templates above.
+crates/slab-agent-memories/templates/memories/agent.md text eol=lf
