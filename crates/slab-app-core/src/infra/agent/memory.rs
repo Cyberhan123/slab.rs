@@ -28,12 +28,11 @@ use crate::domain::models::{
     CommonChatParams, LocalChatParams,
 };
 use crate::domain::services::{ChatService, workspace_root_from_config_explicit};
-use crate::infra::db::AnyStore;
+use crate::infra::db::{AnyStore, ChatSession, MEMORY_PHASE2_SESSION_PREFIX, SessionStore};
 
 use super::memory_project::{backfill_project_key, resolve_project_key};
 use super::rollout_store::RolloutBackedAgentStore;
 
-const MEMORY_PHASE2_SESSION_PREFIX: &str = "memory-phase2-";
 /// Cap on distinct projects consolidated per startup run — bounds worst-case
 /// consolidation cost when many projects accumulated pending extractions.
 const MAX_PROJECTS_PER_RUN: usize = 3;
@@ -383,9 +382,31 @@ impl AgentMemoryPipeline {
             Arc::clone(&self.background_tasks),
             Arc::clone(&self.subagent_sink),
         );
+        // The child's `agent_threads` row references its session id
+        // (`agent_threads.session_id REFERENCES chat_sessions(id)`; FKs are
+        // ON for every pool connection), so the FK parent must exist BEFORE
+        // the spawn: otherwise the child's initial `upsert_thread`
+        // (AgentThread::run) fails the FK, the terminal-snapshot wait then
+        // reports ThreadNotFound, and even a successful consolidation is
+        // recorded as failed. Same ensure-parent pattern as
+        // ChatStore::append_message's auto-session insert. Transient system
+        // bookkeeping: `list_sessions` filters this reserved id namespace
+        // out of user-facing listings.
+        let session_id = format!("{MEMORY_PHASE2_SESSION_PREFIX}{}", Uuid::new_v4());
+        let now = Utc::now();
+        self.store
+            .create_session(ChatSession {
+                id: session_id.clone(),
+                name: format!("Memory phase2 consolidation ({project_key})"),
+                state_path: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .map_err(|error| error.to_string())?;
         let handle = spawner
             .spawn_system(SystemSubagentRequest {
-                session_id: format!("{MEMORY_PHASE2_SESSION_PREFIX}{}", Uuid::new_v4()),
+                session_id,
                 owner_thread_id: None,
                 task_summary: format!("Consolidate memory workspace ({project_key})"),
                 config,
@@ -1424,7 +1445,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::infra::db::AnyStore;
+    use crate::infra::db::{AnyStore, ChatSession, MEMORY_PHASE2_SESSION_PREFIX, SessionStore};
 
     #[tokio::test]
     async fn records_usage_source_kind_and_updates_matching_selected_rollout() {
@@ -1739,6 +1760,87 @@ mod tests {
             0,
             true
         ));
+    }
+
+    /// The phase2 spawn path pinned at the store boundary production hits:
+    /// `run_consolidation_agent` creates the synthetic `chat_sessions` row
+    /// before `spawn_system`, so the consolidation child's initial
+    /// `agent_threads` upsert (session FK) must succeed.
+    #[tokio::test]
+    async fn phase2_session_row_enables_thread_snapshot_upsert() {
+        use slab_agent::port::{AgentStorePort, ThreadSnapshot};
+
+        let store = AnyStore::connect("sqlite::memory:").await.expect("store");
+        let session_id = format!("{MEMORY_PHASE2_SESSION_PREFIX}{}", Uuid::new_v4());
+        let now = Utc::now();
+        store
+            .create_session(ChatSession {
+                id: session_id.clone(),
+                name: "Memory phase2 consolidation (proj)".to_owned(),
+                state_path: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .expect("synthetic phase2 session row");
+
+        // What AgentThread::run's initial upsert does — must pass the
+        // agent_threads.session_id FK.
+        let config_json = serde_json::to_string(&AgentConfig::default()).expect("config");
+        let stamp = now.to_rfc3339();
+        let snapshot = ThreadSnapshot {
+            id: "thread-phase2-child".to_owned(),
+            session_id,
+            parent_id: None,
+            depth: 0,
+            status: slab_agent::ThreadStatus::Running,
+            role_name: None,
+            config_json,
+            completion_text: None,
+            created_at: stamp.clone(),
+            updated_at: stamp,
+            archived_at: None,
+        };
+        store.upsert_thread(&snapshot).await.expect("thread upsert passes the session FK");
+        let loaded = store
+            .get_thread("thread-phase2-child")
+            .await
+            .expect("read back")
+            .expect("thread row exists");
+        assert_eq!(loaded.session_id, snapshot.session_id);
+    }
+
+    /// Synthetic phase2 rows stay out of the user-facing session list while
+    /// exact-id lookups keep resolving them.
+    #[tokio::test]
+    async fn list_sessions_hides_phase2_consolidation_sessions() {
+        let store = AnyStore::connect("sqlite::memory:").await.expect("store");
+        let now = Utc::now();
+        for id in ["memory-phase2-1111", "user-session-1"] {
+            store
+                .create_session(ChatSession {
+                    id: id.to_owned(),
+                    name: format!("session {id}"),
+                    state_path: None,
+                    created_at: now,
+                    updated_at: now,
+                })
+                .await
+                .expect("seed session");
+        }
+
+        let listed = store.list_sessions().await.expect("list sessions");
+        let ids: Vec<String> = listed.into_iter().map(|session| session.id).collect();
+        assert!(ids.contains(&"user-session-1".to_owned()));
+        assert!(
+            !ids.iter().any(|id| id.starts_with(MEMORY_PHASE2_SESSION_PREFIX)),
+            "synthetic phase2 rows must stay hidden: {ids:?}"
+        );
+
+        assert!(
+            store.get_session("memory-phase2-1111").await.expect("get session").is_some(),
+            "exact-id lookup still resolves the synthetic row"
+        );
     }
 
     #[test]

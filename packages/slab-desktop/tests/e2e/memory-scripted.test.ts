@@ -22,13 +22,14 @@
  *     completed_watermark (retry semantics), so later root turns may spawn a
  *     NEW consolidation task — the terminal assertion pins the ORIGINAL
  *     task_id (via `subagent-e2e/status task_id=<id>`);
- *   - the memory child's session id is `memory-phase2-<uuid>` with no
- *     `chat_sessions` row, so its thread snapshot persistence logs a
- *     swallowed FK error (pre-existing, logged at thread persistence) —
- *     server-log noise, not a failure of this flow.
+ *   - the memory child's session id is `memory-phase2-<uuid>`; the pipeline
+ *     creates a synthetic `chat_sessions` row for it BEFORE the spawn (the
+ *     FK parent its `agent_threads` row needs), kept out of
+ *     `GET /v1/sessions` by the store-level prefix filter;
  */
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, inject, it } from "vitest"
 import { chromium, type Browser, type Page } from "playwright"
+import { DatabaseSync } from "node:sqlite"
 
 import { createSession, type SessionResponse } from "./support/e2e-runtime"
 import {
@@ -156,6 +157,20 @@ describe("scripted memory phase2 consolidation", () => {
       expect(nonBlank(consolidation.child_thread_id)).toBe(true)
       expect(consolidation.parent_thread_id).toBe(consolidation.child_thread_id)
       const taskId = consolidation.task_id
+
+      // The synthetic FK-parent row is inserted BEFORE the spawn, so
+      // observing the RUNNING task implies the row exists (literal SQL, no
+      // binds — node:sqlite's binder rejects ?NNN).
+      const database = new DatabaseSync(endpoints.databasePath)
+      try {
+        database.exec("PRAGMA busy_timeout = 5000")
+        const rows = database
+          .prepare("SELECT id, name FROM chat_sessions WHERE id LIKE 'memory-phase2-%'")
+          .all() as Array<{ id: string; name: string }>
+        expect(rows.length).toBeGreaterThan(0)
+      } finally {
+        database.close()
+      }
 
       // Stop it through the registry — the same surface a user-visible kill
       // uses (the pipeline itself also stops the task on lease loss).

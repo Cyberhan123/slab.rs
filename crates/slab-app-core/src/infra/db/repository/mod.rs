@@ -21,6 +21,7 @@ pub use model::ModelStore;
 pub use model_config_state::ModelConfigStateStore;
 pub use model_download::ModelDownloadStore;
 pub use plugin::PluginStateStore;
+pub(crate) use session::MEMORY_PHASE2_SESSION_PREFIX;
 pub use session::SessionStore;
 pub use task::TaskStore;
 pub use ui_state::UiStateStore;
