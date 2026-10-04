@@ -15867,10 +15867,14 @@ dependencies = [
 name = "slab-mcp"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "futures",
  "serde",
  "serde_json",
+ "slab-agent-memories",
  "slab-mcp-client",
+ "slab-utils",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -15897,6 +15901,7 @@ dependencies = [
  "anyhow",
  "serde_json",
  "slab-jsonrpc",
+ "slab-mcp",
  "slab-utils",
  "tokio",
  "tracing",
