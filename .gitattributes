@@ -27,15 +27,11 @@ patches/*.patch text eol=lf
 # and fail `generated_document_schema_matches_checked_in_file`.
 docs/public/manifests/v1/settings-document.schema.json text eol=lf
 
-# Memory prompt templates render into byte-pinned prompt bodies. read.md's full
-# rendered output is pinned by test (slab_memory kv-cache prefix stability) and
-# stays CRLF, matching the historical memory.jinja bytes; recall-manifest.md
-# renders LF to stay byte-identical to the former hardcoded formatter. Pin both
-# so Windows core.autocrlf checkouts cannot flip them.
-crates/slab-agent-memories/templates/memories/read.md text eol=crlf
-crates/slab-agent-memories/templates/memories/recall-manifest.md text eol=lf
-
-# agent.md renders into the memory agent's fallback system prompt. No test
-# pins its rendered bytes; pin LF for cross-platform template uniformity
-# alongside the two pinned templates above.
-crates/slab-agent-memories/templates/memories/agent.md text eol=lf
+# Memory prompt templates are embedded via include_str! with no newline
+# normalization, so worktree bytes are the prompt bytes. Default the whole
+# templates/ tree to LF for cross-platform uniformity so Windows
+# core.autocrlf checkouts/stashes cannot flip them — including templates
+# added later. read.md historically rendered CRLF (matching the removed
+# memory.jinja); it migrated to LF with its byte-stability pin
+# (memory_read_body_is_byte_stable) updated in lockstep.
+crates/slab-agent-memories/templates/** text eol=lf

@@ -255,8 +255,8 @@ mod tests {
 
     /// Full-body byte pin: the injected `slab_memory` developer body must not
     /// drift silently — it is keyed by tag in the rollout merge and feeds the
-    /// prompt-cache prefix. The expected literal below pins content (LF) and
-    /// the CRLF line-ending style of `read.md` at the same time. If this test
+    /// prompt-cache prefix. The expected literal below pins content and the
+    /// LF line-ending style of `read.md` at the same time. If this test
     /// fails, the template changed on purpose: update the pin consciously.
     #[test]
     fn memory_read_body_is_byte_stable() {
@@ -265,7 +265,7 @@ mod tests {
             "v1\n# Summary\nprefers minimal diffs",
         )
         .expect("renders");
-        assert!(rendered.contains("\r\n"), "read.md keeps CRLF line endings");
+        assert!(!rendered.contains('\r'), "read.md renders pure LF line endings");
 
         let expected_lf = r#"## Memory
 
@@ -342,12 +342,10 @@ these notes.
 ========= MEMORY_SUMMARY BEGINS =========
 __SUMMARY__
 ========= MEMORY_SUMMARY ENDS ========="#;
-        // Template lines are CRLF; the substituted summary keeps its own LF
-        // endings verbatim; minijinja strips the template's trailing newline
-        // (so the body ends right after the ENDS marker).
-        let expected = expected_lf
-            .replace('\n', "\r\n")
-            .replace("__SUMMARY__", "v1\n# Summary\nprefers minimal diffs");
+        // Template lines and the substituted summary are both LF; minijinja
+        // strips the template's trailing newline (so the body ends right
+        // after the ENDS marker).
+        let expected = expected_lf.replace("__SUMMARY__", "v1\n# Summary\nprefers minimal diffs");
         assert_eq!(rendered, expected);
     }
 
