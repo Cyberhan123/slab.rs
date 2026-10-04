@@ -279,7 +279,7 @@ fn build_agent_control(
     ));
 
     let tool_router = Arc::new(tool_router);
-    let approval_port: Arc<dyn slab_agent::ApprovalPort> = event_hub;
+    let approval_port: Arc<dyn slab_agent::ApprovalPort> = event_hub.clone();
     let settings = ctx.pmid.config();
     // Trace sink decouple: the trace sink gate is `agent.debug` ONLY (computed
     // upstream in `build_agent_bootstrap`, which is why `trace_dir` is already
@@ -409,6 +409,9 @@ fn build_agent_control(
     // Approval review for the "approve for me" mode (inert until a turn
     // carries approval_model — see TurnStartParams).
     .with_approval_reviewer(approval_reviewer)
+    // Questionnaire user-answer gate: the same event hub backs the pending
+    // entry map the harness `questionnaire/resolve` request routes back to.
+    .with_questionnaire(Arc::clone(&event_hub) as Arc<dyn slab_agent::QuestionnairePort>)
     // Plan agent: disk-backed plan store (durable JSON under `<app_home>/plans`,
     // hot in-memory copy for live queries) — the source of truth for the
     // `plan` / `update_plan` / `present_plan` tools.

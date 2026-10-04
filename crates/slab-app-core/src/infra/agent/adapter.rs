@@ -189,6 +189,15 @@ fn e2e_llm_response(messages: &[ConversationMessage], tools: &[ToolSpec]) -> Llm
         return response;
     }
 
+    // Questionnaire e2e track: `questionnaire-e2e/ask` markers trigger the
+    // tool call; the resumed turn (tool result present) echoes the answer
+    // payload the UI submitted so the suite can assert the round-trip.
+    if let Some(response) =
+        e2e_questionnaire_response(messages, &prompt, has_tool_result_after_prompt, tools)
+    {
+        return response;
+    }
+
     let normalized_prompt = prompt.to_ascii_lowercase();
     let wants_plan_loop = normalized_prompt.contains("tool loop")
         || normalized_prompt.contains("plan_update")
@@ -383,6 +392,53 @@ fn e2e_subagent_response(
 fn e2e_slow_marker_response(prompt: &str) -> Option<LlmResponse> {
     let sleep_ms = e2e_parse_marker_ms(prompt, "subagent-e2e/slow/")?;
     Some(e2e_text_response(format!("E2E slow reply after {sleep_ms}ms.")))
+}
+
+/// Deterministic response track for the questionnaire e2e suite. Returns
+/// `None` when the prompt carries no questionnaire marker. `-ask-multi`
+/// produces a multi-select required questionnaire; plain `-ask` a
+/// single-select optional one with custom input allowed. The resumed turn
+/// (after the answer tool result) echoes the answer payload verbatim.
+#[cfg(any(test, debug_assertions))]
+fn e2e_questionnaire_response(
+    messages: &[ConversationMessage],
+    prompt: &str,
+    has_tool_result_after_prompt: bool,
+    tools: &[ToolSpec],
+) -> Option<LlmResponse> {
+    let multi = prompt.contains("questionnaire-e2e/ask-multi");
+    if !multi && !prompt.contains("questionnaire-e2e/ask") {
+        return None;
+    }
+    if has_tool_result_after_prompt {
+        // Echo the latest tool result — the answer JSON the UI sent through
+        // `questionnaire/resolve` (messages after the user prompt are all part
+        // of this turn's tool loop, so the last tool message is the answer).
+        let answer = messages
+            .iter()
+            .rev()
+            .find(|message| message.role == "tool")
+            .map(|message| message.rendered_text())
+            .unwrap_or_default();
+        return Some(e2e_text_response(format!("E2E questionnaire answers: {answer}")));
+    }
+    if !e2e_tool_available(tools, "questionnaire") {
+        return None;
+    }
+    Some(e2e_tool_call_response(
+        "e2e-questionnaire",
+        "questionnaire",
+        serde_json::json!({
+            "question": "Which editor should the e2e use?",
+            "choices": [
+                { "label": "Vim", "value": "vim" },
+                { "label": "VS Code", "value": "vscode" }
+            ],
+            "allow_multiple": multi,
+            "allow_custom_input": true,
+            "required": multi
+        }),
+    ))
 }
 
 #[cfg(any(test, debug_assertions))]

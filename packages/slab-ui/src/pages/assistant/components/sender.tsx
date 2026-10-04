@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, type ReactNode, type SubmitEvent } from "react"
+import { useMemo, useRef, useState, type ReactNode, type SubmitEvent } from "react"
 import type { FileUIPart } from "ai"
 import {
   InputGroup,
@@ -53,13 +53,14 @@ import type {
   PermissionMode,
   ReasoningEffort,
 } from "@slab/api/harness"
-import type { ApprovalRequest } from "@slab/core/harness"
+import type { ApprovalRequest, QuestionnaireRequest } from "@slab/core/harness"
 import {
   useAssistantUiStore,
   type AssistantThinkingLevel,
 } from "@slab/ui/store/useAssistantUiStore"
 import { resolveCommandDispatch } from "../lib/assistant-commands"
 import { ApprovalCard } from "./approval-banner"
+import { QuestionnaireCard, type QuestionnaireAnswerPayload } from "./questionnaire-card"
 import { ApprovalReviewDialog } from "./approval-review-dialog"
 
 /** Per-session permission modes offered in the composer. */
@@ -112,6 +113,14 @@ function attachmentId(seed: string): string {
     : `${seed}-${Math.random().toString(36).slice(2)}`
 }
 
+/**
+ * Slash-command autocomplete trigger: a leading `/` followed by word
+ * characters only. Paths (`/usr/bin`), files (`/plan.md`) and commands with
+ * args (`/compact all`) stop matching, so the popup never hijacks ordinary
+ * typing.
+ */
+const SLASH_PATTERN = /^\/[a-zA-Z0-9_-]*$/
+
 export type SenderSubmitOptions = {
   files: FileUIPart[]
   effort: ReasoningEffort
@@ -143,6 +152,12 @@ type SenderProps = {
   /** Pending human-approval requests rendered in a slot above the textarea. */
   approvals?: ApprovalRequest[]
   onResolveApproval?: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void> | void
+  /** Pending `questionnaire` tool calls awaiting the user's answer (same slot). */
+  questionnaires?: QuestionnaireRequest[]
+  onResolveQuestionnaire?: (
+    itemId: string,
+    answers: QuestionnaireAnswerPayload,
+  ) => Promise<void> | void
   /** Command registry snapshot driving the `/`-menu (`command/list`). */
   commands: CommandInfo[]
   /** Whether plan mode is active (turn runs as the read-only plan agent). */
@@ -186,6 +201,8 @@ function Sender({
   steerable = false,
   approvals,
   onResolveApproval,
+  questionnaires,
+  onResolveQuestionnaire,
   commands,
   planMode,
   onPlanModeChange,
@@ -256,9 +273,33 @@ function Sender({
       setValue((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")} ${text}` : text)),
   })
 
-  // The "/" command menu opens both from the toolbar button and from typing a
-  // leading "/", as one unified popover above the input.
-  const isSlashCommand = value.trimStart().startsWith("/")
+  // The typed-"/" autocomplete is a plain popup anchored above the input. It
+  // never steals focus (unlike the toolbar DropdownMenu): typing continues in
+  // the textarea while ArrowUp/Down/Tab navigate the suggestions.
+  const slashQuery = SLASH_PATTERN.test(value) ? value.slice(1) : null
+  const filteredCommands = useMemo(() => {
+    if (slashQuery === null) return []
+    const query = slashQuery.toLowerCase()
+    return commands.filter(
+      (cmd) =>
+        cmd.name.toLowerCase().includes(query) ||
+        cmd.aliases.some((alias) => alias.toLowerCase().includes(query)),
+    )
+  }, [commands, slashQuery])
+  // Escape suppresses the popup for the CURRENT query; typing more (query
+  // changes) re-opens it. Selecting a control command also suppresses, so the
+  // seeded trigger ("/compact") doesn't pin the popup open.
+  const [slashDismissed, setSlashDismissed] = useState<string | null>(null)
+  // The highlight is keyed by the query it was moved under (derived during
+  // render, not reset in an effect): a query change re-derives index 0.
+  const [slashHighlight, setSlashHighlight] = useState<{
+    query: string | null
+    index: number
+  }>({ query: null, index: 0 })
+  const highlightForQuery = slashHighlight.query === slashQuery ? slashHighlight.index : 0
+  const slashIndex = Math.min(highlightForQuery, Math.max(filteredCommands.length - 1, 0))
+  const slashOpen =
+    slashQuery !== null && slashQuery !== slashDismissed && filteredCommands.length > 0
 
   // Store level → harness wire level: 'none' means "thinking off" (wire: "off");
   // 'minimal' has no wire tier and collapses to the nearest one.
@@ -313,6 +354,31 @@ function Sender({
       if (target && target.previewUrl.startsWith("blob:")) URL.revokeObjectURL(target.previewUrl)
       return prev.filter((item) => item.id !== id)
     })
+  }
+
+  /**
+   * Apply a command picked from the toolbar menu or the typed-"/" autocomplete
+   * (both entry points share these semantics): `/plan` toggles plan mode and
+   * clears the composer (like submitting `/plan`), control commands seed the
+   * exact trigger ready to submit, Prompt commands prefix the input for
+   * further typing.
+   */
+  const applyCommand = (cmd: CommandInfo) => {
+    const seed = `/${cmd.name}`
+    setCommandMenuOpen(false)
+    if (cmd.name === "plan") {
+      onPlanModeChange(!planMode)
+      setValue("")
+      return
+    }
+    const next =
+      cmd.kind === "control"
+        ? seed
+        : value.startsWith(seed)
+          ? value
+          : `${seed} ${value}`
+    setValue(next)
+    if (SLASH_PATTERN.test(next)) setSlashDismissed(next.slice(1))
   }
 
   const handleSubmit = async (event?: SubmitEvent<HTMLFormElement>) => {
@@ -379,32 +445,10 @@ function Sender({
   }
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault()
-        void handleSubmit(e)
-      }}
-      onDragOver={(e) => {
-        e.preventDefault()
-      }}
-      onDrop={(e) => {
-        e.preventDefault()
-        addFiles(e.dataTransfer.files)
-      }}
-      className="w-full"
-    >
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        hidden
-        aria-label="Attach files"
-        onChange={(e) => {
-          addFiles(e.target.files)
-          e.target.value = ""
-        }}
-      />
-
+    // The approval/questionnaire cards render their own <form> elements (the
+    // questionnaire component Root), so they live OUTSIDE the composer form —
+    // nested forms are invalid HTML. Visually they still sit above the input.
+    <div className="w-full">
       {approvals && approvals.length > 0 && onResolveApproval ? (
         <div className="mb-2 space-y-2">
           {approvals.map((approval) => (
@@ -416,6 +460,44 @@ function Sender({
           ))}
         </div>
       ) : null}
+
+      {questionnaires && questionnaires.length > 0 && onResolveQuestionnaire ? (
+        <div className="mb-2 space-y-2">
+          {questionnaires.map((request) => (
+            <QuestionnaireCard
+              key={request.itemId}
+              request={request}
+              onResolve={onResolveQuestionnaire}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          void handleSubmit(e)
+        }}
+        onDragOver={(e) => {
+          e.preventDefault()
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          addFiles(e.dataTransfer.files)
+        }}
+        className="w-full"
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          aria-label="Attach files"
+          onChange={(e) => {
+            addFiles(e.target.files)
+            e.target.value = ""
+          }}
+        />
 
       {attachments.length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-2">
@@ -442,12 +524,82 @@ function Sender({
       ) : null}
 
       <InputGroup>
+        {slashOpen ? (
+          <div
+            id="assistant-slash-popup"
+            data-testid="assistant-slash-popup"
+            role="listbox"
+            aria-label={t("pages.assistant.composer.commandSkill")}
+            className="absolute bottom-full left-0 z-50 mb-2 w-80 max-w-full overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+          >
+            {filteredCommands.map((cmd, index) => (
+              <button
+                key={cmd.name}
+                id={`assistant-slash-option-${cmd.name}`}
+                type="button"
+                role="option"
+                aria-selected={index === slashIndex}
+                title={cmd.description}
+                className={
+                  index === slashIndex
+                    ? "flex w-full cursor-pointer items-center gap-2 rounded-sm bg-accent px-2 py-1.5 text-left text-sm text-accent-foreground outline-none"
+                    : "flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none"
+                }
+                // onMouseDown (not onClick) + preventDefault keeps focus in the
+                // textarea so typing continues right after the pick.
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  applyCommand(cmd)
+                }}
+              >
+                <span className="font-mono text-xs">/{cmd.name}</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                  {cmd.description}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         <InputGroupTextarea
           aria-label="Message"
           data-testid="assistant-composer-input"
           disabled={loading && !steerable}
+          role="combobox"
+          aria-haspopup="listbox"
+          aria-expanded={slashOpen}
+          aria-controls="assistant-slash-popup"
+          aria-activedescendant={
+            slashOpen
+              ? `assistant-slash-option-${filteredCommands[slashIndex]?.name ?? ""}`
+              : undefined
+          }
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
+            if (slashOpen) {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault()
+                const delta = event.key === "ArrowDown" ? 1 : -1
+                const count = filteredCommands.length
+                setSlashHighlight({
+                  query: slashQuery,
+                  index: (highlightForQuery + delta + count) % count,
+                })
+                return
+              }
+              // Tab accepts the highlighted suggestion (per the composer's
+              // keyboard contract: arrows move, Tab selects, Enter submits).
+              if (event.key === "Tab") {
+                event.preventDefault()
+                const cmd = filteredCommands[slashIndex]
+                if (cmd) applyCommand(cmd)
+                return
+              }
+              if (event.key === "Escape") {
+                event.preventDefault()
+                setSlashDismissed(slashQuery)
+                return
+              }
+            }
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault()
               event.currentTarget.form?.requestSubmit()
@@ -537,7 +689,7 @@ function Sender({
             </InputGroupButton>
           ) : null}
           <DropdownMenu
-            open={commandMenuOpen || isSlashCommand}
+            open={commandMenuOpen}
             onOpenChange={setCommandMenuOpen}
             modal={false}
           >
@@ -611,34 +763,15 @@ function Sender({
                 <DropdownMenuLabel>
                   {t("pages.assistant.composer.commandSkill")}
                 </DropdownMenuLabel>
-                {commands.map((cmd) => {
-                  const seed = `/${cmd.name}`
-                  return (
-                    <DropdownMenuItem
-                      key={cmd.name}
-                      title={cmd.description}
-                      onSelect={(event) => {
-                        event.preventDefault()
-                        // `/plan` toggles plan mode directly (no seeding, no
-                        // message). Control commands seed the exact trigger
-                        // (ready to submit); Prompt/Render commands prefix the
-                        // input for further typing.
-                        if (cmd.name === "plan") {
-                          onPlanModeChange(!planMode)
-                          setCommandMenuOpen(false)
-                          return
-                        }
-                        if (cmd.kind === "control") {
-                          setValue(seed)
-                        } else {
-                          setValue((prev) => (prev.startsWith(seed) ? prev : `${seed} ${prev}`))
-                        }
-                      }}
-                    >
-                      {seed}
-                    </DropdownMenuItem>
-                  )
-                })}
+                {commands.map((cmd) => (
+                  <DropdownMenuItem
+                    key={cmd.name}
+                    title={cmd.description}
+                    onSelect={() => applyCommand(cmd)}
+                  >
+                    {`/${cmd.name}`}
+                  </DropdownMenuItem>
+                ))}
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -748,12 +881,13 @@ function Sender({
           </div>
         </InputGroupAddon>
       </InputGroup>
+      </form>
       <ApprovalReviewDialog
         open={approvalDialogOpen}
         onOpenChange={handleApprovalDialogOpenChange}
         onSaved={handleApprovalSaved}
       />
-    </form>
+    </div>
   )
 }
 

@@ -3,9 +3,14 @@
 import { Button } from "@slab/components/button"
 import { Badge } from "@slab/components/badge"
 import { Spinner } from "@slab/components/spinner"
+import {
+  Questionnaire,
+  QuestionnaireChoice,
+  QuestionnaireChoices,
+  QuestionnaireItem,
+} from "@slab/components/questionnaire"
 import { useTranslation } from "@slab/i18n"
 import {
-  CheckIcon,
   FilePenIcon,
   ListChecksIcon,
   ShieldAlertIcon,
@@ -25,19 +30,11 @@ const changeTypeVariant: Record<string, "default" | "secondary" | "destructive">
   delete: "destructive",
 }
 
-type ScopeChoice = {
-  scope: ApprovalScope
-  approved: boolean
-  label: string
-  icon: typeof CheckIcon
-  variant: "default" | "outline"
-}
-
-const ALL_SCOPES: ScopeChoice[] = [
-  { scope: "run_once", approved: true, label: "pages.assistant.approval.runOnce", icon: CheckIcon, variant: "default" },
-  { scope: "always_in_workspace", approved: true, label: "pages.assistant.approval.alwaysInWorkspace", icon: CheckIcon, variant: "outline" },
-  { scope: "always", approved: true, label: "pages.assistant.approval.always", icon: CheckIcon, variant: "outline" },
-  { scope: "deny", approved: false, label: "pages.assistant.actions.reject", icon: XIcon, variant: "outline" },
+/** Approve scopes offered as questionnaire choices, in display order. */
+const APPROVE_SCOPES: ReadonlyArray<{ scope: ApprovalScope; label: string }> = [
+  { scope: "run_once", label: "pages.assistant.approval.runOnce" },
+  { scope: "always_in_workspace", label: "pages.assistant.approval.alwaysInWorkspace" },
+  { scope: "always", label: "pages.assistant.approval.always" },
 ]
 
 export function ApprovalCard({
@@ -50,8 +47,8 @@ export function ApprovalCard({
   const { t } = useTranslation()
   const [pendingAction, setPendingAction] = useState<string | null>(null)
 
-  const handle = async (approved: boolean, scope: ApprovalScope, label: string) => {
-    setPendingAction(label)
+  const handle = async (approved: boolean, scope: ApprovalScope, action: string) => {
+    setPendingAction(action)
     try {
       await onResolve(approval.itemId, approved, scope)
     } finally {
@@ -59,15 +56,14 @@ export function ApprovalCard({
     }
   }
 
-  // Prefer the server-advertised scopes; fall back to a simple approve/reject
-  // (approve = run-once, reject = deny) for older servers.
-  const choices: ScopeChoice[] =
+  // Approve scopes render as a questionnaire radio list — picking a choice
+  // resolves immediately (no extra confirm step). Prefer the server-advertised
+  // scopes; fall back to a single approve choice (= run-once) for older
+  // servers. "deny" is the dedicated reject button instead of a scope choice.
+  const approveChoices =
     approval.allowedScopes && approval.allowedScopes.length > 0
-      ? ALL_SCOPES.filter((choice) => approval.allowedScopes!.includes(choice.scope))
-      : [
-          { scope: "run_once", approved: true, label: "pages.assistant.actions.approve", icon: CheckIcon, variant: "default" },
-          { scope: "deny", approved: false, label: "pages.assistant.actions.reject", icon: XIcon, variant: "outline" },
-        ]
+      ? APPROVE_SCOPES.filter((choice) => approval.allowedScopes!.includes(choice.scope))
+      : [{ scope: "run_once" as ApprovalScope, label: "pages.assistant.actions.approve" }]
 
   const isCommand = approval.kind === "command"
   const isPlan = approval.kind === "plan"
@@ -126,29 +122,48 @@ export function ApprovalCard({
         )}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {choices.map((choice) => {
-          const Icon = choice.icon
-          return (
-            <Button
-              key={choice.scope}
-              data-testid={`assistant-approval-${choice.scope}`}
-              size="sm"
-              variant={choice.variant}
-              disabled={pendingAction !== null}
-              onClick={() => {
-                void handle(choice.approved, choice.scope, choice.label)
-              }}
-            >
-              {pendingAction === choice.label ? (
-                <Spinner className="size-3.5" />
-              ) : (
-                <Icon className="size-3.5" />
-              )}
-              {t(choice.label)}
-            </Button>
-          )
-        })}
+      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        {approveChoices.length > 0 ? (
+          // The questionnaire Root renders a <form>; the card lives outside
+          // the composer form, and submit is swallowed (choices resolve on
+          // change, so there is nothing to submit).
+          <Questionnaire noValidate onSubmit={(event) => event.preventDefault()}>
+            <QuestionnaireItem name="scope">
+              <QuestionnaireChoices className="grid-cols-1 gap-1.5 sm:grid-cols-3">
+                {approveChoices.map((choice) => (
+                  <QuestionnaireChoice
+                    key={choice.scope}
+                    value={choice.scope}
+                    disabled={pendingAction !== null}
+                    data-testid={`assistant-approval-${choice.scope}`}
+                    className="gap-3 rounded-md border border-border/60 px-3 py-2 text-sm transition-colors hover:bg-accent/50 data-checked:border-primary/60 data-checked:bg-accent"
+                    onChange={() => void handle(true, choice.scope, `approve:${choice.scope}`)}
+                  >
+                    {t(choice.label)}
+                    {pendingAction === `approve:${choice.scope}` ? (
+                      <Spinner className="ms-auto size-3.5" />
+                    ) : null}
+                  </QuestionnaireChoice>
+                ))}
+              </QuestionnaireChoices>
+            </QuestionnaireItem>
+          </Questionnaire>
+        ) : null}
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="assistant-approval-deny"
+          disabled={pendingAction !== null}
+          className="self-start"
+          onClick={() => void handle(false, "deny", "deny")}
+        >
+          {pendingAction === "deny" ? (
+            <Spinner className="size-3.5" />
+          ) : (
+            <XIcon className="size-3.5" />
+          )}
+          {t("pages.assistant.actions.reject")}
+        </Button>
       </div>
     </div>
   )

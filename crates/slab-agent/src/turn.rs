@@ -23,7 +23,7 @@ use crate::{
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
         AgentNotifyPort, ApprovalPort, ApprovalReviewerPort, ExecPolicyPort, LlmPort,
-        LlmStreamObserver, LlmUsage, ParsedToolCall, PlanStorePort, ToolSpec,
+        LlmStreamObserver, LlmUsage, ParsedToolCall, PlanStorePort, QuestionnairePort, ToolSpec,
     },
     protocol::{
         AgentMessageDeltaParams, EventMsg, ItemCompletedParams, ItemStartedParams,
@@ -59,6 +59,9 @@ pub(crate) struct TurnExecutionContext<'a> {
     /// BEFORE the human approval card; `ReviewOutcome::Unavailable` (unconfigured,
     /// wrong mode, failed, timed out) falls back to [`Self::approval`].
     pub approval_reviewer: &'a dyn ApprovalReviewerPort,
+    /// User-answer gate for the `questionnaire` tool: blocks the tool call
+    /// until the host collects answers (see `drive_questionnaire_answers`).
+    pub questionnaire: &'a dyn QuestionnairePort,
     /// Built-in agent registry (Slice 4). Read-only turn use — drives
     /// [`crate::agent::filter_tools_for_agent`] from `config.agent_type`.
     pub agent_registry: &'a dyn crate::agent::AgentRegistry,
