@@ -250,7 +250,10 @@ pub fn truncate_to_token_budget(text: &str, budget_tokens: usize) -> String {
 /// (phase2 consolidation output), so they are a trust boundary: the stripped
 /// name must be one flat path segment in the `[A-Za-z0-9_.-]` charset — no
 /// separators (`/` or `\`), no traversal, no hidden/absolute names.
-fn safe_summary_name(name: &str) -> Option<&str> {
+///
+/// Public so out-of-crate read surfaces (the `slab-mcp` memory tools) can
+/// apply the same single-source rule to caller-supplied names.
+pub fn safe_summary_name(name: &str) -> Option<&str> {
     if name.is_empty()
         || name.starts_with('.')
         || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
