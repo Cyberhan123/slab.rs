@@ -98,10 +98,12 @@ pub struct AgentConfig {
     /// True for short-lived sessions that should skip root-start background work.
     #[serde(default)]
     pub transient: bool,
-    /// Built-in agent type (Slice 4). INTERNAL — set only by `delegate_subagent`
-    /// after a successful registry lookup. `None` means no per-agent tool
-    /// constraint. Persisted so a delegated child carries its type across the
-    /// spawn boundary; `#[serde(default)]` keeps older snapshots deserializing
+    /// Built-in agent type (Slice 4). INTERNAL — set by `delegate_subagent`
+    /// after a successful registry lookup, and by host system launches
+    /// (`SubagentSpawner::spawn_system`, e.g. the memory pipeline's `memory`
+    /// consolidation agent). `None` means no per-agent tool constraint.
+    /// Persisted so a spawned child carries its type across the spawn
+    /// boundary; `#[serde(default)]` keeps older snapshots deserializing
     /// as `None`.
     #[serde(default)]
     pub agent_type: Option<String>,
