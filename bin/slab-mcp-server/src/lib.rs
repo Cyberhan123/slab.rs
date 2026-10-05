@@ -53,6 +53,15 @@ fn handle_tool_call(id: Value, message: &Value) -> Option<Value> {
 
     let result = match name {
         SERVER_INFO_TOOL => server_info_tool_result(),
+        name if slab_mcp::memories::is_memory_tool(name) => {
+            let arguments = message
+                .get("params")
+                .and_then(|params| params.get("arguments"))
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            slab_mcp::memories::handle_tool_call(name, &arguments)
+                .expect("is_memory_tool dispatch always resolves")
+        }
         _ => return Some(error_response(id, INVALID_PARAMS, format!("tool not found: {name}"))),
     };
 
@@ -60,46 +69,48 @@ fn handle_tool_call(id: Value, message: &Value) -> Option<Value> {
 }
 
 fn tools_list_result() -> Value {
-    json!({
-        "tools": [{
-            "name": SERVER_INFO_TOOL,
+    let mut tools = vec![json!({
+        "name": SERVER_INFO_TOOL,
+        "title": "Slab MCP Server Info",
+        "description": "Return read-only metadata about this Slab MCP server process.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {}
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "server_name": { "type": "string" },
+                "version": { "type": "string" },
+                "protocol_version": { "type": "string" },
+                "tools": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                }
+            },
+            "required": ["server_name", "version", "protocol_version", "tools"]
+        },
+        "annotations": {
             "title": "Slab MCP Server Info",
-            "description": "Return read-only metadata about this Slab MCP server process.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            },
-            "outputSchema": {
-                "type": "object",
-                "properties": {
-                    "server_name": { "type": "string" },
-                    "version": { "type": "string" },
-                    "protocol_version": { "type": "string" },
-                    "tools": {
-                        "type": "array",
-                        "items": { "type": "string" }
-                    }
-                },
-                "required": ["server_name", "version", "protocol_version", "tools"]
-            },
-            "annotations": {
-                "title": "Slab MCP Server Info",
-                "readOnlyHint": true,
-                "destructiveHint": false,
-                "idempotentHint": true,
-                "openWorldHint": false
-            },
-            "_meta": slab_tool_meta(SERVER_INFO_TOOL, "slab:mcp:server_info:read")
-        }]
-    })
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+        },
+        "_meta": slab_tool_meta(SERVER_INFO_TOOL, "slab:mcp:server_info:read")
+    })];
+    tools.extend(slab_mcp::memories::tool_specs());
+    json!({ "tools": tools })
 }
 
 fn server_info_tool_result() -> Value {
+    let mut tool_names = vec![SERVER_INFO_TOOL.to_owned()];
+    tool_names.extend(slab_mcp::memories::tool_names().iter().map(|name| name.to_string()));
     let structured = json!({
         "server_name": SERVER_NAME,
         "version": env!("CARGO_PKG_VERSION"),
         "protocol_version": PROTOCOL_VERSION,
-        "tools": [SERVER_INFO_TOOL]
+        "tools": tool_names
     });
     json!({
         "content": [{
@@ -205,9 +216,53 @@ mod tests {
 
         assert_eq!(response["result"]["isError"], false);
         assert_eq!(response["result"]["structuredContent"]["server_name"], SERVER_NAME);
-        assert_eq!(response["result"]["structuredContent"]["tools"], json!([SERVER_INFO_TOOL]));
+        let expected_tools: Vec<Value> = std::iter::once(SERVER_INFO_TOOL)
+            .chain(slab_mcp::memories::tool_names().iter().copied())
+            .map(Value::from)
+            .collect();
+        assert_eq!(response["result"]["structuredContent"]["tools"], Value::from(expected_tools));
         assert_eq!(response["result"]["_meta"]["slab"]["source"], SERVER_NAME);
         assert_eq!(response["result"]["_meta"]["slab"]["audit"]["tool"], SERVER_INFO_TOOL);
+    }
+
+    #[test]
+    fn tools_list_exposes_memory_tools_read_only() {
+        let response = handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/list"
+        }))
+        .expect("response");
+
+        let tools = response["result"]["tools"].as_array().expect("tools");
+        let memory_tools: Vec<&str> = tools
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .filter(|name| slab_mcp::memories::is_memory_tool(name))
+            .collect();
+        assert_eq!(memory_tools, slab_mcp::memories::tool_names());
+        for tool in tools {
+            assert_eq!(tool["annotations"]["readOnlyHint"], true);
+        }
+    }
+
+    #[test]
+    fn tools_call_round_trips_memory_list_projects() {
+        let response = handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "memory_list_projects",
+                "arguments": {}
+            }
+        }))
+        .expect("response");
+
+        // Listing never errors — an absent memory root reads as no projects.
+        assert_eq!(response["result"]["isError"], false);
+        assert_eq!(response["result"]["_meta"]["slab"]["permission"], "slab:mcp:memories:read");
+        assert!(response["result"]["structuredContent"]["projects"].is_array());
     }
 
     #[test]

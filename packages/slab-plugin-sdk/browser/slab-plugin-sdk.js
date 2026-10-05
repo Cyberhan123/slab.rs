@@ -19,7 +19,7 @@
         return cached;
     }
     target = mod != null ? __create(__getProtoOf(mod)) : {};
-    const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+    const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
     if (mod && typeof mod === "object" || typeof mod === "function") {
       for (let key of __getOwnPropNames(mod))
         if (!__hasOwnProp.call(to, key))
@@ -676,7 +676,7 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
       exports.cloneElement = function(element, config, children) {
         if (element === null || element === undefined)
           throw Error("The argument must be a React element, but you passed " + element + ".");
-        var props = assign({}, element.props), key = element.key, owner = element._owner;
+        var props = assign({}, element.props), { key, _owner: owner } = element;
         if (config != null) {
           var JSCompiler_inline_result;
           a: {
@@ -2709,18 +2709,18 @@ React keys must be passed directly to JSX without using spread:
       }
       return data;
     };
-    const queryOptions2 = (method, path, ...[init, options]) => ({
+    const queryOptions = (method, path, ...[init, options]) => ({
       queryKey: init === undefined ? [method, path] : [method, path, init],
       queryFn,
       ...options
     });
     return {
-      queryOptions: queryOptions2,
-      useQuery: (method, path, ...[init, options, queryClient]) => useQuery(queryOptions2(method, path, init, options), queryClient),
-      useSuspenseQuery: (method, path, ...[init, options, queryClient]) => useSuspenseQuery(queryOptions2(method, path, init, options), queryClient),
+      queryOptions,
+      useQuery: (method, path, ...[init, options, queryClient]) => useQuery(queryOptions(method, path, init, options), queryClient),
+      useSuspenseQuery: (method, path, ...[init, options, queryClient]) => useSuspenseQuery(queryOptions(method, path, init, options), queryClient),
       useInfiniteQuery: (method, path, init, options, queryClient) => {
         const { pageParamName = "cursor", ...restOptions } = options;
-        const { queryKey } = queryOptions2(method, path, init);
+        const { queryKey } = queryOptions(method, path, init);
         return useInfiniteQuery({
           queryKey,
           queryFn: async ({ queryKey: [method2, path2, init2], pageParam = 0, signal }) => {
@@ -3152,8 +3152,8 @@ React keys must be passed directly to JSX without using spread:
     }
   }
   function createSlabPluginSdk(target) {
-    const apiClient2 = createSlabApiFetchClient({ baseUrl: SERVER_BASE_URL });
-    apiClient2.use({
+    const apiClient = createSlabApiFetchClient({ baseUrl: SERVER_BASE_URL });
+    apiClient.use({
       async onRequest({ request }) {
         const url = new URL(request.url);
         assertSlabPluginApiSurface(request.method, `${url.pathname}${url.search}`);
@@ -3166,7 +3166,7 @@ React keys must be passed directly to JSX without using spread:
         invoke: (command, args) => requireCore(target).invoke(command, args)
       },
       api: {
-        client: apiClient2,
+        client: apiClient,
         requestJson: async (request) => {
           assertSlabPluginApiSurface(request.method, request.path);
           const response = await fetchPluginApi(serializeJsonRequest(request));

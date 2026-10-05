@@ -83,6 +83,31 @@ const UPDATE_PLAN_TOOL_NAME: &str = "update_plan";
 /// `slab_agent_tools::PRESENT_PLAN_METADATA_KEY`.
 const PRESENT_PLAN_METADATA_KEY: &str = "present_plan";
 
+/// Tool name that asks the user a structured question. Mirrors
+/// `slab_agent_tools::QUESTIONNAIRE_TOOL_NAME`; duplicated here because
+/// `slab-agent` cannot depend on `slab-agent-tools` (dependency direction is
+/// reversed). The loop detects the call by name + metadata marker and drives
+/// the user-answer gate; the question snapshot travels in the tool's metadata.
+const QUESTIONNAIRE_TOOL_NAME: &str = "questionnaire";
+
+/// Metadata key under which `questionnaire` nests the question snapshot.
+/// Mirrors `slab_agent_tools::QUESTIONNAIRE_METADATA_KEY`.
+const QUESTIONNAIRE_METADATA_KEY: &str = "questionnaire";
+
+/// Extract the structured question snapshot a `questionnaire` call stashed in
+/// its `metadata`. Returns `None` for other tools or when no snapshot is
+/// present (a failed call, or a defensive no-marker payload).
+fn questionnaire_snapshot_for(
+    name: &str,
+    metadata: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let metadata = metadata?;
+    if name != QUESTIONNAIRE_TOOL_NAME {
+        return None;
+    }
+    metadata.get(QUESTIONNAIRE_METADATA_KEY).cloned()
+}
+
 /// Extract the structured plan snapshot a plan tool stashed in its `metadata`.
 ///
 /// `plan` / `update_plan` carry the plan as the metadata object itself;
@@ -543,6 +568,94 @@ async fn drive_present_plan_approval(
             )
         }
     })
+}
+
+/// Drive the `questionnaire` user-answer gate after the tool ran. Emits the
+/// question via the dedicated `EventMsg::QuestionnaireRequestAnswer`
+/// notification, then blocks on [`QuestionnairePort`] until the host delivers
+/// the user's answers (or the port times out — a timeout IS a valid result the
+/// model reads and acts on, unlike `present_plan` whose rejection fails the
+/// call). `questionnaire_id` is [`approval_correlation_id`] — the notification
+/// `item_id` and the pending-answer key in one, so the client's
+/// `questionnaire/resolve` routes back to this call. Returns the answers JSON
+/// as the tool-result content; the call status stays `Completed`.
+async fn drive_questionnaire_answers(
+    context: &TurnExecutionContext<'_>,
+    questionnaire_id: &str,
+    snapshot: serde_json::Value,
+) -> Result<String, AgentError> {
+    use crate::protocol::QuestionnaireChoiceView;
+
+    // The snapshot is produced by our own tool, so the field reads below are
+    // reliable; the defaults only guard a defensive re-parse of a stale shape.
+    let question =
+        snapshot.get("question").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned();
+    let flag = |key: &str| snapshot.get(key).and_then(serde_json::Value::as_bool).unwrap_or(false);
+    let choices = snapshot
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|entry| QuestionnaireChoiceView {
+                    label: entry
+                        .get("label")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    value: entry
+                        .get("value")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    description: entry
+                        .get("description")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let msg =
+        EventMsg::QuestionnaireRequestAnswer(crate::protocol::QuestionnaireRequestAnswerParams {
+            thread_id: context.thread_id.to_owned(),
+            turn_id: context.turn_index.to_string(),
+            item_id: questionnaire_id.to_owned(),
+            question,
+            choices,
+            allow_multiple: flag("allow_multiple"),
+            allow_custom_input: flag("allow_custom_input"),
+            required: flag("required"),
+        });
+    context.notify.on_event_msg(context.thread_id, &msg).await;
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "questionnaire_answer_required",
+        serde_json::json!({ "item_id": questionnaire_id, "tool_name": QUESTIONNAIRE_TOOL_NAME }),
+    );
+
+    let answers = tokio::select! {
+        answers = context.questionnaire.request_answers(
+            context.thread_id,
+            questionnaire_id,
+            snapshot,
+        ) => answers,
+        _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+    };
+
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "questionnaire_answered",
+        serde_json::json!({ "item_id": questionnaire_id, "status": answers.get("status").cloned() }),
+    );
+    // A timeout payload is as valid as an answer — the model reads the status
+    // and proceeds with its own judgment, so the call stays Completed.
+    Ok(answers.to_string())
 }
 
 /// A partitioned slice of one assistant tool batch: a maximal run of
@@ -1113,23 +1226,42 @@ async fn handle_tool_call(
     // the tool result. The plan summary shown in the approval card is the tool's
     // own content; the metadata marker is the loop-side signal (mirrors the
     // `task.complete` detection pattern).
-    let mut content =
-        if tool_call.name == PRESENT_PLAN_TOOL_NAME && call_status == ToolCallStatus::Completed {
-            let plan_snapshot =
-                plan_snapshot_for(PRESENT_PLAN_TOOL_NAME, tool_output.metadata.as_ref());
-            let (approved_content, resolved_status) = drive_present_plan_approval(
-                context,
-                approval_correlation_id(&tool_call.id, &call_id),
-                tool_output.content.clone(),
-                plan_snapshot,
-                &risk,
-            )
-            .await?;
-            call_status = resolved_status;
-            approved_content
-        } else {
-            tool_output.content
-        };
+    let mut content = if tool_call.name == PRESENT_PLAN_TOOL_NAME
+        && call_status == ToolCallStatus::Completed
+    {
+        let plan_snapshot =
+            plan_snapshot_for(PRESENT_PLAN_TOOL_NAME, tool_output.metadata.as_ref());
+        let (approved_content, resolved_status) = drive_present_plan_approval(
+            context,
+            approval_correlation_id(&tool_call.id, &call_id),
+            tool_output.content.clone(),
+            plan_snapshot,
+            &risk,
+        )
+        .await?;
+        call_status = resolved_status;
+        approved_content
+    } else if tool_call.name == QUESTIONNAIRE_TOOL_NAME && call_status == ToolCallStatus::Completed
+    {
+        // A successful `questionnaire` blocks on the user's answers before
+        // the result reaches the LLM. Without a snapshot (a defensive
+        // re-parse of a foreign payload) the tool content passes through
+        // unchanged. Unlike present_plan, a timeout is still a Completed
+        // result — the answers JSON (or timeout notice) IS the content.
+        match questionnaire_snapshot_for(QUESTIONNAIRE_TOOL_NAME, tool_output.metadata.as_ref()) {
+            Some(snapshot) => {
+                drive_questionnaire_answers(
+                    context,
+                    approval_correlation_id(&tool_call.id, &call_id),
+                    snapshot,
+                )
+                .await?
+            }
+            None => tool_output.content,
+        }
+    } else {
+        tool_output.content
+    };
     // Central context-budget net: bound every non-plan tool result before it
     // becomes conversation history. Applied AFTER the exit-code sniff above
     // (which parses the raw shell JSON) and BEFORE the trace record below, so
@@ -1708,6 +1840,35 @@ mod tests {
         // Other tools / absent metadata yield None.
         assert!(plan_snapshot_for("shell", Some(&nested)).is_none());
         assert!(plan_snapshot_for(PRESENT_PLAN_TOOL_NAME, None).is_none());
+    }
+
+    #[test]
+    fn questionnaire_snapshot_only_extracts_its_own_tool_marker() {
+        let question = serde_json::json!({
+            "question": "Which DB?",
+            "choices": [{ "label": "SQLite", "value": "SQLite" }],
+            "allow_multiple": false,
+            "allow_custom_input": false,
+            "required": false
+        });
+        let nested = serde_json::json!({ QUESTIONNAIRE_METADATA_KEY: question.clone() });
+        assert_eq!(
+            questionnaire_snapshot_for(QUESTIONNAIRE_TOOL_NAME, Some(&nested)),
+            Some(question)
+        );
+        // The marker under another tool's name, a foreign metadata shape, and
+        // absent metadata all yield None (the loop then passes content through).
+        assert!(questionnaire_snapshot_for("shell", Some(&nested)).is_none());
+        assert!(
+            questionnaire_snapshot_for(
+                QUESTIONNAIRE_TOOL_NAME,
+                Some(&serde_json::json!({
+                    "question": "unmarked"
+                }))
+            )
+            .is_none()
+        );
+        assert!(questionnaire_snapshot_for(QUESTIONNAIRE_TOOL_NAME, None).is_none());
     }
 
     #[allow(clippy::too_many_arguments)]
