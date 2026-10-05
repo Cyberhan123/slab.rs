@@ -58,9 +58,9 @@ through, in order: the `FFMPEG_DIR` environment variable (`<dir>/include` plus
   `.pc` files declare the distro build's full optional-dependency web
   (~100 `-l` flags), so *linking* (anything beyond `cargo check`) needs all of
   those transitive dev packages too. CI avoids that entirely by installing a
-  hermetic PIC static build via `.github/actions/setup-ffmpeg`
-  (BtbN `linux64-gpl`) and exporting `FFMPEG_DIR`, which `ffmpeg-sys-next`
-  probes before pkg-config.
+  self-contained BtbN `linux64-gpl-shared` build via
+  `.github/actions/setup-ffmpeg` (whose clean `.pc` files link only the libav
+  `.so`s) and exporting `PKG_CONFIG_PATH`/`LD_LIBRARY_PATH`.
 
 ### Linux webview development libraries
 

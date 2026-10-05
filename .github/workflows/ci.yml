@@ -110,7 +110,7 @@ jobs:
         run: bun run scripts/apply-patches.ts
 
       - name: Install protoc
-        run: sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get install -y protobuf-compiler pkg-config
 
       - name: Setup FFmpeg
         uses: ./.github/actions/setup-ffmpeg

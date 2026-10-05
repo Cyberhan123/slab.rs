@@ -1,10 +1,11 @@
-name: Setup FFmpeg (prebuilt static)
+name: Setup FFmpeg (prebuilt shared)
 description: >-
-  Install a prebuilt static FFmpeg (BtbN linux64-gpl, PIC-built) and export
-  FFMPEG_DIR. Ubuntu's libav*-dev packages declare the full optional-dependency
-  web of the distro build in their pkg-config Libs lines, so linking against
-  them drags in ~100 unrelated system libraries. A hermetic static build keeps
-  the link line down to the libav archives themselves.
+  Install a prebuilt FFmpeg (BtbN linux64-gpl-shared, dev files included)
+  and export PKG_CONFIG_PATH/LD_LIBRARY_PATH. Ubuntu's libav*-dev packages
+  declare the full optional-dependency web of the distro build in their
+  pkg-config Libs lines, so linking against them drags in ~100 unrelated
+  system libraries; BtbN's self-contained shared build keeps the link line
+  down to the libav .so files themselves.
 runs:
   using: composite
   steps:
@@ -13,18 +14,25 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/ffmpeg
-        key: ffmpeg-n8.1-linux64-gpl-8.1-v1
+        key: ffmpeg-n8.1-linux64-gpl-shared-8.1-v1
 
     - name: Download FFmpeg
       if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
         curl --location --fail --retry 3 -o "$RUNNER_TEMP/ffmpeg.tar.xz" \
-          "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"
+          "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-shared-8.1.tar.xz"
         mkdir -p "$HOME/ffmpeg"
         tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$HOME/ffmpeg" --strip-components=1
 
-    - name: Export FFMPEG_DIR
+    # Note: FFMPEG_DIR is deliberately NOT set — ffmpeg-sys-next's FFMPEG_DIR
+    # branch hardcodes `rustc-link-lib=static=` for its `static` feature
+    # without checking that the .a files exist, and BtbN only ships shared
+    # dev files. Through pkg-config the pkg_config crate falls back to dylib
+    # linking when no archive is present, which is what we want here.
+    - name: Export FFmpeg environment
       if: runner.os == 'Linux'
       shell: bash
-      run: echo "FFMPEG_DIR=$HOME/ffmpeg" >> "$GITHUB_ENV"
+      run: |
+        echo "PKG_CONFIG_PATH=$HOME/ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
+        echo "LD_LIBRARY_PATH=$HOME/ffmpeg/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
