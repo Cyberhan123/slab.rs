@@ -4,13 +4,13 @@
 //! dies).
 //!
 //! The filter gates **socket creation by family**: `socket()` matches (⇒ kill) when its `domain`
-//! argument is **not** `AF_UNIX`. seccomp cannot introspect an fd's family after creation, so
-//! filtering the data-plane syscalls (`connect`, `sendmsg`, …) instead would also kill
-//! family-agnostic local IPC — which real binaries depend on (glibc's NSS daemon probe
+//! argument is neither `AF_UNIX` nor `AF_NETLINK`. seccomp cannot introspect an fd's family
+//! after creation, so filtering the data-plane syscalls (`connect`, `sendmsg`, …) instead would
+//! also kill family-agnostic local IPC — which real binaries depend on (glibc's NSS daemon probe
 //! `connect()`s an `AF_UNIX` socket during `getpwuid` under a sanitized environment, so an
 //! unconditional `connect` kill makes even `bash -c 'echo hi'` die with SIGSYS). With creation
-//! gated, no `AF_INET`/`AF_INET6`/`AF_PACKET`/`AF_NETLINK` socket can ever come into existence,
-//! and the data-plane syscalls can only ever operate on local (or inherited-and-CLOEXEC-closed)
+//! gated, no `AF_INET`/`AF_INET6`/`AF_PACKET` socket can ever come into existence, and the
+//! data-plane syscalls can only ever operate on local (or inherited-and-CLOEXEC-closed)
 //! descriptors — the same exfiltration guarantee without the collateral damage.
 //!
 //! The BPF program is compiled BEFORE spawn (it allocates). The `pre_exec` hook installs it via
@@ -36,16 +36,26 @@ pub fn compile_network_filter() -> Result<BpfProgram, LinuxSandboxError> {
     let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
 
     // socket(domain, type, protocol): the rule MATCHES (⇒ match_action KillProcess) when arg0
-    // (domain) != AF_UNIX. A matching domain (AF_UNIX) leaves the rule unmatched ⇒ mismatch_action
-    // Allow. This is the whole network gate: no non-UNIX socket can ever be created, so
-    // connect/sendmsg/… have nothing network-ish to operate on (see the module docs).
+    // (domain) is neither AF_UNIX nor AF_NETLINK. `AF_UNIX` keeps local IPC alive (glibc's nscd
+    // probe, the shell's own sockets); `AF_NETLINK` is required by bwrap's namespace setup, which
+    // opens a NETLINK_ROUTE socket while configuring the sandbox (and by getifaddrs-style probes
+    // in sandboxed binaries) — netlink is kernel-local and cannot carry data off the machine.
+    // Everything else (inet/inet6/packet) can never be created, so connect/sendmsg/… have
+    // nothing network-ish to operate on (see the module docs).
     let af_unix =
         SeccompCondition::new(0, SeccompCmpArgLen::Qword, SeccompCmpOp::Ne, libc::AF_UNIX as u64)
             .map_err(|e| LinuxSandboxError::SeccompCompile(e.to_string()))?;
+    let af_netlink = SeccompCondition::new(
+        0,
+        SeccompCmpArgLen::Qword,
+        SeccompCmpOp::Ne,
+        libc::AF_NETLINK as u64,
+    )
+    .map_err(|e| LinuxSandboxError::SeccompCompile(e.to_string()))?;
     rules.insert(
         libc::SYS_socket,
         vec![
-            SeccompRule::new(vec![af_unix])
+            SeccompRule::new(vec![af_unix, af_netlink])
                 .map_err(|e| LinuxSandboxError::SeccompCompile(e.to_string()))?,
         ],
     );
