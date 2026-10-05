@@ -46,13 +46,19 @@ pub fn build_bwrap_args(req: &SpawnRequest) -> Vec<String> {
         args.push("--unshare-net".into());
     }
 
+    // The read-only root bind MUST precede --proc/--dev: bwrap applies mounts
+    // in argv order, and a later `--ro-bind / /` covers the freshly mounted
+    // /dev tmpfs with the host root's empty /dev directory, leaving /dev/null
+    // (and every other device node) missing-to-EACCES inside the sandbox —
+    // `2>/dev/null` then fails with "Permission denied". Verified by A/B:
+    // (proc, dev, ro-bind) breaks, (ro-bind, proc, dev) works.
+    args.push("--ro-bind".into());
+    args.push("/".into());
+    args.push("/".into());
     args.push("--proc".into());
     args.push("/proc".into());
     args.push("--dev".into());
     args.push("/dev".into());
-    args.push("--ro-bind".into());
-    args.push("/".into());
-    args.push("/".into());
 
     match req.sandbox_policy {
         crate::request::SandboxPolicyMirror::ReadOnly => {}
@@ -194,6 +200,20 @@ mod tests {
         let args = build_bwrap_args(&req(SandboxPolicyMirror::ReadOnly, true, false));
         assert_eq!(args.last().unwrap(), "--");
         assert!(args.contains(&"--new-session".to_string()));
+    }
+
+    #[test]
+    fn build_bwrap_args_binds_root_before_proc_and_dev() {
+        // A later `--ro-bind / /` would cover the /dev tmpfs mounted by
+        // `--dev`, so the root bind must come first (see build_bwrap_args).
+        let args = build_bwrap_args(&req(SandboxPolicyMirror::ReadOnly, true, false));
+        let root_bind = args
+            .windows(3)
+            .position(|w| w == ["--ro-bind", "/", "/"])
+            .expect("root ro-bind present");
+        let proc = args.iter().position(|a| a == "--proc").expect("--proc present");
+        let dev = args.iter().position(|a| a == "--dev").expect("--dev present");
+        assert!(root_bind < proc && root_bind < dev, "root bind must precede --proc/--dev");
     }
 
     #[test]
