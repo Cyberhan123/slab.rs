@@ -53,6 +53,11 @@ jobs:
             libglib2.0-dev \
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev
+          # libwebkit2gtk pulls bubblewrap in, and Ubuntu 24.04's AppArmor
+          # userns restriction makes bwrap's in-netns loopback setup fail with
+          # EPERM ("loopback: Failed RTM_NEWADDR"). The runner is an ephemeral
+          # single-tenant VM, so lift the restriction.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Setup FFmpeg
         uses: ./.github/actions/setup-ffmpeg
