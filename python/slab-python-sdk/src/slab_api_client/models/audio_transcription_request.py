@@ -125,9 +125,9 @@ class AudioTranscriptionRequest:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                decode_type_1 = TranscribeDecodeRequest.from_dict(data)
+                decode_type_0 = TranscribeDecodeRequest.from_dict(data)
 
-                return decode_type_1
+                return decode_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | TranscribeDecodeRequest | Unset, data)
@@ -178,9 +178,9 @@ class AudioTranscriptionRequest:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                vad_type_1 = TranscribeVadRequest.from_dict(data)
+                vad_type_0 = TranscribeVadRequest.from_dict(data)
 
-                return vad_type_1
+                return vad_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | TranscribeVadRequest | Unset, data)

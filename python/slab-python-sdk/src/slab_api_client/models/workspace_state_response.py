@@ -108,9 +108,9 @@ class WorkspaceStateResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                config_type_1 = WorkspaceConfigResponse.from_dict(data)
+                config_type_0 = WorkspaceConfigResponse.from_dict(data)
 
-                return config_type_1
+                return config_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | Unset | WorkspaceConfigResponse, data)
@@ -125,9 +125,9 @@ class WorkspaceStateResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                current_type_1 = WorkspaceInfoResponse.from_dict(data)
+                current_type_0 = WorkspaceInfoResponse.from_dict(data)
 
-                return current_type_1
+                return current_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | Unset | WorkspaceInfoResponse, data)
@@ -142,9 +142,9 @@ class WorkspaceStateResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                migrated_type_1 = WorkspaceMigrationSummary.from_dict(data)
+                migrated_type_0 = WorkspaceMigrationSummary.from_dict(data)
 
-                return migrated_type_1
+                return migrated_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | Unset | WorkspaceMigrationSummary, data)

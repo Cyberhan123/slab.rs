@@ -76,9 +76,9 @@ class ChatThinkingConfig:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                reasoning_effort_type_1 = ChatReasoningEffort(data)
+                reasoning_effort_type_0 = ChatReasoningEffort(data)
 
-                return reasoning_effort_type_1
+                return reasoning_effort_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ChatReasoningEffort | None | Unset, data)
@@ -93,9 +93,9 @@ class ChatThinkingConfig:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                verbosity_type_1 = ChatVerbosity(data)
+                verbosity_type_0 = ChatVerbosity(data)
 
-                return verbosity_type_1
+                return verbosity_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ChatVerbosity | None | Unset, data)

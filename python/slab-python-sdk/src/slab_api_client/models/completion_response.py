@@ -114,9 +114,9 @@ class CompletionResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                usage_type_1 = ChatCompletionUsage.from_dict(data)
+                usage_type_0 = ChatCompletionUsage.from_dict(data)
 
-                return usage_type_1
+                return usage_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ChatCompletionUsage | None | Unset, data)

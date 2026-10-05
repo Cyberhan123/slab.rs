@@ -263,9 +263,9 @@ class ImageGenerationTaskResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                progress_type_1 = TaskProgressResponse.from_dict(data)
+                progress_type_0 = TaskProgressResponse.from_dict(data)
 
-                return progress_type_1
+                return progress_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | TaskProgressResponse | Unset, data)
@@ -293,9 +293,9 @@ class ImageGenerationTaskResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                result_data_type_1 = ImageGenerationResultData.from_dict(data)
+                result_data_type_0 = ImageGenerationResultData.from_dict(data)
 
-                return result_data_type_1
+                return result_data_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ImageGenerationResultData | None | Unset, data)

@@ -249,9 +249,9 @@ class CompletionRequest:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                response_format_type_1 = ChatResponseFormat.from_dict(data)
+                response_format_type_0 = ChatResponseFormat.from_dict(data)
 
-                return response_format_type_1
+                return response_format_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ChatResponseFormat | None | Unset, data)

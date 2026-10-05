@@ -132,7 +132,7 @@ which = { version = "8", default-features = false }
 dashmap = "6"
 combine = "4.6.7"
 anyhow = "1.0.104"
-bindgen = "0.72.1"
+bindgen = "0.73"
 flate2 = "1.1.9"
 libloading = "0.9.0"
 reqwest = { version = "0.13.4", features = [
@@ -178,15 +178,21 @@ chrono = { version = "0.4", features = ["serde"] }
 # native-tls aligns with the workspace `reqwest` backend; genai 0.6.4+ defaults to
 # rustls-tls and emits a `compile_error!` when both TLS backends are unified.
 genai = { version = "0.6.5", default-features = false, features = ["native-tls"] }
-gix = "0.85.0"
-base64 = "0.22"
+gix = "0.88"
+base64 = "0.23"
 hex = "0.4"
 image = { version = "0.25", default-features = false, features = [
     "png",
     "jpeg",
 ] }
-ffmpeg-next = "8.1.0"
-ort = { version = "2.0.0-rc.12", features = ["load-dynamic"] }
+ffmpeg-next = "9"
+ort = { version = "2.0.0-rc.13", features = [
+    "load-dynamic",
+    "cuda",
+    "tensorrt",
+    "coreml",
+    "directml",
+] }
 candle-core = "0.11.0"
 candle-nn = "0.11.0"
 candle-transformers = "0.11.0"
@@ -204,7 +210,7 @@ shared_library = "0.1.9"
 ts-rs = "12.0.1"
 walkdir = "2.5.0"
 rand = "0.10.2"
-tree-sitter = "0.26.11"
+tree-sitter = "0.27"
 tree-sitter-bash = "0.25.1"
 serde_with = "3.21.0"
 serde_repr = "0.1.21"
@@ -214,12 +220,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 tracing-log = "0.2"
-tracing-opentelemetry = "0.33"
+tracing-opentelemetry = "0.34"
 tracing-test = "0.2"
-opentelemetry = "0.32.0"
-opentelemetry-otlp = "0.32.0"
-opentelemetry-semantic-conventions = "0.32.1"
-opentelemetry_sdk = "0.32.1"
+opentelemetry = "0.33"
+opentelemetry-otlp = "0.33"
+opentelemetry-semantic-conventions = "0.33"
+opentelemetry_sdk = "0.33"
 # Web / gRPC
 axum = { version = "0.8", features = ["macros"] }
 tower = { version = "0.5", features = ["util"] }
@@ -245,9 +251,9 @@ sqlx = { version = "0.9", features = [
     "chrono",
     "uuid",
 ] }
-utoipa = "5"
-utoipa-axum = "0.2"
-utoipa-swagger-ui = "9"
+utoipa = "6"
+utoipa-axum = "0.3"
+utoipa-swagger-ui = "10"
 rustls = "0.23.40"
 # IPC / streaming
 parity-tokio-ipc = "0.9"
@@ -255,7 +261,7 @@ winapi = { version = "0.3.9", features = ["winerror"] }
 tokio-stream = "0.1"
 tokio-tungstenite = "0.30.0"
 extism = "1.30.0"
-deno_core = "0.408.0"
+deno_core = "0.412.0"
 deno_ast = { version = "0.53.3", features = ["transpiling"] }
 deno_error = { version = "0.7.1", features = [
     "serde_json",
@@ -273,10 +279,10 @@ clap = { version = "4.6.2", features = ["derive"] }
 protoc-bin-vendored = "3"
 cargo_metadata = "0.23.1"
 sysinfo = "0.39.6"
-dirs = "6"
-validator = "0.20"
-jsonschema = { version = "0.48.1", default-features = false }
-all-smi = "0.24.1"
+dirs = "7"
+validator = "0.21"
+jsonschema = { version = "0.58", default-features = false }
+all-smi = "0.27"
 mime_guess = "2.0"
 percent-encoding = "2.3.2"
 itertools = "0.15.0"
@@ -288,15 +294,15 @@ syn = "3.0"
 trybuild = "1.0"
 tokio-util = "0.7.18"
 # GUI
-egui = "0.35.0"
-eframe = { version = "0.35.0", default-features = false, features = [
+egui = "0.36"
+eframe = { version = "0.36", default-features = false, features = [
     "default_fonts",
     "glow",
 ] }
 tauri = "2"
 tauri-build = "2"
 tauri-plugin-opener = "2"
-tauri-plugin-mcp-bridge = "0.12"
+tauri-plugin-mcp-bridge = "0.13"
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-window-state = "2"
@@ -305,62 +311,62 @@ tauri-plugin-window-state = "2"
 windows = "0.62.2"
 windows-sys = "0.61.2"
 landlock = "0.4"
-seccompiler = "0.4"
+seccompiler = "0.5"
 
 #deno dependencies
 
-deno_features = "0.52.0"
+deno_features = "0.56.0"
 deno_media_type = "0.4.0"
-deno_permissions = "0.114.0"
+deno_permissions = "0.118.0"
 deno_broadcast_channel = "0.216.0"
-deno_bundle_runtime = "0.42.0"
-deno_cache = "0.188.0"
+deno_bundle_runtime = "0.46.0"
+deno_cache = "0.192.0"
 deno_console = "0.222.0"
-deno_cron = "0.135.0"
-deno_crypto = "0.269.0"
-deno_fetch = "0.279.0"
-deno_ffi = "0.242.0"
-deno_fs = "0.165.0"
-deno_http = "0.253.0"
-deno_kv = "0.163.0"
-deno_net = "0.247.0"
-deno_node = "0.193.0"
-deno_node_sqlite = "0.25.0"
-deno_os = "0.72.0"
-deno_tls = "0.242.0"
+deno_cron = "0.139.0"
+deno_crypto = "0.273.0"
+deno_fetch = "0.283.0"
+deno_ffi = "0.246.0"
+deno_fs = "0.169.0"
+deno_http = "0.257.0"
+deno_kv = "0.167.0"
+deno_net = "0.251.0"
+deno_node = "0.197.0"
+deno_node_sqlite = "0.29.0"
+deno_os = "0.76.0"
+deno_tls = "0.246.0"
 deno_url = "0.222.0"
 
-deno_web = "0.286.0"
-deno_webidl = "0.255.0"
-deno_webstorage = "0.250.0"
-deno_websocket = "0.260.0"
-deno_webgpu = "0.222.0"
+deno_web = "0.290.0"
+deno_webidl = "0.259.0"
+deno_webstorage = "0.254.0"
+deno_websocket = "0.264.0"
+deno_webgpu = "0.226.0"
 
-deno_io = "0.165.0"
-deno_telemetry = "0.77.0"
+deno_io = "0.169.0"
+deno_telemetry = "0.81.0"
 
 rustyline = "18.0.1"
 nix = "0.31.3"
 
 base64-simd = "0.8.0"
-deno_resolver = "0.86.0"
-node_resolver = "0.93.0"
-deno_runtime = "0.263.0"
+deno_resolver = "0.90.0"
+node_resolver = "0.97.0"
+deno_runtime = "0.267.0"
 
 deno_terminal = "0.2.3"
 deno_semver = "0.10.1"
-deno_napi = "0.186.0"
-deno_npm = "0.67.0"
-deno_process = "0.70.0"
-deno_package_json = "0.57.0"
+deno_napi = "0.190.0"
+deno_npm = "0.71.0"
+deno_process = "0.74.0"
+deno_package_json = "0.61.0"
 checksum = "0.2.1"
 sys_traits = "0.1.28"
 
 [patch.crates-io]
-# all-smi 0.24.1 pulls luwen-api 0.8.5 (Tenstorrent, linux-only), whose build-deps pin
+# all-smi 0.27 pulls luwen-api 0.9.0 (Tenstorrent, linux-only), whose build-deps pin
 # home = "=0.5.5" — incompatible with the workspace's home 0.5.12 (rustyline/v8/which).
-# Vendor + relax the pin to "0.5.12". See patches/luwen-api-0.8.5.patch.
-luwen-api = { path = "vendor/luwen-api-0.8.5" }
+# Vendor + relax the pin to "0.5.12". See patches/luwen-api-0.9.0.patch.
+luwen-api = { path = "vendor/luwen-api-0.9.0" }
 # Relax sqlx-sqlite's libsqlite3-sys cap (<0.38 -> <0.39) so cargo can unify on
 # libsqlite3-sys 0.38 alongside deno_cache's rusqlite 0.40 (deno_core 0.408 cycle).
 sqlx-sqlite = { path = "vendor/sqlx-sqlite-0.9.0" }
@@ -369,3 +375,8 @@ sqlx-sqlite = { path = "vendor/sqlx-sqlite-0.9.0" }
 # from "no results". The vendored copy fails loudly on zero-result pages unless
 # a no-results marker confirms the query genuinely matched nothing.
 websearch = { path = "vendor/websearch-0.1.1" }
+# 0.13.0 pins windows/windows-core 0.61 in its Win32 screenshot path while
+# wry 0.57 (tauri 2.12) pulls webview2-com-sys 0.39 / windows-core 0.62, so
+# the two IStream families never unify. Vendor + align both to 0.62.
+# See patches/tauri-plugin-mcp-bridge-0.13.0.patch.
+tauri-plugin-mcp-bridge = { path = "vendor/tauri-plugin-mcp-bridge-0.13.0" }

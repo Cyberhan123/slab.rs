@@ -333,9 +333,9 @@ class PluginResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                compatibility_type_1 = PluginCompatibilityManifest.from_dict(data)
+                compatibility_type_0 = PluginCompatibilityManifest.from_dict(data)
 
-                return compatibility_type_1
+                return compatibility_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | PluginCompatibilityManifest | Unset, data)
@@ -352,9 +352,9 @@ class PluginResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                contributions_type_1 = PluginContributesManifest.from_dict(data)
+                contributions_type_0 = PluginContributesManifest.from_dict(data)
 
-                return contributions_type_1
+                return contributions_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | PluginContributesManifest | Unset, data)
@@ -452,9 +452,9 @@ class PluginResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                permissions_type_1 = PluginPermissionsManifest.from_dict(data)
+                permissions_type_0 = PluginPermissionsManifest.from_dict(data)
 
-                return permissions_type_1
+                return permissions_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | PluginPermissionsManifest | Unset, data)

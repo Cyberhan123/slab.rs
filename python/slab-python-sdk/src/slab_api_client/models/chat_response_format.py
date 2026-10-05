@@ -75,9 +75,9 @@ class ChatResponseFormat:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                json_schema_type_1 = ChatResponseJsonSchema.from_dict(data)
+                json_schema_type_0 = ChatResponseJsonSchema.from_dict(data)
 
-                return json_schema_type_1
+                return json_schema_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ChatResponseJsonSchema | None | Unset, data)

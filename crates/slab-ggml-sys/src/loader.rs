@@ -40,8 +40,8 @@ pub struct GGmlLoaderLib {
 }
 
 impl GGmlLoaderLib {
-    pub unsafe fn new(path: impl libloading::AsFilename) -> Result<Self, libloading::Error> {
-        let library = ::libloading::Library::new(path)?;
+    pub unsafe fn new(path: impl AsRef<::std::ffi::OsStr>) -> Result<Self, libloading::Error> {
+        let library = ::libloading::Library::new(path.as_ref())?;
         Self::from_library(library)
     }
 

@@ -53,9 +53,9 @@ class ListModelsQuery:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                capability_type_1 = ModelCapability(data)
+                capability_type_0 = ModelCapability(data)
 
-                return capability_type_1
+                return capability_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ModelCapability | None | Unset, data)

@@ -160,12 +160,23 @@ pub fn generate_or_copy_bindings(
 fn patch_libloading_filename_bounds(output_path: &Path) -> Result<()> {
     let bindings = fs::read_to_string(output_path)
         .with_context(|| format!("failed to read generated bindings {}", output_path.display()))?;
-    let patched = bindings.replace("P: AsRef<::std::ffi::OsStr>,", "P: ::libloading::AsFilename,");
 
-    if patched != bindings {
-        fs::write(output_path, patched).with_context(|| {
-            format!("failed to patch generated bindings {}", output_path.display())
-        })?;
+    // bindgen <= 0.72 passes the generic `path: P` straight into
+    // `::libloading::Library::new`, which libloading 0.9 bounds by the sealed
+    // `AsFilename` trait instead of `AsRef<OsStr>` — rewrite the bound so the
+    // call compiles. bindgen >= 0.73 instead emits `let path = path.as_ref();`
+    // and hands `&OsStr` (itself an `AsFilename` impl) to `Library::new`;
+    // rewriting the bound there would leave the `.as_ref()` call without an
+    // `AsRef` bound, so the rewrite must not fire for that body shape.
+    if !bindings.contains("let path = path.as_ref();") {
+        let patched =
+            bindings.replace("P: AsRef<::std::ffi::OsStr>,", "P: ::libloading::AsFilename,");
+
+        if patched != bindings {
+            fs::write(output_path, patched).with_context(|| {
+                format!("failed to patch generated bindings {}", output_path.display())
+            })?;
+        }
     }
 
     Ok(())

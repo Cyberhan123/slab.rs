@@ -1,24 +1,25 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index 64200b1..3d6a135 100644
+index 2c4cf93..152be58 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -72,7 +72,7 @@ version = "1.0.117"
- version = "1.0.40"
-
+@@ -78,7 +78,7 @@ version = "1.0.40"
+ version = "0.1.40"
+ 
  [build-dependencies.home]
 -version = "=0.5.5"
 +version = "0.5.12"
  default-features = false
-
+ 
  [build-dependencies.prost-build]
 diff --git a/Cargo.toml.orig b/Cargo.toml.orig
-index 66c0d4a..fa66269 100644
+index 17eaf28..1c32fa6 100644
 --- a/Cargo.toml.orig
 +++ b/Cargo.toml.orig
-@@ -28,5 +28,5 @@ serde_json = { workspace = true }
- thiserror = { workspace = true }
-
+@@ -30,6 +30,6 @@ thiserror = { workspace = true }
+ tracing.workspace = true
+ 
  [build-dependencies]
 -home = { version = "=0.5.5", default-features = false }
 +home = { version = "0.5.12", default-features = false }
  prost-build = "0.13.5"
+ protoc-bin-vendored = "3.2.0"

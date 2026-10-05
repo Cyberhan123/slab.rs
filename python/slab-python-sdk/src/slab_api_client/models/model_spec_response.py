@@ -166,9 +166,9 @@ class ModelSpecResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                pricing_type_1 = PricingResponse.from_dict(data)
+                pricing_type_0 = PricingResponse.from_dict(data)
 
-                return pricing_type_1
+                return pricing_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | PricingResponse | Unset, data)

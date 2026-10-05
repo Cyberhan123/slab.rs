@@ -210,9 +210,9 @@ class OpenAICreateRequest:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                reasoning_type_1 = OpenAIReasoningInput.from_dict(data)
+                reasoning_type_0 = OpenAIReasoningInput.from_dict(data)
 
-                return reasoning_type_1
+                return reasoning_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | OpenAIReasoningInput | Unset, data)
@@ -245,9 +245,9 @@ class OpenAICreateRequest:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                text_type_1 = OpenAITextInput.from_dict(data)
+                text_type_0 = OpenAITextInput.from_dict(data)
 
-                return text_type_1
+                return text_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | OpenAITextInput | Unset, data)
