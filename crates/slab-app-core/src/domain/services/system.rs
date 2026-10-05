@@ -3,7 +3,10 @@ use std::path::Path;
 use crate::context::ModelState;
 use crate::domain::models::{GpuStatusSnapshot, SystemDiagnosticPath, SystemDiagnosticsSnapshot};
 use crate::error::AppCoreError;
-use crate::schemas::system::{AgentDiagnosticsResponse, GpuLedgerResponse};
+use crate::schemas::system::{
+    AgentDiagnosticsResponse, GpuLedgerResponse, MemoryDiagnosticsResponse,
+    MemoryPhase1StatusCountResponse, MemoryPhase2LockResponse, MemoryPhase2RunResponse,
+};
 use chrono::Utc;
 
 #[derive(Clone, Default)]
@@ -156,6 +159,70 @@ impl SystemService {
         let failed_tool_calls = Vec::new();
 
         Ok(AgentDiagnosticsResponse { threads, failed_tool_calls })
+    }
+
+    /// Agent memory pipeline diagnostics: phase1 backlog/failure counts per
+    /// project, per-project phase2 watermarks and lock state, and recent
+    /// consolidation runs. Read-only metadata — no memory content is
+    /// representable in the response DTOs.
+    pub async fn memory_diagnostics(&self) -> Result<MemoryDiagnosticsResponse, AppCoreError> {
+        let model_state = self.model_state.as_ref().ok_or_else(|| {
+            AppCoreError::Internal("memory diagnostics require app state".to_owned())
+        })?;
+        let store = model_state.store();
+        const RECENT_RUN_LIMIT: i64 = 20;
+
+        let phase1 = store
+            .list_memory_phase1_status_counts()
+            .await?
+            .into_iter()
+            .map(|row| MemoryPhase1StatusCountResponse {
+                project_key: row.project_key,
+                status: row.status,
+                count: row.count,
+            })
+            .collect();
+        let phase2_locks =
+            store.list_memory_phase2_locks().await?.into_iter().map(Into::into).collect();
+        let recent_runs = store
+            .list_recent_memory_phase2_runs(RECENT_RUN_LIMIT)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+
+        Ok(MemoryDiagnosticsResponse { phase1, phase2_locks, recent_runs })
+    }
+}
+
+impl From<crate::infra::db::repository::memories::Phase2LockRow> for MemoryPhase2LockResponse {
+    fn from(row: crate::infra::db::repository::memories::Phase2LockRow) -> Self {
+        Self {
+            job_key: row.job_key,
+            status: row.status,
+            lease_owner: row.lease_owner,
+            lease_until: row.lease_until,
+            claimed_watermark: row.claimed_watermark,
+            completed_watermark: row.completed_watermark,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
+impl From<crate::infra::db::repository::memories::Phase2RunRow> for MemoryPhase2RunResponse {
+    fn from(row: crate::infra::db::repository::memories::Phase2RunRow) -> Self {
+        Self {
+            id: row.id,
+            project_key: row.project_key,
+            status: row.status,
+            claimed_watermark: row.claimed_watermark,
+            completed_watermark: row.completed_watermark,
+            started_at: row.started_at,
+            completed_at: row.completed_at,
+            // Failure strings are internal diagnostics; cap them so a
+            // pathological error cannot bloat the response.
+            error: row.error.map(|error| error.chars().take(300).collect()),
+        }
     }
 }
 

@@ -2,6 +2,7 @@
 
 pub mod client;
 pub mod config;
+pub mod memories;
 pub mod protocol;
 
 pub use client::McpClient;

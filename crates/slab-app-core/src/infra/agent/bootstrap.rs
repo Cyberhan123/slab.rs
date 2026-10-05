@@ -145,6 +145,7 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         rollout,
         rollout_store,
         background_tasks,
+        Arc::clone(&subagent_bridge) as Arc<dyn slab_agent_tools::SubagentTaskSink>,
         mcp_client.clone(),
     );
     schedule_agent_runtime_reload(runtime.clone());
@@ -278,7 +279,7 @@ fn build_agent_control(
     ));
 
     let tool_router = Arc::new(tool_router);
-    let approval_port: Arc<dyn slab_agent::ApprovalPort> = event_hub;
+    let approval_port: Arc<dyn slab_agent::ApprovalPort> = event_hub.clone();
     let settings = ctx.pmid.config();
     // Trace sink decouple: the trace sink gate is `agent.debug` ONLY (computed
     // upstream in `build_agent_bootstrap`, which is why `trace_dir` is already
@@ -340,6 +341,8 @@ fn build_agent_control(
         Arc::clone(&ctx.model_state),
         memory_config.clone(),
         memory_root.clone(),
+        Arc::clone(&background_tasks),
+        Arc::clone(&subagent_bridge) as Arc<dyn slab_agent_tools::SubagentTaskSink>,
     );
     let exec_policy = super::exec_policy::build_exec_policy_engine(
         exec_baseline,
@@ -406,6 +409,9 @@ fn build_agent_control(
     // Approval review for the "approve for me" mode (inert until a turn
     // carries approval_model — see TurnStartParams).
     .with_approval_reviewer(approval_reviewer)
+    // Questionnaire user-answer gate: the same event hub backs the pending
+    // entry map the harness `questionnaire/resolve` request routes back to.
+    .with_questionnaire(Arc::clone(&event_hub) as Arc<dyn slab_agent::QuestionnairePort>)
     // Plan agent: disk-backed plan store (durable JSON under `<app_home>/plans`,
     // hot in-memory copy for live queries) — the source of truth for the
     // `plan` / `update_plan` / `present_plan` tools.

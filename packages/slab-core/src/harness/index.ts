@@ -37,6 +37,8 @@ export type {
   ConversationState,
   LiveTextEntry,
   ModelLoadState,
+  QuestionnaireChoice,
+  QuestionnaireRequest,
   SettingsMarker,
   SubagentChildItem,
   SubagentTaskInfo,

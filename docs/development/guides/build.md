@@ -56,6 +56,20 @@ through, in order: the `FFMPEG_DIR` environment variable (`<dir>/include` plus
   `libavformat-dev`, `libavutil-dev`, `libswresample-dev`, `libswscale-dev` on
   Debian/Ubuntu; `brew install ffmpeg` on macOS).
 
+### Linux webview development libraries
+
+Workspace-wide cargo commands (`bun run lint:rust` / `check:rust` /
+`test:rust`) compile the Tauri desktop crate `slab-app`, whose wry dependency
+pulls Linux-only `-sys` crates (`soup3-sys`, `webkit2gtk-sys`,
+`javascriptcore-rs-sys`). Their build scripts probe the system libraries via
+pkg-config and abort with `failed to run custom build command for soup3-sys`
+when the dev packages are missing. On Debian/Ubuntu:
+
+```sh
+sudo apt install libwebkit2gtk-4.1-dev
+# transitively provides libsoup-3.0-dev and libjavascriptcoregtk-4.1-dev
+```
+
 ## Daily Commands
 
 ```sh
