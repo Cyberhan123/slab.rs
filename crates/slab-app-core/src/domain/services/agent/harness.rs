@@ -184,6 +184,7 @@ impl HarnessService {
     /// clear the oneshot entries leak in the hub's map forever.
     pub async fn shutdown(&self, thread_id: &str) -> Result<(), AppCoreError> {
         self.0.events().clear_pending_approvals(thread_id);
+        self.0.events().clear_pending_questionnaires(thread_id);
         // Cascade: background subagent delegations owned by this thread die
         // with it (their kill closures only spawn the child interrupt — no
         // blocking here). Background SHELL tasks survive by design.
@@ -201,6 +202,7 @@ impl HarnessService {
     /// delegations owned by the thread are cascade-stopped as well.
     pub async fn interrupt(&self, thread_id: &str) -> Result<(), AppCoreError> {
         self.0.events().clear_pending_approvals(thread_id);
+        self.0.events().clear_pending_questionnaires(thread_id);
         let stopped = self.0.stop_subagent_tasks_for(thread_id);
         if !stopped.is_empty() {
             tracing::debug!(thread_id, count = stopped.len(), "cascade-stopped subagent tasks");
@@ -324,6 +326,20 @@ impl HarnessService {
         scope: slab_exec_policy::ApprovalScope,
     ) -> bool {
         self.0.events().approve_call(thread_id, call_id, approved, scope)
+    }
+
+    /// Deliver the user's answers to a pending `questionnaire` call (the
+    /// `questionnaire/resolve` harness request). Same ownership rules as
+    /// [`Self::approve_call`]: `thread_id` and the item id must both match.
+    /// Returns `true` if a pending questionnaire was found and the answers
+    /// were delivered.
+    pub fn resolve_questionnaire(
+        &self,
+        thread_id: &str,
+        item_id: &str,
+        answers: &serde_json::Value,
+    ) -> bool {
+        self.0.events().resolve_questionnaire(thread_id, item_id, answers)
     }
 
     /// Fork a thread: clone its persisted history (messages + turn states) into

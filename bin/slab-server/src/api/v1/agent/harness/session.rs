@@ -256,6 +256,7 @@ fn rewrite_thread_id(mut msg: EventMsg, harness_id: &str) -> EventMsg {
         EventMsg::FileChangeOutputDelta(p) => p.thread_id = tid.clone(),
         EventMsg::CommandExecutionRequestApproval(p) => p.thread_id = tid.clone(),
         EventMsg::FileChangeRequestApproval(p) => p.thread_id = tid.clone(),
+        EventMsg::QuestionnaireRequestAnswer(p) => p.thread_id = tid.clone(),
         EventMsg::ContextCompacting(p) => p.thread_id = tid.clone(),
         EventMsg::ContextCompacted(p) => p.thread_id = tid.clone(),
         // Background-task events carry the OWNING thread's real id (the

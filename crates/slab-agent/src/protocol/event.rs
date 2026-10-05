@@ -82,6 +82,12 @@ pub enum EventMsg {
     CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams),
     FileChangeRequestApproval(FileChangeRequestApprovalParams),
 
+    /// The agent asked the user a structured question (the `questionnaire`
+    /// tool). Same shape as the approval notifications: `item_id` is the
+    /// correlation id the client's `questionnaire/resolve` request routes
+    /// back on.
+    QuestionnaireRequestAnswer(QuestionnaireRequestAnswerParams),
+
     ContextCompacting(ContextCompactingParams),
     ContextCompacted(ContextCompactedParams),
 

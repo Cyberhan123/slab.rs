@@ -27,7 +27,6 @@ use crate::environment_instruction::EnvironmentContextFragment;
 use crate::error::Result;
 use crate::fragment::ContextFragment;
 use crate::helper::{build_environment, build_skill_roots};
-use crate::memory_instruction::MemoryInstructionFragment;
 use crate::permissions_instruction::PermissionsInstructionFragment;
 use crate::reasoning_effort::ReasoningEffortFragment;
 use crate::skill_manager::scan_skills;
@@ -118,15 +117,17 @@ impl ContextInstructionHook {
             messages.push(tagged(developer.render(&env)?, "slab_skills"));
         }
         // 6. Read-side memory instructions (developer, preserves the
-        //    `slab_memory` name): the structured summary + base path render
-        //    through the bundled `memory` template.
+        //    `slab_memory` name): the host renders the complete body — this
+        //    crate injects it verbatim (same opaque-body passthrough as 6b).
         if let Some(memory) = self.sources.memory_context(thread_id, model, input_message).await {
             messages.push(tagged(
-                MemoryInstructionFragment {
-                    base_path: memory.base_path,
-                    memory_summary: memory.memory_summary,
-                }
-                .render(&env)?,
+                ConversationMessage {
+                    role: "developer".to_owned(),
+                    content: ConversationMessageContent::Text(memory.summary_body),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                },
                 "slab_memory",
             ));
             // 6b. Recall-selected rollout summaries (developer): a separate
@@ -258,7 +259,7 @@ mod tests {
                 cwd: self.workspace.as_ref().map(|p| p.to_string_lossy().into_owned()),
                 shell: ShellKind::Bash,
                 os: OsKind::Linux,
-                timestamp: "2026-07-24T00:00:00Z".to_owned(),
+                timestamp: "2026-07-24".to_owned(),
             }
         }
         fn permission_snapshot(&self, _thread_id: &str) -> PermissionSnapshot {
@@ -505,8 +506,7 @@ mod tests {
         let ws = tempfile::TempDir::new().unwrap();
         let mut sources = mock_sources(Some(ws.path().to_path_buf()));
         sources.memory = Some(crate::snapshots::MemoryContext {
-            base_path: "/memories/projects/p".to_owned(),
-            memory_summary: "memory summary body".to_owned(),
+            summary_body: "complete host-rendered memory body".to_owned(),
             relevant_body: None,
         });
         let hook = ContextInstructionHook::new(Arc::new(sources));
@@ -521,12 +521,9 @@ mod tests {
             .find(|m| m.name.as_deref() == Some("slab_memory"))
             .expect("folded memory message should be injected");
         assert_eq!(memory_msg.role, "developer");
-        // The structured fields render through the memory template: the
-        // summary is wrapped and the base path reaches the layout routes.
-        let body = memory_msg.content.rendered_text();
-        assert!(body.contains("========= MEMORY_SUMMARY BEGINS ========="));
-        assert!(body.contains("memory summary body"));
-        assert!(body.contains("/memories/projects/p/MEMORY.md"));
+        // Opaque-body passthrough: the host-rendered body lands verbatim —
+        // this crate adds no memory prompt of its own.
+        assert_eq!(memory_msg.content.rendered_text(), "complete host-rendered memory body");
     }
 
     #[tokio::test]
@@ -534,8 +531,7 @@ mod tests {
         let ws = tempfile::TempDir::new().unwrap();
         let mut sources = mock_sources(Some(ws.path().to_path_buf()));
         sources.memory = Some(crate::snapshots::MemoryContext {
-            base_path: "/memories/projects/p".to_owned(),
-            memory_summary: "memory summary body".to_owned(),
+            summary_body: "complete host-rendered memory body".to_owned(),
             relevant_body: Some("relevant rollout summaries".to_owned()),
         });
         let hook = ContextInstructionHook::new(Arc::new(sources));
@@ -555,7 +551,7 @@ mod tests {
             .expect("relevant fragment present");
         let relevant_msg = &injected_messages[relevant_position];
         assert_eq!(relevant_msg.role, "developer");
-        assert!(relevant_msg.content.rendered_text().contains("relevant rollout summaries"));
+        assert_eq!(relevant_msg.content.rendered_text(), "relevant rollout summaries");
         // 6b sits immediately after slot 6.
         assert_eq!(relevant_position, memory_position + 1);
     }

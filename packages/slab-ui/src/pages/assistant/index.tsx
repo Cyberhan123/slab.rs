@@ -81,6 +81,7 @@ function Assistant() {
         actionError: harnessActionError,
         approvals,
         approvalStatusByItemId,
+        questionnaires,
         liveOutputByItemId,
         livePatchByItemId,
         modelLoad,
@@ -92,6 +93,7 @@ function Assistant() {
         isCompacting,
         isForking,
         resolveApproval,
+        resolveQuestionnaire,
         compactThread,
         forkThread,
         userMessageTurnIndex,
@@ -443,12 +445,14 @@ function Assistant() {
                     transport={transport}
                     approvals={approvals}
                     approvalStatusByItemId={approvalStatusByItemId}
+                    questionnaires={questionnaires}
                     liveOutputByItemId={liveOutputByItemId}
                     livePatchByItemId={livePatchByItemId}
                     modelLoad={modelLoad}
                     turnUsage={turnUsage}
                     contextWindow={usageContextWindow}
                     resolveApproval={resolveApproval}
+                    resolveQuestionnaire={resolveQuestionnaire}
                     onCompact={() => compactThread()}
                     onFork={() => forkThread()}
                     historyCreatedAt={historyCreatedAt}
