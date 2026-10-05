@@ -22,7 +22,7 @@ function makeFakeClient(options: FakeClientOptions = {}) {
       | { turnId: string; items: Array<Record<string, unknown>> }
       | null,
     open: vi.fn<() => unknown>(async () => {}),
-    threadStart: vi.fn(async (): Promise<ThreadStartResult> => ({
+    threadStart: vi.fn<() => Promise<ThreadStartResult>>(async () => ({
       thread: { id: "hthread-1", preview: "", modelProvider: "", createdAt: 0, turns: [] },
       model: "slab-llama",
       modelProvider: "",
@@ -30,7 +30,7 @@ function makeFakeClient(options: FakeClientOptions = {}) {
       approvalPolicy: "on-request",
       sandbox: { type: "workspaceWrite" },
     })),
-    turnStart: vi.fn(async (params: TurnStartParams): Promise<TurnStartResult> => {
+    turnStart: vi.fn<(params: TurnStartParams) => Promise<TurnStartResult>>(async (params) => {
       emit("turn/started", { threadId: params.threadId, turn: { id: "0", items: [], status: "inProgress" } })
       emit("item/started", { item: { type: "agentMessage", id: "i1", text: "" }, threadId: params.threadId, turnId: "0" })
       emit("item/agentMessage/delta", { threadId: params.threadId, turnId: "0", itemId: "i1", delta: "hel" })
@@ -71,6 +71,7 @@ async function collect(stream: ReadableStream<UIMessageChunk>): Promise<UIMessag
   const chunks: UIMessageChunk[] = []
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    // eslint-disable-next-line no-await-in-loop -- stream reads are inherently sequential
     const { value, done } = await reader.read()
     if (done) break
     if (value) chunks.push(value)
@@ -268,7 +269,7 @@ describe("HarnessChatTransport", () => {
     // stream.ts must absorb them (exactly one text-start/text-end pair).
     const fake = makeFakeClient({ currentThreadId: "hthread-1" })
     fake.lastTurnIndex = 0
-    fake.turnStart = vi.fn(async (params: TurnStartParams): Promise<TurnStartResult> => {
+    fake.turnStart = vi.fn<(params: TurnStartParams) => Promise<TurnStartResult>>(async (params) => {
       fake.emitNotification("item/started", {
         item: { type: "agentMessage", id: "i1", text: "" },
         threadId: params.threadId,
