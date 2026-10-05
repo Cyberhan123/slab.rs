@@ -54,11 +54,14 @@ pub(super) async fn create_chat_completion(
 
         let error_flag = Arc::new(AtomicBool::new(false));
         let completion_tokens = Arc::new(AtomicU32::new(0));
-        // Terminal stream state: the provider's real stop reason and whether
-        // native tool calls were finalized — both decided by the `Completed`
-        // delta and read by the finish chunk afterwards.
+        // Terminal stream state: the provider's real stop reason, whether
+        // native tool calls were finalized, and the provider-reported token
+        // usage — all decided by the `Completed` delta and read by the
+        // finish/usage chunks afterwards.
         let stop_reason = Arc::new(Mutex::new(None::<String>));
         let has_tool_calls = Arc::new(AtomicBool::new(false));
+        let provider_usage =
+            Arc::new(Mutex::new(None::<crate::domain::models::TextGenerationUsage>));
 
         let role_chunk = stream::once(async move {
             super::build_role_chunk(&completion_id_for_role, created_ts, &model_name_for_role)
@@ -68,6 +71,7 @@ pub(super) async fn create_chat_completion(
         let token_stream_completion_tokens = Arc::clone(&completion_tokens);
         let token_stream_stop_reason = Arc::clone(&stop_reason);
         let token_stream_has_tool_calls = Arc::clone(&has_tool_calls);
+        let token_stream_provider_usage = Arc::clone(&provider_usage);
         let token_stream = backend_stream.filter_map(move |chunk| {
             let mapped: Option<ChatStreamChunk> = match chunk {
                 Ok(CloudDelta::Content(token)) => {
@@ -85,9 +89,12 @@ pub(super) async fn create_chat_completion(
                     &model_name_for_tokens,
                     &token,
                 )),
-                Ok(CloudDelta::Completed { tool_calls, stop_reason }) => {
+                Ok(CloudDelta::Completed { tool_calls, stop_reason, usage }) => {
                     if let Some(reason) = stop_reason {
                         *token_stream_stop_reason.lock().unwrap() = Some(reason);
+                    }
+                    if let Some(reported) = usage {
+                        *token_stream_provider_usage.lock().unwrap() = Some(reported);
                     }
                     if tool_calls.is_empty() {
                         None
@@ -141,15 +148,21 @@ pub(super) async fn create_chat_completion(
 
         let usage_chunk_error_flag = Arc::clone(&error_flag);
         let usage_chunk_completion_tokens = Arc::clone(&completion_tokens);
+        let usage_chunk_provider_usage = Arc::clone(&provider_usage);
         let usage_chunk = stream::once(async move {
             if !include_usage || usage_chunk_error_flag.load(Ordering::SeqCst) {
                 None
             } else {
-                let usage = build_estimated_usage(
-                    &prompt_for_usage,
-                    "",
-                    Some(usage_chunk_completion_tokens.load(Ordering::SeqCst)),
-                );
+                // Provider-reported usage (real counts + cache-hit detail)
+                // when the stream captured it; estimation only as the fallback.
+                let usage =
+                    usage_chunk_provider_usage.lock().unwrap().clone().unwrap_or_else(|| {
+                        build_estimated_usage(
+                            &prompt_for_usage,
+                            "",
+                            Some(usage_chunk_completion_tokens.load(Ordering::SeqCst)),
+                        )
+                    });
                 Some(super::build_usage_chunk(
                     &completion_id_for_usage,
                     created_ts,

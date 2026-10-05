@@ -8,9 +8,14 @@ Agent memory pipeline helpers for Slab.
 
 - Phase 1 rollout filtering and memory candidate shaping.
 - Phase 2 input selection and workspace summary rendering.
+- Every memory prompt: the phase1/phase2 templates, the read-side developer
+  body (`templates::render_memory_read` — usage policy, memory-workspace
+  routing, the load-bearing `<oai-mem-citation>` contract, and the
+  explicit-request `memory_note` update path), the recall side-query prompts,
+  and the static `memory` agent stub. The context hook injects the rendered
+  bodies verbatim.
 - The read-side summary loader (`read::load_memory_summary`) and citation
-  parsing / citation source classification. The developer-message template
-  that wraps the summary lives in `slab-agent-context` (`memory.jinja`).
+  parsing / citation source classification.
 - The `memory_note` tool (`note_tool`): the explicit-request memory-update
   write path, with deterministic naming, notes-dir containment, and phase 1's
   secret redaction. It lives here (not `slab-agent-tools`) so it reuses the
