@@ -163,34 +163,6 @@ fn parse_raw_memories_manifest(raw: &str) -> Vec<RecallManifestEntry> {
     entries
 }
 
-/// Render the side-query user prompt: manifest lines + the request.
-pub fn render_manifest_prompt(
-    entries: &[RecallManifestEntry],
-    input_message: &str,
-    cwd: &str,
-    now: DateTime<Utc>,
-) -> String {
-    let mut prompt = String::from("Memory manifest (newest first):\n");
-    for entry in entries {
-        prompt.push_str(&format!(
-            "- {} | {} | keywords: {} | cwd: {} | {}\n",
-            entry.filename,
-            if entry.title.is_empty() { "(no description)" } else { &entry.title },
-            if entry.keywords.is_empty() { "-" } else { &entry.keywords },
-            if entry.cwd.is_empty() { "-" } else { &entry.cwd },
-            freshness_label(entry.updated_at, now),
-        ));
-    }
-    prompt.push_str(&format!(
-        "\nWorkspace: {cwd}\n\nUser request:\n{input_message}\n\n\
-         Reply ONLY with JSON: {{\"filenames\": [...]}} listing up to {RECALL_TOP_K} \
-         manifest filenames most relevant to the request, most relevant first. \
-         Use EXACT filenames from the manifest; if none are relevant reply \
-         with an empty list."
-    ));
-    prompt
-}
-
 /// Parse the side-query model output into a valid selection.
 ///
 /// Accepts either a bare JSON array or `{"filenames": [...]}`. Hallucinated
@@ -278,7 +250,10 @@ pub fn truncate_to_token_budget(text: &str, budget_tokens: usize) -> String {
 /// (phase2 consolidation output), so they are a trust boundary: the stripped
 /// name must be one flat path segment in the `[A-Za-z0-9_.-]` charset — no
 /// separators (`/` or `\`), no traversal, no hidden/absolute names.
-fn safe_summary_name(name: &str) -> Option<&str> {
+///
+/// Public so out-of-crate read surfaces (the `slab-mcp` memory tools) can
+/// apply the same single-source rule to caller-supplied names.
+pub fn safe_summary_name(name: &str) -> Option<&str> {
     if name.is_empty()
         || name.starts_with('.')
         || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))

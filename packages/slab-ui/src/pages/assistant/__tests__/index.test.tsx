@@ -58,6 +58,7 @@ const mocks = vi.hoisted(() => {
     transport: {},
     approvals: [] as ConversationState["approvals"],
     approvalStatusByItemId: new Map<string, "pending" | "approved" | "denied">(),
+    questionnaires: [] as ConversationState["questionnaires"],
     liveOutputByItemId: new Map<string, string>(),
     livePatchByItemId: new Map<string, string[]>(),
     modelLoad: null,
@@ -99,6 +100,12 @@ const mocks = vi.hoisted(() => {
     interrupt: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     resolveApproval: vi.fn<
       (itemId: string, approved: boolean, scope: "run_once" | "always_in_workspace" | "always" | "deny") => Promise<void>
+    >(),
+    resolveQuestionnaire: vi.fn<
+      (
+        itemId: string,
+        answers: { selected: string[]; custom: string | null; skipped?: boolean },
+      ) => Promise<void>
     >(),
   }
 

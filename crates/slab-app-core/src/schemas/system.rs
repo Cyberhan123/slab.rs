@@ -254,3 +254,77 @@ impl From<slab_gpu_memory_scheduler::DeviceLedger> for GpuLedgerDeviceResponse {
         }
     }
 }
+
+/// Agent-memory phase1 output count for one (project, status) pair — the
+/// backlog and failure surface per project memory store.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MemoryPhase1StatusCountResponse {
+    /// Sanitized project key (empty string rows predate project sharding).
+    pub project_key: String,
+    /// Phase1 output status: pending / running / succeeded /
+    /// succeeded_no_output / failed.
+    pub status: String,
+    /// Row count for this (project, status) pair.
+    pub count: i64,
+}
+
+/// One per-project phase2 consolidation lock: watermarks plus lease state.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MemoryPhase2LockResponse {
+    /// Lock key — the sanitized project key.
+    pub job_key: String,
+    /// Lock status (idle / running).
+    pub status: String,
+    /// Current lease owner, while a consolidation holds the lock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_owner: Option<String>,
+    /// Lease expiry (RFC3339), while held.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_until: Option<String>,
+    /// `MAX(source_updated_at)` snapshot when the current claim was made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed_watermark: Option<String>,
+    /// Watermark of the last completed consolidation for the project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_watermark: Option<String>,
+    /// Last lock update (RFC3339).
+    pub updated_at: String,
+}
+
+/// One recent phase2 consolidation run.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MemoryPhase2RunResponse {
+    /// Run id.
+    pub id: String,
+    /// Sanitized project key the run consolidated.
+    pub project_key: String,
+    /// Run status (running / succeeded / failed).
+    pub status: String,
+    /// Watermark claimed at run start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed_watermark: Option<String>,
+    /// Watermark completed by the run (absent while running or on failure).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_watermark: Option<String>,
+    /// Run start (RFC3339).
+    pub started_at: String,
+    /// Run completion (RFC3339), once terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+    /// Failure reason (truncated), for failed runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Agent memory pipeline diagnostics exposed at
+/// `/v1/system/diagnostics/memories` (read-only; metadata only, no memory
+/// content).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MemoryDiagnosticsResponse {
+    /// Phase1 output counts grouped by project and status.
+    pub phase1: Vec<MemoryPhase1StatusCountResponse>,
+    /// Per-project phase2 locks (watermarks + lease state).
+    pub phase2_locks: Vec<MemoryPhase2LockResponse>,
+    /// Most recent phase2 consolidation runs, newest first.
+    pub recent_runs: Vec<MemoryPhase2RunResponse>,
+}
