@@ -1040,7 +1040,11 @@ mod route_tests {
         })
         .await;
 
-        let response = server.get("/v1/workspace/path/validate?relativePath=src%5Cnew.rs").await;
+        // A backslash is only a path separator on Windows; on Unix it is a
+        // legal filename character, so the input stays platform-native here.
+        let encoded = if cfg!(windows) { "src%5Cnew.rs" } else { "src%2Fnew.rs" };
+        let response =
+            server.get(&format!("/v1/workspace/path/validate?relativePath={encoded}")).await;
 
         assert_eq!(response.status, StatusCode::OK);
         assert_eq!(response.body["relativePath"], "src/new.rs");
