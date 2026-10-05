@@ -155,7 +155,7 @@ impl AppContextSources {
         let system = memory_templates::render_recall_select(recall::RECALL_TOP_K)
             .map_err(|error| tracing::warn!(%error, "memory recall prompt render failed"))
             .ok()?;
-        let user = recall::render_manifest_prompt(
+        let user = memory_templates::render_recall_manifest_prompt(
             &manifest,
             input,
             &self
@@ -163,7 +163,9 @@ impl AppContextSources {
                 .map(|root| root.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             chrono::Utc::now(),
-        );
+        )
+        .map_err(|error| tracing::warn!(%error, "memory recall manifest prompt render failed"))
+        .ok()?;
         let query = memory_chat_json(&self.model_state, &model, &system, &user);
         let output =
             match tokio::time::timeout(Duration::from_secs(RECALL_QUERY_TIMEOUT_SECS), query).await
@@ -275,7 +277,7 @@ impl AgentContextSources for AppContextSources {
             cwd: self.workspace_root().map(|root| root.to_string_lossy().into_owned()),
             shell: self.shell,
             os: Self::os_kind(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: environment_timestamp(),
         }
     }
 
@@ -320,13 +322,23 @@ impl AgentContextSources for AppContextSources {
                 return None;
             }
         };
+        // The complete `slab_memory` developer body is rendered by
+        // slab-agent-memories (it owns every memory prompt); the context hook
+        // injects it verbatim. `base_path` keeps the platform separators
+        // exactly as before (`to_string_lossy`, no normalization).
+        let summary_body = match memory_templates::render_memory_read(
+            &project_root.to_string_lossy(),
+            &memory_summary,
+        ) {
+            Ok(body) => body,
+            Err(error) => {
+                tracing::warn!(%error, "memory context render skipped");
+                return None;
+            }
+        };
         let relevant_body =
             self.recall_body(thread_id, model_id, input_message, &project_key, &project_root).await;
-        Some(MemoryContext {
-            base_path: project_root.to_string_lossy().into_owned(),
-            memory_summary,
-            relevant_body,
-        })
+        Some(MemoryContext { summary_body, relevant_body })
     }
 
     fn evict_thread(&self, thread_id: &str) {
@@ -363,6 +375,17 @@ fn evict_oldest_cache_entry(cache: &DashMap<String, RecallCacheEntry>) {
     }
 }
 
+/// UTC calendar date (`YYYY-MM-DD`) for the environment fragment. Date — not
+/// datetime — granularity on purpose: the fragment is merged IN PLACE on every
+/// run (`merge_injected_messages`), and a second-precision timestamp changed
+/// the prompt prefix at message #2 each user turn, defeating the engine's
+/// kv-cache prefix reuse (the per-thread `agent_kv_session_key` exists exactly
+/// to enable that reuse). Same-day runs stay byte-identical; the model loses
+/// only time-of-day precision, matching the "today's date is…" convention.
+fn environment_timestamp() -> String {
+    chrono::Utc::now().format("%Y-%m-%d").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,6 +397,22 @@ mod tests {
     fn shell_kind_auto_with_bash_path_reports_bash() {
         let exe = std::env::current_exe().expect("current exe");
         assert_eq!(shell_kind(slab_config::ShellLauncherKind::Auto, Some(exe)), ShellKind::Bash);
+    }
+
+    /// Date-granularity is what keeps the environment fragment byte-stable
+    /// across same-day runs (kv-cache prefix reuse); anything with
+    /// time-of-day precision would churn it every user turn.
+    #[test]
+    fn environment_timestamp_is_utc_date_stamp() {
+        let stamp = environment_timestamp();
+        assert!(
+            stamp.len() == 10
+                && stamp.as_bytes()[4] == b'-'
+                && stamp.as_bytes()[7] == b'-'
+                && stamp.chars().all(|c| c.is_ascii_digit() || c == '-'),
+            "expected YYYY-MM-DD, got {stamp}"
+        );
+        assert_eq!(stamp, chrono::Utc::now().format("%Y-%m-%d").to_string());
     }
 
     #[test]

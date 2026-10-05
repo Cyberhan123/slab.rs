@@ -17,6 +17,12 @@ pub struct RolloutResponseItem {
     pub role: String,
     pub content: String,
     pub created_at: String,
+    /// The message's harness tag (`name`), when it carries one. Not part of
+    /// the rendered prompt — it exists so
+    /// [`filter_memory_relevant_items`] can drop harness-injected messages
+    /// (init-context fragments, subagent notices) from the extraction input.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,11 +122,22 @@ impl Phase1ModelOutput {
     }
 }
 
+/// Keep only the conversation-proper items for the phase1 extraction input:
+/// `user` / `assistant` / `tool` roles, non-empty, and NOT harness-injected.
+///
+/// Harness injections carry a `slab_`-prefixed tag (the init-context batch —
+/// `slab_agents_md` is user-role — and the `slab_subagent_notice`
+/// completions); learning from them pollutes the memory with the project's
+/// own instructions and delegated-subtask output re-read as user speech
+/// (Codex strips the same injection classes before extraction). The
+/// `slab_` prefix rule covers future tags too — the namespace is
+/// harness-owned.
 pub fn filter_memory_relevant_items(items: Vec<RolloutResponseItem>) -> Vec<RolloutResponseItem> {
     items
         .into_iter()
         .filter(|item| {
-            matches!(item.role.as_str(), "user" | "assistant" | "tool")
+            !item.name.as_deref().is_some_and(|name| name.starts_with("slab_"))
+                && matches!(item.role.as_str(), "user" | "assistant" | "tool")
                 && !item.content.trim().is_empty()
         })
         .collect()
@@ -180,31 +197,82 @@ mod tests {
                 role: "system".into(),
                 content: "ignore".into(),
                 created_at: "1".into(),
+                name: None,
             },
             RolloutResponseItem {
                 role: "developer".into(),
                 content: "ignore".into(),
                 created_at: "2".into(),
+                name: None,
             },
             RolloutResponseItem {
                 role: "user".into(),
                 content: " ".into(),
                 created_at: "3".into(),
+                name: None,
             },
             RolloutResponseItem {
                 role: "assistant".into(),
                 content: "keep".into(),
                 created_at: "4".into(),
+                name: None,
             },
             RolloutResponseItem {
                 role: "tool".into(),
                 content: "keep".into(),
                 created_at: "5".into(),
+                name: None,
             },
         ]);
 
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].role, "assistant");
         assert_eq!(items[1].role, "tool");
+    }
+
+    /// Harness-injected messages never reach the extraction input, whatever
+    /// their role: the init-context fragments (`slab_agents_md` is user-role)
+    /// and the subagent completion notices would otherwise be re-learned as
+    /// conversation (Codex filters the same injection classes).
+    #[test]
+    fn filters_harness_tagged_injections() {
+        let items = filter_memory_relevant_items(vec![
+            RolloutResponseItem {
+                role: "user".into(),
+                content: "# Project rules\nUse bun.".into(),
+                created_at: "1".into(),
+                name: Some("slab_agents_md".into()),
+            },
+            RolloutResponseItem {
+                role: "user".into(),
+                content: "[subagent task finished] task_id=bg-1\n<subagent-result>findings</subagent-result>".into(),
+                created_at: "2".into(),
+                name: Some("slab_subagent_notice".into()),
+            },
+            RolloutResponseItem {
+                role: "assistant".into(),
+                content: "injected as developer-role too".into(),
+                created_at: "3".into(),
+                name: Some("slab_memory".into()),
+            },
+            RolloutResponseItem {
+                role: "user".into(),
+                content: "real user turn".into(),
+                created_at: "4".into(),
+                name: None,
+            },
+            // A non-harness name (API multi-name chats) is conversation, not
+            // injection — it stays.
+            RolloutResponseItem {
+                role: "user".into(),
+                content: "named user turn".into(),
+                created_at: "5".into(),
+                name: Some("alice".into()),
+            },
+        ]);
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].content, "real user turn");
+        assert_eq!(items[1].content, "named user turn");
     }
 }

@@ -42,6 +42,7 @@ import type {
     HarnessChatTransport,
     LiveTextEntry,
     ModelLoadState,
+    QuestionnaireRequest,
     SettingsMarker,
     SubagentChildItem,
     SubagentTaskInfo,
@@ -70,6 +71,8 @@ export type AssistantChatPaneProps = {
     transport: HarnessChatTransport<UIMessage>
     approvals: ApprovalRequest[]
     approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
+    /** Pending `questionnaire` tool calls awaiting the user's answer. */
+    questionnaires: QuestionnaireRequest[]
     liveOutputByItemId: ReadonlyMap<string, string>
     livePatchByItemId: ReadonlyMap<string, string[]>
     /** Transient model-load indicator state (null when idle). */
@@ -79,6 +82,11 @@ export type AssistantChatPaneProps = {
     /** Context window size for the consumption bar (null when unknown). */
     contextWindow: number | null
     resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
+    /** Answer a pending `questionnaire` tool call. */
+    resolveQuestionnaire: (
+        itemId: string,
+        answers: { selected: string[]; custom: string | null; skipped?: boolean },
+    ) => Promise<void>
     /** Manually compact the current thread (triggered by the `/compact` command). */
     onCompact: () => Promise<void>
     /** Fork the current thread (triggered by the `/fork` command), switching to the child. */
@@ -189,12 +197,14 @@ export function AssistantChatPane({
     transport,
     approvals,
     approvalStatusByItemId,
+    questionnaires,
     liveOutputByItemId,
     livePatchByItemId,
     modelLoad,
     turnUsage,
     contextWindow,
     resolveApproval,
+    resolveQuestionnaire,
     onCompact,
     onFork,
     historyCreatedAt,
@@ -542,6 +552,8 @@ export function AssistantChatPane({
                             steerable={steerable && !disabled && !isCompacting && !isForking}
                             approvals={approvals}
                             onResolveApproval={resolveApproval}
+                            questionnaires={questionnaires}
+                            onResolveQuestionnaire={resolveQuestionnaire}
                             commands={commands}
                             planMode={planMode}
                             onPlanModeChange={onPlanModeChange}

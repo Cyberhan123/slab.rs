@@ -74,8 +74,9 @@ pub use plan::{Plan, PlanCounts, PlanItem, PlanStatus};
 pub use port::{
     AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, ApprovalReviewRequest,
     ApprovalReviewerPort, ExecPolicyPort, LlmPort, LlmResponse, MemoryPressure, MemoryPressurePort,
-    NoopApprovalReviewer, NoopMemoryPressurePort, NoopPlanStore, PlanStorePort, PluginToolPort,
-    ReviewOutcome, ThreadStatus, ToolRiskAssessment, ToolRiskLevel, TurnStateRecord,
+    NoopApprovalReviewer, NoopMemoryPressurePort, NoopPlanStore, NoopQuestionnaire, PlanStorePort,
+    PluginToolPort, QuestionnairePort, ReviewOutcome, ThreadStatus, ToolRiskAssessment,
+    ToolRiskLevel, TurnStateRecord, questionnaire_timeout_payload,
 };
 pub use risk::{BasicToolRiskAnalyzer, ToolApprovalDecision, ToolApprovalPolicy, ToolRiskAnalyzer};
 pub use runtime::AgentRuntime;

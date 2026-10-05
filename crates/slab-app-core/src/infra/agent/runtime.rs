@@ -30,6 +30,10 @@ pub(crate) struct AgentRuntimeReloader {
     /// the shell tool against it so background execution survives a workspace
     /// switch (tasks of the OLD workspace are stopped by the migration path).
     background: Arc<slab_agent_tools::BackgroundTaskRegistry>,
+    /// Shared subagent lifecycle sink: a reloaded memory pipeline launches its
+    /// phase2 consolidation agent through the same chain (rollout persistence
+    /// via the bound `SubagentBridge`) as the bootstrap-built pipeline.
+    subagent_sink: Arc<dyn slab_agent_tools::SubagentTaskSink>,
     /// Shared MCP client (None when MCP is disabled): `reload` probes every
     /// configured server through it and gates `mcp__*` proxy visibility on
     /// per-server health (`ToolServiceKey::McpServer`).
@@ -43,10 +47,20 @@ impl AgentRuntimeReloader {
         rollout: Arc<RolloutFileStore>,
         rollout_store: Arc<RolloutBackedAgentStore>,
         background: Arc<slab_agent_tools::BackgroundTaskRegistry>,
+        subagent_sink: Arc<dyn slab_agent_tools::SubagentTaskSink>,
         mcp_client: Option<Arc<slab_mcp::McpClient>>,
     ) -> Self {
         let tool_router = runtime.tool_router();
-        Self { state, runtime, tool_router, rollout, rollout_store, background, mcp_client }
+        Self {
+            state,
+            runtime,
+            tool_router,
+            rollout,
+            rollout_store,
+            background,
+            subagent_sink,
+            mcp_client,
+        }
     }
 
     /// Stop every background task rooted under `old_root` — the workspace
@@ -276,6 +290,8 @@ impl AgentRuntimeReloader {
             Arc::new(self.state.clone()),
             memory_config.clone(),
             memory_root.clone(),
+            Arc::clone(&self.background),
+            Arc::clone(&self.subagent_sink),
         );
         memory_pipeline.set_control(self.runtime.control());
         let shell_config = self.state.pmid().config().agent.tools.shell.clone();
