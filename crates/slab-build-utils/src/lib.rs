@@ -153,6 +153,62 @@ pub fn generate_or_copy_bindings(
     }
 
     patch_libloading_filename_bounds(&output_path)?;
+    normalize_enum_alias_sign(&output_path)?;
+
+    Ok(())
+}
+
+/// Normalise consts-style enum backing aliases to `c_int`.
+///
+/// bindgen types a C enum after the target ABI's integer type: MSVC always
+/// uses `int`, while the GNU ABI picks `unsigned int` for enums whose
+/// enumerators are all non-negative. Consumer crates assume the MSVC shape,
+/// so the same source compiles on Windows but fails with u32/i32 mismatches
+/// on Linux. Both types are 32-bit wide, so rewriting the alias keeps the FFI
+/// layout identical while making the generated surface platform-stable.
+///
+/// Only aliases that back consts-style enums are rewritten — i.e. aliases
+/// referenced by `pub const <alias>_<variant>: <alias> = N;` entries — so
+/// genuine `unsigned` typedefs and fields keep their type.
+fn normalize_enum_alias_sign(output_path: &Path) -> Result<()> {
+    let bindings = fs::read_to_string(output_path)
+        .with_context(|| format!("failed to read generated bindings {}", output_path.display()))?;
+
+    let mut enum_aliases: HashSet<String> = HashSet::new();
+    for line in bindings.lines() {
+        let Some(rest) = line.trim_start().strip_prefix("pub const ") else { continue };
+        let Some((name, tail)) = rest.split_once(':') else { continue };
+        let declared_type = tail.split_whitespace().next().unwrap_or_default();
+        if name.len() > declared_type.len()
+            && name.starts_with(declared_type)
+            && name.as_bytes()[declared_type.len()] == b'_'
+        {
+            enum_aliases.insert(declared_type.to_string());
+        }
+    }
+
+    if enum_aliases.is_empty() {
+        return Ok(());
+    }
+
+    let mut changed = false;
+    let mut patched = bindings;
+    for alias in &enum_aliases {
+        for unsigned in ["::std::os::raw::c_uint", "u32"] {
+            let from = format!("pub type {alias} = {unsigned};");
+            let to = format!("pub type {alias} = ::std::os::raw::c_int;");
+            if patched.contains(&from) {
+                patched = patched.replace(&from, &to);
+                changed = true;
+            }
+        }
+    }
+
+    if changed {
+        fs::write(output_path, patched).with_context(|| {
+            format!("failed to normalize enum aliases in {}", output_path.display())
+        })?;
+    }
 
     Ok(())
 }
@@ -716,7 +772,8 @@ fn copy_fallback_bindings(fallback_source: &Path, output_path: &Path) -> Result<
 #[cfg(test)]
 mod tests {
     use super::{
-        clang_include_arg, copy_fallback_bindings, retain_existing_web_language_server_tree,
+        clang_include_arg, copy_fallback_bindings, normalize_enum_alias_sign,
+        retain_existing_web_language_server_tree,
     };
     use std::collections::HashSet;
     use std::env;
@@ -761,6 +818,46 @@ mod tests {
                 .to_string()
                 .contains("Unable to generate bindings and bundled fallback is missing")
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn normalize_enum_alias_sign_rewrites_unsigned_enum_backing_type() {
+        let root = temp_dir("normalize-enum-unsigned");
+        let output_path = root.join("out").join("bindings.rs");
+        fs::create_dir_all(output_path.parent().expect("out parent")).unwrap();
+        fs::write(
+            &output_path,
+            concat!(
+                "pub type llama_ftype = ::std::os::raw::c_uint;\n",
+                "pub const llama_ftype_LLAMA_FTYPE_ALL_F32: llama_ftype = 0;\n",
+                "pub struct llama_model_quantize_params { pub ftype: llama_ftype }\n",
+            ),
+        )
+        .unwrap();
+
+        normalize_enum_alias_sign(&output_path).unwrap();
+
+        let patched = fs::read_to_string(&output_path).unwrap();
+        assert!(patched.contains("pub type llama_ftype = ::std::os::raw::c_int;"));
+        assert!(patched.contains("pub const llama_ftype_LLAMA_FTYPE_ALL_F32: llama_ftype = 0;"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn normalize_enum_alias_sign_keeps_non_enum_unsigned_typedefs() {
+        let root = temp_dir("normalize-enum-typedef");
+        let output_path = root.join("out").join("bindings.rs");
+        fs::create_dir_all(output_path.parent().expect("out parent")).unwrap();
+        let contents = concat!(
+            "pub type llama_token = ::std::os::raw::c_uint;\n",
+            "pub struct s { pub t: llama_token }\n",
+        );
+        fs::write(&output_path, contents).unwrap();
+
+        normalize_enum_alias_sign(&output_path).unwrap();
+
+        assert_eq!(fs::read_to_string(&output_path).unwrap(), contents);
         fs::remove_dir_all(root).unwrap();
     }
 

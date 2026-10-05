@@ -279,6 +279,9 @@ impl SandboxDriver for PassThroughDriver {
             child.process_group(0);
         }
 
+        // `mut` is required on Windows (`windows_job_kill_tree` takes `&mut
+        // Child`); on Unix the child is not mutated after spawn.
+        #[cfg_attr(not(windows), allow(unused_mut))]
         let mut spawned = child.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
         // Unix: kill the child's whole process group. Windows: assign a
         // KILL_ON_JOB_CLOSE Job Object so the tree dies on drop (a bare
@@ -324,6 +327,9 @@ impl SandboxDriver for PassThroughDriver {
             child.process_group(0);
         }
 
+        // `mut` is required on Windows (`windows_job_kill_tree` takes `&mut
+        // Child`); on Unix the child is not mutated after spawn.
+        #[cfg_attr(not(windows), allow(unused_mut))]
         let mut spawned = child.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
         let pid = spawned.id();
         #[cfg(unix)]

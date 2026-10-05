@@ -116,7 +116,8 @@ pub(crate) fn pre_spawn(command: &mut tokio::process::Command) {
     command.kill_on_drop(true);
     #[cfg(unix)]
     {
-        use std::os::unix::process::CommandExt;
+        // tokio's `Command` exposes `process_group` as an inherent Unix
+        // method, so no `std::os::unix::process::CommandExt` import is needed.
         command.process_group(0);
     }
 }
