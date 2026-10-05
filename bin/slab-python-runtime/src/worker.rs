@@ -131,16 +131,25 @@ fn execute_python_call(
 
 fn call_wrapper_code(timeout_secs: u64, use_sigalrm: bool) -> String {
     let guarded_call = if use_sigalrm {
+        // `signal.signal` only works on the interpreter's main thread, and in this
+        // embedded interpreter `threading.main_thread()` does not reliably track it
+        // (the interpreter can be initialized from a tokio worker thread, making
+        // `current_thread() is main_thread()` true somewhere signal still rejects).
+        // Probe with try/except instead and degrade to an unguarded call.
         format!(
-            r#"import threading
-
-if threading.current_thread() is threading.main_thread():
+            r#"_slab_alarm_ready = False
+try:
     import signal
 
     def _slab_timeout_handler(signum, frame):
         raise TimeoutError("Python plugin timed out after {timeout_secs}s")
 
     _slab_old_handler = signal.signal(signal.SIGALRM, _slab_timeout_handler)
+    _slab_alarm_ready = True
+except ValueError:
+    pass
+
+if _slab_alarm_ready:
     signal.alarm({timeout_secs})
     try:
         _slab_result_value = _slab_call_plugin(_slab_fn, _slab_params_json)
