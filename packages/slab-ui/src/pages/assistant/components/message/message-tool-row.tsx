@@ -21,6 +21,7 @@ import {
   GlobeIcon,
   ListChecksIcon,
   Loader2Icon,
+  MessageCircleQuestionIcon,
   MinusCircleIcon,
   SquareTerminalIcon,
   TriangleAlertIcon,
@@ -202,6 +203,8 @@ export function toolRowIcon(toolName: string): ReactNode {
     case "update_plan":
     case "present_plan":
       return <ListChecksIcon className="size-4 shrink-0" />
+    case "questionnaire":
+      return <MessageCircleQuestionIcon className="size-4 shrink-0" />
     case "delegate_subagent":
     case "task.complete":
       return <BotIcon className="size-4 shrink-0" />

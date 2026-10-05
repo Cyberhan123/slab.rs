@@ -22,10 +22,13 @@ export default defineConfig({
     // subagent-scripted.test.ts needs its OWN scripted stack
     // (`vitest.e2e.subagent.config.ts`, SLAB_E2E_MODE=1, no model) — its
     // beforeAll injects a provided-context key this suite never provides.
+    // memory-scripted.test.ts likewise needs its OWN scripted stack with the
+    // memory pipeline enabled (`vitest.e2e.memory.config.ts`).
     exclude: [
       "**/node_modules/**",
       "tests/e2e/workspace.test.ts",
       "tests/e2e/subagent-scripted.test.ts",
+      "tests/e2e/memory-scripted.test.ts",
     ],
     environment: "node",
     globalSetup: [fileURLToPath(new URL("./tests/e2e/support/e2e-global-setup.ts", import.meta.url))],
