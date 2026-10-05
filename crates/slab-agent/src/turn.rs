@@ -452,7 +452,13 @@ pub(crate) async fn execute_turn(
             .await;
             return Err(error);
         }
-        persist_final_answer(&context, messages, response.content.unwrap_or_default()).await;
+        persist_final_answer(
+            &context,
+            messages,
+            response.content.unwrap_or_default(),
+            response.content_already_streamed,
+        )
+        .await;
         transition_turn(&context, TurnPhase::Completed).await;
         emit_turn_state_changed(
             &context,
@@ -504,7 +510,10 @@ pub(crate) async fn execute_turn(
             // must hit the tool's no-active-plan denial instead of silently
             // finalizing again on the already-completed plan.
             context.plan_store.clear(context.thread_id).await;
-            persist_final_answer(&context, messages, completion.summary).await;
+            // `already_streamed` is about the SUMMARY, which comes from the
+            // tool arguments and was never streamed as model deltas — the
+            // model's own body text for this round is a different string.
+            persist_final_answer(&context, messages, completion.summary, false).await;
             transition_turn(&context, TurnPhase::Completed).await;
             emit_turn_state_changed(
                 &context,
@@ -923,18 +932,37 @@ async fn persist_final_answer(
     context: &TurnExecutionContext<'_>,
     messages: &mut Vec<ConversationMessage>,
     content: String,
+    already_streamed: bool,
 ) {
     // `content` is the LLM-grade form (reasoning embedded as a
     // `<think status="done">…</think>` block for the next prompt's chat
     // template). The UI-grade agentMessage item must carry only the visible
     // text — history renders item text verbatim, so the block is stripped
     // here while the appended ConversationMessage keeps it.
+    let text = strip_think_blocks(&content);
+    let item_id = assistant_item_id(context.turn_index);
+    // The frontend drops an `item/completed` whose text part was never opened
+    // by a started/delta pair, so text that did NOT go out as live deltas (a
+    // non-streaming adapter's final answer, the `task.complete` summary) must
+    // be announced here first — same shape as `emit_unstreamed_tool_text`.
+    if !already_streamed && !text.is_empty() {
+        emit_agent_message_started(context.notify, context.thread_id, context.turn_index, &item_id)
+            .await;
+        emit_agent_message_delta(
+            context.notify,
+            context.thread_id,
+            context.turn_index,
+            &item_id,
+            &text,
+        )
+        .await;
+    }
     emit_agent_message_completed(
         context.notify,
         context.thread_id,
         context.turn_index,
-        &assistant_item_id(context.turn_index),
-        &strip_think_blocks(&content),
+        &item_id,
+        &text,
     )
     .await;
 

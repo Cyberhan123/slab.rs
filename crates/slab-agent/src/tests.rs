@@ -23,8 +23,9 @@ use crate::{
     config::{AgentConfig, AgentToolChoice},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, ApprovalReviewRequest,
-        ApprovalReviewerPort, LlmPort, LlmResponse, LlmUsage, ParsedToolCall, ReviewOutcome,
-        ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec, TurnStateRecord,
+        ApprovalReviewerPort, LlmPort, LlmResponse, LlmStreamObserver, LlmUsage, ParsedToolCall,
+        ReviewOutcome, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec,
+        TurnStateRecord,
     },
     protocol::{EventMsg, TurnItem},
     risk::ToolRiskAnalyzer,
@@ -966,6 +967,32 @@ impl RecordingNotify {
             .iter()
             .filter_map(|event| match event {
                 EventMsg::MessageAppended(p) if p.thread_id == thread_id => Some(p.message.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Agent-message item lifecycle for a thread, in emission order —
+    /// `"started"`, `"delta:<text>"`, `"completed:<text>"` — for asserting the
+    /// full announce-then-complete sequence (an orphan `completed` is dropped
+    /// by the frontend stream converter, losing the text).
+    fn agent_message_lifecycle(&self, thread_id: &str) -> Vec<String> {
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event {
+                EventMsg::ItemStarted(p) if p.thread_id == thread_id => match &p.item {
+                    TurnItem::AgentMessage { .. } => Some("started".to_owned()),
+                    _ => None,
+                },
+                EventMsg::AgentMessageDelta(p) if p.thread_id == thread_id => {
+                    Some(format!("delta:{}", p.delta))
+                }
+                EventMsg::ItemCompleted(p) if p.thread_id == thread_id => match &p.item {
+                    TurnItem::AgentMessage { text, .. } => Some(format!("completed:{text}")),
+                    _ => None,
+                },
                 _ => None,
             })
             .collect()
@@ -4305,6 +4332,132 @@ async fn task_complete_finalizes_run_on_success() {
             _ => None,
         });
     assert_eq!(final_text.as_deref(), Some("shipped it"));
+
+    // The summary must go out as a full item lifecycle: the model emitted no
+    // body text alongside the tool call, so without the started/delta pair the
+    // frontend drops the orphan `item/completed` and the final answer never
+    // renders.
+    assert_eq!(
+        notify.agent_message_lifecycle(&thread_id),
+        vec![
+            "started".to_owned(),
+            "delta:shipped it".to_owned(),
+            "completed:shipped it".to_owned(),
+        ],
+    );
+}
+
+/// LLM double that answers immediately with a final text answer. Overrides
+/// `chat_completion_streaming` so the default non-streaming shim (which would
+/// forward the text as one delta and force `content_already_streamed = true`)
+/// stays out of the way: `already_streamed = true` announces the text through
+/// the observer like a real streaming adapter; `false` returns it unannounced.
+struct FinalPathLlm {
+    already_streamed: bool,
+}
+
+#[async_trait]
+impl LlmPort for FinalPathLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        Ok(LlmResponse {
+            content: Some("final answer".into()),
+            content_already_streamed: self.already_streamed,
+            tool_calls: vec![],
+            finish_reason: Some("stop".into()),
+            usage: None,
+        })
+    }
+
+    async fn chat_completion_streaming(
+        &self,
+        model: &str,
+        messages: &[ConversationMessage],
+        tools: &[ToolSpec],
+        config: &AgentConfig,
+        trace_context: &AgentTraceContext,
+        observer: &mut dyn LlmStreamObserver,
+    ) -> Result<LlmResponse, AgentError> {
+        let response = self.chat_completion(model, messages, tools, config, trace_context).await?;
+        if self.already_streamed {
+            observer.on_text_delta(response.content.as_deref().unwrap_or_default()).await?;
+        }
+        Ok(response)
+    }
+}
+
+async fn run_final_path_agent(llm: Arc<FinalPathLlm>) -> (Arc<RecordingNotify>, String) {
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    let approval = Arc::clone(&Arc::new(NoopNotify));
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
+    let config = AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-final-answer".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("answer directly".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+    (notify, thread_id)
+}
+
+#[tokio::test]
+async fn final_answer_already_streamed_does_not_reannounce_item() {
+    // The streaming observer announced the text live (started + delta), so
+    // `persist_final_answer` must only close the item — a second started/delta
+    // pair would render the final answer twice.
+    let (notify, thread_id) =
+        run_final_path_agent(Arc::new(FinalPathLlm { already_streamed: true })).await;
+    assert_eq!(
+        notify.agent_message_lifecycle(&thread_id),
+        vec![
+            "started".to_owned(),
+            "delta:final answer".to_owned(),
+            "completed:final answer".to_owned(),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn final_answer_unstreamed_text_is_announced_before_completion() {
+    // The stream produced no text deltas (flag false), so the completion must
+    // be preceded by the synthesized started/delta pair — otherwise the
+    // frontend drops the orphan completed and the final answer never renders.
+    let (notify, thread_id) =
+        run_final_path_agent(Arc::new(FinalPathLlm { already_streamed: false })).await;
+    assert_eq!(
+        notify.agent_message_lifecycle(&thread_id),
+        vec![
+            "started".to_owned(),
+            "delta:final answer".to_owned(),
+            "completed:final answer".to_owned(),
+        ],
+    );
 }
 
 /// Tool double that seeds the durable plan store (stands in for `update_plan`)
