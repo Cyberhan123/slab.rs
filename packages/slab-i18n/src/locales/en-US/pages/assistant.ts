@@ -12,6 +12,17 @@ export const assistant = {
     alwaysInWorkspace: 'Always in workspace',
     always: 'Always allow',
   },
+  questionnaire: {
+    title: 'Question from the assistant',
+    customPlaceholder: 'Or type your own answer',
+    required: 'Pick an answer (or type one) to continue.',
+    submit: 'Answer',
+    skip: 'Skip',
+    waiting: 'Waiting for your answer…',
+    answered: 'Answered',
+    skipped: 'Skipped',
+    timeout: 'Not answered in time',
+  },
   planMode: {
     exit: 'Exit',
   },

@@ -66,8 +66,12 @@ const mocks = vi.hoisted(() => {
     userMessageTurnIndex: new Map<string, number>(),
     approvals: [] as ConversationState["approvals"],
     approvalStatusByItemId: new Map<string, 'pending' | 'approved' | 'denied'>(),
+    questionnaires: [] as ConversationState["questionnaires"],
     resolveApproval: vi.fn<
       (itemId: string, approved: boolean, scope: 'run_once' | 'always_in_workspace' | 'always' | 'deny') => Promise<void>
+    >(),
+    resolveQuestionnaire: vi.fn<
+      (itemId: string, answers: { selected: string[]; custom: string | null; skipped?: boolean }) => Promise<void>
     >(),
   };
   return {

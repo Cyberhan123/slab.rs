@@ -98,6 +98,10 @@ from .install_plugin_request import InstallPluginRequest
 from .list_available_query import ListAvailableQuery
 from .list_models_query import ListModelsQuery
 from .load_model_request import LoadModelRequest
+from .memory_diagnostics_response import MemoryDiagnosticsResponse
+from .memory_phase_1_status_count_response import MemoryPhase1StatusCountResponse
+from .memory_phase_2_lock_response import MemoryPhase2LockResponse
+from .memory_phase_2_run_response import MemoryPhase2RunResponse
 from .message_input import MessageInput
 from .message_response import MessageResponse
 from .model_capability import ModelCapability
@@ -359,6 +363,10 @@ __all__ = (
     "ListAvailableQuery",
     "ListModelsQuery",
     "LoadModelRequest",
+    "MemoryDiagnosticsResponse",
+    "MemoryPhase1StatusCountResponse",
+    "MemoryPhase2LockResponse",
+    "MemoryPhase2RunResponse",
     "MessageInput",
     "MessageResponse",
     "ModelCapability",

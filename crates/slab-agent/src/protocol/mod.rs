@@ -24,9 +24,10 @@ pub use notification::{
     AgentMessageDeltaParams, BackgroundTaskUpdatedParams, CommandExecutionOutputDeltaParams,
     CommandExecutionRequestApprovalParams, ContextCompactedParams, ContextCompactingParams,
     FileChangeApprovalChange, FileChangeOutputDeltaParams, FileChangeRequestApprovalParams,
-    ItemCompletedParams, ItemStartedParams, MessageAppendedParams, ReasoningSummaryTextDeltaParams,
-    ReasoningTextDeltaParams, SubagentChildEventParams, ThreadStatusChangedParams,
-    TurnCompletedParams, TurnStartedParams, TurnStateChangedParams, TurnUsage,
+    ItemCompletedParams, ItemStartedParams, MessageAppendedParams, QuestionnaireChoiceView,
+    QuestionnaireRequestAnswerParams, ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams,
+    SubagentChildEventParams, ThreadStatusChangedParams, TurnCompletedParams, TurnStartedParams,
+    TurnStateChangedParams, TurnUsage,
 };
 pub use thread::{GitInfo, Thread};
 pub use turn::{Turn, TurnError};
