@@ -79,15 +79,27 @@ impl SubagentTaskSink for SubagentBridge {
         // Child threads are spawned inside the tool (slab-agent-tools cannot
         // reach app-core) — this is the ONLY attach point for their rollout
         // persistence observer. The hub's persistence replay buffer drains
-        // atomically on subscribe, so no child event is lost.
+        // atomically on subscribe, so no child event is lost. This applies to
+        // SYSTEM subagents too (host-launched, no parent): their two
+        // BackgroundTaskUpdated transitions persist on the child's own
+        // rollout instead of buffering against a dead owner.
         core.ensure_rollout_persistence(&event.child_thread_id);
+
+        // Parent-facing work only exists for delegations. A system subagent
+        // has no parent thread to relay onto and no one to wake: skip the
+        // relay AND the watchdog (host system launches carry their own
+        // supervision — e.g. the memory pipeline's lease heartbeat + DB lease
+        // expiry bound a stuck consolidation agent).
+        let Some(parent_thread_id) = event.parent_thread_id.clone() else {
+            return;
+        };
 
         // Relay the child's turn items onto the parent's UI channel so harness
         // clients can render live child activity inside the delegate card.
         tokio::spawn(relay_child_events(
             Arc::clone(core.events()),
             event.child_thread_id.clone(),
-            event.parent_thread_id.clone(),
+            parent_thread_id.clone(),
         ));
 
         // One-shot stall watchdog. `no_resume` delegations asked NOT to be
@@ -96,7 +108,7 @@ impl SubagentTaskSink for SubagentBridge {
             let hub = Arc::clone(core.events());
             let child_thread_id = event.child_thread_id.clone();
             let notify_core = Arc::clone(core);
-            let notice_parent = event.parent_thread_id.clone();
+            let notice_parent = parent_thread_id.clone();
             let dedupe_needle = stall_notice_needle(&event.child_thread_id);
             tokio::spawn(SubagentWatchdog { stall_after: stall_warn_after() }.run(
                 hub,
@@ -131,9 +143,15 @@ impl SubagentTaskSink for SubagentBridge {
     fn on_subagent_finished(&self, event: SubagentFinishedEvent) {
         let Some(core) = self.core() else {
             tracing::warn!(
-                parent_thread_id = event.parent_thread_id,
+                parent_thread_id = ?event.parent_thread_id,
                 "subagent finished before the bridge core was bound; parent not notified"
             );
+            return;
+        };
+        // System subagents finish parentless: the registry task and the
+        // child's own rollout carry the outcome — nothing to deliver.
+        let Some(parent_thread_id) = event.parent_thread_id.clone() else {
+            tracing::debug!(task_id = %event.task_id, "system subagent finished; no parent to notify");
             return;
         };
         if !should_notify_parent(&event) {
@@ -146,19 +164,19 @@ impl SubagentTaskSink for SubagentBridge {
             // that delegated) must be durable before `send_input_message`
             // re-reads the rollout history, or the resume would rebuild a
             // tail-less conversation.
-            core.await_durable(&event.parent_thread_id).await;
+            core.await_durable(&parent_thread_id).await;
             let needle = completion_notice_needle(&event.task_id);
-            if notice_already_delivered(&core, &event.parent_thread_id, &needle).await {
+            if notice_already_delivered(&core, &parent_thread_id, &needle).await {
                 return;
             }
             let message = notice_message(render_notification(&event));
-            if let Err(error) = core.send_input_message(&event.parent_thread_id, message).await {
+            if let Err(error) = core.send_input_message(&parent_thread_id, message).await {
                 // The parent may be archived/shut down — a missed follow-up
                 // is unfortunate but not fatal; the registry result and the
                 // artifact remain queryable.
                 tracing::warn!(
                     %error,
-                    parent_thread_id = event.parent_thread_id,
+                    parent_thread_id = parent_thread_id,
                     task_id = event.task_id,
                     "failed to deliver subagent completion to the parent"
                 );
@@ -169,7 +187,8 @@ impl SubagentTaskSink for SubagentBridge {
 
 /// Whether the finished delegation should deliver the parent follow-up
 /// (`no_resume` delegations keep the result queryable via the registry /
-/// the artifact but never wake the parent).
+/// the artifact but never wake the parent). Only reachable with a parent
+/// thread present — parentless callers return before this check.
 fn should_notify_parent(event: &SubagentFinishedEvent) -> bool {
     !event.no_resume
 }
@@ -479,7 +498,7 @@ mod tests {
 
     fn finished(completion: Option<&str>, refs: &[&str]) -> SubagentFinishedEvent {
         SubagentFinishedEvent {
-            parent_thread_id: "parent".to_owned(),
+            parent_thread_id: Some("parent".to_owned()),
             child_thread_id: "child".to_owned(),
             task_id: "bg-x-1".to_owned(),
             task_summary: "summarize the repo".to_owned(),
@@ -564,11 +583,28 @@ mod tests {
     fn unbound_core_is_reported_not_panicked() {
         let bridge = SubagentBridge::new();
         bridge.on_subagent_spawned(SubagentSpawnedEvent {
-            parent_thread_id: "p".to_owned(),
+            parent_thread_id: Some("p".to_owned()),
             child_thread_id: "c".to_owned(),
             no_resume: false,
         });
         bridge.on_subagent_finished(finished(Some("done"), &[]));
+    }
+
+    /// System subagents (host-launched, no parent): the parentless lifecycle
+    /// events must return early on every path — no relay, no watchdog, no
+    /// notification — and never panic (the core here is unbound, which also
+    /// exercises the guard ordering).
+    #[test]
+    fn parentless_events_skip_notification_and_do_not_panic() {
+        let bridge = SubagentBridge::new();
+        bridge.on_subagent_spawned(SubagentSpawnedEvent {
+            parent_thread_id: None,
+            child_thread_id: "system-child".to_owned(),
+            no_resume: false,
+        });
+        let mut finished_event = finished(Some("consolidated"), &[]);
+        finished_event.parent_thread_id = None;
+        bridge.on_subagent_finished(finished_event);
     }
 
     #[test]

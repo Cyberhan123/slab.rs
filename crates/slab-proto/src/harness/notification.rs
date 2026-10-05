@@ -18,8 +18,9 @@ use slab_agent::protocol::{
     AgentMessageDeltaParams, BackgroundTaskUpdatedParams, CommandExecutionOutputDeltaParams,
     CommandExecutionRequestApprovalParams, ContextCompactedParams, ContextCompactingParams,
     FileChangeOutputDeltaParams, FileChangeRequestApprovalParams, ItemCompletedParams,
-    ItemStartedParams, ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams,
-    SubagentChildEventParams, ThreadStatusChangedParams, TurnCompletedParams, TurnStartedParams,
+    ItemStartedParams, QuestionnaireRequestAnswerParams, ReasoningSummaryTextDeltaParams,
+    ReasoningTextDeltaParams, SubagentChildEventParams, ThreadStatusChangedParams,
+    TurnCompletedParams, TurnStartedParams,
 };
 
 // ---- error / account ----
@@ -175,6 +176,8 @@ pub enum ServerNotification {
     CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams),
     #[serde(rename = "item/fileChange/requestApproval")]
     FileChangeRequestApproval(FileChangeRequestApprovalParams),
+    #[serde(rename = "item/questionnaire/requestAnswer")]
+    QuestionnaireRequestAnswer(QuestionnaireRequestAnswerParams),
     #[serde(rename = "error")]
     Error(ErrorParams),
     #[serde(rename = "account/updated")]
@@ -210,6 +213,9 @@ impl ServerNotification {
             }
             Self::FileChangeRequestApproval(_) => {
                 crate::harness::method::ITEM_FILE_CHANGE_REQUEST_APPROVAL
+            }
+            Self::QuestionnaireRequestAnswer(_) => {
+                crate::harness::method::ITEM_QUESTIONNAIRE_REQUEST_ANSWER
             }
             Self::Error(_) => crate::harness::method::ERROR,
             Self::AccountUpdated(_) => crate::harness::method::ACCOUNT_UPDATED,

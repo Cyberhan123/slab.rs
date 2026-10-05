@@ -227,6 +227,17 @@ function handleItemCompleted(state: StreamState, params: ItemCompletedParams): U
     if (streamed !== undefined && normalizedText(streamed) !== normalizedText(item.text ?? "")) {
       state.onItemTextDivergence?.(item.id)
     }
+    // Orphan completed: no delta ever opened this item's text part (e.g. an
+    // older server emitting a `task.complete` summary with no body text), so
+    // `closeText` would silently drop the authoritative text. Synthesize the
+    // full part instead. Empty-text orphans still close to nothing — no
+    // empty bubble.
+    if (streamed === undefined && item.text) {
+      return openText(state, item.id).concat(
+        { delta: item.text, id: item.id, type: "text-delta" },
+        closeText(state, item.id),
+      )
+    }
     return closeText(state, item.id)
   }
   if (item.type === "reasoning") return closeReasoning(state, item.id)

@@ -23,6 +23,7 @@ final class HarnessMethod {
   static const String skillsList = 'skills/list';
   static const String commandList = 'command/list';
   static const String approvalResolve = 'approval/resolve';
+  static const String questionnaireResolve = 'questionnaire/resolve';
   static const String shutdown = 'shutdown';
   static const String workspaceMigrate = 'workspace/migrate';
 }
@@ -44,6 +45,7 @@ final class HarnessNotification {
   static const String itemCommandExecutionRequestApproval =
       'item/commandExecution/requestApproval';
   static const String itemFileChangeRequestApproval = 'item/fileChange/requestApproval';
+  static const String itemQuestionnaireRequestAnswer = 'item/questionnaire/requestAnswer';
   static const String backgroundTaskUpdated = 'backgroundTask/updated';
   static const String subagentChildEvent = 'subagent/childEvent';
   static const String error = 'error';
