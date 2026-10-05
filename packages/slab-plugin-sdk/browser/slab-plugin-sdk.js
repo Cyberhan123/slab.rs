@@ -71,7 +71,7 @@
     throw Error('Dynamic require of "' + x + '" is not supported');
   });
 
-  // ../../node_modules/.bun/react@19.2.8/node_modules/react/cjs/react.development.js
+  // ../../node_modules/.bun/react@19.3.0/node_modules/react/cjs/react.development.js
   var require_react_development = __commonJS(function(exports, module) {
     (function() {
       function defineDeprecationWarning(methodName, info) {
@@ -144,6 +144,8 @@
             return "SuspenseList";
           case REACT_ACTIVITY_TYPE:
             return "Activity";
+          case REACT_VIEW_TRANSITION_TYPE:
+            return "ViewTransition";
         }
         if (typeof type === "object")
           switch (typeof type.tag === "number" && console.error("Received an unexpected object in getComponentNameFromType(). This is likely a bug in React. Please file an issue."), type.$$typeof) {
@@ -353,8 +355,11 @@
       }
       function lazyInitializer(payload) {
         if (payload._status === -1) {
-          var ioInfo = payload._ioInfo;
-          ioInfo != null && (ioInfo.start = ioInfo.end = performance.now());
+          var resolveDebugValue = null, rejectDebugValue = null, ioInfo = payload._ioInfo;
+          ioInfo != null && (ioInfo.start = ioInfo.end = performance.now(), ioInfo.value = new Promise(function(resolve, reject) {
+            resolveDebugValue = resolve;
+            rejectDebugValue = reject;
+          }));
           ioInfo = payload._result;
           var thenable = ioInfo();
           thenable.then(function(moduleObject) {
@@ -362,7 +367,13 @@
               payload._status = 1;
               payload._result = moduleObject;
               var _ioInfo = payload._ioInfo;
-              _ioInfo != null && (_ioInfo.end = performance.now());
+              if (_ioInfo != null) {
+                _ioInfo.end = performance.now();
+                var debugValue = moduleObject == null ? undefined : moduleObject.default;
+                resolveDebugValue(debugValue);
+                _ioInfo.value.status = "fulfilled";
+                _ioInfo.value.value = debugValue;
+              }
               thenable.status === undefined && (thenable.status = "fulfilled", thenable.value = moduleObject);
             }
           }, function(error) {
@@ -370,13 +381,12 @@
               payload._status = 2;
               payload._result = error;
               var _ioInfo2 = payload._ioInfo;
-              _ioInfo2 != null && (_ioInfo2.end = performance.now());
+              _ioInfo2 != null && (_ioInfo2.end = performance.now(), _ioInfo2.value.then(noop, noop), rejectDebugValue(error), _ioInfo2.value.status = "rejected", _ioInfo2.value.reason = error);
               thenable.status === undefined && (thenable.status = "rejected", thenable.reason = error);
             }
           });
           ioInfo = payload._ioInfo;
           if (ioInfo != null) {
-            ioInfo.value = thenable;
             var displayName = thenable.displayName;
             typeof displayName === "string" && (ioInfo.name = displayName);
           }
@@ -405,6 +415,29 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
       }
       function releaseAsyncTransition() {
         ReactSharedInternals.asyncTransitions--;
+      }
+      function startTransition(scope) {
+        var prevTransition = ReactSharedInternals.T, currentTransition = {};
+        currentTransition.types = prevTransition !== null ? prevTransition.types : null;
+        currentTransition._updatedFibers = new Set;
+        ReactSharedInternals.T = currentTransition;
+        try {
+          var returnValue = scope(), onStartTransitionFinish = ReactSharedInternals.S;
+          onStartTransitionFinish !== null && onStartTransitionFinish(currentTransition, returnValue);
+          typeof returnValue === "object" && returnValue !== null && typeof returnValue.then === "function" && (ReactSharedInternals.asyncTransitions++, returnValue.then(releaseAsyncTransition, releaseAsyncTransition), returnValue.then(noop, reportGlobalError));
+        } catch (error) {
+          reportGlobalError(error);
+        } finally {
+          prevTransition === null && currentTransition._updatedFibers && (scope = currentTransition._updatedFibers.size, currentTransition._updatedFibers.clear(), 10 < scope && console.warn("Detected a large number of updates inside startTransition. If this is due to a subscription please re-write it to use React provided hooks. Otherwise concurrent mode guarantees are off the table.")), prevTransition !== null && currentTransition.types !== null && (prevTransition.types !== null && prevTransition.types !== currentTransition.types && console.error("We expected inner Transitions to have transferred the outer types set and that you cannot add to the outer Transition while inside the inner.This is a bug in React."), prevTransition.types = currentTransition.types), ReactSharedInternals.T = prevTransition;
+        }
+      }
+      function addTransitionType(type) {
+        var transition = ReactSharedInternals.T;
+        if (transition !== null) {
+          var transitionTypes = transition.types;
+          transitionTypes === null ? transition.types = [type] : transitionTypes.indexOf(type) === -1 && transitionTypes.push(type);
+        } else
+          ReactSharedInternals.asyncTransitions === 0 && console.error("addTransitionType can only be called inside a `startTransition()` callback. It must be associated with a specific Transition."), startTransition(addTransitionType.bind(null, type));
       }
       function enqueueTask(task) {
         if (enqueueTaskImpl === null)
@@ -475,7 +508,7 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
         }
       }
       typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ !== "undefined" && typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart === "function" && __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart(Error());
-      var REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element"), REACT_PORTAL_TYPE = Symbol.for("react.portal"), REACT_FRAGMENT_TYPE = Symbol.for("react.fragment"), REACT_STRICT_MODE_TYPE = Symbol.for("react.strict_mode"), REACT_PROFILER_TYPE = Symbol.for("react.profiler"), REACT_CONSUMER_TYPE = Symbol.for("react.consumer"), REACT_CONTEXT_TYPE = Symbol.for("react.context"), REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref"), REACT_SUSPENSE_TYPE = Symbol.for("react.suspense"), REACT_SUSPENSE_LIST_TYPE = Symbol.for("react.suspense_list"), REACT_MEMO_TYPE = Symbol.for("react.memo"), REACT_LAZY_TYPE = Symbol.for("react.lazy"), REACT_ACTIVITY_TYPE = Symbol.for("react.activity"), MAYBE_ITERATOR_SYMBOL = Symbol.iterator, didWarnStateUpdateForUnmountedComponent = {}, ReactNoopUpdateQueue = {
+      var REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element"), REACT_PORTAL_TYPE = Symbol.for("react.portal"), REACT_FRAGMENT_TYPE = Symbol.for("react.fragment"), REACT_STRICT_MODE_TYPE = Symbol.for("react.strict_mode"), REACT_PROFILER_TYPE = Symbol.for("react.profiler"), REACT_CONSUMER_TYPE = Symbol.for("react.consumer"), REACT_CONTEXT_TYPE = Symbol.for("react.context"), REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref"), REACT_SUSPENSE_TYPE = Symbol.for("react.suspense"), REACT_SUSPENSE_LIST_TYPE = Symbol.for("react.suspense_list"), REACT_MEMO_TYPE = Symbol.for("react.memo"), REACT_LAZY_TYPE = Symbol.for("react.lazy"), REACT_ACTIVITY_TYPE = Symbol.for("react.activity"), REACT_VIEW_TRANSITION_TYPE = Symbol.for("react.view_transition"), MAYBE_ITERATOR_SYMBOL = Symbol.iterator, didWarnStateUpdateForUnmountedComponent = {}, ReactNoopUpdateQueue = {
         isMounted: function() {
           return false;
         },
@@ -600,6 +633,7 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
       exports.PureComponent = PureComponent;
       exports.StrictMode = REACT_STRICT_MODE_TYPE;
       exports.Suspense = REACT_SUSPENSE_TYPE;
+      exports.ViewTransition = REACT_VIEW_TRANSITION_TYPE;
       exports.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE = ReactSharedInternals;
       exports.__COMPILER_RUNTIME = deprecatedAPIs;
       exports.act = function(callback) {
@@ -661,6 +695,7 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
           }
         };
       };
+      exports.addTransitionType = addTransitionType;
       exports.cache = function(fn) {
         return function() {
           return fn.apply(null, arguments);
@@ -726,6 +761,7 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
       exports.createElement = function(type, config, children) {
         for (var i = 2;i < arguments.length; i++)
           validateChildKeys(arguments[i]);
+        var propName;
         i = {};
         var key = null;
         if (config != null)
@@ -744,8 +780,8 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
           for (propName in childrenLength = type.defaultProps, childrenLength)
             i[propName] === undefined && (i[propName] = childrenLength[propName]);
         key && defineKeyPropWarningGetter(i, typeof type === "function" ? type.displayName || type.name || "Unknown" : type);
-        var propName = 1e4 > ReactSharedInternals.recentlyCreatedOwnerStacks++;
-        return ReactElement(type, key, i, getOwner(), propName ? Error("react-stack-top-frame") : unknownOwnerDebugStack, propName ? createTask(getTaskName(type)) : unknownOwnerDebugTask);
+        (propName = 1e4 > ReactSharedInternals.recentlyCreatedOwnerStacks++) ? (childArray = Error.stackTraceLimit, Error.stackTraceLimit = 10, childrenLength = Error("react-stack-top-frame"), Error.stackTraceLimit = childArray) : childrenLength = unknownOwnerDebugStack;
+        return ReactElement(type, key, i, getOwner(), childrenLength, propName ? createTask(getTaskName(type)) : unknownOwnerDebugTask);
       };
       exports.createRef = function() {
         var refObject = { current: null };
@@ -810,20 +846,7 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
         });
         return compare;
       };
-      exports.startTransition = function(scope) {
-        var prevTransition = ReactSharedInternals.T, currentTransition = {};
-        currentTransition._updatedFibers = new Set;
-        ReactSharedInternals.T = currentTransition;
-        try {
-          var returnValue = scope(), onStartTransitionFinish = ReactSharedInternals.S;
-          onStartTransitionFinish !== null && onStartTransitionFinish(currentTransition, returnValue);
-          typeof returnValue === "object" && returnValue !== null && typeof returnValue.then === "function" && (ReactSharedInternals.asyncTransitions++, returnValue.then(releaseAsyncTransition, releaseAsyncTransition), returnValue.then(noop, reportGlobalError));
-        } catch (error) {
-          reportGlobalError(error);
-        } finally {
-          prevTransition === null && currentTransition._updatedFibers && (scope = currentTransition._updatedFibers.size, currentTransition._updatedFibers.clear(), 10 < scope && console.warn("Detected a large number of updates inside startTransition. If this is due to a subscription please re-write it to use React provided hooks. Otherwise concurrent mode guarantees are off the table.")), prevTransition !== null && currentTransition.types !== null && (prevTransition.types !== null && prevTransition.types !== currentTransition.types && console.error("We expected inner Transitions to have transferred the outer types set and that you cannot add to the outer Transition while inside the inner.This is a bug in React."), prevTransition.types = currentTransition.types), ReactSharedInternals.T = prevTransition;
-        }
-      };
+      exports.startTransition = startTransition;
       exports.unstable_useCacheRefresh = function() {
         return resolveDispatcher().useCacheRefresh();
       };
@@ -889,19 +912,19 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
       exports.useTransition = function() {
         return resolveDispatcher().useTransition();
       };
-      exports.version = "19.2.8";
+      exports.version = "19.3.0";
       typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ !== "undefined" && typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop === "function" && __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop(Error());
     })();
   });
 
-  // ../../node_modules/.bun/react@19.2.8/node_modules/react/index.js
+  // ../../node_modules/.bun/react@19.3.0/node_modules/react/index.js
   var require_react = __commonJS(function(exports, module) {
     if (false) {} else {
       module.exports = require_react_development();
     }
   });
 
-  // ../../node_modules/.bun/react@19.2.8/node_modules/react/cjs/react-jsx-runtime.development.js
+  // ../../node_modules/.bun/react@19.3.0/node_modules/react/cjs/react-jsx-runtime.development.js
   var require_react_jsx_runtime_development = __commonJS(function(exports) {
     (function() {
       function getComponentNameFromType(type) {
@@ -924,6 +947,8 @@ See https://react.dev/link/invalid-hook-call for tips about how to debug and fix
             return "SuspenseList";
           case REACT_ACTIVITY_TYPE:
             return "Activity";
+          case REACT_VIEW_TRANSITION_TYPE:
+            return "ViewTransition";
         }
         if (typeof type === "object")
           switch (typeof type.tag === "number" && console.error("Received an unexpected object in getComponentNameFromType(). This is likely a bug in React. Please file an issue."), type.$$typeof) {
@@ -1094,7 +1119,7 @@ React keys must be passed directly to JSX without using spread:
       function isValidElement(object) {
         return typeof object === "object" && object !== null && object.$$typeof === REACT_ELEMENT_TYPE;
       }
-      var React = require_react(), REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element"), REACT_PORTAL_TYPE = Symbol.for("react.portal"), REACT_FRAGMENT_TYPE = Symbol.for("react.fragment"), REACT_STRICT_MODE_TYPE = Symbol.for("react.strict_mode"), REACT_PROFILER_TYPE = Symbol.for("react.profiler"), REACT_CONSUMER_TYPE = Symbol.for("react.consumer"), REACT_CONTEXT_TYPE = Symbol.for("react.context"), REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref"), REACT_SUSPENSE_TYPE = Symbol.for("react.suspense"), REACT_SUSPENSE_LIST_TYPE = Symbol.for("react.suspense_list"), REACT_MEMO_TYPE = Symbol.for("react.memo"), REACT_LAZY_TYPE = Symbol.for("react.lazy"), REACT_ACTIVITY_TYPE = Symbol.for("react.activity"), REACT_CLIENT_REFERENCE = Symbol.for("react.client.reference"), ReactSharedInternals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, hasOwnProperty = Object.prototype.hasOwnProperty, isArrayImpl = Array.isArray, createTask = console.createTask ? console.createTask : function() {
+      var React = require_react(), REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element"), REACT_PORTAL_TYPE = Symbol.for("react.portal"), REACT_FRAGMENT_TYPE = Symbol.for("react.fragment"), REACT_STRICT_MODE_TYPE = Symbol.for("react.strict_mode"), REACT_PROFILER_TYPE = Symbol.for("react.profiler"), REACT_CONSUMER_TYPE = Symbol.for("react.consumer"), REACT_CONTEXT_TYPE = Symbol.for("react.context"), REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref"), REACT_SUSPENSE_TYPE = Symbol.for("react.suspense"), REACT_SUSPENSE_LIST_TYPE = Symbol.for("react.suspense_list"), REACT_MEMO_TYPE = Symbol.for("react.memo"), REACT_LAZY_TYPE = Symbol.for("react.lazy"), REACT_ACTIVITY_TYPE = Symbol.for("react.activity"), REACT_VIEW_TRANSITION_TYPE = Symbol.for("react.view_transition"), REACT_CLIENT_REFERENCE = Symbol.for("react.client.reference"), ReactSharedInternals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, hasOwnProperty = Object.prototype.hasOwnProperty, isArrayImpl = Array.isArray, createTask = console.createTask ? console.createTask : function() {
         return null;
       };
       React = {
@@ -1110,16 +1135,30 @@ React keys must be passed directly to JSX without using spread:
       exports.Fragment = REACT_FRAGMENT_TYPE;
       exports.jsx = function(type, config, maybeKey) {
         var trackActualOwner = 1e4 > ReactSharedInternals.recentlyCreatedOwnerStacks++;
-        return jsxDEVImpl(type, config, maybeKey, false, trackActualOwner ? Error("react-stack-top-frame") : unknownOwnerDebugStack, trackActualOwner ? createTask(getTaskName(type)) : unknownOwnerDebugTask);
+        if (trackActualOwner) {
+          var previousStackTraceLimit = Error.stackTraceLimit;
+          Error.stackTraceLimit = 10;
+          var debugStackDEV = Error("react-stack-top-frame");
+          Error.stackTraceLimit = previousStackTraceLimit;
+        } else
+          debugStackDEV = unknownOwnerDebugStack;
+        return jsxDEVImpl(type, config, maybeKey, false, debugStackDEV, trackActualOwner ? createTask(getTaskName(type)) : unknownOwnerDebugTask);
       };
       exports.jsxs = function(type, config, maybeKey) {
         var trackActualOwner = 1e4 > ReactSharedInternals.recentlyCreatedOwnerStacks++;
-        return jsxDEVImpl(type, config, maybeKey, true, trackActualOwner ? Error("react-stack-top-frame") : unknownOwnerDebugStack, trackActualOwner ? createTask(getTaskName(type)) : unknownOwnerDebugTask);
+        if (trackActualOwner) {
+          var previousStackTraceLimit = Error.stackTraceLimit;
+          Error.stackTraceLimit = 10;
+          var debugStackDEV = Error("react-stack-top-frame");
+          Error.stackTraceLimit = previousStackTraceLimit;
+        } else
+          debugStackDEV = unknownOwnerDebugStack;
+        return jsxDEVImpl(type, config, maybeKey, true, debugStackDEV, trackActualOwner ? createTask(getTaskName(type)) : unknownOwnerDebugTask);
       };
     })();
   });
 
-  // ../../node_modules/.bun/react@19.2.8/node_modules/react/jsx-runtime.js
+  // ../../node_modules/.bun/react@19.3.0/node_modules/react/jsx-runtime.js
   var require_jsx_runtime = __commonJS(function(exports, module) {
     if (false) {} else {
       module.exports = require_react_jsx_runtime_development();
@@ -1581,7 +1620,7 @@ React keys must be passed directly to JSX without using spread:
     }
     return url;
   }
-  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.104.1+62547eec5a2188e3/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js
   var React = __toESM(require_react(), 1);
   var import_jsx_runtime = __toESM(require_jsx_runtime(), 1);
   "use client";
@@ -1595,14 +1634,14 @@ React keys must be passed directly to JSX without using spread:
     return client;
   };
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/IsRestoringProvider.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.104.1+62547eec5a2188e3/node_modules/@tanstack/react-query/build/modern/IsRestoringProvider.js
   var React2 = __toESM(require_react(), 1);
   "use client";
   var IsRestoringContext = React2.createContext(false);
   var useIsRestoring = () => React2.useContext(IsRestoringContext);
   var IsRestoringProvider = IsRestoringContext.Provider;
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/QueryErrorResetBoundary.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.104.1+62547eec5a2188e3/node_modules/@tanstack/react-query/build/modern/QueryErrorResetBoundary.js
   var React3 = __toESM(require_react(), 1);
   var import_jsx_runtime2 = __toESM(require_jsx_runtime(), 1);
   "use client";
@@ -1623,10 +1662,10 @@ React keys must be passed directly to JSX without using spread:
   var QueryErrorResetBoundaryContext = React3.createContext(createValue());
   var useQueryErrorResetBoundary = () => React3.useContext(QueryErrorResetBoundaryContext);
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/errorBoundaryUtils.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.104.1+62547eec5a2188e3/node_modules/@tanstack/react-query/build/modern/errorBoundaryUtils.js
   var React4 = __toESM(require_react(), 1);
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/timeoutManager.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/timeoutManager.js
   var defaultTimeoutProvider = {
     setTimeout: (callback, delay) => setTimeout(callback, delay),
     clearTimeout: (timeoutId) => clearTimeout(timeoutId),
@@ -1670,7 +1709,7 @@ React keys must be passed directly to JSX without using spread:
     setTimeout(callback, 0);
   }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/utils.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/utils.js
   var isServer = typeof window === "undefined" || "Deno" in globalThis;
   function noop() {}
   function isValidTimeout(value) {
@@ -1679,11 +1718,8 @@ React keys must be passed directly to JSX without using spread:
   function timeUntilStale(updatedAt, staleTime) {
     return Math.max(updatedAt + (staleTime || 0) - Date.now(), 0);
   }
-  function resolveStaleTime(staleTime, query) {
-    return typeof staleTime === "function" ? staleTime(query) : staleTime;
-  }
-  function resolveQueryBoolean(option, query) {
-    return typeof option === "function" ? option(query) : option;
+  function resolveQueryValue(value, query) {
+    return typeof value === "function" ? value(query) : value;
   }
   function hashKey(queryKey) {
     return JSON.stringify(queryKey, (_, val) => isPlainObject(val) ? Object.keys(val).sort().reduce((result, key) => {
@@ -1740,15 +1776,18 @@ React keys must be passed directly to JSX without using spread:
   function isPlainObject(o) {
     if (!hasObjectPrototype(o))
       return false;
-    const ctor = o.constructor;
+    const objectPrototype = Object.getPrototypeOf(o);
+    const ctor = objectPrototype?.constructor;
     if (ctor === undefined)
       return true;
+    if (typeof ctor !== "function")
+      return false;
     const prot = ctor.prototype;
     if (!hasObjectPrototype(prot))
       return false;
     if (!prot.hasOwnProperty("isPrototypeOf"))
       return false;
-    if (Object.getPrototypeOf(o) !== Object.prototype)
+    if (objectPrototype !== Object.prototype)
       return false;
     return true;
   }
@@ -1777,20 +1816,11 @@ React keys must be passed directly to JSX without using spread:
     return !!throwOnError;
   }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/environmentManager.js
-  var environmentManager = (() => {
-    let isServerFn = () => isServer;
-    return {
-      isServer() {
-        return isServerFn();
-      },
-      setIsServer(isServerValue) {
-        isServerFn = isServerValue;
-      }
-    };
-  })();
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/environmentManager.js
+  var isServerFn = () => isServer;
+  var isServer2 = () => isServerFn();
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/subscribable.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/subscribable.js
   var Subscribable = class {
     constructor() {
       this.listeners = /* @__PURE__ */ new Set;
@@ -1811,7 +1841,7 @@ React keys must be passed directly to JSX without using spread:
     onUnsubscribe() {}
   };
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/focusManager.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/focusManager.js
   var FocusManager = class extends Subscribable {
     #focused;
     #cleanup;
@@ -1868,7 +1898,7 @@ React keys must be passed directly to JSX without using spread:
   };
   var focusManager = new FocusManager;
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/notifyManager.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/notifyManager.js
   var defaultScheduler = systemSetTimeoutZero;
   function createNotifyManager() {
     let queue = [];
@@ -1934,7 +1964,7 @@ React keys must be passed directly to JSX without using spread:
   }
   var notifyManager = createNotifyManager();
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/onlineManager.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/onlineManager.js
   var OnlineManager = class extends Subscribable {
     #online = true;
     #cleanup;
@@ -1983,12 +2013,12 @@ React keys must be passed directly to JSX without using spread:
   };
   var onlineManager = new OnlineManager;
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/retryer.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/retryer.js
   function canFetch(networkMode) {
     return (networkMode ?? "online") === "online" ? onlineManager.isOnline() : true;
   }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/infiniteQueryBehavior.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/infiniteQueryBehavior.js
   function getNextPageParam(options, { pages, pageParams }) {
     const lastIndex = pages.length - 1;
     return pages.length > 0 ? options.getNextPageParam(pages[lastIndex], pages, pageParams[lastIndex], pageParams) : undefined;
@@ -2007,7 +2037,7 @@ React keys must be passed directly to JSX without using spread:
     return getPreviousPageParam(options, data) != null;
   }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/query.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/query.js
   function fetchState(data, options) {
     return {
       fetchFailureCount: 0,
@@ -2020,7 +2050,7 @@ React keys must be passed directly to JSX without using spread:
     };
   }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/queryObserver.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/queryObserver.js
   var QueryObserver = class extends Subscribable {
     #client;
     #currentQuery = undefined;
@@ -2077,7 +2107,7 @@ React keys must be passed directly to JSX without using spread:
       const prevOptions = this.options;
       const prevQuery = this.#currentQuery;
       this.options = this.#client.defaultQueryOptions(options);
-      if (this.options.enabled !== undefined && typeof this.options.enabled !== "boolean" && typeof this.options.enabled !== "function" && typeof resolveQueryBoolean(this.options.enabled, this.#currentQuery) !== "boolean")
+      if (this.options.enabled !== undefined && typeof this.options.enabled !== "boolean" && typeof this.options.enabled !== "function" && typeof resolveQueryValue(this.options.enabled, this.#currentQuery) !== "boolean")
         throw new Error("Expected enabled to be a boolean or a callback that returns a boolean");
       this.#updateQuery();
       this.#currentQuery.setOptions(this.options);
@@ -2091,16 +2121,16 @@ React keys must be passed directly to JSX without using spread:
       if (mounted && shouldFetchOptionally(this.#currentQuery, prevQuery, this.options, prevOptions))
         this.#executeFetch();
       this.updateResult();
-      if (mounted && (this.#currentQuery !== prevQuery || resolveQueryBoolean(this.options.enabled, this.#currentQuery) !== resolveQueryBoolean(prevOptions.enabled, this.#currentQuery) || resolveStaleTime(this.options.staleTime, this.#currentQuery) !== resolveStaleTime(prevOptions.staleTime, this.#currentQuery)))
+      if (mounted && (this.#currentQuery !== prevQuery || resolveQueryValue(this.options.enabled, this.#currentQuery) !== resolveQueryValue(prevOptions.enabled, this.#currentQuery) || resolveQueryValue(this.options.staleTime, this.#currentQuery) !== resolveQueryValue(prevOptions.staleTime, this.#currentQuery)))
         this.#updateStaleTimeout();
       const nextRefetchInterval = this.#computeRefetchInterval();
-      if (mounted && (this.#currentQuery !== prevQuery || resolveQueryBoolean(this.options.enabled, this.#currentQuery) !== resolveQueryBoolean(prevOptions.enabled, this.#currentQuery) || nextRefetchInterval !== this.#currentRefetchInterval))
+      if (mounted && (this.#currentQuery !== prevQuery || resolveQueryValue(this.options.enabled, this.#currentQuery) !== resolveQueryValue(prevOptions.enabled, this.#currentQuery) || nextRefetchInterval !== this.#currentRefetchInterval))
         this.#updateRefetchInterval(nextRefetchInterval);
     }
     getOptimisticResult(options) {
       const query = this.#client.getQueryCache().build(this.#client, options);
       const result = this.createResult(query, options);
-      if (shouldAssignObserverCurrentProperties(this, result)) {
+      if (!shallowEqualObjects(this.getCurrentResult(), result)) {
         this.#currentResult = result;
         this.#currentResultOptions = this.options;
         this.#currentResultState = this.#currentQuery.state;
@@ -2164,10 +2194,13 @@ React keys must be passed directly to JSX without using spread:
         promise = promise.catch(noop);
       return promise;
     }
+    #shouldScheduleTimer(timeout) {
+      return !isServer2() && resolveQueryValue(this.options.enabled, this.#currentQuery) !== false && isValidTimeout(timeout);
+    }
     #updateStaleTimeout() {
       this.#clearStaleTimeout();
-      const staleTime = resolveStaleTime(this.options.staleTime, this.#currentQuery);
-      if (environmentManager.isServer() || this.#currentResult.isStale || !isValidTimeout(staleTime))
+      const staleTime = resolveQueryValue(this.options.staleTime, this.#currentQuery);
+      if (this.#currentResult.isStale || !this.#shouldScheduleTimer(staleTime))
         return;
       const timeout = timeUntilStale(this.#currentResult.dataUpdatedAt, staleTime) + 1;
       this.#staleTimeoutId = timeoutManager.setTimeout(() => {
@@ -2176,12 +2209,12 @@ React keys must be passed directly to JSX without using spread:
       }, timeout);
     }
     #computeRefetchInterval() {
-      return (typeof this.options.refetchInterval === "function" ? this.options.refetchInterval(this.#currentQuery) : this.options.refetchInterval) ?? false;
+      return resolveQueryValue(this.options.refetchInterval, this.#currentQuery) ?? false;
     }
     #updateRefetchInterval(nextInterval) {
       this.#clearRefetchInterval();
       this.#currentRefetchInterval = nextInterval;
-      if (environmentManager.isServer() || resolveQueryBoolean(this.options.enabled, this.#currentQuery) === false || !isValidTimeout(this.#currentRefetchInterval) || this.#currentRefetchInterval === 0)
+      if (this.#currentRefetchInterval === 0 || !this.#shouldScheduleTimer(this.#currentRefetchInterval))
         return;
       this.#refetchIntervalId = timeoutManager.setInterval(() => {
         if (this.options.refetchIntervalInBackground || focusManager.isFocused())
@@ -2295,7 +2328,7 @@ React keys must be passed directly to JSX without using spread:
         isRefetchError: isError && hasData,
         isStale: isStale(query, options),
         refetch: this.refetch,
-        isEnabled: resolveQueryBoolean(options.enabled, query) !== false
+        isEnabled: resolveQueryValue(options.enabled, query) !== false
       };
     }
     updateResult() {
@@ -2323,7 +2356,17 @@ React keys must be passed directly to JSX without using spread:
           return this.#currentResult[typedKey] !== prevResult[typedKey] && includedProps.has(typedKey);
         });
       };
-      this.#notify({ listeners: shouldNotifyListeners() });
+      const notifyListeners = shouldNotifyListeners();
+      notifyManager.batch(() => {
+        if (notifyListeners)
+          this.listeners.forEach((listener) => {
+            listener(this.#currentResult);
+          });
+        this.#client.getQueryCache().notify({
+          query: this.#currentQuery,
+          type: "observerResultsUpdated"
+        });
+      });
     }
     #updateQuery() {
       const query = this.#client.getQueryCache().build(this.#client, this.options);
@@ -2342,45 +2385,28 @@ React keys must be passed directly to JSX without using spread:
       if (this.hasListeners())
         this.#updateTimers();
     }
-    #notify(notifyOptions) {
-      notifyManager.batch(() => {
-        if (notifyOptions.listeners)
-          this.listeners.forEach((listener) => {
-            listener(this.#currentResult);
-          });
-        this.#client.getQueryCache().notify({
-          query: this.#currentQuery,
-          type: "observerResultsUpdated"
-        });
-      });
-    }
   };
   function shouldLoadOnMount(query, options) {
-    return resolveQueryBoolean(options.enabled, query) !== false && query.state.data === undefined && !(query.state.status === "error" && resolveQueryBoolean(options.retryOnMount, query) === false);
+    return resolveQueryValue(options.enabled, query) !== false && query.state.data === undefined && !(query.state.status === "error" && resolveQueryValue(options.retryOnMount, query) === false);
   }
   function shouldFetchOnMount(query, options) {
     return shouldLoadOnMount(query, options) || query.state.data !== undefined && shouldFetchOn(query, options, options.refetchOnMount);
   }
   function shouldFetchOn(query, options, field) {
-    if (resolveQueryBoolean(options.enabled, query) !== false && resolveStaleTime(options.staleTime, query) !== "static") {
-      const value = typeof field === "function" ? field(query) : field;
+    if (resolveQueryValue(options.enabled, query) !== false && resolveQueryValue(options.staleTime, query) !== "static") {
+      const value = resolveQueryValue(field, query);
       return value === "always" || value !== false && isStale(query, options);
     }
     return false;
   }
   function shouldFetchOptionally(query, prevQuery, options, prevOptions) {
-    return (query !== prevQuery || resolveQueryBoolean(prevOptions.enabled, query) === false) && (!options.suspense || query.state.status !== "error") && isStale(query, options);
+    return (query !== prevQuery || resolveQueryValue(prevOptions.enabled, query) === false) && (!options.suspense || query.state.status !== "error") && isStale(query, options);
   }
   function isStale(query, options) {
-    return resolveQueryBoolean(options.enabled, query) !== false && query.isStaleByTime(resolveStaleTime(options.staleTime, query));
-  }
-  function shouldAssignObserverCurrentProperties(observer, optimisticResult) {
-    if (!shallowEqualObjects(observer.getCurrentResult(), optimisticResult))
-      return true;
-    return false;
+    return resolveQueryValue(options.enabled, query) !== false && query.isStaleByTime(resolveQueryValue(options.staleTime, query));
   }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/infiniteQueryObserver.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/infiniteQueryObserver.js
   var InfiniteQueryObserver = class extends QueryObserver {
     constructor(client, options) {
       super(client, options);
@@ -2435,7 +2461,7 @@ React keys must be passed directly to JSX without using spread:
     }
   };
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/mutation.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/mutation.js
   function getDefaultState() {
     return {
       context: undefined,
@@ -2450,7 +2476,7 @@ React keys must be passed directly to JSX without using spread:
     };
   }
 
-  // ../../node_modules/.bun/@tanstack+query-core@5.102.2/node_modules/@tanstack/query-core/build/modern/mutationObserver.js
+  // ../../node_modules/.bun/@tanstack+query-core@5.104.1/node_modules/@tanstack/query-core/build/modern/mutationObserver.js
   var MutationObserver = class extends Subscribable {
     #client;
     #currentResult = undefined;
@@ -2564,7 +2590,7 @@ React keys must be passed directly to JSX without using spread:
     }
   };
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/errorBoundaryUtils.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.104.1+62547eec5a2188e3/node_modules/@tanstack/react-query/build/modern/errorBoundaryUtils.js
   "use client";
   var ensurePreventErrorBoundaryRetry = (options, errorResetBoundary, query) => {
     const throwOnError = query?.state.error && typeof options.throwOnError === "function" ? shouldThrowError(options.throwOnError, [query.state.error, query]) : options.throwOnError;
@@ -2582,7 +2608,7 @@ React keys must be passed directly to JSX without using spread:
     return result.isError && !errorResetBoundary.isReset() && !result.isFetching && query && (suspense && result.data === undefined || shouldThrowError(throwOnError, [result.error, query]));
   };
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/suspense.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.104.1+62547eec5a2188e3/node_modules/@tanstack/react-query/build/modern/suspense.js
   var defaultThrowOnError = (_error, query) => query.state.data === undefined;
   var ensureSuspenseTimers = (defaultedOptions) => {
     if (defaultedOptions.suspense) {
@@ -2599,7 +2625,7 @@ React keys must be passed directly to JSX without using spread:
     errorResetBoundary.clearReset();
   });
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/useBaseQuery.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.104.1+62547eec5a2188e3/node_modules/@tanstack/react-query/build/modern/useBaseQuery.js
   var React5 = __toESM(require_react(), 1);
   "use client";
   function useBaseQuery(options, Observer, queryClient) {
@@ -2645,13 +2671,13 @@ React keys must be passed directly to JSX without using spread:
     return !defaultedOptions.notifyOnChangeProps ? observer.trackResult(result) : result;
   }
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/useQuery.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.104.1+62547eec5a2188e3/node_modules/@tanstack/react-query/build/modern/useQuery.js
   "use client";
   function useQuery(options, queryClient) {
     return useBaseQuery(options, QueryObserver, queryClient);
   }
 
-  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/useSuspenseQuery.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.104.1+62547eec5a2188e3/node_modules/@tanstack/react-query/build/modern/useSuspenseQuery.js
   "use client";
   function useSuspenseQuery(options, queryClient) {
     if (true) {
@@ -2666,7 +2692,7 @@ React keys must be passed directly to JSX without using spread:
       placeholderData: undefined
     }, QueryObserver, queryClient);
   }
-  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/useMutation.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.104.1+62547eec5a2188e3/node_modules/@tanstack/react-query/build/modern/useMutation.js
   var React6 = __toESM(require_react(), 1);
   "use client";
   function useMutation(options, queryClient) {
@@ -2687,12 +2713,12 @@ React keys must be passed directly to JSX without using spread:
       mutateAsync: result.mutate
     };
   }
-  // ../../node_modules/.bun/@tanstack+react-query@5.102.2+0f58469d5b3bd39f/node_modules/@tanstack/react-query/build/modern/useInfiniteQuery.js
+  // ../../node_modules/.bun/@tanstack+react-query@5.104.1+62547eec5a2188e3/node_modules/@tanstack/react-query/build/modern/useInfiniteQuery.js
   "use client";
   function useInfiniteQuery(options, queryClient) {
     return useBaseQuery(options, InfiniteQueryObserver, queryClient);
   }
-  // ../../node_modules/.bun/openapi-react-query@0.5.4+22a9d9701d41cf3c/node_modules/openapi-react-query/dist/index.mjs
+  // ../../node_modules/.bun/openapi-react-query@0.5.4+6d748704adb9a9b9/node_modules/openapi-react-query/dist/index.mjs
   function createClient2(client) {
     const queryFn = async ({
       queryKey: [method, path, init],

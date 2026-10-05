@@ -1,4 +1,4 @@
-import { memo } from "react"
+import { memo, useState } from "react"
 import type { ComponentType, ReactElement } from "react"
 import { useTranslation } from "@slab/i18n"
 import { Marker, MarkerContent } from "@slab/components/marker"
@@ -34,8 +34,11 @@ export function HistoryMarkerRow({
     historyCreatedAt,
 }: ScrollerRowComponentProps<ScrollerRowOf<"historyMarker">>): ReactElement {
     const { t } = useTranslation()
+    // "null = today" fallback: capture the clock once per mount in a lazy
+    // state initializer so render stays pure (react(purity)).
+    const [markedAt] = useState(() => new Date())
     const label = formatMarkerDate(
-        historyCreatedAt != null ? new Date(historyCreatedAt) : new Date(),
+        historyCreatedAt != null ? new Date(historyCreatedAt) : markedAt,
     )
     return (
         <Marker variant="separator" data-testid="assistant-history-marker">

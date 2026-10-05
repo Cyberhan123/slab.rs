@@ -72,7 +72,7 @@ export default function FooterStatusBar({ variant = "default" }: FooterStatusBar
     return {
       available: false,
       backend: "all-smi",
-      updated_at: new Date().toISOString(),
+      updated_at: "",
       devices: [],
       error: getErrorMessage(error),
     }

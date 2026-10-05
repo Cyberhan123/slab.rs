@@ -11,7 +11,9 @@ import {
 } from "../support/tauri-webdriver"
 import { workspaceTerminalReadSentinelCommand } from "../support/workspace-project"
 
-describe.sequential("workspace desktop e2e", () => {
+// Tests within this suite build on each other and rely on default sequential
+// execution (describe.sequential was removed in vitest 5).
+describe("workspace desktop e2e", () => {
   let env: DesktopWebDriverEnvironment | undefined
   let browser: WebdriverIO.Browser
 

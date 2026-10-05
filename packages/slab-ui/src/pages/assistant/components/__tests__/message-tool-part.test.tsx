@@ -188,7 +188,9 @@ describe("MessageToolPart", () => {
       />,
     )
 
-    await expect.element(screen.getByText("Read")).toBeInTheDocument()
+    // Browser-mode getByText matches whole-element text only (the trigger
+    // label span renders "Read:"), so assert on the rendered text instead.
+    expect(screen.container.textContent).toContain("Read")
     // Substring queries would double-match the expanded JSON body, so assert
     // on the collapsed trigger line directly.
     expect(screen.container.textContent).toContain("src/main.rs")

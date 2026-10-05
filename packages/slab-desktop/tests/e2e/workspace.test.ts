@@ -32,7 +32,9 @@ type Schema = components["schemas"]
 
 let env: E2eRuntimeEndpoints | undefined
 
-describe.sequential("workspace e2e", () => {
+// Tests within this suite build on each other and rely on default sequential
+// execution (describe.sequential was removed in vitest 5).
+describe("workspace e2e", () => {
   let browser: Browser | undefined
   let context: BrowserContext | undefined
   let page: Page

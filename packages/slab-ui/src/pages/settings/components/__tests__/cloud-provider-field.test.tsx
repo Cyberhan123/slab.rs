@@ -88,7 +88,10 @@ describe("CloudProviderField", () => {
     const customEntry = { ...OPENAI_ENTRY, family: "openai_compatible", display_name: "My Local" };
     const screen = await render(<CloudProviderField value={[customEntry]} onChange={vi.fn()} />);
 
-    await expect.element(screen.getByText("My Local")).toBeInTheDocument();
+    // Browser-mode getByText matches whole-element text only (the title mixes
+    // the display name with the family badge), so assert on rendered text.
+    expect(screen.container.textContent).toContain("My Local");
+    expect(screen.container.textContent).toContain("Other (OpenAI-compatible)");
   });
 
   it("preserves api_style when saving an edited provider", async () => {
