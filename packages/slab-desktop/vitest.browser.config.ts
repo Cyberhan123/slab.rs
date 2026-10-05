@@ -3,7 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { playwright } from "@vitest/browser-playwright";
 import { defineProject } from "vitest/config";
 
-import { desktopVitestResolve } from "./vitest.shared";
+import { desktopVitestResolve } from "./vitest.shared.ts";
 
 const browserActionTimeoutMs = 5_000;
 const browserTestTimeoutMs = 30_000;

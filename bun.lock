@@ -4,9 +4,6 @@
   "workspaces": {
     "": {
       "name": "slab-workspace",
-      "dependencies": {
-        "markdown-it": "catalog:",
-      },
       "devDependencies": {
         "@tailwindcss/vite": "catalog:",
         "@tauri-apps/api": "catalog:",

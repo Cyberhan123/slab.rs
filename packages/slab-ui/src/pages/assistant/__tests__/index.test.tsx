@@ -123,13 +123,13 @@ const mocks = vi.hoisted(() => {
     deleteSession: vi.fn<() => Promise<boolean>>(),
     ensureDownloaded: vi.fn<() => Promise<{ downloadedNow: boolean }>>(),
     ensureLoaded: vi.fn<() => Promise<{ runtimeStatus: null }>>(),
-    sendMessage: vi.fn(),
-    stop: vi.fn(),
+    sendMessage: vi.fn<() => unknown>(),
+    stop: vi.fn<() => unknown>(),
     models,
-    setCurrentSessionId: vi.fn(),
-    setSelectedModelId: vi.fn(),
-    toastInfo: vi.fn(),
-    toastError: vi.fn(),
+    setCurrentSessionId: vi.fn<() => unknown>(),
+    setSelectedModelId: vi.fn<() => unknown>(),
+    toastInfo: vi.fn<() => unknown>(),
+    toastError: vi.fn<() => unknown>(),
     translate,
     harnessConversation,
     updateSessionLabel: vi.fn<() => Promise<boolean>>(),
@@ -137,7 +137,7 @@ const mocks = vi.hoisted(() => {
 })
 
 vi.mock("@ai-sdk/react", () => ({
-  useChat: vi.fn(({ messages = [] }: { messages?: UIMessage[] }) => {
+  useChat: vi.fn<(options: { messages?: UIMessage[] }) => unknown>(({ messages = [] }: { messages?: UIMessage[] }) => {
     mocks.currentMessagesRef.value = messages
 
     return {
@@ -155,7 +155,7 @@ vi.mock("@ai-sdk/react", () => ({
 export const conversationStateDriftGuard: ConversationState = mocks.harnessConversation
 
 vi.mock("../hooks/use-harness-conversation", () => ({
-  useHarnessConversation: vi.fn(() => mocks.harnessConversation),
+  useHarnessConversation: vi.fn<() => unknown>(() => mocks.harnessConversation),
 }))
 
 vi.mock("@slab/i18n", () => ({
@@ -180,8 +180,8 @@ vi.mock("sonner", () => ({
   toast: {
     error: mocks.toastError,
     info: mocks.toastInfo,
-    message: vi.fn(),
-    success: vi.fn(),
+    message: vi.fn<() => unknown>(),
+    success: vi.fn<() => unknown>(),
   },
 }))
 
@@ -195,7 +195,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
     ...actual,
     useQuery: () => ({ data: { current: null } }),
     useQueryClient: () => ({
-      setQueryData: vi.fn(),
+      setQueryData: vi.fn<() => unknown>(),
       invalidateQueries: async () => undefined,
     }),
   }
@@ -313,7 +313,7 @@ vi.mock("@slab/components/dropdown-menu", () => ({
 }))
 
 vi.mock("@slab/ui/hooks/use-ai-model", () => ({
-  useAiModel: vi.fn(() => ({
+  useAiModel: vi.fn<() => unknown>(() => ({
     ensureDownloaded: mocks.ensureDownloaded,
     ensureLoaded: mocks.ensureLoaded,
     loading: false,
@@ -326,7 +326,7 @@ vi.mock("@slab/ui/hooks/use-ai-model", () => ({
 }))
 
 vi.mock("../hooks/use-assistant-sessions", () => ({
-  useAssistantSessions: vi.fn(() => ({
+  useAssistantSessions: vi.fn<() => unknown>(() => ({
     conversationList: mocks.conversationList,
     createSession: mocks.createSession,
     currentSessionId: "session-a",

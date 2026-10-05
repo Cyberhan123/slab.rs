@@ -1,0 +1,10 @@
+"use strict";
+import { vi } from "vitest";
+const AssistantChatPane = () => null;
+const baseProps = (o = {}) => o;
+async function render(x) {
+  return x;
+}
+it("re-stages the draft when onBeforeSubmit throws", async () => {
+  const onBeforeSubmit = vi.fn(() => Promise.reject(new Error("not ready")));
+});

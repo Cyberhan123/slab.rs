@@ -66,7 +66,7 @@ vi.mock('@slab/ui/pages/image/hooks/use-image-model-preparation', () => ({
 
 vi.mock('@slab/ui/hooks/use-header', () => ({
   useHeader: vi.fn<() => unknown>(() => ({
-    meta: { title: 'Image', subtitle: 'Image', icon: vi.fn(), contextLabel: null },
+    meta: { title: 'Image', subtitle: 'Image', icon: vi.fn<() => unknown>(), contextLabel: null },
     search: null,
     select: null,
   })),

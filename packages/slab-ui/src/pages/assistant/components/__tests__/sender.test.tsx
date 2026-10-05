@@ -6,7 +6,7 @@ import { SlabProvider } from "../../../../provider/slab-provider"
 import { createTestSlabPorts } from "../../../../provider/test-ports"
 import { useAssistantUiStore } from "../../../../store/useAssistantUiStore"
 
-import Sender from "../sender"
+import Sender, { type SenderSubmitOptions } from "../sender"
 
 import i18n from "@slab/i18n"
 
@@ -21,7 +21,7 @@ import type { CommandInfo } from "@slab/api/harness"
 // The approval-review dialog loads its reviewer-model options through this
 // hook; fixed options keep the dialog test offline and deterministic.
 vi.mock("@slab/ui/hooks/use-ai-model", () => ({
-  useAiModel: vi.fn(() => ({
+  useAiModel: vi.fn<() => unknown>(() => ({
     options: [
       { id: "reviewer-model", label: "Reviewer Model", disabled: false },
     ],
@@ -69,10 +69,10 @@ describe("Sender", () => {
   })
 
   it("submits trimmed text and clears the textarea", async () => {
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn<(message: string, options: SenderSubmitOptions) => void>()
 
     const screen = await renderSender(
-      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     const textarea = screen.getByLabelText("Message")
@@ -90,10 +90,10 @@ describe("Sender", () => {
   })
 
   it("does not submit empty text", async () => {
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn<(message: string, options: SenderSubmitOptions) => void>()
 
     const screen = await renderSender(
-      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.type(screen.getByLabelText("Message"), "   ")
@@ -103,7 +103,7 @@ describe("Sender", () => {
 
   it("disables input while loading", async () => {
     const screen = await renderSender(
-      <Sender loading onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender loading onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await expect.element(screen.getByLabelText("Message")).toBeDisabled()
@@ -113,17 +113,17 @@ describe("Sender", () => {
 
 describe("Sender single-button stop/steer state", () => {
   it("shows Stop while generating with an empty composer and stops on click", async () => {
-    const onStop = vi.fn()
+    const onStop = vi.fn<() => void>()
 
     const screen = await renderSender(
       <Sender
         loading
         steerable
         onStop={onStop}
-        onSubmit={vi.fn()}
+        onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()}
         commands={COMMANDS}
         planMode={false}
-        onPlanModeChange={vi.fn()}
+        onPlanModeChange={vi.fn<(enabled: boolean) => void>()}
       />,
     )
 
@@ -134,8 +134,8 @@ describe("Sender single-button stop/steer state", () => {
   })
 
   it("shows Send while generating with text and submits (steering) on click", async () => {
-    const onStop = vi.fn()
-    const onSubmit = vi.fn()
+    const onStop = vi.fn<() => void>()
+    const onSubmit = vi.fn<(message: string, options: SenderSubmitOptions) => void>()
 
     const screen = await renderSender(
       <Sender
@@ -145,7 +145,7 @@ describe("Sender single-button stop/steer state", () => {
         onSubmit={onSubmit}
         commands={COMMANDS}
         planMode={false}
-        onPlanModeChange={vi.fn()}
+        onPlanModeChange={vi.fn<(enabled: boolean) => void>()}
       />,
     )
 
@@ -167,7 +167,7 @@ describe("Sender single-button stop/steer state", () => {
 describe("Sender slash-command menu", () => {
   it("opens the autocomplete popup when the user types a leading slash", async () => {
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.type(screen.getByLabelText("Message"), "/")
@@ -178,7 +178,7 @@ describe("Sender slash-command menu", () => {
 
   it("opens the same menu from the toolbar button, including the Model group", async () => {
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.click(screen.getByRole("button", { name: "Commands" }))
@@ -193,7 +193,7 @@ describe("Sender slash-command menu", () => {
 
   it("inserts a control command into the input when selected", async () => {
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.type(screen.getByLabelText("Message"), "/")
@@ -209,7 +209,7 @@ describe("Sender slash-command menu", () => {
     // command (e.g. /summarize) seeds `/summarize ` for further typing. (`/plan`
     // is special — it toggles plan mode instead of seeding; see below.)
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.click(screen.getByRole("button", { name: "Commands" }))
@@ -220,7 +220,7 @@ describe("Sender slash-command menu", () => {
 
   it("filters suggestions while the user types after the slash", async () => {
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.type(screen.getByLabelText("Message"), "/comp")
@@ -232,7 +232,7 @@ describe("Sender slash-command menu", () => {
 
   it("selects the highlighted suggestion with arrow keys and Tab", async () => {
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     const textarea = screen.getByLabelText("Message")
@@ -246,7 +246,7 @@ describe("Sender slash-command menu", () => {
 
   it("dismisses the popup on Escape and reopens it when typing continues", async () => {
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     const textarea = screen.getByLabelText("Message")
@@ -263,7 +263,7 @@ describe("Sender slash-command menu", () => {
 
   it("never shows the popup for path-like input", async () => {
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.type(screen.getByLabelText("Message"), "/usr/bin")
@@ -273,7 +273,7 @@ describe("Sender slash-command menu", () => {
 
   it("closes the toolbar menu after picking a command from it", async () => {
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.click(screen.getByRole("button", { name: "Commands" }))
@@ -290,8 +290,8 @@ describe("Sender slash-command menu", () => {
 
 describe("Sender plan-mode toggle", () => {
   it("toggles plan mode on when the `/plan` command is selected", async () => {
-    const onSubmit = vi.fn()
-    const onPlanModeChange = vi.fn()
+    const onSubmit = vi.fn<(message: string, options: SenderSubmitOptions) => void>()
+    const onPlanModeChange = vi.fn<() => unknown>()
 
     const screen = await renderSender(
       <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={onPlanModeChange} />,
@@ -307,10 +307,10 @@ describe("Sender plan-mode toggle", () => {
   })
 
   it("toggles plan mode off when already on", async () => {
-    const onPlanModeChange = vi.fn()
+    const onPlanModeChange = vi.fn<() => unknown>()
 
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={true} onPlanModeChange={onPlanModeChange} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={true} onPlanModeChange={onPlanModeChange} />,
     )
 
     await userEvent.click(screen.getByRole("button", { name: "Commands" }))
@@ -320,10 +320,10 @@ describe("Sender plan-mode toggle", () => {
   })
 
   it("renders the plan chip when plan mode is on and clears it via the X", async () => {
-    const onPlanModeChange = vi.fn()
+    const onPlanModeChange = vi.fn<() => unknown>()
 
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={true} onPlanModeChange={onPlanModeChange} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={true} onPlanModeChange={onPlanModeChange} />,
     )
 
     const chip = screen.getByTestId("assistant-plan-mode-chip")
@@ -335,10 +335,10 @@ describe("Sender plan-mode toggle", () => {
   })
 
   it("sends agentType 'plan' on submit when plan mode is on", async () => {
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn<(message: string, options: SenderSubmitOptions) => void>()
 
     const screen = await renderSender(
-      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={true} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={true} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.type(screen.getByLabelText("Message"), "plan this")
@@ -358,10 +358,10 @@ describe("Sender thinking toggle", () => {
   })
 
   it("persists a tier picked in the effort group and submits it", async () => {
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn<(message: string, options: SenderSubmitOptions) => void>()
 
     const screen = await renderSender(
-      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.click(screen.getByRole("button", { name: "Commands" }))
@@ -381,10 +381,10 @@ describe("Sender thinking toggle", () => {
   })
 
   it("switching deep-think off maps to the wire 'off' level and back on restores the tier", async () => {
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn<(message: string, options: SenderSubmitOptions) => void>()
 
     const screen = await renderSender(
-      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.click(screen.getByRole("button", { name: "Commands" }))
@@ -409,11 +409,11 @@ describe("Sender thinking toggle", () => {
   })
 
   it("collapses a persisted 'minimal' level to the nearest wire tier on submit", async () => {
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn<(message: string, options: SenderSubmitOptions) => void>()
     useAssistantUiStore.setState({ reasoningEffort: "minimal" })
 
     const screen = await renderSender(
-      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.type(screen.getByLabelText("Message"), "brief")
@@ -436,10 +436,10 @@ describe("Sender permission-mode selector", () => {
   })
 
   it("exposes a dedicated permission button that updates the selected mode", async () => {
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn<(message: string, options: SenderSubmitOptions) => void>()
 
     const screen = await renderSender(
-      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={onSubmit} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     // Open the dedicated permission popover (left of Send).
@@ -458,7 +458,7 @@ describe("Sender permission-mode selector", () => {
 
   it("defers approve_for_me with no reviewer model: the dialog opens but the mode is untouched", async () => {
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.click(screen.getByTestId("assistant-permission-mode-trigger"))
@@ -473,7 +473,7 @@ describe("Sender permission-mode selector", () => {
 
   it("cancelling the approval dialog rolls back to the pre-switch mode", async () => {
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     await userEvent.click(screen.getByTestId("assistant-permission-mode-trigger"))
@@ -485,14 +485,14 @@ describe("Sender permission-mode selector", () => {
   })
 
   it("saving the approval dialog commits the deferred mode and the reviewer config", async () => {
-    const onApprovalReviewChange = vi.fn()
+    const onApprovalReviewChange = vi.fn<() => unknown>()
 
     const screen = await renderSender(
       <Sender
-        onSubmit={vi.fn()}
+        onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()}
         commands={COMMANDS}
         planMode={false}
-        onPlanModeChange={vi.fn()}
+        onPlanModeChange={vi.fn<(enabled: boolean) => void>()}
         onApprovalReviewChange={onApprovalReviewChange}
       />,
     )
@@ -522,7 +522,7 @@ describe("Sender permission-mode selector", () => {
     })
 
     const screen = await renderSender(
-      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+      <Sender onSubmit={vi.fn<(message: string, options: SenderSubmitOptions) => void>()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn<(enabled: boolean) => void>()} />,
     )
 
     // The "Configure" entry (mode already approve_for_me) opens the dialog

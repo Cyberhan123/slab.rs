@@ -77,11 +77,13 @@ function MessageToolQuestionnairePart({
   kind,
   toolCallId,
 }: MessagePartRenderProps<TMessagePart, TMessage>) {
-  if (kind !== "tool") return null
+  // Hooks must run unconditionally — the kind guard below returns early, so
+  // useTranslation/useMessageInteraction are called before it (rules-of-hooks).
   const { t } = useTranslation()
+  const { approvalStatusByItemId } = useMessageInteraction()
+  if (kind !== "tool") return null
 
   const p = part as ToolPartLike
-  const { approvalStatusByItemId } = useMessageInteraction()
   const approval = toolCallId ? approvalStatusByItemId.get(toolCallId) : undefined
   const state = deriveState(p, approval)
 

@@ -14,7 +14,7 @@ vi.mock('@slab/ui/pages/video/hooks/use-video-generation', () => ({
 
 vi.mock('@slab/ui/hooks/use-header', () => ({
   useHeader: vi.fn<() => unknown>(() => ({
-    meta: { title: 'Video', subtitle: 'Video', icon: vi.fn(), contextLabel: null },
+    meta: { title: 'Video', subtitle: 'Video', icon: vi.fn<() => unknown>(), contextLabel: null },
     search: null,
     select: null,
   })),

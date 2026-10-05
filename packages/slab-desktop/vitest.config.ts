@@ -2,8 +2,8 @@ import react from "@vitejs/plugin-react";
 import { playwright } from "@vitest/browser-playwright";
 import { defineProject, mergeConfig } from "vitest/config";
 
-import { desktopVitestResolve } from "./vitest.shared";
-import { vitestBase } from "../../vitest.base";
+import { desktopVitestResolve } from "./vitest.shared.ts";
+import { vitestBase } from "../../vitest.base.ts";
 
 // Browser-mode unit tests. `render`/`renderHook` come from `vitest-browser-react`
 // (which only works in Browser Mode), so this project drives a real headless

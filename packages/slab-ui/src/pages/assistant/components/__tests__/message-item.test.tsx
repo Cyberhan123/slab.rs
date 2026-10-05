@@ -200,7 +200,7 @@ describe("MessageItem", () => {
   })
 
   it("shows a rollback button on a retracable user message and emits the message id", async () => {
-    const rollbackToMessage = vi.fn()
+    const rollbackToMessage = vi.fn<() => unknown>()
     const screen = await render(
       <MessageInteractionContext.Provider
         value={{
@@ -228,7 +228,7 @@ describe("MessageItem", () => {
         value={{
           approvalStatusByItemId: new Map(),
           userMessageTurnIndex: new Map([["mu0", 0]]),
-          rollbackToMessage: vi.fn(),
+          rollbackToMessage: vi.fn<() => unknown>(),
           subagentTasksByTaskId: new Map(),
           subagentChildItemsByChildId: new Map(),
         }}
@@ -248,7 +248,7 @@ describe("MessageItem", () => {
         value={{
           approvalStatusByItemId: new Map(),
           userMessageTurnIndex: new Map([["ma1", 2]]),
-          rollbackToMessage: vi.fn(),
+          rollbackToMessage: vi.fn<() => unknown>(),
           subagentTasksByTaskId: new Map(),
           subagentChildItemsByChildId: new Map(),
         }}

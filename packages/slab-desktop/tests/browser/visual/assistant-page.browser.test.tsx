@@ -110,22 +110,22 @@ const { mockUseMarkdownTheme } = vi.hoisted(() => ({
 export const conversationStateDriftGuard: ConversationState = mocks.harnessConversation;
 
 vi.mock('@slab/ui/pages/assistant/hooks/use-harness-conversation', () => ({
-  useHarnessConversation: vi.fn(() => mocks.harnessConversation),
+  useHarnessConversation: vi.fn<() => unknown>(() => mocks.harnessConversation),
 }));
 
 vi.mock('@ai-sdk/react', () => ({
-  useChat: vi.fn(({ messages = [] }: { messages?: Array<Record<string, unknown>> }) => ({
+  useChat: vi.fn<(options: { messages?: Array<Record<string, unknown>> }) => unknown>(({ messages = [] }: { messages?: Array<Record<string, unknown>> }) => ({
     messages,
-    sendMessage: vi.fn(),
+    sendMessage: vi.fn<() => unknown>(),
     status: 'ready',
-    stop: vi.fn(),
+    stop: vi.fn<() => unknown>(),
   })),
 }));
 
 vi.mock('@slab/ui/hooks/use-ai-model', () => ({
-  useAiModel: vi.fn(() => ({
-    ensureDownloaded: vi.fn().mockResolvedValue({ downloadedNow: false }),
-    ensureLoaded: vi.fn().mockResolvedValue({ runtimeStatus: null }),
+  useAiModel: vi.fn<() => unknown>(() => ({
+    ensureDownloaded: vi.fn<() => Promise<unknown>>().mockResolvedValue({ downloadedNow: false }),
+    ensureLoaded: vi.fn<() => Promise<unknown>>().mockResolvedValue({ runtimeStatus: null }),
     loading: false,
     localModels: [],
     models: [
@@ -142,7 +142,7 @@ vi.mock('@slab/ui/hooks/use-ai-model', () => ({
       },
     ],
     selectedId: 'model-a',
-    setSelectedId: vi.fn(),
+    setSelectedId: vi.fn<() => unknown>(),
     status: { busy: false },
   })),
 }));
@@ -161,7 +161,7 @@ vi.mock('@slab/ui/pages/assistant/hooks/use-markdown-theme', () => ({
 
 vi.mock('@slab/ui/hooks/use-header', () => ({
   useHeader: vi.fn<() => unknown>(() => ({
-    meta: { title: 'Assistant', subtitle: 'Assistant', icon: vi.fn(), contextLabel: null },
+    meta: { title: 'Assistant', subtitle: 'Assistant', icon: vi.fn<() => unknown>(), contextLabel: null },
     search: null,
     select: null,
   })),
@@ -217,8 +217,8 @@ function createAssistantSessionsViewModel(overrides = {}) {
     isDeletingSession: false,
     isSessionMutating: false,
     isSessionsLoading: false,
-    setCurrentSessionId: vi.fn(),
-    setSessionLabel: vi.fn(),
+    setCurrentSessionId: vi.fn<() => unknown>(),
+    setSessionLabel: vi.fn<() => unknown>(),
     updateSessionLabel: vi.fn<() => Promise<boolean>>().mockResolvedValue(true),
     ...overrides,
   };

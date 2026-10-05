@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { render } from "vitest-browser-react"
 import type { ReactNode } from "react"
 
-import { QuestionnaireCard } from "../questionnaire-card"
+import { type QuestionnaireAnswerPayload, QuestionnaireCard } from "../questionnaire-card"
 import type { QuestionnaireRequest } from "@slab/core/harness"
 
 vi.mock("@slab/i18n", () => ({
@@ -52,7 +52,7 @@ function request(overrides: Partial<QuestionnaireRequest> = {}): QuestionnaireRe
 
 describe("QuestionnaireCard", () => {
   it("renders the question and choices", async () => {
-    const screen = await render(<QuestionnaireCard request={request()} onResolve={vi.fn()} />)
+    const screen = await render(<QuestionnaireCard request={request()} onResolve={vi.fn<(itemId: string, answers: QuestionnaireAnswerPayload) => void>()} />)
     await expect.element(screen.getByText("Which database engine?")).toBeInTheDocument()
     await expect
       .element(screen.getByRole("radio", { name: "SQLite" }))
@@ -61,7 +61,7 @@ describe("QuestionnaireCard", () => {
   })
 
   it("submits a single selection on Submit", async () => {
-    const onResolve = vi.fn()
+    const onResolve = vi.fn<(itemId: string, answers: QuestionnaireAnswerPayload) => void>()
     const screen = await render(<QuestionnaireCard request={request()} onResolve={onResolve} />)
 
     await screen.getByRole("radio", { name: "Postgres" }).click()
@@ -71,7 +71,7 @@ describe("QuestionnaireCard", () => {
   })
 
   it("supports multiple selection when allowMultiple", async () => {
-    const onResolve = vi.fn()
+    const onResolve = vi.fn<(itemId: string, answers: QuestionnaireAnswerPayload) => void>()
     const screen = await render(
       <QuestionnaireCard
         request={request({ allowMultiple: true })}
@@ -92,7 +92,7 @@ describe("QuestionnaireCard", () => {
   })
 
   it("submits the custom answer text when offered", async () => {
-    const onResolve = vi.fn()
+    const onResolve = vi.fn<(itemId: string, answers: QuestionnaireAnswerPayload) => void>()
     const screen = await render(
       <QuestionnaireCard
         request={request({ allowCustomInput: true })}
@@ -109,7 +109,7 @@ describe("QuestionnaireCard", () => {
   })
 
   it("blocks empty submits when required and shows the error", async () => {
-    const onResolve = vi.fn()
+    const onResolve = vi.fn<(itemId: string, answers: QuestionnaireAnswerPayload) => void>()
     const screen = await render(<QuestionnaireCard request={request()} onResolve={onResolve} />)
 
     await screen.getByTestId("assistant-questionnaire-submit").click()
@@ -121,7 +121,7 @@ describe("QuestionnaireCard", () => {
   })
 
   it("renders a Skip button and resolves skipped when the question is optional", async () => {
-    const onResolve = vi.fn()
+    const onResolve = vi.fn<(itemId: string, answers: QuestionnaireAnswerPayload) => void>()
     const screen = await render(
       <QuestionnaireCard request={request({ required: false })} onResolve={onResolve} />,
     )
@@ -137,8 +137,7 @@ describe("QuestionnaireCard", () => {
 
   it("disables everything (with a spinner) while a resolution is pending", async () => {
     let resolvePromise: (() => void) | undefined
-    const onResolve = vi.fn(
-      () =>
+    const onResolve = vi.fn<(itemId: string, answers: QuestionnaireAnswerPayload) => void>(() =>
         new Promise<void>((r) => {
           resolvePromise = () => r()
         }),

@@ -151,10 +151,12 @@ function MessageToolPlanPart({
   kind,
   toolCallId,
 }: MessagePartRenderProps<TMessagePart, TMessage>) {
+  // useMessageInteraction must run before the kind guard's early return
+  // (rules-of-hooks), even though plan parts always render with kind "tool".
+  const { approvalStatusByItemId } = useMessageInteraction()
   if (kind !== "tool") return null
 
   const p = part as ToolPartLike
-  const { approvalStatusByItemId } = useMessageInteraction()
   const approval = toolCallId ? approvalStatusByItemId.get(toolCallId) : undefined
   const state = deriveState(p, approval)
 

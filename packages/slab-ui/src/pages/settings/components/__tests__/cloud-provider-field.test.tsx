@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
+import type { JsonValue } from "../../types"
+
 import { CloudProviderField } from "../cloud-provider-field";
 
 vi.mock("@slab/i18n", () => ({
@@ -33,7 +35,7 @@ beforeEach(() => {
 
 describe("CloudProviderField", () => {
   it("renders the empty state when no providers are configured", async () => {
-    const screen = await render(<CloudProviderField value={[]} onChange={vi.fn()} />);
+    const screen = await render(<CloudProviderField value={[]} onChange={vi.fn<() => unknown>()} />);
 
     await expect.element(screen.getByText("pages.settings.providerRegistry.empty")).toBeInTheDocument();
     await expect.element(screen.getByText("pages.settings.providerRegistry.addProvider")).toBeInTheDocument();
@@ -41,7 +43,7 @@ describe("CloudProviderField", () => {
 
   it("lists configured providers with their display name and api base", async () => {
     const screen = await render(
-      <CloudProviderField value={[OPENAI_ENTRY, ANTHROPIC_ENTRY]} onChange={vi.fn()} />,
+      <CloudProviderField value={[OPENAI_ENTRY, ANTHROPIC_ENTRY]} onChange={vi.fn<() => unknown>()} />,
     );
 
     // Display name appears in both the title and the family badge.
@@ -56,7 +58,7 @@ describe("CloudProviderField", () => {
   });
 
   it("deletes a provider and emits the remaining registry via onChange", async () => {
-    const onChange = vi.fn();
+    const onChange = vi.fn<(value: JsonValue) => void>();
     const screen = await render(
       <CloudProviderField value={[OPENAI_ENTRY, ANTHROPIC_ENTRY]} onChange={onChange} />,
     );
@@ -73,7 +75,7 @@ describe("CloudProviderField", () => {
   });
 
   it("preserves the auth shape (api_key / api_key_env) when emitting entries", async () => {
-    const onChange = vi.fn();
+    const onChange = vi.fn<(value: JsonValue) => void>();
     const screen = await render(<CloudProviderField value={[ANTHROPIC_ENTRY]} onChange={onChange} />);
 
     const removeButtons = screen.getByLabelText("Remove provider").all();
@@ -86,7 +88,7 @@ describe("CloudProviderField", () => {
 
   it("renders a custom provider without crashing when family is unknown", async () => {
     const customEntry = { ...OPENAI_ENTRY, family: "openai_compatible", display_name: "My Local" };
-    const screen = await render(<CloudProviderField value={[customEntry]} onChange={vi.fn()} />);
+    const screen = await render(<CloudProviderField value={[customEntry]} onChange={vi.fn<() => unknown>()} />);
 
     // Browser-mode getByText matches whole-element text only (the title mixes
     // the display name with the family badge), so assert on rendered text.
@@ -95,7 +97,7 @@ describe("CloudProviderField", () => {
   });
 
   it("preserves api_style when saving an edited provider", async () => {
-    const onChange = vi.fn();
+    const onChange = vi.fn<(value: JsonValue) => void>();
     const entry = { ...OPENAI_ENTRY, api_style: "responses" };
     const screen = await render(<CloudProviderField value={[entry]} onChange={onChange} />);
 
@@ -113,7 +115,7 @@ describe("CloudProviderField", () => {
   });
 
   it("defaults api_style to auto when editing a legacy provider without one", async () => {
-    const onChange = vi.fn();
+    const onChange = vi.fn<(value: JsonValue) => void>();
     // OPENAI_ENTRY predates api_style — the field must not stay missing after
     // an edit round trip (the historical data-loss shape).
     const screen = await render(<CloudProviderField value={[OPENAI_ENTRY]} onChange={onChange} />);

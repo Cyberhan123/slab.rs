@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url"
 
 import { defineConfig } from "vitest/config"
 
-import { desktopVitestResolve } from "./vitest.shared"
+import { desktopVitestResolve } from "./vitest.shared.ts"
 
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),

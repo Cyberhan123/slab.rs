@@ -1,12 +1,12 @@
 import path from "node:path";
 
-const componentSourcePath = path.resolve(__dirname, "../slab-components/src");
+const componentSourcePath = path.resolve(import.meta.dirname, "../slab-components/src");
 const componentSourceUrl = componentSourcePath.replace(/\\/g, "/");
-const apiSourcePath = path.resolve(__dirname, "../api/src");
+const apiSourcePath = path.resolve(import.meta.dirname, "../api/src");
 const apiSourceUrl = apiSourcePath.replace(/\\/g, "/");
-const coreSourcePath = path.resolve(__dirname, "../slab-core/src");
+const coreSourcePath = path.resolve(import.meta.dirname, "../slab-core/src");
 const coreSourceUrl = coreSourcePath.replace(/\\/g, "/");
-const testUtilsSourcePath = path.resolve(__dirname, "../slab-test-utils/src");
+const testUtilsSourcePath = path.resolve(import.meta.dirname, "../slab-test-utils/src");
 const testUtilsSourceUrl = testUtilsSourcePath.replace(/\\/g, "/");
 
 export const uiVitestResolve = {
@@ -50,19 +50,19 @@ export const uiVitestResolve = {
     },
     {
       find: "@slab/plugin-sdk",
-      replacement: path.resolve(__dirname, "../slab-plugin-sdk/src/index.ts"),
+      replacement: path.resolve(import.meta.dirname, "../slab-plugin-sdk/src/index.ts"),
     },
     {
       find: "@slab/i18n",
-      replacement: path.resolve(__dirname, "../slab-i18n/src/index.ts"),
+      replacement: path.resolve(import.meta.dirname, "../slab-i18n/src/index.ts"),
     },
     {
       find: /^@slab\/ui\/(.+)$/,
-      replacement: path.resolve(__dirname, "./src").replace(/\\/g, "/") + "/$1",
+      replacement: path.resolve(import.meta.dirname, "./src").replace(/\\/g, "/") + "/$1",
     },
     {
       find: "@slab/ui",
-      replacement: path.resolve(__dirname, "./src/index.ts"),
+      replacement: path.resolve(import.meta.dirname, "./src/index.ts"),
     },
     {
       // `@` belongs to @slab/components sources (they import `@/lib/utils`).

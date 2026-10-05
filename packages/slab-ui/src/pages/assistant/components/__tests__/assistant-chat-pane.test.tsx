@@ -5,7 +5,8 @@ import { render } from "vitest-browser-react"
 
 import { AssistantChatPane } from "../assistant-chat-pane"
 import type { HarnessChatTransport } from "@slab/core/harness"
-import type { ApprovalStatus } from "@slab/core/harness"
+import type { ApprovalScope } from "@slab/api/harness"
+import type { ApprovalStatus, TurnSendOptions } from "@slab/core/harness"
 
 // Mutable stand-in for the `useChat` return so each test can set messages/status.
 const chatState = vi.hoisted(() => ({
@@ -19,7 +20,7 @@ vi.mock("@ai-sdk/react", () => ({
     messages: chatState.messages,
     sendMessage: chatState.sendMessage,
     status: chatState.status,
-    stop: vi.fn(),
+    stop: vi.fn<() => unknown>(),
   }),
 }))
 
@@ -115,9 +116,9 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     initialMessages: [],
     isHistoryLoading: false,
     modelStatusLabel: "model: ready",
-    onBeforeSubmit: vi.fn(),
-    onBusyChange: vi.fn(),
-    onMessageCountChange: vi.fn(),
+    onBeforeSubmit: vi.fn<(value: string) => Promise<void>>(),
+    onBusyChange: vi.fn<(busy: boolean) => void>(),
+    onMessageCountChange: vi.fn<(count: number) => void>(),
     transport: {} as unknown as HarnessChatTransport<UIMessage>,
     approvals: [],
     approvalStatusByItemId: new Map<string, ApprovalStatus>(),
@@ -127,20 +128,22 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     modelLoad: null,
     turnUsage: null,
     contextWindow: null,
-    resolveApproval: vi.fn(),
-    resolveQuestionnaire: vi.fn(),
-    onCompact: vi.fn(),
+    resolveApproval: vi.fn<(itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>>(),
+    resolveQuestionnaire: vi.fn<
+      (itemId: string, answers: { selected: string[]; custom: string | null; skipped?: boolean }) => Promise<void>
+    >(),
+    onCompact: vi.fn<() => Promise<void>>(),
     historyCreatedAt: null,
     commands: [],
     compactionMarkers: [],
     settingsMarkers: [],
     isCompacting: false,
-    onFork: vi.fn(),
+    onFork: vi.fn<() => Promise<void>>(),
     isForking: false,
     userMessageTurnIndex: new Map<string, number>(),
-    onRollbackFromTurn: vi.fn(),
+    onRollbackFromTurn: vi.fn<(turnIndex: number) => Promise<void>>(),
     planMode: false,
-    onPlanModeChange: vi.fn(),
+    onPlanModeChange: vi.fn<(enabled: boolean) => void>(),
     threadStatus: null,
     abortReason: null,
     queuedTexts: [],
@@ -149,8 +152,8 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     subagentChildItemsByChildId: new Map(),
     liveTextByItemId: new Map(),
     localTurnStartSeq: 0,
-    onSteerSubmit: vi.fn(),
-    onInterrupt: vi.fn(),
+    onSteerSubmit: vi.fn<(text: string, options?: TurnSendOptions) => Promise<unknown>>(),
+    onInterrupt: vi.fn<() => void>(),
     ...overrides,
   }
 }
@@ -159,7 +162,7 @@ describe("AssistantChatPane", () => {
   beforeEach(() => {
     chatState.messages = []
     chatState.status = "ready"
-    chatState.sendMessage = vi.fn()
+    chatState.sendMessage = vi.fn<() => undefined>()
   })
 
   it("shows the greeting empty state when there are no messages and not loading", async () => {
@@ -169,7 +172,7 @@ describe("AssistantChatPane", () => {
   })
 
   it("renders the new-chat CTA on the empty state when the handler is provided", async () => {
-    const onStartNewChat = vi.fn()
+    const onStartNewChat = vi.fn<() => void>()
     const screen = await render(<AssistantChatPane {...baseProps({ onStartNewChat })} />)
     await expect.element(screen.getByTestId("assistant-new-chat-cta")).toBeInTheDocument()
   })
@@ -192,8 +195,8 @@ describe("AssistantChatPane", () => {
   })
 
   it("auto-sends a staged draft exactly once once the controller is ready", async () => {
-    const onBeforeSubmit = vi.fn()
-    const onAutoSendConsumed = vi.fn()
+    const onBeforeSubmit = vi.fn<(value: string) => Promise<void>>()
+    const onAutoSendConsumed = vi.fn<() => void>()
     const autoSend = {
       text: "kick off the build",
       files: [],
@@ -213,7 +216,7 @@ describe("AssistantChatPane", () => {
   })
 
   it("does not auto-send while the session is loading or busy", async () => {
-    const onAutoSendConsumed = vi.fn()
+    const onAutoSendConsumed = vi.fn<() => void>()
     const autoSend = { text: "hold", files: [], metadata: {} }
     await render(
       <AssistantChatPane
@@ -226,7 +229,7 @@ describe("AssistantChatPane", () => {
 
   it("does not auto-send a busy (streaming) pane", async () => {
     chatState.status = "streaming"
-    const onAutoSendConsumed = vi.fn()
+    const onAutoSendConsumed = vi.fn<() => void>()
     const autoSend = { text: "hold", files: [], metadata: {} }
     await render(<AssistantChatPane {...baseProps({ onAutoSendConsumed, autoSend })} />)
     expect(onAutoSendConsumed).not.toHaveBeenCalled()
@@ -267,8 +270,8 @@ describe("AssistantChatPane", () => {
     chatState.messages = [
       { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
     ]
-    const onBusyChange = vi.fn()
-    const onMessageCountChange = vi.fn()
+    const onBusyChange = vi.fn<(busy: boolean) => void>()
+    const onMessageCountChange = vi.fn<(count: number) => void>()
     const screen = await render(
       <AssistantChatPane
         {...baseProps({ onBusyChange, onMessageCountChange })}
@@ -282,7 +285,7 @@ describe("AssistantChatPane", () => {
 
   it("forwards approvals + resolveApproval to the Sender", async () => {
     const approvals = [{ itemId: "call-1", status: "pending" }]
-    const resolveApproval = vi.fn()
+    const resolveApproval = vi.fn<(itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>>()
     const screen = await render(<AssistantChatPane {...baseProps({ approvals, resolveApproval })} />)
     const sender = screen.getByTestId("sender")
     expect(sender.element().getAttribute("data-approvals")).toBe("1")
@@ -318,9 +321,9 @@ describe("AssistantChatPane", () => {
   // ── draft re-staging + detach notification + live tail + busy gate ────────
 
   it("re-stages the draft when onBeforeSubmit throws", async () => {
-    const onBeforeSubmit = vi.fn(() => Promise.reject(new Error("not ready")))
-    const onAutoSendConsumed = vi.fn()
-    const onAutoSendFailed = vi.fn()
+    const onBeforeSubmit = vi.fn<(value: string) => Promise<void>>(() => Promise.reject(new Error("not ready")))
+    const onAutoSendConsumed = vi.fn<() => void>()
+    const onAutoSendFailed = vi.fn<(payload: { attempts: number }) => void>()
     const autoSend = { text: "kick off", files: [], metadata: {} }
     await render(
       <AssistantChatPane
@@ -332,8 +335,8 @@ describe("AssistantChatPane", () => {
   })
 
   it("re-stages when the send errors before the turn starts", async () => {
-    const onAutoSendConsumed = vi.fn()
-    const onAutoSendFailed = vi.fn()
+    const onAutoSendConsumed = vi.fn<() => void>()
+    const onAutoSendFailed = vi.fn<(payload: { attempts: number }) => void>()
     const autoSend = { text: "kick off", files: [], metadata: {} }
     const screen = await render(
       <AssistantChatPane
@@ -364,8 +367,8 @@ describe("AssistantChatPane", () => {
   })
 
   it("does not re-stage when the turn had started (seq advanced)", async () => {
-    const onAutoSendConsumed = vi.fn()
-    const onAutoSendFailed = vi.fn()
+    const onAutoSendConsumed = vi.fn<() => void>()
+    const onAutoSendFailed = vi.fn<(payload: { attempts: number }) => void>()
     const autoSend = { text: "kick off", files: [], metadata: {} }
     const props = (seq: number) =>
       baseProps({ onAutoSendConsumed, onAutoSendFailed, autoSend, localTurnStartSeq: seq })
@@ -379,7 +382,7 @@ describe("AssistantChatPane", () => {
   })
 
   it("claimKey includes attempts — a re-staged draft re-claims", async () => {
-    const onAutoSendConsumed = vi.fn()
+    const onAutoSendConsumed = vi.fn<() => void>()
     const first = { text: "same text", files: [], metadata: {} }
     const screen = await render(
       <AssistantChatPane {...baseProps({ onAutoSendConsumed, autoSend: first })} />,
@@ -396,7 +399,7 @@ describe("AssistantChatPane", () => {
   })
 
   it("notifies detachment on unmount while streaming", async () => {
-    const onPaneDetached = vi.fn()
+    const onPaneDetached = vi.fn<() => void>()
     chatState.status = "streaming"
     const screen = await render(
       <AssistantChatPane {...baseProps({ onPaneDetached })} />,
@@ -405,7 +408,7 @@ describe("AssistantChatPane", () => {
     expect(onPaneDetached).toHaveBeenCalledTimes(1)
 
     // A ready pane unmounting does NOT notify.
-    const onPaneDetachedIdle = vi.fn()
+    const onPaneDetachedIdle = vi.fn<() => void>()
     chatState.status = "ready"
     const idle = await render(
       <AssistantChatPane {...baseProps({ onPaneDetached: onPaneDetachedIdle })} />,
@@ -415,8 +418,8 @@ describe("AssistantChatPane", () => {
   })
 
   it("gates /compact and /fork while the server run is busy", async () => {
-    const onCompact = vi.fn()
-    const onFork = vi.fn()
+    const onCompact = vi.fn<() => Promise<void>>()
+    const onFork = vi.fn<() => Promise<void>>()
     const commands = [
       {
         name: "compact",

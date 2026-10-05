@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest"
 import { render } from "vitest-browser-react"
 import type { ReactNode } from "react"
 
+import type { ApprovalScope } from "@slab/api/harness"
+
 import { ApprovalCard } from "../approval-banner"
 import type { ApprovalRequest } from "@slab/core/harness"
 
@@ -49,7 +51,7 @@ function commandApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequ
 
 describe("ApprovalCard", () => {
   it("renders the command in a terminal-style block with cwd framing", async () => {
-    await render(<ApprovalCard approval={commandApproval()} onResolve={vi.fn()} />)
+    await render(<ApprovalCard approval={commandApproval()} onResolve={vi.fn<(itemId: string, approved: boolean, scope: ApprovalScope) => void>()} />)
     const text = document.body.textContent ?? ""
     expect(text).toContain("$ cd /repo")
     expect(text).toContain("echo hi")
@@ -71,7 +73,7 @@ describe("ApprovalCard", () => {
             ],
           } as ApprovalRequest
         }
-        onResolve={vi.fn()}
+        onResolve={vi.fn<(itemId: string, approved: boolean, scope: ApprovalScope) => void>()}
       />,
     )
     const text = document.body.textContent ?? ""
@@ -85,7 +87,7 @@ describe("ApprovalCard", () => {
     const screen = await render(
       <ApprovalCard
         approval={commandApproval({ allowedScopes: ["run_once", "deny"] })}
-        onResolve={vi.fn()}
+        onResolve={vi.fn<(itemId: string, approved: boolean, scope: ApprovalScope) => void>()}
       />,
     )
     const radios = screen.getByRole("radio").elements()
@@ -100,7 +102,7 @@ describe("ApprovalCard", () => {
   })
 
   it("falls back to a single approve choice when no scopes are advertised", async () => {
-    const screen = await render(<ApprovalCard approval={commandApproval()} onResolve={vi.fn()} />)
+    const screen = await render(<ApprovalCard approval={commandApproval()} onResolve={vi.fn<(itemId: string, approved: boolean, scope: ApprovalScope) => void>()} />)
     const radios = screen.getByRole("radio").elements()
     expect(radios).toHaveLength(1)
     await expect
@@ -112,7 +114,7 @@ describe("ApprovalCard", () => {
   })
 
   it("resolves immediately with (itemId, approved, scope) when a choice is picked", async () => {
-    const onResolve = vi.fn()
+    const onResolve = vi.fn<(itemId: string, approved: boolean, scope: ApprovalScope) => void>()
     const screen = await render(
       <ApprovalCard
         approval={commandApproval({ allowedScopes: ["run_once", "always", "deny"] })}
@@ -124,7 +126,7 @@ describe("ApprovalCard", () => {
   })
 
   it("resolves with approved=false for the deny button", async () => {
-    const onResolve = vi.fn()
+    const onResolve = vi.fn<(itemId: string, approved: boolean, scope: ApprovalScope) => void>()
     const screen = await render(
       <ApprovalCard
         approval={commandApproval({ allowedScopes: ["run_once", "deny"] })}
@@ -137,8 +139,7 @@ describe("ApprovalCard", () => {
 
   it("disables the choices and the deny button (with a spinner) while a resolution is pending", async () => {
     let resolvePromise: (() => void) | undefined
-    const onResolve = vi.fn(
-      () =>
+    const onResolve = vi.fn<(itemId: string, approved: boolean, scope: ApprovalScope) => void>(() =>
         new Promise<void>((r) => {
           resolvePromise = () => r()
         }),

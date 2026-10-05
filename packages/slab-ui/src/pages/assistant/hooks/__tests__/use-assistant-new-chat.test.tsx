@@ -4,9 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const harness = vi.hoisted(() => ({
     calls: [] as string[],
-    navigate: vi.fn(),
+    navigate: vi.fn<() => unknown>(),
     workspaceData: { current: null as { rootPath: string; name: string } | null },
-    apply: vi.fn(),
+    apply: vi.fn<() => unknown>(),
 }))
 
 vi.mock("@tanstack/react-query", () => ({
@@ -19,7 +19,7 @@ vi.mock("react-router-dom", () => ({
 
 vi.mock("@slab/core/workspace/bridge", () => ({
     WORKSPACE_STATE_QUERY_KEY: ["workspace-state"],
-    workspaceState: vi.fn(),
+    workspaceState: vi.fn<() => unknown>(),
 }))
 
 vi.mock("../use-workspace-switch", () => ({
@@ -116,7 +116,7 @@ describe("useAssistantNewChat", () => {
     })
 
     it("submit: creates the session, deep-links, switches, then stages the draft — in order", async () => {
-        const createSession = vi.fn(async () => {
+        const createSession = vi.fn<(options?: unknown) => Promise<{ id: string } | null>>(async () => {
             harness.calls.push("createSession")
             return { id: "s1" }
         })
@@ -151,7 +151,7 @@ describe("useAssistantNewChat", () => {
     })
 
     it("global submit still deep-links into the detail (no workspace switch)", async () => {
-        const createSession = vi.fn(async () => ({ id: "s2" }))
+        const createSession = vi.fn<(options?: unknown) => Promise<{ id: string } | null>>(async () => ({ id: "s2" }))
         await setup(createSession)
 
         await senderCapture.onSubmit("global hello", { files: [], effort: "low", permissionMode: "default" })
@@ -166,7 +166,7 @@ describe("useAssistantNewChat", () => {
 
     it("defaults to global even when a workspace is active (closing switch)", async () => {
         harness.workspaceData = { current: { rootPath: "C:\\old", name: "old" } }
-        const createSession = vi.fn(async () => ({ id: "s3" }))
+        const createSession = vi.fn<(options?: unknown) => Promise<{ id: string } | null>>(async () => ({ id: "s3" }))
         await setup(createSession)
         // The landing seeds the DEFAULT selection = 全局 (global), not the
         // active workspace — submitting switches to global chat.
@@ -186,7 +186,7 @@ describe("useAssistantNewChat", () => {
                 prompt: "Explain this code from src/app.ts",
             },
         })
-        const createSession = vi.fn(async () => ({ id: "s5" }))
+        const createSession = vi.fn<(options?: unknown) => Promise<{ id: string } | null>>(async () => ({ id: "s5" }))
 
         await setup(createSession)
 
@@ -199,7 +199,7 @@ describe("useAssistantNewChat", () => {
     })
 
     it("does not stage the draft when the workspace switch fails (nothing stranded)", async () => {
-        const createSession = vi.fn(async () => ({ id: "s4" }))
+        const createSession = vi.fn<(options?: unknown) => Promise<{ id: string } | null>>(async () => ({ id: "s4" }))
         harness.apply.mockRejectedValue(new Error("open failed"))
         const api = await setup(createSession)
         await api.select({ kind: "root", rootPath: "C:\\broken" })
@@ -209,7 +209,7 @@ describe("useAssistantNewChat", () => {
     })
 
     it("aborts when session creation fails (already toasted by the sessions hook)", async () => {
-        const createSession = vi.fn(async () => null)
+        const createSession = vi.fn<(options?: unknown) => Promise<{ id: string } | null>>(async () => null)
         await setup(createSession)
 
         await senderCapture.onSubmit("nope", { files: [], effort: "low", permissionMode: "default" })

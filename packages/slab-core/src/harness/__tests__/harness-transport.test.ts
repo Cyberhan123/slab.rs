@@ -21,7 +21,7 @@ function makeFakeClient(options: FakeClientOptions = {}) {
     liveResume: null as
       | { turnId: string; items: Array<Record<string, unknown>> }
       | null,
-    open: vi.fn(async () => {}),
+    open: vi.fn<() => unknown>(async () => {}),
     threadStart: vi.fn(async (): Promise<ThreadStartResult> => ({
       thread: { id: "hthread-1", preview: "", modelProvider: "", createdAt: 0, turns: [] },
       model: "slab-llama",
@@ -39,7 +39,7 @@ function makeFakeClient(options: FakeClientOptions = {}) {
       emit("turn/completed", { threadId: params.threadId, turn: { id: "0", items: [], status: "completed" } })
       return { turn: { id: "0", items: [], status: "inProgress" } }
     }),
-    turnInterrupt: vi.fn(async () => ({ status: "interrupting" })),
+    turnInterrupt: vi.fn<() => unknown>(async () => ({ status: "interrupting" })),
     /** Emit a notification to the currently-registered handler (test seam). */
     emitNotification: emit,
     onNotification(h: (n: JsonRpcNotification) => void) {
@@ -207,7 +207,7 @@ describe("HarnessChatTransport", () => {
   it("retries client.open with backoff before failing the stream", async () => {
     const fake = makeFakeClient({ currentThreadId: "hthread-1" })
     let failures = 0
-    fake.open = vi.fn(async () => {
+    fake.open = vi.fn<() => unknown>(async () => {
       failures += 1
       if (failures <= 2) throw new Error("socket not ready")
     })
@@ -243,10 +243,12 @@ describe("HarnessChatTransport", () => {
 
   it("no turn-started ack when turn/start rejects", async () => {
     const fake = makeFakeClient({ currentThreadId: "hthread-1" })
-    fake.turnStart = vi.fn(async () => {
-      throw new Error("model not found")
-    })
-    const started = vi.fn()
+    fake.turnStart = vi.fn<(params: TurnStartParams) => Promise<TurnStartResult>>(
+      async () => {
+        throw new Error("model not found")
+      },
+    )
+    const started = vi.fn<() => unknown>()
     const transport = new HarnessChatTransport({
       client: fake as unknown as HarnessClient,
       onLocalTurnStarted: started,

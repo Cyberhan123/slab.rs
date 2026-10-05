@@ -2,8 +2,8 @@ import react from "@vitejs/plugin-react";
 import { playwright } from "@vitest/browser-playwright";
 import { defineProject, mergeConfig } from "vitest/config";
 
-import { uiVitestResolve } from "./vitest.shared";
-import { vitestBase } from "../../vitest.base";
+import { uiVitestResolve } from "./vitest.shared.ts";
+import { vitestBase } from "../../vitest.base.ts";
 
 // Browser-mode unit tests (mirrors packages/slab-desktop/vitest.config.ts):
 // `render`/`renderHook` come from `vitest-browser-react`, which only works in

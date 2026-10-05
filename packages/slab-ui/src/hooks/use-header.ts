@@ -61,6 +61,11 @@ export function useHeader(registration?: UseHeaderRegistration | null) {
     setSelect,
   } = context;
 
+  // NOTE(oxlint): `registration` is intentionally not a dependency — the
+  // destructured fields in the dep array carry every value the effect reads,
+  // so object identity churn never re-runs it. oxlint's react-hooks plugin
+  // ignores inline eslint-disable directives for this rule; see the
+  // use-header.ts override in oxlint.config.ts.
   useLayoutEffect(() => {
     if (registration === undefined) {
       return undefined;

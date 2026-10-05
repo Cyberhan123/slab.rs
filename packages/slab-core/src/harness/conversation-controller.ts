@@ -776,11 +776,13 @@ export class ConversationController {
       for (let attempt = 1; attempt <= MAX_RESTORE_ATTEMPTS; attempt += 1) {
         if (!isCurrent()) return
         try {
+          // eslint-disable-next-line no-await-in-loop -- backoff retry: each attempt must observe the previous failure's delay
           await this.client.open()
           break
         } catch (openError) {
           if (!isCurrent()) return
           if (attempt === MAX_RESTORE_ATTEMPTS) throw openError
+          // eslint-disable-next-line no-await-in-loop -- the backoff sleep is the point of the loop
           await sleep(RESTORE_BACKOFF_MS * attempt)
         }
       }

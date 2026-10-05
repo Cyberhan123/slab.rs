@@ -310,8 +310,5 @@
     "react-router@>=6.0.0 <7.18.2": "7.18.2",
     "undici@<6.28.0": "6.28.0",
     "undici@>=7.0.0 <7.29.0": "7.29.0"
-  },
-  "dependencies": {
-    "markdown-it": "catalog:"
   }
 }
