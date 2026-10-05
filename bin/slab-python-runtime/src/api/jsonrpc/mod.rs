@@ -197,7 +197,11 @@ def run(params):\n\
         )
         .expect("parse response message");
         assert_eq!(response["id"], "1");
-        assert_eq!(response["result"], json!({ "result": { "value": 3 } }));
+        assert_eq!(
+            response["result"],
+            json!({ "result": { "value": 3 } }),
+            "full response: {response}"
+        );
 
         serve.await.expect("join").expect("serve");
     }
@@ -354,6 +358,10 @@ def run(params):\n\
 
         assert_eq!(ready["method"], "runtime.ready");
         assert_eq!(response["id"], 1);
-        assert_eq!(response["result"], json!({ "result": { "value": 3 } }));
+        assert_eq!(
+            response["result"],
+            json!({ "result": { "value": 3 } }),
+            "full response: {response}"
+        );
     }
 }
