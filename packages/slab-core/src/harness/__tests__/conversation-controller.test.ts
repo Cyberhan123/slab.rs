@@ -1821,6 +1821,66 @@ describe("ConversationController remount/orphan/live-text", () => {
     expect(controller.getState().liveTextByItemId.get("b1")?.text).toBe("fresh")
   })
 
+  it("turn/started clears the live-text mirror (tool-round text has no item/completed)", async () => {
+    const { controller, socket } = await restoredController()
+    // A tool-round iteration's agent-message text never receives an
+    // item/completed (only the FINAL answer emits one) — without a
+    // turn-boundary clear its mirror entry survives the whole run and, once
+    // the pane's own stream finishes, renders as a DUPLICATE tail bubble.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.ITEM_AGENT_MESSAGE_DELTA, {
+        threadId: "hthread-1",
+        turnId: "2",
+        itemId: "assistant-2",
+        delta: "hard denied",
+      }),
+    )
+    // Clear BEFORE the 16 ms coalescer flushes: the staged buffer must go
+    // with the committed mirror, and the pending flush timer must not
+    // resurrect the entry afterwards.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.TURN_STARTED, {
+        threadId: "hthread-1",
+        turnId: "3",
+        turn: { id: "3", status: "inProgress", items: [] },
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(controller.getState().liveTextByItemId.size).toBe(0)
+
+    // The clear is not sticky: the NEXT iteration's text mirrors normally.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.ITEM_AGENT_MESSAGE_DELTA, {
+        threadId: "hthread-1",
+        turnId: "3",
+        itemId: "assistant-3",
+        delta: "final",
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(controller.getState().liveTextByItemId.get("assistant-3")?.text).toBe("final")
+
+    // A turn/started for ANOTHER thread on the shared socket clears nothing.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.TURN_STARTED, {
+        threadId: "hthread-2",
+        turnId: "0",
+        turn: { id: "0", status: "inProgress", items: [] },
+      }),
+    )
+    expect(controller.getState().liveTextByItemId.get("assistant-3")?.text).toBe("final")
+
+    // The already-flushed case: a turn boundary landing after the coalescer.
+    socket.simMessage(
+      notification(HARNESS_NOTIFICATION.TURN_STARTED, {
+        threadId: "hthread-1",
+        turnId: "4",
+        turn: { id: "4", status: "inProgress", items: [] },
+      }),
+    )
+    expect(controller.getState().liveTextByItemId.size).toBe(0)
+  })
+
   it("an unexpected socket close schedules a recovery reconnect", async () => {
     const { controller, socket } = await restoredController()
     const socketBefore = socket

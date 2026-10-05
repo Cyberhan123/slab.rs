@@ -28,7 +28,7 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use slab_agent::{
     ToolRiskAssessment,
-    port::{AgentNotifyPort, ApprovalDecision, ApprovalPort, ThreadStatus},
+    port::{AgentNotifyPort, ApprovalDecision, ApprovalPort, QuestionnairePort, ThreadStatus},
     protocol::EventMsg,
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -75,6 +75,11 @@ fn is_persistence_grade(msg: &EventMsg) -> bool {
 /// How long (in seconds) to wait for an operator approval before auto-rejecting.
 const APPROVAL_TIMEOUT_SECS: u64 = 300;
 
+/// How long (in seconds) to wait for questionnaire answers before returning
+/// the timeout payload. Unlike approvals (auto-REJECT on timeout), a timeout
+/// here is a valid result the model reads and acts on.
+const QUESTIONNAIRE_TIMEOUT_SECS: u64 = 300;
+
 /// Shared state used by both the notify path and the HTTP handlers.
 #[derive(Clone, Default)]
 pub struct AgentEventHub {
@@ -86,6 +91,10 @@ pub struct AgentEventHub {
     /// VALUE carries the owning thread id for ownership verification and
     /// teardown clearing.
     approvals: Arc<DashMap<String, PendingApproval>>,
+    /// Pending questionnaire answers: `questionnaire:<call_id>` →
+    /// [`PendingQuestionnaire`]. Same key/ownership scheme as `approvals`
+    /// (call_id-scoped key, thread id in the value for ownership checks).
+    questionnaires: Arc<DashMap<String, PendingQuestionnaire>>,
     /// Per-thread DEDICATED UNBOUNDED persistence channel.
     /// Replaces the bounded broadcast for the rollout persistence observer so
     /// a flood of persistence-grade events CANNOT `Lagged`-drop conversation
@@ -453,6 +462,79 @@ impl AgentEventHub {
         cleared
     }
 
+    /// Deliver the user's answers to a pending questionnaire. Mirrors
+    /// [`Self::approve_call`]: the entry is matched by the questionnaire
+    /// correlation id (the notification `item_id` — the provider tool-call id
+    /// or the per-call UUID fallback) and ownership is verified against
+    /// `thread_id`, so a resolve routed to the wrong thread is refused without
+    /// consuming the entry. Returns `true` when the answers were delivered.
+    pub fn resolve_questionnaire(
+        &self,
+        thread_id: &str,
+        call_id: &str,
+        answers: &serde_json::Value,
+    ) -> bool {
+        let key = questionnaire_key(call_id);
+        // Ownership check BEFORE removal (same rationale as approve_call).
+        if let Some(entry) = self.questionnaires.get(&key)
+            && !entry.value().thread_id.is_empty()
+            && !thread_id.is_empty()
+            && entry.value().thread_id != thread_id
+        {
+            warn!(
+                call_id,
+                owner_thread = %entry.value().thread_id,
+                resolve_thread = %thread_id,
+                "questionnaire resolve routed to the wrong thread; refusing cross-thread delivery"
+            );
+            return false;
+        }
+        let Some((_, pending)) = self.questionnaires.remove(&key) else {
+            warn!(
+                call_id,
+                resolve_thread = %thread_id,
+                "questionnaire resolve found no pending entry (already resolved, timed out, or run ended)"
+            );
+            return false;
+        };
+        match pending.tx.send(answers.clone()) {
+            Ok(()) => true,
+            Err(_) => {
+                warn!(
+                    call_id,
+                    resolve_thread = %thread_id,
+                    "questionnaire resolve found a pending entry whose waiter is gone (turn cancelled?)"
+                );
+                false
+            }
+        }
+    }
+
+    /// Drop every pending questionnaire owned by `thread_id` (interrupt /
+    /// shutdown teardown). The dropped oneshot senders surface as `RecvError`
+    /// in `request_answers`, which answers with the timeout payload — though
+    /// on teardown the turn's cancellation select! usually wins the race.
+    /// Returns the number of entries cleared. Mirrors
+    /// [`Self::clear_pending_approvals`].
+    pub fn clear_pending_questionnaires(&self, thread_id: &str) -> usize {
+        let mut cleared = 0usize;
+        self.questionnaires.retain(|_key, pending| {
+            let keep = pending.thread_id != thread_id;
+            if !keep {
+                cleared += 1;
+            }
+            keep
+        });
+        if cleared > 0 {
+            debug!(
+                thread_id,
+                cleared,
+                "cleared pending questionnaires on teardown (dropped senders answer timeout)"
+            );
+        }
+        cleared
+    }
+
     fn broadcast_msg(&self, thread_id: &str, msg: EventMsg) {
         self.channel(thread_id).send_msg(msg);
     }
@@ -560,6 +642,40 @@ impl AgentEventHub {
 
 fn approval_key(call_id: &str) -> String {
     format!("approval:{call_id}")
+}
+
+fn questionnaire_key(call_id: &str) -> String {
+    format!("questionnaire:{call_id}")
+}
+
+/// Monotonic registration token for the questionnaire map — same role as
+/// [`NEXT_APPROVAL_REGISTRATION`] (a dropped `request_answers` future removes
+/// exactly its own entry even when the same call id was re-registered).
+static NEXT_QUESTIONNAIRE_REGISTRATION: AtomicU64 = AtomicU64::new(1);
+
+/// A pending questionnaire answer: the waiting thread's id (ownership checks +
+/// teardown clearing) plus the oneshot back to the turn loop.
+struct PendingQuestionnaire {
+    thread_id: String,
+    tx: oneshot::Sender<serde_json::Value>,
+    /// Token minted by this registration; paired with the entry guard.
+    registration: u64,
+}
+
+/// Removes the owning [`PendingQuestionnaire`] registration when the
+/// `request_answers` future is dropped mid-await — the questionnaire mirror of
+/// [`PendingEntryGuard`].
+struct PendingQuestionnaireGuard {
+    questionnaires: Arc<DashMap<String, PendingQuestionnaire>>,
+    key: String,
+    registration: u64,
+}
+
+impl Drop for PendingQuestionnaireGuard {
+    fn drop(&mut self) {
+        self.questionnaires
+            .remove_if(&self.key, |_, pending| pending.registration == self.registration);
+    }
 }
 
 /// Monotonic registration token so a dropped [`request_approval`] future can
@@ -693,6 +809,55 @@ impl ApprovalPort for AgentEventHub {
                     "approval request timed out after {APPROVAL_TIMEOUT_SECS}s; auto-rejecting"
                 );
                 ApprovalDecision::Rejected
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl QuestionnairePort for AgentEventHub {
+    async fn request_answers(
+        &self,
+        thread_id: &str,
+        call_id: &str,
+        _snapshot: serde_json::Value,
+    ) -> serde_json::Value {
+        let (tx, rx) = oneshot::channel();
+        let key = questionnaire_key(call_id);
+        let registration = NEXT_QUESTIONNAIRE_REGISTRATION.fetch_add(1, Ordering::Relaxed);
+        self.questionnaires.insert(
+            key.clone(),
+            PendingQuestionnaire { thread_id: thread_id.to_owned(), tx, registration },
+        );
+        // Owns the entry's cleanup on EVERY exit path — answers delivered,
+        // timeout, and drop-mid-await (turn cancelled at the select! boundary).
+        let _guard = PendingQuestionnaireGuard {
+            questionnaires: self.questionnaires.clone(),
+            key,
+            registration,
+        };
+
+        // A timeout is NOT an error here (unlike approvals): the model reads
+        // the payload's status/message and proceeds with its own judgment.
+        match tokio::time::timeout(std::time::Duration::from_secs(QUESTIONNAIRE_TIMEOUT_SECS), rx)
+            .await
+        {
+            Ok(Ok(answers)) => answers,
+            Ok(Err(_)) => {
+                warn!(
+                    call_id,
+                    thread_id,
+                    "questionnaire channel closed without answers; returning timeout payload"
+                );
+                slab_agent::questionnaire_timeout_payload()
+            }
+            Err(_elapsed) => {
+                warn!(
+                    call_id,
+                    thread_id,
+                    "questionnaire request timed out after {QUESTIONNAIRE_TIMEOUT_SECS}s"
+                );
+                slab_agent::questionnaire_timeout_payload()
             }
         }
     }
@@ -1166,5 +1331,121 @@ mod tests {
             .expect("second waiter resolved")
             .expect("waiter task ok");
         assert!(matches!(decision, slab_agent::port::ApprovalDecision::Approved(_)));
+    }
+
+    // ── pending-questionnaire ownership + teardown clearing ────────────────
+
+    use slab_agent::QuestionnairePort as _;
+
+    fn questionnaire_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "question": "Which DB?",
+            "choices": [{ "label": "SQLite", "value": "SQLite" }],
+            "allow_multiple": false,
+            "allow_custom_input": false,
+            "required": false
+        })
+    }
+
+    #[tokio::test]
+    async fn resolve_questionnaire_delivers_answers_and_refuses_cross_thread() {
+        let hub = AgentEventHub::new();
+        let waiter = {
+            let hub = hub.clone();
+            let snapshot = questionnaire_snapshot();
+            tokio::spawn(async move { hub.request_answers("t-owner", "q-1", snapshot).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        // Wrong thread → refused, entry survives for a correct retry.
+        assert!(!hub.resolve_questionnaire(
+            "t-other",
+            "q-1",
+            &serde_json::json!({"status": "answered", "selected": ["hax"]})
+        ));
+        let answers = serde_json::json!({
+            "status": "answered",
+            "selected": ["SQLite"],
+            "custom": null,
+        });
+        assert!(hub.resolve_questionnaire("t-owner", "q-1", &answers));
+        let received = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("waiter resolved")
+            .expect("waiter task ok");
+        assert_eq!(received["status"], "answered");
+        assert_eq!(received["selected"][0], "SQLite");
+
+        // A second resolve for the same call is a clean miss (already resolved).
+        assert!(!hub.resolve_questionnaire("t-owner", "q-1", &answers));
+    }
+
+    #[tokio::test]
+    async fn clear_pending_questionnaires_scopes_by_thread_and_answers_timeout() {
+        let hub = AgentEventHub::new();
+        let waiter_a = {
+            let hub = hub.clone();
+            let snapshot = questionnaire_snapshot();
+            tokio::spawn(async move { hub.request_answers("t-clear", "q-a", snapshot).await })
+        };
+        let waiter_b = {
+            let hub = hub.clone();
+            let snapshot = questionnaire_snapshot();
+            tokio::spawn(async move { hub.request_answers("t-keep", "q-b", snapshot).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        // Teardown clearing removes ONLY the thread's entry; the dropped sender
+        // resolves the still-listening waiter with the timeout payload.
+        assert_eq!(hub.clear_pending_questionnaires("t-clear"), 1);
+        let answered_a = tokio::time::timeout(std::time::Duration::from_secs(1), waiter_a)
+            .await
+            .expect("cleared waiter resolved promptly")
+            .expect("waiter task ok");
+        assert_eq!(answered_a["status"], "timeout");
+        assert_eq!(
+            answered_a["message"],
+            "user did not answer within 300s; proceed with your best judgment"
+        );
+
+        // The other thread's questionnaire is untouched and resolvable.
+        assert!(hub.resolve_questionnaire(
+            "t-keep",
+            "q-b",
+            &serde_json::json!({"status": "answered", "selected": [], "custom": "postgres"}),
+        ));
+        let answered_b = tokio::time::timeout(std::time::Duration::from_secs(1), waiter_b)
+            .await
+            .expect("kept waiter resolved")
+            .expect("waiter task ok");
+        assert_eq!(answered_b["status"], "answered");
+        assert_eq!(answered_b["custom"], "postgres");
+    }
+
+    // A `request_answers` future dropped mid-await must remove its own entry —
+    // the questionnaire mirror of the approval drop-guard contract.
+    #[tokio::test]
+    async fn cancelled_request_answers_removes_its_pending_entry() {
+        let hub = AgentEventHub::new();
+        let waiter = {
+            let hub = hub.clone();
+            let snapshot = questionnaire_snapshot();
+            tokio::spawn(async move { hub.request_answers("t-drop", "q-drop", snapshot).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(hub.questionnaires.contains_key("questionnaire:q-drop"));
+
+        waiter.abort();
+        let _ = waiter.await;
+
+        assert!(
+            !hub.questionnaires.contains_key("questionnaire:q-drop"),
+            "dropped request must remove its own pending entry"
+        );
+        assert!(!hub.resolve_questionnaire(
+            "t-drop",
+            "q-drop",
+            &serde_json::json!({"status": "answered", "selected": []})
+        ));
     }
 }

@@ -94,18 +94,16 @@ pub struct PermissionSnapshot {
 
 // ── Memory ────────────────────────────────────────────────────────────────────
 
-/// Read-side memory context for the memory fragment. `base_path` is the
-/// absolute per-project memory root and `memory_summary` the v1-gated,
-/// token-truncated `memory_summary.md` body; the context hook renders them
-/// through the bundled `memory` template into a `developer` message named
-/// `slab_memory`. `relevant_body` carries the recall-selected rollout
-/// summaries (when recall is enabled and produced a selection); it stays
-/// fully rendered by `slab-agent-memories` and is injected as a separate
-/// `slab_memory_relevant` developer message so each fragment refreshes
-/// independently by tag.
-#[derive(Debug, Clone, Serialize)]
+/// Read-side memory context: fully rendered developer-message bodies bridged
+/// from `slab-agent-memories`. The host renders both bodies completely so
+/// this crate carries no memory prompt text: `summary_body` is the whole
+/// `slab_memory` body (usage policy, workspace layout, the
+/// `<oai-mem-citation>` contract, update policy, and the wrapped
+/// MEMORY_SUMMARY), `relevant_body` the recall-selected `slab_memory_relevant`
+/// body when recall produced one. The context hook injects them verbatim
+/// under their stable tags so each fragment refreshes independently.
+#[derive(Debug, Clone)]
 pub struct MemoryContext {
-    pub base_path: String,
-    pub memory_summary: String,
+    pub summary_body: String,
     pub relevant_body: Option<String>,
 }

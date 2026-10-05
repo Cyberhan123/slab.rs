@@ -262,6 +262,60 @@ impl ApprovalReviewerPort for NoopApprovalReviewer {
     }
 }
 
+// ── Questionnaire ────────────────────────────────────────────────────────────
+
+/// Port that blocks the turn loop on user answers to a `questionnaire` call.
+///
+/// Unlike [`ApprovalPort`] (whose [`ApprovalDecision`] is a `Copy` enum), a
+/// questionnaire answer is arbitrary structured JSON (`{"status":"answered",
+/// "selected":[...],"custom":...}`), so it gets its own port. The turn loop
+/// awaits this AFTER emitting `EventMsg::QuestionnaireRequestAnswer`; the host
+/// implementation registers a pending entry keyed by the correlation id that
+/// `questionnaire/resolve` routes back to.
+#[async_trait]
+pub trait QuestionnairePort: Send + Sync {
+    /// Blocks until the host collects user answers. Returns structured JSON:
+    /// `{"status":"answered","selected":[...],"custom":...}` or a timeout
+    /// payload (`{"status":"timeout",...}`) the model reads and acts on.
+    async fn request_answers(
+        &self,
+        thread_id: &str,
+        call_id: &str,
+        snapshot: serde_json::Value,
+    ) -> serde_json::Value;
+}
+
+/// The timeout payload shape shared by [`NoopQuestionnaire`] and hosts that
+/// time out — kept here so every producer returns byte-identical JSON the
+/// model can rely on.
+pub fn questionnaire_timeout_payload() -> serde_json::Value {
+    serde_json::json!({
+        "status": "timeout",
+        "selected": [],
+        "custom": null,
+        "message": "user did not answer within 300s; proceed with your best judgment",
+    })
+}
+
+/// [`QuestionnairePort`] that answers immediately with the timeout payload —
+/// the default when no host questionnaire UI is wired (tests, bare control
+/// stacks). The model reads the timeout message and proceeds with its own
+/// judgment, so a questionnaire call degrades gracefully instead of hanging.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopQuestionnaire;
+
+#[async_trait]
+impl QuestionnairePort for NoopQuestionnaire {
+    async fn request_answers(
+        &self,
+        _thread_id: &str,
+        _call_id: &str,
+        _snapshot: serde_json::Value,
+    ) -> serde_json::Value {
+        questionnaire_timeout_payload()
+    }
+}
+
 // ── Port traits ──────────────────────────────────────────────────────────────
 
 /// Port for calling chat completions.
