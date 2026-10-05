@@ -1280,7 +1280,10 @@ mod tests {
         let root = tempfile::tempdir().expect("tempdir");
         fs::create_dir_all(root.path().join("src")).expect("src");
 
-        let view = WorkspaceService::validate_path(root.path(), "src\\new.rs")
+        // A backslash is only a path separator on Windows; on Unix it is a
+        // legal filename character, so the input stays platform-native here.
+        let input = if cfg!(windows) { "src\\new.rs" } else { "src/new.rs" };
+        let view = WorkspaceService::validate_path(root.path(), input)
             .expect("workspace path should validate");
 
         assert_eq!(view.relative_path, "src/new.rs");
