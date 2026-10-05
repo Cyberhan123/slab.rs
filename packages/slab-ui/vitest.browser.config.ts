@@ -2,8 +2,8 @@ import react from "@vitejs/plugin-react";
 import { playwright } from "@vitest/browser-playwright";
 import { defineProject, mergeConfig } from "vitest/config";
 
-import { uiVitestResolve } from "./vitest.shared";
-import { vitestBase } from "../../vitest.base";
+import { uiVitestResolve } from "./vitest.shared.ts";
+import { vitestBase } from "../../vitest.base.ts";
 
 // Dedicated screenshot/visual-regression project (mirrors
 // packages/slab-desktop/vitest.browser.config.ts). Port 64117 is NOT pinned

@@ -53,7 +53,7 @@ const {
 
 vi.mock('@slab/ui/hooks/use-header', () => ({
   useHeader: vi.fn<() => unknown>(() => ({
-    meta: { title: 'Settings', subtitle: 'Settings', icon: vi.fn(), contextLabel: null },
+    meta: { title: 'Settings', subtitle: 'Settings', icon: vi.fn<() => unknown>(), contextLabel: null },
     search: null,
     select: null,
   })),

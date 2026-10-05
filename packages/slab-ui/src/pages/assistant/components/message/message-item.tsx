@@ -29,6 +29,7 @@ import MessageToolFileGlobPart from "./message-tool-file-glob-part"
 import MessageToolGrepPart from "./message-tool-grep-part"
 import MessageToolListDirPart from "./message-tool-list-dir-part"
 import MessageToolPlanPart from "./message-tool-plan-part"
+import MessageToolQuestionnairePart from "./message-tool-questionnaire-part"
 import MessageToolReadFilePart from "./message-tool-read-file-part"
 import MessageToolSubagentPart from "./message-tool-subagent-part"
 
@@ -117,6 +118,7 @@ const messagePartComponents: MessagePartComponents<TMessagePart, TMessage> = {
         commandExecution: MessageToolCommandPart,
         fileChange: MessageToolFileChangePart,
         plan: MessageToolPlanPart,
+        questionnaire: MessageToolQuestionnairePart,
         read_file: MessageToolReadFilePart,
         list_dir: MessageToolListDirPart,
         file_glob: MessageToolFileGlobPart,
@@ -139,10 +141,10 @@ const messagePartComponents: MessagePartComponents<TMessagePart, TMessage> = {
  */
 const messagePartsCache = new WeakMap<object, unknown>()
 
-function memoizedCreateMessageParts<TMessage extends object>(message: TMessage): unknown {
+function memoizedCreateMessageParts<TMessageLike extends object>(message: TMessageLike): unknown {
     let cached = messagePartsCache.get(message)
     if (cached === undefined) {
-        cached = createMessageParts<TMessage>(message)
+        cached = createMessageParts<TMessageLike>(message)
         messagePartsCache.set(message, cached)
     }
     return cached

@@ -23,8 +23,9 @@ use crate::{
     config::{AgentConfig, AgentToolChoice},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, ApprovalReviewRequest,
-        ApprovalReviewerPort, LlmPort, LlmResponse, LlmUsage, ParsedToolCall, ReviewOutcome,
-        ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec, TurnStateRecord,
+        ApprovalReviewerPort, LlmPort, LlmResponse, LlmStreamObserver, LlmUsage, ParsedToolCall,
+        ReviewOutcome, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolSpec,
+        TurnStateRecord,
     },
     protocol::{EventMsg, TurnItem},
     risk::ToolRiskAnalyzer,
@@ -493,6 +494,7 @@ impl LlmPort for BudgetedToolCallLlm {
                 prompt_tokens: 3,
                 completion_tokens: 4,
                 total_tokens: 7,
+                cached_tokens: None,
                 estimated: false,
             }),
         })
@@ -965,6 +967,32 @@ impl RecordingNotify {
             .iter()
             .filter_map(|event| match event {
                 EventMsg::MessageAppended(p) if p.thread_id == thread_id => Some(p.message.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Agent-message item lifecycle for a thread, in emission order —
+    /// `"started"`, `"delta:<text>"`, `"completed:<text>"` — for asserting the
+    /// full announce-then-complete sequence (an orphan `completed` is dropped
+    /// by the frontend stream converter, losing the text).
+    fn agent_message_lifecycle(&self, thread_id: &str) -> Vec<String> {
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event {
+                EventMsg::ItemStarted(p) if p.thread_id == thread_id => match &p.item {
+                    TurnItem::AgentMessage { .. } => Some("started".to_owned()),
+                    _ => None,
+                },
+                EventMsg::AgentMessageDelta(p) if p.thread_id == thread_id => {
+                    Some(format!("delta:{}", p.delta))
+                }
+                EventMsg::ItemCompleted(p) if p.thread_id == thread_id => match &p.item {
+                    TurnItem::AgentMessage { text, .. } => Some(format!("completed:{text}")),
+                    _ => None,
+                },
                 _ => None,
             })
             .collect()
@@ -1804,6 +1832,234 @@ async fn present_plan_rejected_keeps_mutation_hidden() {
     }
 }
 
+// ── questionnaire user-answer gate ───────────────────────────────────────────
+
+/// Test-only `questionnaire` tool. The turn loop detects its name + metadata
+/// marker and drives the answer gate; this stub produces the snapshot shape
+/// the real tool (slab-agent-tools) emits.
+struct QuestionnaireStubTool;
+#[async_trait]
+impl TypedTool for QuestionnaireStubTool {
+    type Input = serde_json::Value;
+    fn name(&self) -> &str {
+        "questionnaire"
+    }
+    fn description(&self) -> &str {
+        "Ask the user a question (test stub)."
+    }
+    async fn execute(
+        &self,
+        _: &ToolContext,
+        _: serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        Ok(ToolOutput {
+            content: "questionnaire presented to the user; awaiting response".into(),
+            metadata: Some(serde_json::json!({
+                "questionnaire": {
+                    "question": "Which database?",
+                    "choices": [
+                        { "label": "SQLite", "value": "SQLite" },
+                        { "label": "Postgres", "value": "pg" }
+                    ],
+                    "allow_multiple": false,
+                    "allow_custom_input": true,
+                    "required": false
+                }
+            })),
+        })
+    }
+}
+
+struct QuestionnaireLlm {
+    call_count: Mutex<u32>,
+}
+
+impl QuestionnaireLlm {
+    fn new() -> Self {
+        Self { call_count: Mutex::new(0) }
+    }
+}
+
+#[async_trait]
+impl LlmPort for QuestionnaireLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut count = self.call_count.lock().unwrap();
+        *count += 1;
+        Ok(if *count == 1 {
+            LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "qq".into(),
+                    name: "questionnaire".into(),
+                    arguments: r#"{"question":"Which database?","choices":[{"label":"SQLite"},{"label":"Postgres","value":"pg"}]}"#.into(),
+                }],
+                finish_reason: Some("tool_calls".into()),
+                usage: None,
+            }
+        } else {
+            LlmResponse {
+                content: Some("done".into()),
+                content_already_streamed: false,
+                tool_calls: vec![],
+                finish_reason: Some("stop".into()),
+                usage: None,
+            }
+        })
+    }
+}
+
+/// Questionnaire port stub that answers immediately with a fixed payload and
+/// records the correlation ids it was asked under.
+struct AnsweringQuestionnaire {
+    payload: serde_json::Value,
+    call_ids: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl crate::QuestionnairePort for AnsweringQuestionnaire {
+    async fn request_answers(
+        &self,
+        _thread_id: &str,
+        call_id: &str,
+        _snapshot: serde_json::Value,
+    ) -> serde_json::Value {
+        self.call_ids.lock().unwrap().push(call_id.to_owned());
+        self.payload.clone()
+    }
+}
+
+/// Drive a turn through `questionnaire` → final, capturing the emitted events.
+async fn run_questionnaire_agent(
+    questionnaire: Arc<dyn crate::QuestionnairePort>,
+) -> (Arc<RecordingNotify>, String) {
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    router.register(Box::new(QuestionnaireStubTool));
+    let control = Arc::new(
+        AgentControl::new(
+            Arc::new(QuestionnaireLlm::new()),
+            store,
+            notify.clone(),
+            Arc::new(ApprovingApproval),
+            Arc::new(router),
+            8,
+            4,
+        )
+        .with_exec_policy(Arc::new(FullExposureExecPolicy))
+        .with_questionnaire(questionnaire),
+    );
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("which db?".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let thread_id = control
+        .spawn("session-questionnaire".into(), AgentConfig::default(), messages)
+        .await
+        .expect("spawn");
+    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            if matches!(
+                *status_rx.borrow(),
+                ThreadStatus::Completed
+                    | ThreadStatus::Errored
+                    | ThreadStatus::Shutdown
+                    | ThreadStatus::Interrupted
+            ) {
+                return;
+            }
+        }
+    })
+    .await;
+    (notify, thread_id)
+}
+
+#[tokio::test]
+async fn questionnaire_gate_notifies_and_feeds_answers_back() {
+    let answers = serde_json::json!({
+        "status": "answered",
+        "selected": ["SQLite"],
+        "custom": null,
+    });
+    let port = Arc::new(AnsweringQuestionnaire {
+        payload: answers.clone(),
+        call_ids: Mutex::new(Vec::new()),
+    });
+    let (notify, thread_id) = run_questionnaire_agent(port.clone()).await;
+
+    // The request-answer notification carries the snapshot (correlated on the
+    // provider tool-call id, same key the port was asked under).
+    let events = notify.events.lock().unwrap().clone();
+    let request = events
+        .iter()
+        .find_map(|event| match event {
+            EventMsg::QuestionnaireRequestAnswer(p) if p.thread_id == thread_id => Some(p.clone()),
+            _ => None,
+        })
+        .expect("QuestionnaireRequestAnswer emitted");
+    assert_eq!(request.question, "Which database?");
+    assert_eq!(request.turn_id, "0");
+    assert_eq!(request.choices.len(), 2);
+    assert_eq!(request.choices[1].value, "pg");
+    assert!(request.allow_custom_input);
+    assert!(!request.allow_multiple);
+    assert_eq!(port.call_ids.lock().unwrap().as_slice(), ["qq"]);
+
+    // The answers JSON flowed back to the LLM as the tool result.
+    let tool_result = notify
+        .emitted_messages(&thread_id)
+        .into_iter()
+        .find(|m| m.role == "tool")
+        .expect("tool result message recorded");
+    assert!(tool_result.rendered_text().contains("\"status\":\"answered\""));
+    assert!(tool_result.rendered_text().contains("SQLite"));
+}
+
+#[tokio::test]
+async fn questionnaire_timeout_is_a_completed_result_not_a_failure() {
+    // The Noop/timeout port shape: the model reads the timeout message and
+    // proceeds — the call must NOT be marked failed.
+    let port = Arc::new(AnsweringQuestionnaire {
+        payload: crate::questionnaire_timeout_payload(),
+        call_ids: Mutex::new(Vec::new()),
+    });
+    let (notify, thread_id) = run_questionnaire_agent(port).await;
+
+    let events = notify.events.lock().unwrap().clone();
+    let completed_item = events.iter().find_map(|event| match event {
+        EventMsg::ItemCompleted(p) if p.thread_id == thread_id => Some(p.item.clone()),
+        _ => None,
+    });
+    let Some(TurnItem::ToolCall { status, .. }) = completed_item else {
+        panic!("expected a ToolCall item for the questionnaire call");
+    };
+    assert_eq!(status, "completed", "a questionnaire timeout is a valid result");
+
+    let tool_result = notify
+        .emitted_messages(&thread_id)
+        .into_iter()
+        .find(|m| m.role == "tool")
+        .expect("tool result message recorded");
+    assert!(tool_result.rendered_text().contains("\"status\":\"timeout\""));
+    assert!(
+        tool_result.rendered_text().contains("proceed with your best judgment"),
+        "the timeout payload must tell the model how to proceed"
+    );
+}
+
 #[tokio::test]
 async fn trace_sink_records_prompt_llm_tool_and_turn_events() {
     let llm = Arc::new(MockLlm::new());
@@ -1872,6 +2128,130 @@ async fn trace_sink_records_prompt_llm_tool_and_turn_events() {
         .expect("tool output event");
     assert_eq!(tool_output.1.payload["tool_name"], "echo");
     assert_eq!(tool_output.1.payload["output"], "hello from agent");
+}
+
+// ── tool-round agent text must close its item (leak + restore-loss fix) ──────
+
+/// Two-round LLM: the FIRST response carries text AND a tool call (the
+/// "commentary between tool cards" shape); the second is the final answer.
+struct TextThenToolLlm {
+    call_count: Mutex<u32>,
+}
+
+impl TextThenToolLlm {
+    fn new() -> Self {
+        Self { call_count: Mutex::new(0) }
+    }
+}
+
+#[async_trait]
+impl LlmPort for TextThenToolLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut count = self.call_count.lock().unwrap();
+        *count += 1;
+        if *count == 1 {
+            Ok(LlmResponse {
+                content: Some("checking first".into()),
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "call-1".into(),
+                    name: "echo".into(),
+                    arguments: r#"{"message":"hi"}"#.into(),
+                }],
+                finish_reason: Some("tool_calls".into()),
+                usage: None,
+            })
+        } else {
+            Ok(LlmResponse {
+                content: Some("all done".into()),
+                content_already_streamed: false,
+                tool_calls: vec![],
+                finish_reason: Some("stop".into()),
+                usage: None,
+            })
+        }
+    }
+}
+
+#[tokio::test]
+async fn tool_round_text_closes_its_agent_message_item() {
+    // Regression (the assistant message-leak): a tool round's agent-message
+    // item used to stay open — only the FINAL answer emitted
+    // ItemCompleted(agentMessage). The open item leaked twice: the frontend
+    // live-text mirror (which deletes entries solely on item/completed)
+    // rendered it as a DUPLICATE tail bubble after the run, and the segment
+    // was never persisted as a TurnItem, so restored history dropped the
+    // commentary between tool cards.
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+    let control = Arc::new(
+        AgentControl::new(
+            Arc::new(TextThenToolLlm::new()),
+            store,
+            notify.clone(),
+            Arc::new(ApprovingApproval),
+            Arc::new(router),
+            8,
+            4,
+        )
+        .with_exec_policy(Arc::new(FullExposureExecPolicy)),
+    );
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("run it".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let thread_id = control
+        .spawn("session-tool-round-text".into(), AgentConfig::default(), messages)
+        .await
+        .expect("spawn");
+    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            if matches!(
+                *status_rx.borrow(),
+                ThreadStatus::Completed
+                    | ThreadStatus::Errored
+                    | ThreadStatus::Shutdown
+                    | ThreadStatus::Interrupted
+            ) {
+                return;
+            }
+        }
+    })
+    .await;
+
+    let events = notify.events.lock().unwrap().clone();
+    let agent_items: Vec<(String, String)> = events
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::ItemCompleted(p) if p.thread_id == thread_id => match &p.item {
+                TurnItem::AgentMessage { id, text } => Some((id.clone(), text.clone())),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        agent_items,
+        vec![
+            ("assistant-0".to_owned(), "checking first".to_owned()),
+            ("assistant-1".to_owned(), "all done".to_owned()),
+        ],
+        "the tool round's text must close as its own completed item; events: {events:#?}"
+    );
 }
 
 fn assert_trace_event(events: &[(AgentTraceContext, AgentTraceEvent)], event_name: &str) {
@@ -3952,6 +4332,132 @@ async fn task_complete_finalizes_run_on_success() {
             _ => None,
         });
     assert_eq!(final_text.as_deref(), Some("shipped it"));
+
+    // The summary must go out as a full item lifecycle: the model emitted no
+    // body text alongside the tool call, so without the started/delta pair the
+    // frontend drops the orphan `item/completed` and the final answer never
+    // renders.
+    assert_eq!(
+        notify.agent_message_lifecycle(&thread_id),
+        vec![
+            "started".to_owned(),
+            "delta:shipped it".to_owned(),
+            "completed:shipped it".to_owned(),
+        ],
+    );
+}
+
+/// LLM double that answers immediately with a final text answer. Overrides
+/// `chat_completion_streaming` so the default non-streaming shim (which would
+/// forward the text as one delta and force `content_already_streamed = true`)
+/// stays out of the way: `already_streamed = true` announces the text through
+/// the observer like a real streaming adapter; `false` returns it unannounced.
+struct FinalPathLlm {
+    already_streamed: bool,
+}
+
+#[async_trait]
+impl LlmPort for FinalPathLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        Ok(LlmResponse {
+            content: Some("final answer".into()),
+            content_already_streamed: self.already_streamed,
+            tool_calls: vec![],
+            finish_reason: Some("stop".into()),
+            usage: None,
+        })
+    }
+
+    async fn chat_completion_streaming(
+        &self,
+        model: &str,
+        messages: &[ConversationMessage],
+        tools: &[ToolSpec],
+        config: &AgentConfig,
+        trace_context: &AgentTraceContext,
+        observer: &mut dyn LlmStreamObserver,
+    ) -> Result<LlmResponse, AgentError> {
+        let response = self.chat_completion(model, messages, tools, config, trace_context).await?;
+        if self.already_streamed {
+            observer.on_text_delta(response.content.as_deref().unwrap_or_default()).await?;
+        }
+        Ok(response)
+    }
+}
+
+async fn run_final_path_agent(llm: Arc<FinalPathLlm>) -> (Arc<RecordingNotify>, String) {
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    let approval = Arc::clone(&Arc::new(NoopNotify));
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
+    let config = AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-final-answer".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("answer directly".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+    (notify, thread_id)
+}
+
+#[tokio::test]
+async fn final_answer_already_streamed_does_not_reannounce_item() {
+    // The streaming observer announced the text live (started + delta), so
+    // `persist_final_answer` must only close the item — a second started/delta
+    // pair would render the final answer twice.
+    let (notify, thread_id) =
+        run_final_path_agent(Arc::new(FinalPathLlm { already_streamed: true })).await;
+    assert_eq!(
+        notify.agent_message_lifecycle(&thread_id),
+        vec![
+            "started".to_owned(),
+            "delta:final answer".to_owned(),
+            "completed:final answer".to_owned(),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn final_answer_unstreamed_text_is_announced_before_completion() {
+    // The stream produced no text deltas (flag false), so the completion must
+    // be preceded by the synthesized started/delta pair — otherwise the
+    // frontend drops the orphan completed and the final answer never renders.
+    let (notify, thread_id) =
+        run_final_path_agent(Arc::new(FinalPathLlm { already_streamed: false })).await;
+    assert_eq!(
+        notify.agent_message_lifecycle(&thread_id),
+        vec![
+            "started".to_owned(),
+            "delta:final answer".to_owned(),
+            "completed:final answer".to_owned(),
+        ],
+    );
 }
 
 /// Tool double that seeds the durable plan store (stands in for `update_plan`)
@@ -5401,6 +5907,7 @@ impl LlmPort for BudgetExhaustingToolCallLlm {
                 prompt_tokens: 60,
                 completion_tokens: 40,
                 total_tokens: 100,
+                cached_tokens: None,
                 estimated: false,
             }),
         })
@@ -6578,6 +7085,7 @@ impl LlmPort for OneToolCallWithUsageLlm {
                     prompt_tokens: 130,
                     completion_tokens: 5,
                     total_tokens: 135,
+                    cached_tokens: None,
                     estimated: false,
                 }),
             });
@@ -6595,6 +7103,7 @@ impl LlmPort for OneToolCallWithUsageLlm {
                 prompt_tokens: 100,
                 completion_tokens: 20,
                 total_tokens: 120,
+                cached_tokens: None,
                 estimated: false,
             }),
         })

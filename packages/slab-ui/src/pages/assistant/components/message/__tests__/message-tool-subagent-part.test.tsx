@@ -2,7 +2,10 @@ import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { render } from "vitest-browser-react"
 
-import { MessageInteractionContext } from "../../message-interaction-context"
+import {
+  MessageInteractionContext,
+  type MessageInteractionValue,
+} from "../../message-interaction-context"
 import type { SubagentChildItem, SubagentTaskInfo } from "@slab/core/harness"
 import type { ToolPartLike } from "../message-tool-part"
 import MessageToolSubagentPart from "../message-tool-subagent-part"
@@ -35,7 +38,7 @@ async function renderPart(
   childItems?: readonly SubagentChildItem[],
   name = "delegate_subagent",
 ) {
-  const interactionValue = {
+  const interactionValue: MessageInteractionValue = {
     approvalStatusByItemId: new Map(),
     userMessageTurnIndex: new Map(),
     rollbackToMessage: undefined,
@@ -44,18 +47,25 @@ async function renderPart(
     // activity to that id like the controller state would.
     subagentChildItemsByChildId: childItems ? new Map([["c1", childItems]]) : new Map(),
   }
+  // The context value is BUILT here and passed as a parameter: constructing it
+  // in the JSX-owning scope trips react(jsx-no-constructed-context-values).
+  return renderWithInteraction(
+    <MessageToolSubagentPart
+      part={part as ToolPartLike}
+      item={{} as never}
+      message={{} as never}
+      index={0}
+      kind="tool"
+      name={name}
+      toolCallId="call-1"
+    />,
+    interactionValue,
+  )
+}
+
+function renderWithInteraction(ui: ReactNode, value: MessageInteractionValue) {
   return render(
-    <MessageInteractionContext.Provider value={interactionValue}>
-      <MessageToolSubagentPart
-        part={part as ToolPartLike}
-        item={{} as never}
-        message={{} as never}
-        index={0}
-        kind="tool"
-        name={name}
-        toolCallId="call-1"
-      />
-    </MessageInteractionContext.Provider>,
+    <MessageInteractionContext.Provider value={value}>{ui}</MessageInteractionContext.Provider>,
   )
 }
 

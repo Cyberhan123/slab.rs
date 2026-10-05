@@ -100,9 +100,9 @@ class SettingsSubsectionView:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                i18n_type_1 = I18NPayload.from_dict(data)
+                i18n_type_0 = I18NPayload.from_dict(data)
 
-                return i18n_type_1
+                return i18n_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(I18NPayload | None | Unset, data)

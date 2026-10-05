@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const platform = vi.hoisted(() => ({
     desktop: true,
-    pickFolder: vi.fn(),
+    pickFolder: vi.fn<() => unknown>(),
 }))
 
 const storeState = vi.hoisted(() => ({
@@ -36,7 +36,7 @@ import { WorkspaceSelector } from "../workspace-selector"
 function baseProps(overrides: Record<string, unknown> = {}) {
     return {
         value: { kind: "global" as const },
-        onValueChange: vi.fn(),
+        onValueChange: vi.fn<() => unknown>(),
         currentWorkspace: null,
         ...overrides,
     }
@@ -53,7 +53,7 @@ describe("WorkspaceSelector", () => {
     })
 
     it("always offers the global option, even with an active workspace", async () => {
-        const onValueChange = vi.fn()
+        const onValueChange = vi.fn<() => unknown>()
         const screen = await render(
             <WorkspaceSelector
                 {...baseProps({
@@ -93,7 +93,7 @@ describe("WorkspaceSelector", () => {
     })
 
     it("emits a root selection with name for a recent workspace", async () => {
-        const onValueChange = vi.fn()
+        const onValueChange = vi.fn<() => unknown>()
         const screen = await render(<WorkspaceSelector {...baseProps({ onValueChange })} />)
         await openDropdown(screen)
 
@@ -107,7 +107,7 @@ describe("WorkspaceSelector", () => {
 
     it("picks a folder through the native dialog when on desktop", async () => {
         platform.pickFolder.mockResolvedValue("C:\\picked")
-        const onValueChange = vi.fn()
+        const onValueChange = vi.fn<() => unknown>()
         const screen = await render(<WorkspaceSelector {...baseProps({ onValueChange })} />)
         await openDropdown(screen)
 

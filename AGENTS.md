@@ -108,6 +108,8 @@ bun run dev:mobile
 
 `gen:mobile` regenerates the mobile token/locale assets and needs only Bun. The other mobile scripts wrap the Flutter SDK inside `flutter/slab-mobile` (see `flutter/slab-mobile/README.md`). `dev`/`dev:desktop` run the Tauri desktop stack (Tauri spawns `slab-server` itself); `dev:server` runs the headless server standalone; `dev:mobile` runs that server plus `flutter run`.
 
+Frontend-testing gotcha (vitest 5): `getByText` / `toHaveTextContent` match the element's whole normalized text only — use the full string, a testid, `container.textContent`, or `toMatchTextContent` for substring assertions. See "Testing Conventions" in `packages/slab-ui/README.md`.
+
 ## Reference Map
 
 Start with the nearest local README for the code you are changing.

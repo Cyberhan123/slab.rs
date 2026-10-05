@@ -81,11 +81,13 @@ export function useVoiceInput({ onTranscript }: UseVoiceInputOptions) {
 /** Poll the transcription task until it reaches a terminal state. */
 async function pollTranscript(operationId: string): Promise<string | null> {
   for (let i = 0; i < MAX_POLL_ATTEMPTS; i += 1) {
+    // eslint-disable-next-line no-await-in-loop -- task polling: each probe waits for the interval since the last
     const task = await getAudioTranscription(operationId)
     if (task.status !== "pending" && task.status !== "running") {
       if (task.status === "succeeded") return task.transcript_text?.trim() || null
       return null
     }
+    // eslint-disable-next-line no-await-in-loop -- the poll sleep is the point of the loop
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
   }
   return null

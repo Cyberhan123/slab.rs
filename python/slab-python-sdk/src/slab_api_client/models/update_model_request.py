@@ -175,9 +175,9 @@ class UpdateModelRequest:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                kind_type_1 = ModelKind(data)
+                kind_type_0 = ModelKind(data)
 
-                return kind_type_1
+                return kind_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ModelKind | None | Unset, data)
@@ -194,9 +194,9 @@ class UpdateModelRequest:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                runtime_presets_type_1 = RuntimePresetsRequest.from_dict(data)
+                runtime_presets_type_0 = RuntimePresetsRequest.from_dict(data)
 
-                return runtime_presets_type_1
+                return runtime_presets_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | RuntimePresetsRequest | Unset, data)
@@ -211,9 +211,9 @@ class UpdateModelRequest:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                spec_type_1 = ModelSpecRequest.from_dict(data)
+                spec_type_0 = ModelSpecRequest.from_dict(data)
 
-                return spec_type_1
+                return spec_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ModelSpecRequest | None | Unset, data)

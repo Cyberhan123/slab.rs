@@ -8,7 +8,7 @@ import { Markdown } from "../message/markdown"
 // the test stays focused on the wrapper's prop logic (defaults, className merge,
 // streaming-mode override) instead of Streamdown's HTML output.
 vi.mock("streamdown", () => ({
-  Streamdown: vi.fn((_props: unknown) => null),
+  Streamdown: vi.fn<(props: unknown) => unknown>((_props: unknown) => null),
 }))
 
 const MockStreamdown = vi.mocked(Streamdown)

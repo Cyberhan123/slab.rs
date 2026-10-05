@@ -332,9 +332,9 @@ class ChatCompletionRequest:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                reasoning_effort_type_1 = ChatReasoningEffort(data)
+                reasoning_effort_type_0 = ChatReasoningEffort(data)
 
-                return reasoning_effort_type_1
+                return reasoning_effort_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ChatReasoningEffort | None | Unset, data)
@@ -360,9 +360,9 @@ class ChatCompletionRequest:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                response_format_type_1 = ChatResponseFormat.from_dict(data)
+                response_format_type_0 = ChatResponseFormat.from_dict(data)
 
-                return response_format_type_1
+                return response_format_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ChatResponseFormat | None | Unset, data)
@@ -396,9 +396,9 @@ class ChatCompletionRequest:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                stream_options_type_1 = ChatStreamOptions.from_dict(data)
+                stream_options_type_0 = ChatStreamOptions.from_dict(data)
 
-                return stream_options_type_1
+                return stream_options_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ChatStreamOptions | None | Unset, data)
@@ -422,9 +422,9 @@ class ChatCompletionRequest:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                thinking_type_1 = ChatThinkingConfig.from_dict(data)
+                thinking_type_0 = ChatThinkingConfig.from_dict(data)
 
-                return thinking_type_1
+                return thinking_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ChatThinkingConfig | None | Unset, data)
@@ -457,9 +457,9 @@ class ChatCompletionRequest:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                verbosity_type_1 = ChatVerbosity(data)
+                verbosity_type_0 = ChatVerbosity(data)
 
-                return verbosity_type_1
+                return verbosity_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ChatVerbosity | None | Unset, data)

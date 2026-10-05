@@ -27,9 +27,9 @@ function setPlatformDesktop(desktop: boolean) {
 describe("OpenWorkspaceButton", () => {
   it("renders only the folder button in Tauri and opens the native dialog", async () => {
     setPlatformDesktop(true)
-    const onOpenFolder = vi.fn()
+    const onOpenFolder = vi.fn<() => void | Promise<void>>()
     const screen = await render(
-      <OpenWorkspaceButton onOpenFolder={onOpenFolder} onOpenWorkspacePath={vi.fn()} />,
+      <OpenWorkspaceButton onOpenFolder={onOpenFolder} onOpenWorkspacePath={vi.fn<(rootPath: string) => void | Promise<void>>()} />,
     )
 
     // No duplicate always-visible path form in the Tauri shell.
@@ -44,7 +44,7 @@ describe("OpenWorkspaceButton", () => {
     setPlatformDesktop(false)
     const onOpenWorkspacePath = vi.fn<(rootPath: string) => Promise<void>>()
     const screen = await render(
-      <OpenWorkspaceButton onOpenFolder={vi.fn()} onOpenWorkspacePath={onOpenWorkspacePath} />,
+      <OpenWorkspaceButton onOpenFolder={vi.fn<() => void | Promise<void>>()} onOpenWorkspacePath={onOpenWorkspacePath} />,
     )
 
     // Path input is hidden until the single folder button is clicked.

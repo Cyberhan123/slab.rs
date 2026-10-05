@@ -86,9 +86,9 @@ class GpuLedgerDeviceResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                gauge_type_1 = GpuLedgerGaugeResponse.from_dict(data)
+                gauge_type_0 = GpuLedgerGaugeResponse.from_dict(data)
 
-                return gauge_type_1
+                return gauge_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(GpuLedgerGaugeResponse | None | Unset, data)

@@ -14,7 +14,7 @@ describe('SliderField', () => {
       <SliderField
         label="Size"
         value={512}
-        slider={<input data-testid="slider" aria-label="slider" type="range" onChange={vi.fn()} />}
+        slider={<input data-testid="slider" aria-label="slider" type="range" onChange={vi.fn<() => unknown>()} />}
       />,
     );
 

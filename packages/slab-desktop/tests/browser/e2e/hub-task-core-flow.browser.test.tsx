@@ -184,7 +184,7 @@ describe('hub and task core flows e2e', () => {
 
     await page.getByTestId('task-details-open-task-running-1').click();
     await expect.element(page.getByTestId('task-details-task-running-1')).toBeVisible();
-    await expect.element(page.getByTestId('task-details-task-running-1')).toHaveTextContent(
+    await expect.element(page.getByTestId('task-details-task-running-1')).toMatchTextContent(
       'task-running-1',
     );
     expect(mockFetchTaskDetail).toHaveBeenCalledWith('task-running-1');

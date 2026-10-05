@@ -16,11 +16,15 @@ export type WorkspaceSelection =
   | { kind: "root"; rootPath: string; name?: string }
   | { kind: "global" }
 
+/** Normalize a root path for comparison: forward slashes, no trailing slash, lowercase. */
+function normalizeRootPath(value: string) {
+  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
+}
+
 /** Loose root-path equality (case-insensitive, separator-normalized). */
 export function isSameRoot(left: string | null | undefined, right: string | null | undefined) {
   if (!left || !right) return false
-  const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
-  return normalize(left) === normalize(right)
+  return normalizeRootPath(left) === normalizeRootPath(right)
 }
 
 function getErrorMessage(error: unknown): string {

@@ -127,6 +127,7 @@ export function useAssistantNewChat({
                 setSubmitting(false)
             }
         },
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- applyWorkspace IS referenced below; the compiler mis-proves it stable (it recaptures `t`/queryClient on language change)
         [applyWorkspace, createSession, currentRoot, navigate, setDraft],
     )
 

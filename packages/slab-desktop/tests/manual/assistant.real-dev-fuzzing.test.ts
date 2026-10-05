@@ -113,7 +113,9 @@ let primarySession: SessionResponse
 let workspaceRootPath = ""
 let workspaceMarkerRoot = ""
 
-describe.sequential("assistant real-dev e2e fuzzing", () => {
+// Tests within this suite build on each other and rely on default sequential
+// execution (describe.sequential was removed in vitest 5).
+describe("assistant real-dev e2e fuzzing", () => {
   beforeAll(async () => {
     marker = `slab-e2e-fuzzing-${Date.now()}`
     workspaceMarkerRoot = `.slab-e2e-fuzzing/${marker}`

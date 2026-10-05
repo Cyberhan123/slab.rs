@@ -75,6 +75,25 @@ function SelectRegistration({ value }: { value: string }) {
   return null;
 }
 
+function DisabledHistoryRegistration() {
+  useHeader({
+    history: {
+      ...historyConfig,
+      disabled: true,
+    },
+  });
+
+  return null;
+}
+
+function StableHistoryRegistration({ value }: { value: string }) {
+  useHeader({
+    history: historyConfig,
+  });
+
+  return <span data-testid="stable-value">{value}</span>;
+}
+
 const HeaderRenderProbe = memo(function HeaderRenderProbe({
   onRender,
 }: {
@@ -179,17 +198,6 @@ describe('useHeader', () => {
   it('disables registered history actions while preserving the control', async () => {
     onHistoryClick.mockClear();
 
-    function DisabledHistoryRegistration() {
-      useHeader({
-        history: {
-          ...historyConfig,
-          disabled: true,
-        },
-      });
-
-      return null;
-    }
-
     const screen = await render(
       withSlabPorts(
         <HeaderProvider>
@@ -235,14 +243,6 @@ describe('useHeader', () => {
 
   it('does not republish equivalent history registrations', async () => {
     const onRender = vi.fn<(history: HeaderHistoryConfig | null) => void>();
-
-    function StableHistoryRegistration({ value }: { value: string }) {
-      useHeader({
-        history: historyConfig,
-      });
-
-      return <span data-testid="stable-value">{value}</span>;
-    }
 
     const screen = await render(
       <HeaderProvider>

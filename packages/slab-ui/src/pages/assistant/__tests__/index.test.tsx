@@ -16,6 +16,7 @@ import { createTestSlabPorts } from "@slab/ui/provider/test-ports"
 
 const mocks = vi.hoisted(() => {
   let currentMessages: UIMessage[] = []
+  // eslint-disable-next-line unicorn/consistent-function-scoping -- vi.hoisted factories must be self-contained (no outer references)
   const translate = (key: string, values?: Record<string, unknown>) =>
     values ? `${key} ${Object.values(values).join(" ")}` : key
   const conversationList = [
@@ -58,6 +59,7 @@ const mocks = vi.hoisted(() => {
     transport: {},
     approvals: [] as ConversationState["approvals"],
     approvalStatusByItemId: new Map<string, "pending" | "approved" | "denied">(),
+    questionnaires: [] as ConversationState["questionnaires"],
     liveOutputByItemId: new Map<string, string>(),
     livePatchByItemId: new Map<string, string[]>(),
     modelLoad: null,
@@ -100,6 +102,12 @@ const mocks = vi.hoisted(() => {
     resolveApproval: vi.fn<
       (itemId: string, approved: boolean, scope: "run_once" | "always_in_workspace" | "always" | "deny") => Promise<void>
     >(),
+    resolveQuestionnaire: vi.fn<
+      (
+        itemId: string,
+        answers: { selected: string[]; custom: string | null; skipped?: boolean },
+      ) => Promise<void>
+    >(),
   }
 
   return {
@@ -116,13 +124,13 @@ const mocks = vi.hoisted(() => {
     deleteSession: vi.fn<() => Promise<boolean>>(),
     ensureDownloaded: vi.fn<() => Promise<{ downloadedNow: boolean }>>(),
     ensureLoaded: vi.fn<() => Promise<{ runtimeStatus: null }>>(),
-    sendMessage: vi.fn(),
-    stop: vi.fn(),
+    sendMessage: vi.fn<() => unknown>(),
+    stop: vi.fn<() => unknown>(),
     models,
-    setCurrentSessionId: vi.fn(),
-    setSelectedModelId: vi.fn(),
-    toastInfo: vi.fn(),
-    toastError: vi.fn(),
+    setCurrentSessionId: vi.fn<() => unknown>(),
+    setSelectedModelId: vi.fn<() => unknown>(),
+    toastInfo: vi.fn<() => unknown>(),
+    toastError: vi.fn<() => unknown>(),
     translate,
     harnessConversation,
     updateSessionLabel: vi.fn<() => Promise<boolean>>(),
@@ -130,7 +138,7 @@ const mocks = vi.hoisted(() => {
 })
 
 vi.mock("@ai-sdk/react", () => ({
-  useChat: vi.fn(({ messages = [] }: { messages?: UIMessage[] }) => {
+  useChat: vi.fn<(options: { messages?: UIMessage[] }) => unknown>(({ messages = [] }: { messages?: UIMessage[] }) => {
     mocks.currentMessagesRef.value = messages
 
     return {
@@ -148,7 +156,7 @@ vi.mock("@ai-sdk/react", () => ({
 export const conversationStateDriftGuard: ConversationState = mocks.harnessConversation
 
 vi.mock("../hooks/use-harness-conversation", () => ({
-  useHarnessConversation: vi.fn(() => mocks.harnessConversation),
+  useHarnessConversation: vi.fn<() => unknown>(() => mocks.harnessConversation),
 }))
 
 vi.mock("@slab/i18n", () => ({
@@ -173,8 +181,8 @@ vi.mock("sonner", () => ({
   toast: {
     error: mocks.toastError,
     info: mocks.toastInfo,
-    message: vi.fn(),
-    success: vi.fn(),
+    message: vi.fn<() => unknown>(),
+    success: vi.fn<() => unknown>(),
   },
 }))
 
@@ -188,7 +196,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
     ...actual,
     useQuery: () => ({ data: { current: null } }),
     useQueryClient: () => ({
-      setQueryData: vi.fn(),
+      setQueryData: vi.fn<() => unknown>(),
       invalidateQueries: async () => undefined,
     }),
   }
@@ -306,7 +314,7 @@ vi.mock("@slab/components/dropdown-menu", () => ({
 }))
 
 vi.mock("@slab/ui/hooks/use-ai-model", () => ({
-  useAiModel: vi.fn(() => ({
+  useAiModel: vi.fn<() => unknown>(() => ({
     ensureDownloaded: mocks.ensureDownloaded,
     ensureLoaded: mocks.ensureLoaded,
     loading: false,
@@ -319,7 +327,7 @@ vi.mock("@slab/ui/hooks/use-ai-model", () => ({
 }))
 
 vi.mock("../hooks/use-assistant-sessions", () => ({
-  useAssistantSessions: vi.fn(() => ({
+  useAssistantSessions: vi.fn<() => unknown>(() => ({
     conversationList: mocks.conversationList,
     createSession: mocks.createSession,
     currentSessionId: "session-a",

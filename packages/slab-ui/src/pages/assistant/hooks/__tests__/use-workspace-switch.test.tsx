@@ -2,12 +2,12 @@ import { renderHook } from "vitest-browser-react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const harness = vi.hoisted(() => ({
-    open: vi.fn(),
-    close: vi.fn(),
-    setQueryData: vi.fn(),
-    invalidateQueries: vi.fn().mockResolvedValue(undefined),
-    remember: vi.fn(),
-    toast: { success: vi.fn(), error: vi.fn() },
+    open: vi.fn<() => unknown>(),
+    close: vi.fn<() => unknown>(),
+    setQueryData: vi.fn<() => unknown>(),
+    invalidateQueries: vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+    remember: vi.fn<() => unknown>(),
+    toast: { success: vi.fn<() => unknown>(), error: vi.fn<() => unknown>() },
 }))
 
 vi.mock("@tanstack/react-query", () => ({

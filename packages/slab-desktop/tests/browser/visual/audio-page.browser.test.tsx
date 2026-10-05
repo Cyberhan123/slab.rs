@@ -15,7 +15,7 @@ vi.mock('@slab/ui/pages/audio/hooks/use-audio', () => ({
 
 vi.mock('@slab/ui/hooks/use-header', () => ({
   useHeader: vi.fn<() => unknown>(() => ({
-    meta: { title: 'Audio', subtitle: 'Audio', icon: vi.fn(), contextLabel: null },
+    meta: { title: 'Audio', subtitle: 'Audio', icon: vi.fn<() => unknown>(), contextLabel: null },
     search: null,
     select: null,
   })),

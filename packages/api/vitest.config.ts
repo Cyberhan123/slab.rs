@@ -1,6 +1,6 @@
 import { defineProject, mergeConfig } from "vitest/config";
 
-import { vitestBase } from "../../vitest.base";
+import { vitestBase } from "../../vitest.base.ts";
 
 export default defineProject(
   mergeConfig(vitestBase, {

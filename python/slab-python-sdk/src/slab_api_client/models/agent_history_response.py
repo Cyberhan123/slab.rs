@@ -96,9 +96,9 @@ class AgentHistoryResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                thread_type_1 = AgentThreadResponse.from_dict(data)
+                thread_type_0 = AgentThreadResponse.from_dict(data)
 
-                return thread_type_1
+                return thread_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(AgentThreadResponse | None | Unset, data)

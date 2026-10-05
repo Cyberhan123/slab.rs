@@ -18,6 +18,7 @@ import { renderDesktopScene } from '../test-utils';
  */
 
 const mocks = vi.hoisted(() => {
+  // eslint-disable-next-line unicorn/consistent-function-scoping -- vi.hoisted factories must be self-contained (no outer references)
   const translate = (key: string) => key;
   const harnessConversation = {
     activeConversation: 'session-a' as string | undefined,
@@ -66,8 +67,12 @@ const mocks = vi.hoisted(() => {
     userMessageTurnIndex: new Map<string, number>(),
     approvals: [] as ConversationState["approvals"],
     approvalStatusByItemId: new Map<string, 'pending' | 'approved' | 'denied'>(),
+    questionnaires: [] as ConversationState["questionnaires"],
     resolveApproval: vi.fn<
       (itemId: string, approved: boolean, scope: 'run_once' | 'always_in_workspace' | 'always' | 'deny') => Promise<void>
+    >(),
+    resolveQuestionnaire: vi.fn<
+      (itemId: string, answers: { selected: string[]; custom: string | null; skipped?: boolean }) => Promise<void>
     >(),
   };
   return {
@@ -85,16 +90,16 @@ const mocks = vi.hoisted(() => {
         status: 'ready',
       },
     ],
-    sendMessage: vi.fn(),
-    stop: vi.fn(),
-    setSelectedModelId: vi.fn(),
-    setCurrentSessionId: vi.fn(),
+    sendMessage: vi.fn<() => unknown>(),
+    stop: vi.fn<() => unknown>(),
+    setSelectedModelId: vi.fn<() => unknown>(),
+    setCurrentSessionId: vi.fn<() => unknown>(),
     translate,
   };
 });
 
 vi.mock('@ai-sdk/react', () => ({
-  useChat: vi.fn(({ messages = [] }: { messages?: UIMessage[] }) => ({
+  useChat: vi.fn<(options: { messages?: UIMessage[] }) => unknown>(({ messages = [] }: { messages?: UIMessage[] }) => ({
     messages,
     sendMessage: mocks.sendMessage,
     status: 'ready',
@@ -108,7 +113,7 @@ vi.mock('@ai-sdk/react', () => ({
 export const conversationStateDriftGuard: ConversationState = mocks.harnessConversation;
 
 vi.mock('@slab/ui/pages/assistant/hooks/use-harness-conversation', () => ({
-  useHarnessConversation: vi.fn(() => mocks.harnessConversation),
+  useHarnessConversation: vi.fn<() => unknown>(() => mocks.harnessConversation),
 }));
 
 vi.mock('@slab/i18n', () => ({
@@ -120,14 +125,14 @@ vi.mock('@slab/i18n', () => ({
 }));
 
 vi.mock('sonner', () => ({
-  toast: { error: vi.fn(), info: vi.fn(), message: vi.fn(), success: vi.fn() },
+  toast: { error: vi.fn<() => unknown>(), info: vi.fn<() => unknown>(), message: vi.fn<() => unknown>(), success: vi.fn<() => unknown>() },
   Toaster: () => null,
 }));
 
 vi.mock('@slab/ui/hooks/use-ai-model', () => ({
-  useAiModel: vi.fn(() => ({
-    ensureDownloaded: vi.fn().mockResolvedValue({ downloadedNow: false }),
-    ensureLoaded: vi.fn().mockResolvedValue({ runtimeStatus: null }),
+  useAiModel: vi.fn<() => unknown>(() => ({
+    ensureDownloaded: vi.fn<() => Promise<unknown>>().mockResolvedValue({ downloadedNow: false }),
+    ensureLoaded: vi.fn<() => Promise<unknown>>().mockResolvedValue({ runtimeStatus: null }),
     loading: false,
     localModels: [],
     models: mocks.models,
@@ -138,17 +143,17 @@ vi.mock('@slab/ui/hooks/use-ai-model', () => ({
 }));
 
 vi.mock('@slab/ui/pages/assistant/hooks/use-assistant-sessions', () => ({
-  useAssistantSessions: vi.fn(() => ({
+  useAssistantSessions: vi.fn<() => unknown>(() => ({
     conversationList: [{ group: 'Workspace', key: 'session-a', label: 'Session A' }],
-    createSession: vi.fn().mockResolvedValue({ id: 'session-new' }),
+    createSession: vi.fn<() => Promise<unknown>>().mockResolvedValue({ id: 'session-new' }),
     currentSessionId: 'session-a',
-    deleteSession: vi.fn().mockResolvedValue(true),
+    deleteSession: vi.fn<() => Promise<unknown>>().mockResolvedValue(true),
     isCreatingSession: false,
     isDeletingSession: false,
     isSessionMutating: false,
     isSessionsLoading: false,
     setCurrentSessionId: mocks.setCurrentSessionId,
-    updateSessionLabel: vi.fn().mockResolvedValue(true),
+    updateSessionLabel: vi.fn<() => Promise<unknown>>().mockResolvedValue(true),
   })),
 }));
 

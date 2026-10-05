@@ -56,7 +56,7 @@ function main() {
   const offlineInstaller = readdirSync(bundleDir)
     .filter((name) => /^Slab_.*_x64-offline-setup\.exe$/.test(name))
     .map((name) => ({ name, mtime: readdirStatMtime(path.join(bundleDir, name)) }))
-    .sort((left, right) => right.mtime - left.mtime)[0]?.name;
+    .toSorted((left, right) => right.mtime - left.mtime)[0]?.name;
   if (!offlineInstaller) {
     throw new Error(`pack completed but no Slab_*_x64-offline-setup.exe found under ${bundleDir}`);
   }

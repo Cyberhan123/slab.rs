@@ -44,8 +44,6 @@ export function getWorkspaceThemeMode(): WorkspaceThemeMode {
 
 export function buildSlabMonacoTheme(mode: WorkspaceThemeMode): Monaco.editor.IStandaloneThemeData {
   const fallback = fallbackColors[mode]
-  const css = (name: string, defaultColor: string) => readCssColor(name, defaultColor)
-  const token = (name: string, defaultColor: string) => css(name, defaultColor).replace(/^#/, "")
 
   return {
     base: mode === "dark" ? "vs-dark" : "vs",
@@ -107,6 +105,16 @@ export async function applySlabVscodeTheme(mode: WorkspaceThemeMode, workspaceRo
   await workspace
     .getConfiguration("workbench")
     .update("colorTheme", mode === "dark" ? "Default Dark Modern" : "Default Light Modern", ConfigurationTarget.Global)
+}
+
+/** Read a CSS custom property as a color string, falling back when absent. */
+function css(name: string, defaultColor: string) {
+  return readCssColor(name, defaultColor)
+}
+
+/** Same as {@link css} but strips the leading `#` (monaco token colors are bare hex). */
+function token(name: string, defaultColor: string) {
+  return css(name, defaultColor).replace(/^#/, "")
 }
 
 function readCssColor(name: string, fallback: string) {

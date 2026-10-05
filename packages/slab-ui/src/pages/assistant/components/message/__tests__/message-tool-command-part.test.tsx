@@ -5,6 +5,8 @@ import { render } from "vitest-browser-react"
 import {
   LiveToolOutputContext,
   MessageInteractionContext,
+  type LiveToolOutputValue,
+  type MessageInteractionValue,
 } from "../../message-interaction-context"
 import type { ToolPartLike } from "../message-tool-part"
 import MessageToolCommandPart from "../message-tool-command-part"
@@ -78,33 +80,43 @@ async function renderPart(
   ctx: { approval?: string; liveOutput?: string },
   toolCallId = "call-1",
 ) {
+  const liveValue: LiveToolOutputValue = {
+    liveOutputByItemId: ctx.liveOutput ? new Map([["call-1", ctx.liveOutput]]) : new Map(),
+    livePatchByItemId: new Map(),
+  }
+  const interactionValue: MessageInteractionValue = {
+    approvalStatusByItemId: ctx.approval ? new Map([["call-1", ctx.approval]]) : new Map(),
+    userMessageTurnIndex: new Map(),
+    rollbackToMessage: undefined,
+    subagentTasksByTaskId: new Map(),
+    subagentChildItemsByChildId: new Map(),
+  }
+  // The context values are BUILT here and passed as parameters: constructing
+  // them in the JSX-owning scope trips react(jsx-no-constructed-context-values).
+  return renderProviders(
+    <MessageToolCommandPart
+      // The component only reads `part`/`kind`/`toolCallId`; the rest of the
+      // render-props contract is stubbed to satisfy the type.
+      part={part as ToolPartLike}
+      item={{} as never}
+      message={{} as never}
+      index={0}
+      kind="tool"
+      toolCallId={toolCallId}
+    />,
+    liveValue,
+    interactionValue,
+  )
+}
+
+function renderProviders(
+  ui: ReactNode,
+  liveValue: LiveToolOutputValue,
+  interactionValue: MessageInteractionValue,
+) {
   return render(
-    <LiveToolOutputContext.Provider
-      value={{
-        liveOutputByItemId: ctx.liveOutput ? new Map([["call-1", ctx.liveOutput]]) : new Map(),
-        livePatchByItemId: new Map(),
-      }}
-    >
-      <MessageInteractionContext.Provider
-        value={{
-          approvalStatusByItemId: ctx.approval ? new Map([["call-1", ctx.approval]]) : new Map(),
-          userMessageTurnIndex: new Map(),
-          rollbackToMessage: undefined,
-          subagentTasksByTaskId: new Map(),
-          subagentChildItemsByChildId: new Map(),
-        }}
-      >
-        <MessageToolCommandPart
-          // The component only reads `part`/`kind`/`toolCallId`; the rest of the
-          // render-props contract is stubbed to satisfy the type.
-          part={part as ToolPartLike}
-          item={{} as never}
-          message={{} as never}
-          index={0}
-          kind="tool"
-          toolCallId={toolCallId}
-        />
-      </MessageInteractionContext.Provider>
+    <LiveToolOutputContext.Provider value={liveValue}>
+      <MessageInteractionContext.Provider value={interactionValue}>{ui}</MessageInteractionContext.Provider>
     </LiveToolOutputContext.Provider>,
   )
 }

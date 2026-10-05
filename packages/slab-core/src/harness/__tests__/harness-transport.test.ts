@@ -21,8 +21,8 @@ function makeFakeClient(options: FakeClientOptions = {}) {
     liveResume: null as
       | { turnId: string; items: Array<Record<string, unknown>> }
       | null,
-    open: vi.fn(async () => {}),
-    threadStart: vi.fn(async (): Promise<ThreadStartResult> => ({
+    open: vi.fn<() => unknown>(async () => {}),
+    threadStart: vi.fn<() => Promise<ThreadStartResult>>(async () => ({
       thread: { id: "hthread-1", preview: "", modelProvider: "", createdAt: 0, turns: [] },
       model: "slab-llama",
       modelProvider: "",
@@ -30,7 +30,7 @@ function makeFakeClient(options: FakeClientOptions = {}) {
       approvalPolicy: "on-request",
       sandbox: { type: "workspaceWrite" },
     })),
-    turnStart: vi.fn(async (params: TurnStartParams): Promise<TurnStartResult> => {
+    turnStart: vi.fn<(params: TurnStartParams) => Promise<TurnStartResult>>(async (params) => {
       emit("turn/started", { threadId: params.threadId, turn: { id: "0", items: [], status: "inProgress" } })
       emit("item/started", { item: { type: "agentMessage", id: "i1", text: "" }, threadId: params.threadId, turnId: "0" })
       emit("item/agentMessage/delta", { threadId: params.threadId, turnId: "0", itemId: "i1", delta: "hel" })
@@ -39,7 +39,7 @@ function makeFakeClient(options: FakeClientOptions = {}) {
       emit("turn/completed", { threadId: params.threadId, turn: { id: "0", items: [], status: "completed" } })
       return { turn: { id: "0", items: [], status: "inProgress" } }
     }),
-    turnInterrupt: vi.fn(async () => ({ status: "interrupting" })),
+    turnInterrupt: vi.fn<() => unknown>(async () => ({ status: "interrupting" })),
     /** Emit a notification to the currently-registered handler (test seam). */
     emitNotification: emit,
     onNotification(h: (n: JsonRpcNotification) => void) {
@@ -71,6 +71,7 @@ async function collect(stream: ReadableStream<UIMessageChunk>): Promise<UIMessag
   const chunks: UIMessageChunk[] = []
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    // eslint-disable-next-line no-await-in-loop -- stream reads are inherently sequential
     const { value, done } = await reader.read()
     if (done) break
     if (value) chunks.push(value)
@@ -207,7 +208,7 @@ describe("HarnessChatTransport", () => {
   it("retries client.open with backoff before failing the stream", async () => {
     const fake = makeFakeClient({ currentThreadId: "hthread-1" })
     let failures = 0
-    fake.open = vi.fn(async () => {
+    fake.open = vi.fn<() => unknown>(async () => {
       failures += 1
       if (failures <= 2) throw new Error("socket not ready")
     })
@@ -243,10 +244,12 @@ describe("HarnessChatTransport", () => {
 
   it("no turn-started ack when turn/start rejects", async () => {
     const fake = makeFakeClient({ currentThreadId: "hthread-1" })
-    fake.turnStart = vi.fn(async () => {
-      throw new Error("model not found")
-    })
-    const started = vi.fn()
+    fake.turnStart = vi.fn<(params: TurnStartParams) => Promise<TurnStartResult>>(
+      async () => {
+        throw new Error("model not found")
+      },
+    )
+    const started = vi.fn<() => unknown>()
     const transport = new HarnessChatTransport({
       client: fake as unknown as HarnessClient,
       onLocalTurnStarted: started,
@@ -266,7 +269,7 @@ describe("HarnessChatTransport", () => {
     // stream.ts must absorb them (exactly one text-start/text-end pair).
     const fake = makeFakeClient({ currentThreadId: "hthread-1" })
     fake.lastTurnIndex = 0
-    fake.turnStart = vi.fn(async (params: TurnStartParams): Promise<TurnStartResult> => {
+    fake.turnStart = vi.fn<(params: TurnStartParams) => Promise<TurnStartResult>>(async (params) => {
       fake.emitNotification("item/started", {
         item: { type: "agentMessage", id: "i1", text: "" },
         threadId: params.threadId,

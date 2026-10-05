@@ -67,6 +67,13 @@ export interface StreamState {
   openReasoning: Set<string>
   /** Item ids with an open tool part (Running card, no result yet). */
   openTools: Set<string>
+  /**
+   * Item ids whose terminal `item/completed` was already applied. A reconnect
+   * re-delivers completed items from the server's replay buffer; without this
+   * guard the orphan-completion synthesis would re-open a closed text part
+   * (duplicate text-start/-end pair).
+   */
+  completedItems: Set<string>
   /** Accumulated text deltas per item id, for final-item divergence checks. */
   textById: Map<string, string>
   /**
@@ -85,6 +92,7 @@ export function createStreamState(): StreamState {
     openText: new Set(),
     openReasoning: new Set(),
     openTools: new Set(),
+    completedItems: new Set(),
     textById: new Map(),
   }
 }
@@ -134,6 +142,7 @@ function finishChunks(state: StreamState, reason: "stop" | "error" = "stop"): UI
   state.openReasoning.clear()
   state.openText.clear()
   state.openTools.clear()
+  state.completedItems.clear()
   state.textById.clear()
   chunks.push({ type: "finish-step" }, { finishReason: reason, type: "finish" })
   state.finished = true
@@ -185,6 +194,9 @@ function toolChunksFromItem(state: StreamState, item: TurnItem): UIMessageChunk[
 function handleItemStarted(state: StreamState, params: ItemStartedParams): UIMessageChunk[] {
   const { item } = params
   if (item.type === "agentMessage") {
+    // Replay absorption: a started for an id whose completion was already
+    // applied would re-open the closed part and dangle until finish.
+    if (state.completedItems.has(item.id)) return []
     // The assistant's main message is starting. Close any reasoning part that is
     // still open so its "Thinking..." indicator stops immediately — even when the
     // server omits an explicit `item/completed(reasoning)` and jumps straight to
@@ -219,6 +231,11 @@ function handleItemStarted(state: StreamState, params: ItemStartedParams): UIMes
 function handleItemCompleted(state: StreamState, params: ItemCompletedParams): UIMessageChunk[] {
   const { item } = params
   if (item.type === "agentMessage") {
+    // Replay absorption: a re-delivered completed (reconnect replay buffer)
+    // must not re-synthesize the part — the first completion already closed
+    // that part, orphan synthesis included, so exactly one text-start/-end pair.
+    if (state.completedItems.has(item.id)) return []
+    state.completedItems.add(item.id)
     // The completed item's text is the authoritative UI-grade form (the
     // server strips think blocks there). If the accumulated live deltas
     // disagree, the streamed bubble text is stale or leaked — hand the
@@ -226,6 +243,17 @@ function handleItemCompleted(state: StreamState, params: ItemCompletedParams): U
     const streamed = state.textById.get(item.id)
     if (streamed !== undefined && normalizedText(streamed) !== normalizedText(item.text ?? "")) {
       state.onItemTextDivergence?.(item.id)
+    }
+    // Orphan completed: no delta ever opened this item's text part (e.g. an
+    // older server emitting a `task.complete` summary with no body text), so
+    // `closeText` would silently drop the authoritative text. Synthesize the
+    // full part instead. Empty-text orphans still close to nothing — no
+    // empty bubble.
+    if (streamed === undefined && item.text) {
+      return openText(state, item.id).concat(
+        { delta: item.text, id: item.id, type: "text-delta" },
+        closeText(state, item.id),
+      )
     }
     return closeText(state, item.id)
   }

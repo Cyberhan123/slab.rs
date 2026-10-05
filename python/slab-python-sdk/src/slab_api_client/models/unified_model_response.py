@@ -191,9 +191,9 @@ class UnifiedModelResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                chat_capabilities_type_1 = ChatModelCapabilities.from_dict(data)
+                chat_capabilities_type_0 = ChatModelCapabilities.from_dict(data)
 
-                return chat_capabilities_type_1
+                return chat_capabilities_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ChatModelCapabilities | None | Unset, data)
@@ -210,9 +210,9 @@ class UnifiedModelResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                runtime_presets_type_1 = RuntimePresetsResponse.from_dict(data)
+                runtime_presets_type_0 = RuntimePresetsResponse.from_dict(data)
 
-                return runtime_presets_type_1
+                return runtime_presets_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | RuntimePresetsResponse | Unset, data)
@@ -229,9 +229,9 @@ class UnifiedModelResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                runtime_state_type_1 = ModelRuntimeStateResponse.from_dict(data)
+                runtime_state_type_0 = ModelRuntimeStateResponse.from_dict(data)
 
-                return runtime_state_type_1
+                return runtime_state_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(ModelRuntimeStateResponse | None | Unset, data)

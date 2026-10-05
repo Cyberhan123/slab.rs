@@ -15,7 +15,7 @@ const mutation = {
 vi.mock("@slab/i18n", () => ({
   ...setupSlabI18nMock(),
   isAppLanguagePreference: () => false,
-  applyAppLanguagePreference: vi.fn(),
+  applyAppLanguagePreference: vi.fn<() => unknown>(),
 }))
 
 vi.mock("@slab/api", () => ({
@@ -52,7 +52,7 @@ describe("useSettingsAutosave", () => {
 
   it("marks the field saved and clears the draft after a successful PUT", async () => {
     mutation.mutateAsync.mockResolvedValue(undefined)
-    const refetch = vi.fn().mockResolvedValue(undefined)
+    const refetch = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
     const { result, act } = await renderHook(
       () => useSettingsAutosave({ propertyMap: makePropertyMap(), refetch }),
       { wrapper },
@@ -85,7 +85,7 @@ describe("useSettingsAutosave", () => {
         }),
     )
     mutation.mutateAsync.mockResolvedValue(undefined)
-    const refetch = vi.fn().mockResolvedValue(undefined)
+    const refetch = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
     const { result, act } = await renderHook(
       () => useSettingsAutosave({ propertyMap: makePropertyMap(), refetch }),
       { wrapper },
@@ -118,7 +118,7 @@ describe("useSettingsAutosave", () => {
 
   it("marks the field error when the PUT rejects", async () => {
     mutation.mutateAsync.mockRejectedValue(new Error("boom"))
-    const refetch = vi.fn().mockResolvedValue(undefined)
+    const refetch = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
     const { result, act } = await renderHook(
       () => useSettingsAutosave({ propertyMap: makePropertyMap(), refetch }),
       { wrapper },

@@ -122,6 +122,15 @@ declare global {
 
 const sdk = getSlabPluginSdk(window);
 
+async function apiRequest<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  timeoutMs = 60_000,
+): Promise<T> {
+  return sdk.api.requestJson<T>({ method, path, body, timeoutMs });
+}
+
 export function App() {
   const [videoPath, setVideoPath] = useState("");
   const [running, setRunning] = useState(false);
@@ -195,15 +204,6 @@ export function App() {
     setTranslatedSegments([]);
     setSourceOutput("Not generated");
     setTranslatedOutput("Not generated");
-  };
-
-  const apiRequest = async <T,>(
-    method: string,
-    path: string,
-    body?: unknown,
-    timeoutMs = 60_000,
-  ): Promise<T> => {
-    return sdk.api.requestJson<T>({ method, path, body, timeoutMs });
   };
 
   const localModelPath = useCallback(

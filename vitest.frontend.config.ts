@@ -1,6 +1,6 @@
 import { defineConfig } from "vitest/config";
 
-import { frontendVitestProjects } from "./vitest.projects";
+import { frontendVitestProjects } from "./vitest.projects.ts";
 
 export default defineConfig({
   test: {

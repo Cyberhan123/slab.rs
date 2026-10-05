@@ -30,6 +30,7 @@ function freezeAnimations() {
 }
 
 const mocks = vi.hoisted(() => {
+  // eslint-disable-next-line unicorn/consistent-function-scoping -- vi.hoisted factories must be self-contained (no outer references)
   const translate = (key: string) => key;
   // Mirrors the initial `ConversationState` of the real harness controller
   // (packages/slab-core/src/harness/conversation-controller.ts); every field
@@ -81,8 +82,12 @@ const mocks = vi.hoisted(() => {
     userMessageTurnIndex: new Map<string, number>(),
     approvals: [] as ConversationState["approvals"],
     approvalStatusByItemId: new Map<string, 'pending' | 'approved' | 'denied'>(),
+    questionnaires: [] as ConversationState["questionnaires"],
     resolveApproval: vi.fn<
       (itemId: string, approved: boolean, scope: 'run_once' | 'always_in_workspace' | 'always' | 'deny') => Promise<void>
+    >(),
+    resolveQuestionnaire: vi.fn<
+      (itemId: string, answers: { selected: string[]; custom: string | null; skipped?: boolean }) => Promise<void>
     >(),
   };
   return { harnessConversation, translate };
@@ -106,22 +111,22 @@ const { mockUseMarkdownTheme } = vi.hoisted(() => ({
 export const conversationStateDriftGuard: ConversationState = mocks.harnessConversation;
 
 vi.mock('@slab/ui/pages/assistant/hooks/use-harness-conversation', () => ({
-  useHarnessConversation: vi.fn(() => mocks.harnessConversation),
+  useHarnessConversation: vi.fn<() => unknown>(() => mocks.harnessConversation),
 }));
 
 vi.mock('@ai-sdk/react', () => ({
-  useChat: vi.fn(({ messages = [] }: { messages?: Array<Record<string, unknown>> }) => ({
+  useChat: vi.fn<(options: { messages?: Array<Record<string, unknown>> }) => unknown>(({ messages = [] }: { messages?: Array<Record<string, unknown>> }) => ({
     messages,
-    sendMessage: vi.fn(),
+    sendMessage: vi.fn<() => unknown>(),
     status: 'ready',
-    stop: vi.fn(),
+    stop: vi.fn<() => unknown>(),
   })),
 }));
 
 vi.mock('@slab/ui/hooks/use-ai-model', () => ({
-  useAiModel: vi.fn(() => ({
-    ensureDownloaded: vi.fn().mockResolvedValue({ downloadedNow: false }),
-    ensureLoaded: vi.fn().mockResolvedValue({ runtimeStatus: null }),
+  useAiModel: vi.fn<() => unknown>(() => ({
+    ensureDownloaded: vi.fn<() => Promise<unknown>>().mockResolvedValue({ downloadedNow: false }),
+    ensureLoaded: vi.fn<() => Promise<unknown>>().mockResolvedValue({ runtimeStatus: null }),
     loading: false,
     localModels: [],
     models: [
@@ -138,7 +143,7 @@ vi.mock('@slab/ui/hooks/use-ai-model', () => ({
       },
     ],
     selectedId: 'model-a',
-    setSelectedId: vi.fn(),
+    setSelectedId: vi.fn<() => unknown>(),
     status: { busy: false },
   })),
 }));
@@ -157,7 +162,7 @@ vi.mock('@slab/ui/pages/assistant/hooks/use-markdown-theme', () => ({
 
 vi.mock('@slab/ui/hooks/use-header', () => ({
   useHeader: vi.fn<() => unknown>(() => ({
-    meta: { title: 'Assistant', subtitle: 'Assistant', icon: vi.fn(), contextLabel: null },
+    meta: { title: 'Assistant', subtitle: 'Assistant', icon: vi.fn<() => unknown>(), contextLabel: null },
     search: null,
     select: null,
   })),
@@ -213,8 +218,8 @@ function createAssistantSessionsViewModel(overrides = {}) {
     isDeletingSession: false,
     isSessionMutating: false,
     isSessionsLoading: false,
-    setCurrentSessionId: vi.fn(),
-    setSessionLabel: vi.fn(),
+    setCurrentSessionId: vi.fn<() => unknown>(),
+    setSessionLabel: vi.fn<() => unknown>(),
     updateSessionLabel: vi.fn<() => Promise<boolean>>().mockResolvedValue(true),
     ...overrides,
   };
@@ -366,8 +371,10 @@ describe('AssistantPage browser visual regression', () => {
     // Completed rows sit collapsed by design — the compact `Bash: <command>`
     // line IS the feature this baseline pins. (The expanded terminal raced its
     // mount/animation state run-to-run under parallel suite load; its content
-    // rendering is covered by the message-tool unit tests.)
-    await expect.element(page.getByText('Bash')).toBeVisible();
+    // rendering is covered by the message-tool unit tests.) The label span's
+    // whole text is `Bash:` — @vitest/browser 5 getByText matches whole
+    // normalized element text only.
+    await expect.element(page.getByText('Bash:')).toBeVisible();
     freezeAnimations();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('assistant-page-agent-chain.png');
   });

@@ -173,5 +173,17 @@ export default defineConfig({
         "vitest/valid-title": "off",
       },
     },
+    {
+      // useHeader deps `registration` via its destructured fields (history/
+      // meta/...) instead of object identity, so parent re-renders that pass a
+      // fresh literal with identical fields never re-run the effect. The rule
+      // wants the object itself; the plugin ignores inline eslint-disable
+      // directives, so the exception lives here.
+      files: ["packages/slab-ui/src/hooks/use-header.ts"],
+      rules: {
+        "react-hooks/exhaustive-deps": "off",
+        "react/exhaustive-effect-dependencies": "off",
+      },
+    },
   ],
 });

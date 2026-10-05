@@ -20,13 +20,13 @@ pub mod user_input;
 pub use messages::{
     ApprovalResolveParams, ApprovalResolveResult, ApprovalScope, CommandInfo, CommandKind,
     CommandListParams, CommandListResult, CommandSource, InitializeParams, InitializeResult,
-    OperationCategory, PermissionMode, ReasoningEffort, ShutdownParams, ShutdownResult, SkillInfo,
-    SkillSource, SkillsListParams, SkillsListResult, ThreadArchiveParams, ThreadArchiveResult,
-    ThreadCompactStartParams, ThreadCompactStartResult, ThreadForkParams, ThreadForkResult,
-    ThreadListParams, ThreadListResult, ThreadLiveItem, ThreadLiveItemKind, ThreadLiveState,
-    ThreadResumeParams, ThreadResumeResult, ThreadRollbackParams, ThreadRollbackResult,
-    ThreadStartParams, ThreadStartResult, TurnInterruptParams, TurnInterruptResult,
-    TurnStartParams, TurnStartResult,
+    OperationCategory, PermissionMode, QuestionnaireResolveParams, QuestionnaireResolveResult,
+    ReasoningEffort, ShutdownParams, ShutdownResult, SkillInfo, SkillSource, SkillsListParams,
+    SkillsListResult, ThreadArchiveParams, ThreadArchiveResult, ThreadCompactStartParams,
+    ThreadCompactStartResult, ThreadForkParams, ThreadForkResult, ThreadListParams,
+    ThreadListResult, ThreadLiveItem, ThreadLiveItemKind, ThreadLiveState, ThreadResumeParams,
+    ThreadResumeResult, ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams,
+    ThreadStartResult, TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
 };
 pub use model::{ModelInfo, ModelListParams, ModelListResult, ReasoningEffortOption};
 pub use notification::{
@@ -54,6 +54,7 @@ pub mod method {
     pub const SKILLS_LIST: &str = "skills/list";
     pub const COMMAND_LIST: &str = "command/list";
     pub const APPROVAL_RESOLVE: &str = "approval/resolve";
+    pub const QUESTIONNAIRE_RESOLVE: &str = "questionnaire/resolve";
     pub const SHUTDOWN: &str = "shutdown";
     pub const WORKSPACE_MIGRATE: &str = "workspace/migrate";
 
@@ -71,6 +72,10 @@ pub mod method {
     pub const ITEM_COMMAND_EXECUTION_REQUEST_APPROVAL: &str =
         "item/commandExecution/requestApproval";
     pub const ITEM_FILE_CHANGE_REQUEST_APPROVAL: &str = "item/fileChange/requestApproval";
+    // Structured question to the user (the `questionnaire` tool). The client's
+    // answers flow back via the `questionnaire/resolve` request, correlated on
+    // the same `item_id` as the approval notifications.
+    pub const ITEM_QUESTIONNAIRE_REQUEST_ANSWER: &str = "item/questionnaire/requestAnswer";
     // Resident background task lifecycle (shell background=true), emitted from
     // the background task registry via `EventMsg` (projected like item events).
     pub const BACKGROUND_TASK_UPDATED: &str = "backgroundTask/updated";

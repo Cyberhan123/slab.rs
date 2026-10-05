@@ -261,9 +261,9 @@ class AudioTranscriptionTaskResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                decode_json_type_1 = TranscribeDecodeOptionsResponse.from_dict(data)
+                decode_json_type_0 = TranscribeDecodeOptionsResponse.from_dict(data)
 
-                return decode_json_type_1
+                return decode_json_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | TranscribeDecodeOptionsResponse | Unset, data)
@@ -314,9 +314,9 @@ class AudioTranscriptionTaskResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                progress_type_1 = TaskProgressResponse.from_dict(data)
+                progress_type_0 = TaskProgressResponse.from_dict(data)
 
-                return progress_type_1
+                return progress_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | TaskProgressResponse | Unset, data)
@@ -342,9 +342,9 @@ class AudioTranscriptionTaskResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                result_data_type_1 = AudioTranscriptionResultData.from_dict(data)
+                result_data_type_0 = AudioTranscriptionResultData.from_dict(data)
 
-                return result_data_type_1
+                return result_data_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(AudioTranscriptionResultData | None | Unset, data)
@@ -396,9 +396,9 @@ class AudioTranscriptionTaskResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                vad_json_type_1 = TranscribeVadOptionsResponse.from_dict(data)
+                vad_json_type_0 = TranscribeVadOptionsResponse.from_dict(data)
 
-                return vad_json_type_1
+                return vad_json_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             return cast(None | TranscribeVadOptionsResponse | Unset, data)

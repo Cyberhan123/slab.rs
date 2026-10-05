@@ -148,9 +148,13 @@ describe("agent e2e", () => {
     const output = parseToolJson(toolResult.toolMessages[0].content)
     expect(String(output.stdout ?? "")).toContain(marker)
     expect(output.exit_code).toBe(0)
-    // The fix makes the turn complete in a few seconds (sleep is tree-killed);
-    // a regression hangs for the 300s background sleep (well past this bound).
-    expect(elapsedMs).toBeLessThan(90_000)
+    // The fix makes the turn complete well before the 300s background sleep;
+    // a regression hangs and trips waitForToolExecution's 180s cap first.
+    // The elapsed budget below only catches "completed but suspiciously slow":
+    // healthy turns (model time to emit the tool call, Qwen3.5-9B Q8 with
+    // variable thinking length) measure 100-130s as of 2026-10, so the bound
+    // sits above that with margin while staying under the 180s wait cap.
+    expect(elapsedMs).toBeLessThan(150_000)
   })
 
   // Validates the `ApprovalScope` persistence path: approving a shell with

@@ -21,7 +21,9 @@ function ScrollAreaGallery() {
 describe("ScrollArea browser coverage", () => {
   it("matches the shared scroll area gallery screenshot", async () => {
     await renderComponentScene(<ScrollAreaGallery />)
-    await expect.element(page.getByText("Scrollable content area")).toBeVisible()
+    await expect.element(
+      page.getByText("Scrollable content area with custom scrollbar styling.")
+    ).toBeVisible()
     await expect(page.getByTestId("scroll-area-gallery")).toMatchScreenshot("scroll-area-gallery.png")
   })
 

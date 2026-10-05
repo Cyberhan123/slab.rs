@@ -158,8 +158,8 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
     // one-argument `sendMessage({ text, metadata })` form stores it on the
     // MESSAGE only. Prefer the request-level value, fall back to the newest
     // user message's.
-    const lastUserMetadata = [...options.messages]
-      .reverse()
+    const lastUserMetadata = options.messages
+      .toReversed()
       .find((message) => message.role === "user")?.metadata
     const metadata = options.metadata ?? lastUserMetadata
     const effort = readEffort(metadata)
@@ -308,11 +308,13 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
     let lastError: unknown
     for (let attempt = 1; attempt <= MAX_RESTORE_ATTEMPTS; attempt += 1) {
       try {
+        // eslint-disable-next-line no-await-in-loop -- backoff retry: each attempt must observe the previous failure's delay
         await this.client.open()
         return
       } catch (openError) {
         lastError = openError
         if (attempt < MAX_RESTORE_ATTEMPTS) {
+          // eslint-disable-next-line no-await-in-loop -- the backoff sleep is the point of the loop
           await new Promise((resolve) => setTimeout(resolve, RESTORE_BACKOFF_MS * attempt))
         }
       }

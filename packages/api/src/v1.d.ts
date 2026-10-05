@@ -859,6 +859,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/system/diagnostics/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["memory_diagnostics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/system/gpu": {
         parameters: {
             query?: never;
@@ -1405,16 +1421,16 @@ export interface components {
             model?: string | null;
             /** Format: float */
             presence_penalty?: number | null;
-            reasoning_effort?: null | components["schemas"]["ChatReasoningEffort"];
+            reasoning_effort?: components["schemas"]["ChatReasoningEffort"] | null;
             /** Format: float */
             repetition_penalty?: number | null;
-            structured_output?: null | components["schemas"]["AgentStructuredOutputInput"];
+            structured_output?: components["schemas"]["AgentStructuredOutputInput"] | null;
             system_prompt?: string | null;
             /** Format: float */
             temperature?: number | null;
             /** Format: int32 */
             token_budget?: number | null;
-            tool_choice?: null | components["schemas"]["AgentToolChoiceInput"];
+            tool_choice?: components["schemas"]["AgentToolChoiceInput"] | null;
             /** Format: int32 */
             tool_concurrency?: number | null;
             /** Format: int32 */
@@ -1422,7 +1438,7 @@ export interface components {
             /** Format: float */
             top_p?: number | null;
             transient?: boolean | null;
-            verbosity?: null | components["schemas"]["ChatVerbosity"];
+            verbosity?: components["schemas"]["ChatVerbosity"] | null;
         };
         /** @description Aggregated agent diagnostics: recent thread stats + recent failed tool calls. */
         AgentDiagnosticsResponse: {
@@ -1434,7 +1450,7 @@ export interface components {
             messages: components["schemas"]["AgentThreadMessageResponse"][];
             responses?: unknown[];
             session_id: string;
-            thread?: null | components["schemas"]["AgentThreadResponse"];
+            thread?: components["schemas"]["AgentThreadResponse"] | null;
         };
         /**
          * @description Serializable mirror of [`AgentThreadStatus`].
@@ -1507,7 +1523,7 @@ export interface components {
             type: "tool";
         };
         AudioTranscriptionRequest: {
-            decode?: null | components["schemas"]["TranscribeDecodeRequest"];
+            decode?: components["schemas"]["TranscribeDecodeRequest"] | null;
             /**
              * @description Native whisper detection-only flag. When `true`, ggml whisper detects the
              *     language and may return without transcript segments.
@@ -1524,16 +1540,16 @@ export interface components {
             path: string;
             /** @description Optional initial prompt passed to whisper inference. */
             prompt?: string | null;
-            vad?: null | components["schemas"]["TranscribeVadRequest"];
+            vad?: components["schemas"]["TranscribeVadRequest"] | null;
         };
         AudioTranscriptionRequestData: {
-            decode?: null | components["schemas"]["TranscribeDecodeOptionsResponse"];
+            decode?: components["schemas"]["TranscribeDecodeOptionsResponse"] | null;
             detect_language?: boolean | null;
             language?: string | null;
             model_id?: string | null;
             prompt?: string | null;
             source_path: string;
-            vad?: null | components["schemas"]["TranscribeVadOptionsResponse"];
+            vad?: components["schemas"]["TranscribeVadOptionsResponse"] | null;
         };
         AudioTranscriptionResultData: {
             segments: components["schemas"]["TimedTextSegmentResponse"][];
@@ -1542,15 +1558,15 @@ export interface components {
         AudioTranscriptionTaskResponse: {
             backend_id: string;
             created_at: string;
-            decode_json?: null | components["schemas"]["TranscribeDecodeOptionsResponse"];
+            decode_json?: components["schemas"]["TranscribeDecodeOptionsResponse"] | null;
             detect_language?: boolean | null;
             error_msg?: string | null;
             language?: string | null;
             model_id?: string | null;
-            progress?: null | components["schemas"]["TaskProgressResponse"];
+            progress?: components["schemas"]["TaskProgressResponse"] | null;
             prompt?: string | null;
             request_data: components["schemas"]["AudioTranscriptionRequestData"];
-            result_data?: null | components["schemas"]["AudioTranscriptionResultData"];
+            result_data?: components["schemas"]["AudioTranscriptionResultData"] | null;
             segments?: components["schemas"]["TimedTextSegmentResponse"][] | null;
             source_path: string;
             status: components["schemas"]["TaskStatus"];
@@ -1558,7 +1574,7 @@ export interface components {
             task_type: string;
             transcript_text?: string | null;
             updated_at: string;
-            vad_json?: null | components["schemas"]["TranscribeVadOptionsResponse"];
+            vad_json?: components["schemas"]["TranscribeVadOptionsResponse"] | null;
         };
         /** @description Response for `GET /v1/models/available`. */
         AvailableModelsResponse: {
@@ -1629,23 +1645,23 @@ export interface components {
              * @description Presence penalty for local llama backends.
              */
             presence_penalty?: number | null;
-            reasoning_effort?: null | components["schemas"]["ChatReasoningEffort"];
+            reasoning_effort?: components["schemas"]["ChatReasoningEffort"] | null;
             /**
              * Format: float
              * @description Repetition penalty for local llama backends.
              */
             repetition_penalty?: number | null;
-            response_format?: null | components["schemas"]["ChatResponseFormat"];
-            stop?: null | components["schemas"]["StopSequences"];
+            response_format?: components["schemas"]["ChatResponseFormat"] | null;
+            stop?: components["schemas"]["StopSequences"] | null;
             /** @description When `true`, the response is streamed token-by-token using SSE. */
             stream?: boolean;
-            stream_options?: null | components["schemas"]["ChatStreamOptions"];
+            stream_options?: components["schemas"]["ChatStreamOptions"] | null;
             /**
              * Format: float
              * @description Sampling temperature in [0, 2].
              */
             temperature?: number | null;
-            thinking?: null | components["schemas"]["ChatThinkingConfig"];
+            thinking?: components["schemas"]["ChatThinkingConfig"] | null;
             /**
              * Format: int32
              * @description Top-k sampling limit for local llama backends.
@@ -1656,7 +1672,7 @@ export interface components {
              * @description Nucleus sampling threshold in (0, 1].
              */
             top_p?: number | null;
-            verbosity?: null | components["schemas"]["ChatVerbosity"];
+            verbosity?: components["schemas"]["ChatVerbosity"] | null;
         };
         /** @description Response body for `POST /v1/chat/completions`. */
         ChatCompletionResponse: {
@@ -1675,7 +1691,7 @@ export interface components {
             object: string;
             /** @description Backend/system fingerprint for compatibility with OpenAI clients. */
             system_fingerprint: string;
-            usage?: null | components["schemas"]["ChatCompletionUsage"];
+            usage?: components["schemas"]["ChatCompletionUsage"] | null;
         };
         ChatCompletionUsage: {
             /** Format: int32 */
@@ -1721,7 +1737,7 @@ export interface components {
         };
         /** @description A single message in the conversation history. */
         ChatMessage: {
-            content?: null | components["schemas"]["ChatMessageContent"];
+            content?: components["schemas"]["ChatMessageContent"] | null;
             /** @description Optional participant name for providers that support named turns. */
             name?: string | null;
             /** @description The role of the message author. */
@@ -1773,7 +1789,7 @@ export interface components {
          */
         ChatReasoningEffort: "none" | "low" | "medium" | "high" | "minimal";
         ChatResponseFormat: {
-            json_schema?: null | components["schemas"]["ChatResponseJsonSchema"];
+            json_schema?: components["schemas"]["ChatResponseJsonSchema"] | null;
             schema?: unknown;
             type: components["schemas"]["ChatResponseFormatType"];
         };
@@ -1792,10 +1808,10 @@ export interface components {
         };
         /** @description Thinking settings accepted by `POST /v1/chat/completions`. */
         ChatThinkingConfig: {
-            reasoning_effort?: null | components["schemas"]["ChatReasoningEffort"];
+            reasoning_effort?: components["schemas"]["ChatReasoningEffort"] | null;
             /** @description Whether server-side reasoning should be enabled for this request. */
             type: components["schemas"]["ChatThinkingType"];
-            verbosity?: null | components["schemas"]["ChatVerbosity"];
+            verbosity?: components["schemas"]["ChatVerbosity"] | null;
         };
         /**
          * @description High-level thinking toggle used by chat clients.
@@ -1871,8 +1887,8 @@ export interface components {
              * @description Repetition penalty for local llama backends.
              */
             repetition_penalty?: number | null;
-            response_format?: null | components["schemas"]["ChatResponseFormat"];
-            stop?: null | components["schemas"]["StopSequences"];
+            response_format?: components["schemas"]["ChatResponseFormat"] | null;
+            stop?: components["schemas"]["StopSequences"] | null;
             /** @description Stream the result using SSE. */
             stream?: boolean;
             /**
@@ -1908,7 +1924,7 @@ export interface components {
             object: string;
             /** @description Backend/system fingerprint for compatibility with OpenAI clients. */
             system_fingerprint: string;
-            usage?: null | components["schemas"]["ChatCompletionUsage"];
+            usage?: components["schemas"]["ChatCompletionUsage"] | null;
         };
         /** @description Availability information for a single environment component. */
         ComponentStatusResponse: {
@@ -1932,8 +1948,8 @@ export interface components {
             display_name: string;
             /** @description Whether this model is backed by the local runtime or a cloud provider. */
             kind: components["schemas"]["ModelKind"];
-            runtime_presets?: null | components["schemas"]["RuntimePresetsRequest"];
-            spec?: null | components["schemas"]["ModelSpecRequest"];
+            runtime_presets?: components["schemas"]["RuntimePresetsRequest"] | null;
+            spec?: components["schemas"]["ModelSpecRequest"] | null;
             /**
              * @description Initial status. If omitted, defaults to `"ready"` for cloud models and
              *     `"not_downloaded"` for local models.
@@ -2011,7 +2027,7 @@ export interface components {
         };
         /** @description Per-device ledger: last-synced gauge + resident model entries. */
         GpuLedgerDeviceResponse: {
-            gauge?: null | components["schemas"]["GpuLedgerGaugeResponse"];
+            gauge?: components["schemas"]["GpuLedgerGaugeResponse"] | null;
             resident: components["schemas"]["GpuLedgerEntryResponse"][];
             uuid: string;
         };
@@ -2215,13 +2231,13 @@ export interface components {
             model_path: string;
             negative_prompt?: string | null;
             primary_image_url?: string | null;
-            progress?: null | components["schemas"]["TaskProgressResponse"];
+            progress?: components["schemas"]["TaskProgressResponse"] | null;
             prompt: string;
             reference_image_url?: string | null;
             request_data: components["schemas"]["ImageGenerationRequestData"];
             /** Format: int32 */
             requested_count: number;
-            result_data?: null | components["schemas"]["ImageGenerationResultData"];
+            result_data?: components["schemas"]["ImageGenerationResultData"] | null;
             status: components["schemas"]["TaskStatus"];
             task_id: string;
             task_type: string;
@@ -2255,7 +2271,7 @@ export interface components {
         };
         /** @description Query parameters for `GET /v1/models`. */
         ListModelsQuery: {
-            capability?: null | components["schemas"]["ModelCapability"];
+            capability?: components["schemas"]["ModelCapability"] | null;
         };
         /** @description Request body for `POST /v1/models/load`. */
         LoadModelRequest: {
@@ -2270,6 +2286,73 @@ export interface components {
              * @description Optional worker override.
              */
             num_workers?: number | null;
+        };
+        /**
+         * @description Agent memory pipeline diagnostics exposed at
+         *     `/v1/system/diagnostics/memories` (read-only; metadata only, no memory
+         *     content).
+         */
+        MemoryDiagnosticsResponse: {
+            /** @description Phase1 output counts grouped by project and status. */
+            phase1: components["schemas"]["MemoryPhase1StatusCountResponse"][];
+            /** @description Per-project phase2 locks (watermarks + lease state). */
+            phase2_locks: components["schemas"]["MemoryPhase2LockResponse"][];
+            /** @description Most recent phase2 consolidation runs, newest first. */
+            recent_runs: components["schemas"]["MemoryPhase2RunResponse"][];
+        };
+        /**
+         * @description Agent-memory phase1 output count for one (project, status) pair — the
+         *     backlog and failure surface per project memory store.
+         */
+        MemoryPhase1StatusCountResponse: {
+            /**
+             * Format: int64
+             * @description Row count for this (project, status) pair.
+             */
+            count: number;
+            /** @description Sanitized project key (empty string rows predate project sharding). */
+            project_key: string;
+            /**
+             * @description Phase1 output status: pending / running / succeeded /
+             *     succeeded_no_output / failed.
+             */
+            status: string;
+        };
+        /** @description One per-project phase2 consolidation lock: watermarks plus lease state. */
+        MemoryPhase2LockResponse: {
+            /** @description `MAX(source_updated_at)` snapshot when the current claim was made. */
+            claimed_watermark?: string | null;
+            /** @description Watermark of the last completed consolidation for the project. */
+            completed_watermark?: string | null;
+            /** @description Lock key — the sanitized project key. */
+            job_key: string;
+            /** @description Current lease owner, while a consolidation holds the lock. */
+            lease_owner?: string | null;
+            /** @description Lease expiry (RFC3339), while held. */
+            lease_until?: string | null;
+            /** @description Lock status (idle / running). */
+            status: string;
+            /** @description Last lock update (RFC3339). */
+            updated_at: string;
+        };
+        /** @description One recent phase2 consolidation run. */
+        MemoryPhase2RunResponse: {
+            /** @description Watermark claimed at run start. */
+            claimed_watermark?: string | null;
+            /** @description Run completion (RFC3339), once terminal. */
+            completed_at?: string | null;
+            /** @description Watermark completed by the run (absent while running or on failure). */
+            completed_watermark?: string | null;
+            /** @description Failure reason (truncated), for failed runs. */
+            error?: string | null;
+            /** @description Run id. */
+            id: string;
+            /** @description Sanitized project key the run consolidated. */
+            project_key: string;
+            /** @description Run start (RFC3339). */
+            started_at: string;
+            /** @description Run status (running / succeeded / failed). */
+            status: string;
         };
         /** @description A single message in the initial conversation. */
         MessageInput: {
@@ -2302,7 +2385,7 @@ export interface components {
             description_md?: string | null;
             editable: boolean;
             effective_value: unknown;
-            i18n?: null | components["schemas"]["I18nPayload"];
+            i18n?: components["schemas"]["I18nPayload"] | null;
             json_schema?: unknown;
             label: string;
             locked: boolean;
@@ -2325,7 +2408,7 @@ export interface components {
         ModelConfigSectionResponse: {
             description_md?: string | null;
             fields: components["schemas"]["ModelConfigFieldResponse"][];
-            i18n?: null | components["schemas"]["I18nPayload"];
+            i18n?: components["schemas"]["I18nPayload"] | null;
             id: string;
             label: string;
         };
@@ -2391,7 +2474,7 @@ export interface components {
             hub_provider?: string | null;
             /** @description Absolute path to the downloaded model file (populated after download). */
             local_path?: string | null;
-            pricing?: null | components["schemas"]["PricingRequest"];
+            pricing?: components["schemas"]["PricingRequest"] | null;
             /**
              * @description Cloud provider id from the settings document `providers.registry` list
              *     (e.g. `"openai-main"`).
@@ -2409,7 +2492,7 @@ export interface components {
             filename?: string | null;
             hub_provider?: string | null;
             local_path?: string | null;
-            pricing?: null | components["schemas"]["PricingResponse"];
+            pricing?: components["schemas"]["PricingResponse"] | null;
             provider_id?: string | null;
             remote_model_id?: string | null;
             repo_id?: string | null;
@@ -2445,11 +2528,11 @@ export interface components {
             max_output_tokens?: number | null;
             model?: string | null;
             previous_response_id?: string | null;
-            reasoning?: null | components["schemas"]["OpenAIReasoningInput"];
+            reasoning?: components["schemas"]["OpenAIReasoningInput"] | null;
             stream?: boolean | null;
             /** Format: float */
             temperature?: number | null;
-            text?: null | components["schemas"]["OpenAITextInput"];
+            text?: components["schemas"]["OpenAITextInput"] | null;
             tool_choice?: unknown;
             /**
              * @description OpenAI Responses `tools` array (function tool definitions). Held as a
@@ -2470,7 +2553,7 @@ export interface components {
         };
         OpenAiError: {
             code?: string | null;
-            i18n?: null | components["schemas"]["I18nPayload"];
+            i18n?: components["schemas"]["I18nPayload"] | null;
             message: string;
             param?: string | null;
             type: string;
@@ -2613,8 +2696,8 @@ export interface components {
         PluginResponse: {
             allowHosts: string[];
             availableVersion?: string | null;
-            compatibility?: null | components["schemas"]["PluginCompatibilityManifest"];
-            contributions?: null | components["schemas"]["PluginContributesManifest"];
+            compatibility?: components["schemas"]["PluginCompatibilityManifest"] | null;
+            contributions?: components["schemas"]["PluginContributesManifest"] | null;
             enabled: boolean;
             error?: string | null;
             hasWasm: boolean;
@@ -2631,7 +2714,7 @@ export interface components {
             manifestVersion: number;
             name: string;
             networkMode: string;
-            permissions?: null | components["schemas"]["PluginPermissionsManifest"];
+            permissions?: components["schemas"]["PluginPermissionsManifest"] | null;
             removable: boolean;
             runtimeStatus: string;
             sourceKind: string;
@@ -2900,11 +2983,11 @@ export interface components {
             description_md?: string;
             editable: boolean;
             effective_value: components["schemas"]["SettingValue"];
-            i18n?: null | components["schemas"]["I18nPayload"];
+            i18n?: components["schemas"]["I18nPayload"] | null;
             is_overridden: boolean;
             label: string;
-            overridden_by?: null | components["schemas"]["SettingOverrideSource"];
-            override_value?: null | components["schemas"]["SettingValue"];
+            overridden_by?: components["schemas"]["SettingOverrideSource"] | null;
+            override_value?: components["schemas"]["SettingValue"] | null;
             pmid: string;
             schema: components["schemas"]["SettingPropertySchema"];
             search_terms: string[];
@@ -2927,14 +3010,14 @@ export interface components {
         };
         SettingsSectionView: {
             description_md?: string;
-            i18n?: null | components["schemas"]["I18nPayload"];
+            i18n?: components["schemas"]["I18nPayload"] | null;
             id: string;
             subsections: components["schemas"]["SettingsSubsectionView"][];
             title: string;
         };
         SettingsSubsectionView: {
             description_md?: string;
-            i18n?: null | components["schemas"]["I18nPayload"];
+            i18n?: components["schemas"]["I18nPayload"] | null;
             id: string;
             properties: components["schemas"]["SettingPropertyView"][];
             title: string;
@@ -2997,7 +3080,7 @@ export interface components {
         TaskProgressResponse: {
             /** Format: int64 */
             current: number;
-            i18n?: null | components["schemas"]["I18nPayload"];
+            i18n?: components["schemas"]["I18nPayload"] | null;
             label?: string | null;
             logs?: string[] | null;
             message?: string | null;
@@ -3012,9 +3095,9 @@ export interface components {
         TaskResponse: {
             created_at: string;
             error_msg?: string | null;
-            i18n?: null | components["schemas"]["I18nPayload"];
+            i18n?: components["schemas"]["I18nPayload"] | null;
             id: string;
-            progress?: null | components["schemas"]["TaskProgressResponse"];
+            progress?: components["schemas"]["TaskProgressResponse"] | null;
             status: components["schemas"]["TaskStatus"];
             task_type: string;
             updated_at: string;
@@ -3231,14 +3314,14 @@ export interface components {
             /** @description Runtime backend identifier for local models, e.g. `"ggml.llama"`. */
             backend_id?: string | null;
             capabilities: components["schemas"]["ModelCapability"][];
-            chat_capabilities?: null | components["schemas"]["ChatModelCapabilities"];
+            chat_capabilities?: components["schemas"]["ChatModelCapabilities"] | null;
             created_at: string;
             display_name: string;
             id: string;
             /** @description Whether this model is backed by the local runtime or a cloud provider. */
             kind: components["schemas"]["ModelKind"];
-            runtime_presets?: null | components["schemas"]["RuntimePresetsResponse"];
-            runtime_state?: null | components["schemas"]["ModelRuntimeStateResponse"];
+            runtime_presets?: components["schemas"]["RuntimePresetsResponse"] | null;
+            runtime_state?: components["schemas"]["ModelRuntimeStateResponse"] | null;
             /**
              * Format: int64
              * @description Total bytes for locally materialized model artifacts, when known.
@@ -3277,9 +3360,9 @@ export interface components {
             backend_id?: string | null;
             capabilities?: components["schemas"]["ModelCapability"][] | null;
             display_name?: string | null;
-            kind?: null | components["schemas"]["ModelKind"];
-            runtime_presets?: null | components["schemas"]["RuntimePresetsRequest"];
-            spec?: null | components["schemas"]["ModelSpecRequest"];
+            kind?: components["schemas"]["ModelKind"] | null;
+            runtime_presets?: components["schemas"]["RuntimePresetsRequest"] | null;
+            spec?: components["schemas"]["ModelSpecRequest"] | null;
             status?: string | null;
         };
         /** @description Request body for `PUT /v1/sessions/{id}`. */
@@ -3288,7 +3371,7 @@ export interface components {
         };
         UpdateSettingCommand: {
             op: components["schemas"]["UpdateSettingOperation"];
-            value?: null | components["schemas"]["SettingValue"];
+            value?: components["schemas"]["SettingValue"] | null;
         };
         /** @enum {string} */
         UpdateSettingOperation: "set" | "unset";
@@ -3400,11 +3483,11 @@ export interface components {
             model_id?: string | null;
             model_path: string;
             negative_prompt?: string | null;
-            progress?: null | components["schemas"]["TaskProgressResponse"];
+            progress?: components["schemas"]["TaskProgressResponse"] | null;
             prompt: string;
             reference_image_url?: string | null;
             request_data: components["schemas"]["VideoGenerationRequestData"];
-            result_data?: null | components["schemas"]["VideoGenerationResultData"];
+            result_data?: components["schemas"]["VideoGenerationResultData"] | null;
             status: components["schemas"]["TaskStatus"];
             task_id: string;
             task_type: string;
@@ -3565,9 +3648,9 @@ export interface components {
             toRelativePath: string;
         };
         WorkspaceStateResponse: {
-            config?: null | components["schemas"]["WorkspaceConfigResponse"];
-            current?: null | components["schemas"]["WorkspaceInfoResponse"];
-            migrated?: null | components["schemas"]["WorkspaceMigrationSummary"];
+            config?: components["schemas"]["WorkspaceConfigResponse"] | null;
+            current?: components["schemas"]["WorkspaceInfoResponse"] | null;
+            migrated?: components["schemas"]["WorkspaceMigrationSummary"] | null;
             recent: components["schemas"]["RecentWorkspaceResponse"][];
         };
         WorkspaceTextSearchFileMatch: {
@@ -4386,7 +4469,7 @@ export interface operations {
     list_models: {
         parameters: {
             query?: {
-                capability?: null | components["schemas"]["ModelCapability"];
+                capability?: components["schemas"]["ModelCapability"] | null;
             };
             header?: never;
             path?: never;
@@ -5711,6 +5794,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentDiagnosticsResponse"];
+                };
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    memory_diagnostics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent memory pipeline status: phase1 counts, phase2 locks, recent runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryDiagnosticsResponse"];
                 };
             };
             /** @description Backend error */

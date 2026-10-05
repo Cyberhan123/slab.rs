@@ -13,13 +13,13 @@ use slab_app_core::domain::models::ModelLoadCommand;
 use slab_app_core::domain::services::ModelLoadProgress;
 use slab_cloud_provider::default_models_for_provider;
 use slab_proto::harness::messages::{
-    ApprovalPolicy, ApprovalResolveParams, ApprovalResolveResult, SandboxPolicy, ShutdownParams,
-    ShutdownResult, ThreadArchiveParams, ThreadArchiveResult, ThreadCompactStartParams,
-    ThreadCompactStartResult, ThreadForkParams, ThreadForkResult, ThreadListParams,
-    ThreadListResult, ThreadResumeParams, ThreadResumeResult, ThreadRollbackParams,
-    ThreadRollbackResult, ThreadStartParams, ThreadStartResult, TurnInterruptParams,
-    TurnInterruptResult, TurnStartParams, TurnStartResult, WorkspaceMigrateParams,
-    WorkspaceMigrateResult,
+    ApprovalPolicy, ApprovalResolveParams, ApprovalResolveResult, QuestionnaireResolveParams,
+    QuestionnaireResolveResult, SandboxPolicy, ShutdownParams, ShutdownResult, ThreadArchiveParams,
+    ThreadArchiveResult, ThreadCompactStartParams, ThreadCompactStartResult, ThreadForkParams,
+    ThreadForkResult, ThreadListParams, ThreadListResult, ThreadResumeParams, ThreadResumeResult,
+    ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams, ThreadStartResult,
+    TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
+    WorkspaceMigrateParams, WorkspaceMigrateResult,
 };
 use slab_proto::harness::method;
 use slab_proto::harness::{
@@ -358,6 +358,20 @@ pub(crate) async fn approval_resolve(
     let delivered =
         session.service().approve_call(&real_id, &params.item_id, params.approved, scope);
     Ok(ApprovalResolveResult { delivered: Some(delivered), status: None })
+}
+
+/// `questionnaire/resolve` — deliver the user's answers to a pending
+/// `questionnaire` tool call. Same shape as `approval/resolve`: the params'
+/// harness `thread_id` resolves to the real thread id via `thread_op`, and the
+/// service-side ownership check refuses cross-thread delivery.
+pub(crate) async fn questionnaire_resolve(
+    session: HarnessSession,
+    real_id: String,
+    params: QuestionnaireResolveParams,
+) -> Result<QuestionnaireResolveResult, String> {
+    let delivered =
+        session.service().resolve_questionnaire(&real_id, &params.item_id, &params.answers);
+    Ok(QuestionnaireResolveResult { delivered: Some(delivered), status: None })
 }
 
 pub(crate) async fn shutdown(

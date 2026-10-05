@@ -2,7 +2,10 @@ import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { render } from "vitest-browser-react"
 
-import { MessageInteractionContext } from "../../message-interaction-context"
+import {
+  MessageInteractionContext,
+  type MessageInteractionValue,
+} from "../../message-interaction-context"
 import type { ToolPartLike } from "../message-tool-part"
 import MessageToolPlanPart from "../message-tool-plan-part"
 
@@ -14,17 +17,18 @@ vi.mock("@slab/components/collapsible", () => ({
   CollapsibleTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 
+/** Shared empty interaction fixture — the component only reads the maps. */
+const EMPTY_INTERACTION: MessageInteractionValue = {
+  approvalStatusByItemId: new Map(),
+  userMessageTurnIndex: new Map(),
+  rollbackToMessage: undefined,
+  subagentTasksByTaskId: new Map(),
+  subagentChildItemsByChildId: new Map(),
+}
+
 async function renderPart(part: Partial<ToolPartLike>, toolCallId = "call-1") {
   return render(
-    <MessageInteractionContext.Provider
-      value={{
-        approvalStatusByItemId: new Map(),
-        userMessageTurnIndex: new Map(),
-        rollbackToMessage: undefined,
-        subagentTasksByTaskId: new Map(),
-          subagentChildItemsByChildId: new Map(),
-      }}
-    >
+    <MessageInteractionContext.Provider value={EMPTY_INTERACTION}>
       <MessageToolPlanPart
         part={part as ToolPartLike}
         item={{} as never}

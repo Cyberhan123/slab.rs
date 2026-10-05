@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { defineProject, mergeConfig } from "vitest/config";
 
-import { vitestBase } from "../../vitest.base";
+import { vitestBase } from "../../vitest.base.ts";
 
 export default defineProject(
   mergeConfig(vitestBase, {
@@ -17,7 +17,7 @@ export default defineProject(
         // component files import "@/lib/utils" internally. Any consumer that
         // resolves @slab/components at source must map "@" at the components
         // source root, otherwise those internal imports fail to resolve.
-        "@": path.resolve(__dirname, "../slab-components/src"),
+        "@": path.resolve(import.meta.dirname, "../slab-components/src"),
       },
     },
   }),
