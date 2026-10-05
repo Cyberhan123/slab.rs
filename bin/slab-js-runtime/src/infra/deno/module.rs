@@ -270,6 +270,6 @@ mod test_module {
     fn test_load_dir() {
         let modules = Module::load_dir("src/infra/deno/ext/rustyscript")
             .expect("Failed to load modules from directory");
-        assert!(!modules.is_empty());
+        assert_ne!(modules, []);
     }
 }

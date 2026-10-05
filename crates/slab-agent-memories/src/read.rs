@@ -1,8 +1,9 @@
 //! Read side of the memory workspace: load the injectable summary and parse
 //! the `<oai-mem-citation>` blocks the model appends to final replies.
 //!
-//! The developer-message rendering itself lives in `slab-agent-context` (the
-//! `memory` fragment template); this module only loads the structured inputs.
+//! The developer-message body that teaches the citation contract is rendered
+//! by this crate (`templates::render_memory_read`); this module loads the
+//! structured inputs and parses the citations back out.
 
 use std::path::Path;
 

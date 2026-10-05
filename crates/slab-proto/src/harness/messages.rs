@@ -592,6 +592,32 @@ pub struct ApprovalResolveResult {
     pub status: Option<String>,
 }
 
+// ============ questionnaire/resolve ============
+
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct QuestionnaireResolveParams {
+    pub thread_id: String,
+    /// The pending questionnaire item / tool-call id (the notification's
+    /// `item_id`).
+    pub item_id: String,
+    /// The user's answers as structured JSON, e.g.
+    /// `{"status":"answered","selected":["value"],"custom":null}`. Delivered
+    /// verbatim to the waiting agent turn as the tool result.
+    pub answers: serde_json::Value,
+}
+
+#[derive(TS, Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct QuestionnaireResolveResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
 // ============ shutdown ============
 
 #[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]

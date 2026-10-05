@@ -26,3 +26,12 @@ patches/*.patch text eol=lf
 # platform so a Windows core.autocrlf checkout cannot flip the file to CRLF
 # and fail `generated_document_schema_matches_checked_in_file`.
 docs/public/manifests/v1/settings-document.schema.json text eol=lf
+
+# Memory prompt templates are embedded via include_str! with no newline
+# normalization, so worktree bytes are the prompt bytes. Default the whole
+# templates/ tree to LF for cross-platform uniformity so Windows
+# core.autocrlf checkouts/stashes cannot flip them — including templates
+# added later. read.md historically rendered CRLF (matching the removed
+# memory.jinja); it migrated to LF with its byte-stability pin
+# (memory_read_body_is_byte_stable) updated in lockstep.
+crates/slab-agent-memories/templates/** text eol=lf

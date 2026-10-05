@@ -43,6 +43,9 @@ pub fn event_msg_to_notification(msg: EventMsg) -> Option<ServerNotification> {
         EventMsg::FileChangeRequestApproval(p) => {
             Some(ServerNotification::FileChangeRequestApproval(p))
         }
+        EventMsg::QuestionnaireRequestAnswer(p) => {
+            Some(ServerNotification::QuestionnaireRequestAnswer(p))
+        }
         EventMsg::ContextCompacting(p) => Some(ServerNotification::ContextCompacting(p)),
         EventMsg::ContextCompacted(p) => Some(ServerNotification::ContextCompacted(p)),
         // Persistence-grade conversation events. They carry data for
