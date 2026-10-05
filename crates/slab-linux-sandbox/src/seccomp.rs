@@ -63,11 +63,16 @@ pub fn compile_network_filter() -> Result<BpfProgram, LinuxSandboxError> {
     );
 
     for &sysno in BLOCKED {
-        // Empty conditions ⇒ the rule matches unconditionally ⇒ KillProcess.
+        // The rule matches unconditionally ⇒ KillProcess. seccompiler 0.5
+        // rejects empty condition vectors (`Error::EmptyRule`), so "always
+        // true" is expressed as a tautology: `arg0 & 0 == 0`.
+        let always =
+            SeccompCondition::new(0, SeccompCmpArgLen::Qword, SeccompCmpOp::MaskedEq(0), 0)
+                .map_err(|e| LinuxSandboxError::SeccompCompile(e.to_string()))?;
         rules.insert(
             sysno,
             vec![
-                SeccompRule::new(vec![])
+                SeccompRule::new(vec![always])
                     .map_err(|e| LinuxSandboxError::SeccompCompile(e.to_string()))?,
             ],
         );
