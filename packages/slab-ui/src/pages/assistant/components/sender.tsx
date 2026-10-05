@@ -448,7 +448,9 @@ function Sender({
     // The approval/questionnaire cards render their own <form> elements (the
     // questionnaire component Root), so they live OUTSIDE the composer form —
     // nested forms are invalid HTML. Visually they still sit above the input.
-    <div className="w-full">
+    // Capped width so the composer (and the cards above it) stay readable on
+    // wide panes instead of stretching edge to edge.
+    <div className="mx-auto w-full max-w-3xl">
       {approvals && approvals.length > 0 && onResolveApproval ? (
         <div className="mb-2 space-y-2">
           {approvals.map((approval) => (

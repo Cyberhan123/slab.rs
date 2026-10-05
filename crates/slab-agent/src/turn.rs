@@ -487,6 +487,7 @@ pub(crate) async fn execute_turn(
         response.content_already_streamed,
     )
     .await;
+    complete_tool_round_agent_text(&context, response.content.as_deref()).await;
     persist_assistant_tool_request(&context, messages, &response).await;
     if !validation.invalid.is_empty() {
         record_invalid_tool_calls(&context, &validation.invalid, messages).await?;
@@ -987,6 +988,34 @@ async fn emit_unstreamed_tool_text(
         context.thread_id,
         context.turn_index,
         &item_id,
+        &text,
+    )
+    .await;
+}
+
+/// Close the iteration's agent-message item when the round ends in tool
+/// calls. Only the FINAL answer emitted an `ItemCompleted(agentMessage)`
+/// (`persist_final_answer`), so a tool round's text item stayed open on the
+/// wire for the rest of the run: the server's live snapshot cleared it only
+/// at the next `turn/started`, and the frontend live-text mirror (which
+/// deletes entries solely on `item/completed`) leaked it as a DUPLICATE
+/// tail bubble once the pane's own stream finished. Emitting the completion
+/// here also persists the segment as a `TurnItem`, so restored history
+/// renders the commentary between tool cards (previously it lived only in
+/// the LLM-grade `MessageAppend`, which the full-fidelity restore path
+/// skips). Rounds with no visible text emit nothing — completing an item
+/// that never started would persist an empty bubble.
+async fn complete_tool_round_agent_text(context: &TurnExecutionContext<'_>, content: Option<&str>) {
+    let Some(text) = content else { return };
+    let text = strip_think_blocks(text);
+    if text.is_empty() {
+        return;
+    }
+    emit_agent_message_completed(
+        context.notify,
+        context.thread_id,
+        context.turn_index,
+        &assistant_item_id(context.turn_index),
         &text,
     )
     .await;

@@ -122,14 +122,16 @@ export function ApprovalCard({
         )}
       </div>
 
-      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      {/* Actions stack VERTICALLY: one approve scope per row, deny below —
+          side-by-side placement squeezed the scope labels on narrow cards. */}
+      <div className="mt-3 flex flex-col gap-3">
         {approveChoices.length > 0 ? (
           // The questionnaire Root renders a <form>; the card lives outside
           // the composer form, and submit is swallowed (choices resolve on
           // change, so there is nothing to submit).
           <Questionnaire noValidate onSubmit={(event) => event.preventDefault()}>
             <QuestionnaireItem name="scope">
-              <QuestionnaireChoices className="grid-cols-1 gap-1.5 sm:grid-cols-3">
+              <QuestionnaireChoices className="grid-cols-1 gap-1.5">
                 {approveChoices.map((choice) => (
                   <QuestionnaireChoice
                     key={choice.scope}

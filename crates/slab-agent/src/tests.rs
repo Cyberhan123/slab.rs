@@ -2103,6 +2103,130 @@ async fn trace_sink_records_prompt_llm_tool_and_turn_events() {
     assert_eq!(tool_output.1.payload["output"], "hello from agent");
 }
 
+// ── tool-round agent text must close its item (leak + restore-loss fix) ──────
+
+/// Two-round LLM: the FIRST response carries text AND a tool call (the
+/// "commentary between tool cards" shape); the second is the final answer.
+struct TextThenToolLlm {
+    call_count: Mutex<u32>,
+}
+
+impl TextThenToolLlm {
+    fn new() -> Self {
+        Self { call_count: Mutex::new(0) }
+    }
+}
+
+#[async_trait]
+impl LlmPort for TextThenToolLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut count = self.call_count.lock().unwrap();
+        *count += 1;
+        if *count == 1 {
+            Ok(LlmResponse {
+                content: Some("checking first".into()),
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "call-1".into(),
+                    name: "echo".into(),
+                    arguments: r#"{"message":"hi"}"#.into(),
+                }],
+                finish_reason: Some("tool_calls".into()),
+                usage: None,
+            })
+        } else {
+            Ok(LlmResponse {
+                content: Some("all done".into()),
+                content_already_streamed: false,
+                tool_calls: vec![],
+                finish_reason: Some("stop".into()),
+                usage: None,
+            })
+        }
+    }
+}
+
+#[tokio::test]
+async fn tool_round_text_closes_its_agent_message_item() {
+    // Regression (the assistant message-leak): a tool round's agent-message
+    // item used to stay open — only the FINAL answer emitted
+    // ItemCompleted(agentMessage). The open item leaked twice: the frontend
+    // live-text mirror (which deletes entries solely on item/completed)
+    // rendered it as a DUPLICATE tail bubble after the run, and the segment
+    // was never persisted as a TurnItem, so restored history dropped the
+    // commentary between tool cards.
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+    let control = Arc::new(
+        AgentControl::new(
+            Arc::new(TextThenToolLlm::new()),
+            store,
+            notify.clone(),
+            Arc::new(ApprovingApproval),
+            Arc::new(router),
+            8,
+            4,
+        )
+        .with_exec_policy(Arc::new(FullExposureExecPolicy)),
+    );
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("run it".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let thread_id = control
+        .spawn("session-tool-round-text".into(), AgentConfig::default(), messages)
+        .await
+        .expect("spawn");
+    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            if matches!(
+                *status_rx.borrow(),
+                ThreadStatus::Completed
+                    | ThreadStatus::Errored
+                    | ThreadStatus::Shutdown
+                    | ThreadStatus::Interrupted
+            ) {
+                return;
+            }
+        }
+    })
+    .await;
+
+    let events = notify.events.lock().unwrap().clone();
+    let agent_items: Vec<(String, String)> = events
+        .iter()
+        .filter_map(|event| match event {
+            EventMsg::ItemCompleted(p) if p.thread_id == thread_id => match &p.item {
+                TurnItem::AgentMessage { id, text } => Some((id.clone(), text.clone())),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        agent_items,
+        vec![
+            ("assistant-0".to_owned(), "checking first".to_owned()),
+            ("assistant-1".to_owned(), "all done".to_owned()),
+        ],
+        "the tool round's text must close as its own completed item; events: {events:#?}"
+    );
+}
+
 fn assert_trace_event(events: &[(AgentTraceContext, AgentTraceEvent)], event_name: &str) {
     assert!(
         events.iter().any(|(_context, event)| event.event == event_name),

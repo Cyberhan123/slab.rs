@@ -1565,6 +1565,35 @@ export class ConversationController {
   private readonly handleNotification = (notification: JsonRpcNotification): void => {
     const { method } = notification
 
+    // A new run iteration begins: clear the live-text mirror, mirroring the
+    // server's own folding rule (event_hub `accumulate_live` clears its
+    // in-flight items on TurnStarted). Without this arm the mirror diverges
+    // from the server: an agent-message item whose iteration ends in tool
+    // calls never receives an `item/completed` (only the FINAL answer emits
+    // one), so its mirrored text survives the whole run and — once the pane's
+    // own stream finishes (`isBusy` false) — renders as a DUPLICATE assistant
+    // bubble at the timeline tail. Reasoning-bearing iterations were masked by
+    // `on_reasoning_done`'s ItemCompleted (same shared item id) dropping the
+    // entry first; reasoning-less tool-round text leaked exactly once per run.
+    // Clearing here keeps at most the CURRENT iteration's in-flight text in
+    // the mirror (interrupted-run text stays until the next iteration — it is
+    // the only visual record, since history never persisted it).
+    if (method === HARNESS_NOTIFICATION.TURN_STARTED) {
+      const params = (notification.params ?? {}) as { threadId?: string }
+      if (params.threadId !== undefined && params.threadId !== this.client.currentThreadId) {
+        return
+      }
+      if (this.liveText.size > 0 || this.liveTextBuffer.size > 0) {
+        // Replace (not mutate) both maps so the snapshot consumers see the
+        // change; a pending flush timer firing later finds an empty buffer
+        // and is a no-op (no resurrection of the cleared entries).
+        this.liveTextBuffer = new Map()
+        this.liveText = new Map()
+        this.commit()
+      }
+      return
+    }
+
     // Item finalization: drop the per-item live accumulations (streamed
     // output / patch lines). The finalized item carries its own content, and
     // keeping the streamed copies would grow the maps without bound over a
