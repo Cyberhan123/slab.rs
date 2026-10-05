@@ -1,11 +1,17 @@
 //! Network-only seccomp BPF filter. The filter's *mismatch* action is `Allow` (syscalls not in the
 //! map, or whose rule conditions don't match, pass through); its *match* action is `KillProcess`
 //! (a matching rule kills the whole process tree — no forked child can exfil after the parent
-//! dies). The network syscalls are added as rules: `socket()` matches (⇒ kill) when its `domain`
-//! argument is **not** `AF_UNIX`, so libc/NSS/fontconfig init probes that open Unix sockets
-//! survive; the other network syscalls match unconditionally. (seccomp cannot introspect an fd's
-//! family after creation, so `connect`/`sendmsg` on an AF_UNIX fd are collateral damage —
-//! acceptable, since outbound exfiltration is fully blocked.)
+//! dies).
+//!
+//! The filter gates **socket creation by family**: `socket()` matches (⇒ kill) when its `domain`
+//! argument is **not** `AF_UNIX`. seccomp cannot introspect an fd's family after creation, so
+//! filtering the data-plane syscalls (`connect`, `sendmsg`, …) instead would also kill
+//! family-agnostic local IPC — which real binaries depend on (glibc's NSS daemon probe
+//! `connect()`s an `AF_UNIX` socket during `getpwuid` under a sanitized environment, so an
+//! unconditional `connect` kill makes even `bash -c 'echo hi'` die with SIGSYS). With creation
+//! gated, no `AF_INET`/`AF_INET6`/`AF_PACKET`/`AF_NETLINK` socket can ever come into existence,
+//! and the data-plane syscalls can only ever operate on local (or inherited-and-CLOEXEC-closed)
+//! descriptors — the same exfiltration guarantee without the collateral damage.
 //!
 //! The BPF program is compiled BEFORE spawn (it allocates). The `pre_exec` hook installs it via
 //! raw syscalls only (`prctl` + the `seccomp` syscall), which is async-signal-safe. We do NOT use
@@ -24,25 +30,6 @@ use crate::error::LinuxSandboxError;
 /// (see <https://github.com/rust-lang/libc/issues/3342>, mirrored from seccompiler's own backend).
 const SECCOMP_SET_MODE_FILTER: libc::c_uint = 1;
 
-/// Network syscalls denied unconditionally (kill on call). `socket` is handled separately so the
-/// `AF_UNIX` exemption can be applied to its `domain` argument. `libc::SYS_*` is `c_long` (= `i64`
-/// on the supported x86_64 linux target), matching the `i64` keys seccompiler requires.
-const BLOCKED: &[libc::c_long] = &[
-    libc::SYS_connect,
-    libc::SYS_bind,
-    libc::SYS_listen,
-    libc::SYS_accept,
-    libc::SYS_accept4,
-    libc::SYS_sendto,
-    libc::SYS_recvfrom,
-    libc::SYS_sendmsg,
-    libc::SYS_recvmsg,
-    libc::SYS_getsockopt,
-    libc::SYS_setsockopt,
-    libc::SYS_shutdown,
-    libc::SYS_socketpair,
-];
-
 /// Compile the network-only seccomp filter to a BPF program. Allocates — call BEFORE spawn, never
 /// inside `pre_exec`.
 pub fn compile_network_filter() -> Result<BpfProgram, LinuxSandboxError> {
@@ -50,7 +37,8 @@ pub fn compile_network_filter() -> Result<BpfProgram, LinuxSandboxError> {
 
     // socket(domain, type, protocol): the rule MATCHES (⇒ match_action KillProcess) when arg0
     // (domain) != AF_UNIX. A matching domain (AF_UNIX) leaves the rule unmatched ⇒ mismatch_action
-    // Allow.
+    // Allow. This is the whole network gate: no non-UNIX socket can ever be created, so
+    // connect/sendmsg/… have nothing network-ish to operate on (see the module docs).
     let af_unix =
         SeccompCondition::new(0, SeccompCmpArgLen::Qword, SeccompCmpOp::Ne, libc::AF_UNIX as u64)
             .map_err(|e| LinuxSandboxError::SeccompCompile(e.to_string()))?;
@@ -61,22 +49,6 @@ pub fn compile_network_filter() -> Result<BpfProgram, LinuxSandboxError> {
                 .map_err(|e| LinuxSandboxError::SeccompCompile(e.to_string()))?,
         ],
     );
-
-    for &sysno in BLOCKED {
-        // The rule matches unconditionally ⇒ KillProcess. seccompiler 0.5
-        // rejects empty condition vectors (`Error::EmptyRule`), so "always
-        // true" is expressed as a tautology: `arg0 & 0 == 0`.
-        let always =
-            SeccompCondition::new(0, SeccompCmpArgLen::Qword, SeccompCmpOp::MaskedEq(0), 0)
-                .map_err(|e| LinuxSandboxError::SeccompCompile(e.to_string()))?;
-        rules.insert(
-            sysno,
-            vec![
-                SeccompRule::new(vec![always])
-                    .map_err(|e| LinuxSandboxError::SeccompCompile(e.to_string()))?,
-            ],
-        );
-    }
 
     // mismatch_action = Allow (default for non-network / AF_UNIX socket),
     // match_action = KillProcess (a rule's conditions match).
