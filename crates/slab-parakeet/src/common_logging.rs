@@ -47,12 +47,9 @@ macro_rules! generic_trace {
 
 pub(crate) use {generic_debug, generic_error, generic_info, generic_trace, generic_warn};
 
-// Unsigned integer type on most platforms is 32 bit, niche platforms that parakeet
-// likely doesn't even support would use 16 bit and would still fit
-#[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))]
-// Of course Windows thinks it's a special little shit and
-// picks a signed integer for an unsigned type
-#[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))]
+// slab-build-utils normalizes bindgen enum aliases to c_int, so the
+// discriminant consts are i32 on every target.
+#[repr(i32)]
 pub enum GGMLLogLevel {
     None = slab_parakeet_sys::ggml_log_level_GGML_LOG_LEVEL_NONE,
     Info = slab_parakeet_sys::ggml_log_level_GGML_LOG_LEVEL_INFO,

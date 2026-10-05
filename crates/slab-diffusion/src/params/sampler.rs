@@ -29,8 +29,9 @@ use slab_diffusion_sys::{
 };
 
 #[allow(non_camel_case_types)]
-#[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))]
-#[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))]
+// slab-build-utils normalizes bindgen enum aliases to c_int, so the
+// discriminant consts are i32 on every target.
+#[repr(i32)]
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SampleMethod {
     Euler = sample_method_t_EULER_SAMPLE_METHOD,

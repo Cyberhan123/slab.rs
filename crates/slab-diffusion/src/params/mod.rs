@@ -49,8 +49,9 @@ use slab_diffusion_sys::{
     sd_log_level_t_SD_LOG_ERROR,
 };
 
-#[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
-#[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
+// slab-build-utils normalizes bindgen enum aliases to c_int, so the
+// discriminant consts are i32 on every target.
+#[repr(i32)]
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum LogLevel {
     Debug = sd_log_level_t_SD_LOG_DEBUG,
@@ -76,8 +77,9 @@ use slab_diffusion_sys::{
     rng_type_t_RNG_TYPE_COUNT,
 };
 
-#[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
-#[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
+// slab-build-utils normalizes bindgen enum aliases to c_int, so the
+// discriminant consts are i32 on every target.
+#[repr(i32)]
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum RngType {
     #[default]
@@ -134,8 +136,9 @@ use slab_diffusion_sys::{
 };
 
 #[allow(non_camel_case_types)]
-#[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
-#[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
+// slab-build-utils normalizes bindgen enum aliases to c_int, so the
+// discriminant consts are i32 on every target.
+#[repr(i32)]
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum WeightType {
     F32 = sd_type_t_SD_TYPE_F32,

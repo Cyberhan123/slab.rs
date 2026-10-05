@@ -6,8 +6,9 @@ use slab_whisper_sys::{
     whisper_gretype_WHISPER_GRETYPE_RULE_REF,
 };
 
-#[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
-#[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
+// slab-build-utils normalizes bindgen enum aliases to c_int, so the
+// discriminant consts are i32 on every target.
+#[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WhisperGrammarElementType {
     /// End of rule definition
