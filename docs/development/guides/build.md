@@ -54,7 +54,13 @@ through, in order: the `FFMPEG_DIR` environment variable (`<dir>/include` plus
 - Linux/macOS: install the libav development packages so pkg-config can find
   them (`libavcodec-dev`, `libavdevice-dev`, `libavfilter-dev`,
   `libavformat-dev`, `libavutil-dev`, `libswresample-dev`, `libswscale-dev` on
-  Debian/Ubuntu; `brew install ffmpeg` on macOS).
+  Debian/Ubuntu; `brew install ffmpeg` on macOS). Note that on Ubuntu these
+  `.pc` files declare the distro build's full optional-dependency web
+  (~100 `-l` flags), so *linking* (anything beyond `cargo check`) needs all of
+  those transitive dev packages too. CI avoids that entirely by installing a
+  hermetic PIC static build via `.github/actions/setup-ffmpeg`
+  (BtbN `linux64-gpl`) and exporting `FFMPEG_DIR`, which `ffmpeg-sys-next`
+  probes before pkg-config.
 
 ### Linux webview development libraries
 
