@@ -18,6 +18,8 @@ import { HARNESS_METHOD } from "@slab/api/harness"
 import type {
   ApprovalResolveParams,
   ApprovalResolveResult,
+  QuestionnaireResolveParams,
+  QuestionnaireResolveResult,
   InitializeResult,
   JsonRpcNotification,
   JsonRpcRequest,
@@ -303,6 +305,10 @@ export class HarnessClient {
 
   approvalResolve(params: ApprovalResolveParams): Promise<ApprovalResolveResult> {
     return this.sendRequest(HARNESS_METHOD.APPROVAL_RESOLVE, params)
+  }
+
+  questionnaireResolve(params: QuestionnaireResolveParams): Promise<QuestionnaireResolveResult> {
+    return this.sendRequest(HARNESS_METHOD.QUESTIONNAIRE_RESOLVE, params)
   }
 
   shutdown(params: ShutdownParams): Promise<ShutdownResult> {

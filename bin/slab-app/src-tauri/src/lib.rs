@@ -16,8 +16,17 @@ use tracing_subscriber::util::SubscriberInitExt;
 pub fn run() {
     let _otel_provider = init_telemetry();
     let api_endpoint = ApiEndpointConfig::desktop();
+    // Windows runs with native decorations (`decorations: true` in the platform
+    // configs), so the persisted window state must never re-apply a stale
+    // `decorated: false` saved by the old borderless-with-custom-controls era.
+    let window_state_flags = tauri_plugin_window_state::StateFlags::all()
+        & !tauri_plugin_window_state::StateFlags::DECORATIONS;
     let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(window_state_flags)
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
