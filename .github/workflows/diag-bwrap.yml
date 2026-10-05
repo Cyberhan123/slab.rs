@@ -1,0 +1,20 @@
+name: Diagnose bwrap on runner
+on: workflow_dispatch
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        run: |
+          set -x
+          command -v bwrap; bwrap --version
+          dpkg -l bubblewrap 2>&1 | tail -2 || true
+          sysctl kernel.apparmor_restrict_unprivileged_userns 2>&1 || true
+          cat /proc/sys/user/max_user_namespaces
+          bwrap --die-with-parent --new-session --unshare-user --unshare-pid --unshare-net \
+            --proc /proc --dev /dev --ro-bind / / --tmpfs /tmp -- \
+            /usr/bin/env -i /bin/bash -c 'echo BWRAP_OK'; echo "rc=$?"
+          # without --unshare-net to isolate the loopback path
+          bwrap --die-with-parent --new-session --unshare-user --unshare-pid \
+            --proc /proc --dev /dev --ro-bind / / --tmpfs /tmp -- \
+            /usr/bin/env -i /bin/bash -c 'echo NO_NETNS_OK'; echo "rc=$?"
