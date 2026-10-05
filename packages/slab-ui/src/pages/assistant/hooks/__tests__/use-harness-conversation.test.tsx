@@ -179,8 +179,7 @@ describe("useHarnessConversation", () => {
     await flush()
     const turnReq = FakeWebSocket.last!.sent
       .map((raw) => JSON.parse(raw))
-      .filter((m: { method?: string }) => m.method === "turn/start")
-      .at(-1)!
+      .findLast((m: { method?: string }) => m.method === "turn/start")!
     FakeWebSocket.last!.simMessage(
       rpcResponse(turnReq.id, { turn: { id: "0", status: "queued" }, queued: true }),
     )
@@ -193,8 +192,7 @@ describe("useHarnessConversation", () => {
     await flush()
     const interruptReq = FakeWebSocket.last!.sent
       .map((raw) => JSON.parse(raw))
-      .filter((m: { method?: string }) => m.method === "turn/interrupt")
-      .at(-1)!
+      .findLast((m: { method?: string }) => m.method === "turn/interrupt")!
     expect(interruptReq.params).toMatchObject({ threadId: "hthread-1", turnId: "0" })
     FakeWebSocket.last!.simMessage(rpcResponse(interruptReq.id, {}))
     await expect(stopping).resolves.toBeUndefined()
@@ -247,12 +245,11 @@ describe("useHarnessConversation", () => {
     })
     // Answer the turn/start the transport fired.
     const startReq = await vi.waitFor(() => {
-      const req = FakeWebSocket.last!.sent
+      const latest = FakeWebSocket.last!.sent
         .map((raw) => JSON.parse(raw))
-        .filter((m: { method?: string }) => m.method === "turn/start")
-        .at(-1)
-      expect(req).toBeDefined()
-      return req!
+        .findLast((m: { method?: string }) => m.method === "turn/start")
+      expect(latest).toBeDefined()
+      return latest!
     })
     FakeWebSocket.last!.simMessage(rpcResponse(startReq.id, { turn: { id: "1", items: [], status: "inProgress" } }))
     FakeWebSocket.last!.simMessage(
