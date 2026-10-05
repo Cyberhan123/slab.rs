@@ -112,6 +112,10 @@ jobs:
       - name: Install protoc
         run: sudo apt-get install -y protobuf-compiler pkg-config
 
+      - name: Setup uv
+        # gen:api regenerates the Python SDK through `uvx openapi-python-client`.
+        uses: astral-sh/setup-uv@v5
+
       - name: Setup FFmpeg
         uses: ./.github/actions/setup-ffmpeg
 
