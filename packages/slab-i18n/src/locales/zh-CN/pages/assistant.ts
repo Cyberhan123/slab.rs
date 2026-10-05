@@ -12,6 +12,17 @@ export const assistant = {
     alwaysInWorkspace: '当前工作区总是允许',
     always: '总是允许',
   },
+  questionnaire: {
+    title: '助手提问',
+    customPlaceholder: '或输入自定义回答',
+    required: '请选择或输入一个回答后继续。',
+    submit: '回答',
+    skip: '跳过',
+    waiting: '等待你的回答…',
+    answered: '已回答',
+    skipped: '已跳过',
+    timeout: '未在时限内回答',
+  },
   planMode: {
     exit: '退出',
   },
