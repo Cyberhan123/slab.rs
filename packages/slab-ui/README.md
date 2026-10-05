@@ -24,6 +24,13 @@ Bun-managed frontend package, consumed as workspace source.
 - `bun run build` (tsc --noEmit), `bun run lint` / `bun run lint:fix`, `bun run test:run`, `bun run test:browser` (browser mode)
 - Covered by root `bun run check:frontend`; broader test gates run from the repo root (`bun run test:frontend`, `bun run test:browser`).
 
+## Testing Conventions (vitest 5 / @vitest/browser 5)
+
+- `getByText(text)` matches an element whose **whole normalized text equals** the argument — substring matches are gone and the `exact` option does not relax this. For mixed-content assertions use the element's full text, a `data-testid` locator, or read `screen.container.textContent` (or `element.element().textContent`) directly.
+- `toHaveTextContent(expected)` is likewise **exact full-text equality** (whitespace-normalized). For substring containment use the dedicated `toMatchTextContent(expected)` matcher — e.g. asserting `42%` inside a progress card that also renders labels and ETA text.
+- `vi.fn()` requires an explicit type parameter (oxlint `require-mock-type-parameters`). For mocks passed to typed props, spell the real prop signature (`vi.fn<(message: string, options: SenderSubmitOptions) => void>()`); `tsc --noEmit` typechecks the tests under `src/`, so wrong signatures fail the build.
+- Browser-mode screenshots honor each project's configured viewport (`components-browser` 1280×900, `desktop-browser` 1440×960). Changing a project viewport invalidates every baseline under `__screenshots__/` — regenerate locally with `-u` and let CI rebuild the `chromium-linux` variants (they are per-platform files).
+
 ## Hard Boundaries
 
 - No platform adapters or port implementations — those belong to `@slab/core` (`src/infra/*`). UI reaches platform capabilities only through core ports.
