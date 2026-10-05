@@ -14,6 +14,9 @@ use slab_agent_memories::{
     templates,
 };
 use slab_agent_rollout::RolloutFileStore;
+use slab_agent_tools::{
+    BackgroundTaskRegistry, SubagentSpawner, SubagentTaskSink, SystemSubagentRequest,
+};
 use slab_config::AgentMemoriesConfig;
 use slab_types::{ConversationMessage, ConversationMessageContent, StructuredOutput};
 use tracing::warn;
@@ -25,12 +28,11 @@ use crate::domain::models::{
     CommonChatParams, LocalChatParams,
 };
 use crate::domain::services::{ChatService, workspace_root_from_config_explicit};
-use crate::infra::db::AnyStore;
+use crate::infra::db::{AnyStore, ChatSession, MEMORY_PHASE2_SESSION_PREFIX, SessionStore};
 
 use super::memory_project::{backfill_project_key, resolve_project_key};
 use super::rollout_store::RolloutBackedAgentStore;
 
-const MEMORY_PHASE2_SESSION_PREFIX: &str = "memory-phase2-";
 /// Cap on distinct projects consolidated per startup run — bounds worst-case
 /// consolidation cost when many projects accumulated pending extractions.
 const MAX_PROJECTS_PER_RUN: usize = 3;
@@ -56,10 +58,19 @@ pub struct AgentMemoryPipeline {
     /// Each project's workspace lives at
     /// `<memory_root>/projects/<project-key>/` (see `memory_fs::project_memory_root`).
     memory_root: PathBuf,
+    /// The shared background-task registry: the phase2 consolidation agent
+    /// registers here as a system subagent (visible via `subagent_status`,
+    /// bounded by the capacity gate, stoppable via `subagent_stop`).
+    background_tasks: Arc<BackgroundTaskRegistry>,
+    /// The subagent lifecycle sink (rollout persistence for the consolidation
+    /// child; parent-facing work is skipped — system subagents are
+    /// parentless).
+    subagent_sink: Arc<dyn SubagentTaskSink>,
     control: Arc<OnceLock<Arc<AgentControl>>>,
 }
 
 impl AgentMemoryPipeline {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: Arc<AnyStore>,
         rollout: Arc<RolloutFileStore>,
@@ -67,6 +78,8 @@ impl AgentMemoryPipeline {
         model_state: Arc<ModelState>,
         config: AgentMemoriesConfig,
         memory_root: PathBuf,
+        background_tasks: Arc<BackgroundTaskRegistry>,
+        subagent_sink: Arc<dyn SubagentTaskSink>,
     ) -> Self {
         Self {
             store,
@@ -75,6 +88,8 @@ impl AgentMemoryPipeline {
             model_state,
             config,
             memory_root,
+            background_tasks,
+            subagent_sink,
             control: Arc::new(OnceLock::new()),
         }
     }
@@ -352,12 +367,50 @@ impl AgentMemoryPipeline {
             "",
         )
         .map_err(|error| error.to_string())?;
-        let config = phase2_consolidation_agent_config(model, prompt);
-        let thread_id = control
-            .spawn(
-                format!("memory-phase2-{}", Uuid::new_v4()),
+        let registry = control.agent_registry();
+        let config = phase2_consolidation_agent_config(registry.as_ref(), model, prompt)?;
+        // The consolidation agent joins the subagent chain: spawned through
+        // `SubagentSpawner` it lands in the background-task registry
+        // (queryable via `subagent_status`, bounded by the capacity gate,
+        // stoppable via `subagent_stop` with the kill cascade) and gets
+        // rollout persistence via the sink — a self-owned parentless system
+        // subagent instead of an invisible root thread. No artifact root:
+        // the git-baselined memory workspace must not hold
+        // `.slab/artifacts/`.
+        let spawner = SubagentSpawner::new(
+            Arc::clone(&control),
+            Arc::clone(&self.background_tasks),
+            Arc::clone(&self.subagent_sink),
+        );
+        // The child's `agent_threads` row references its session id
+        // (`agent_threads.session_id REFERENCES chat_sessions(id)`; FKs are
+        // ON for every pool connection), so the FK parent must exist BEFORE
+        // the spawn: otherwise the child's initial `upsert_thread`
+        // (AgentThread::run) fails the FK, the terminal-snapshot wait then
+        // reports ThreadNotFound, and even a successful consolidation is
+        // recorded as failed. Same ensure-parent pattern as
+        // ChatStore::append_message's auto-session insert. Transient system
+        // bookkeeping: `list_sessions` filters this reserved id namespace
+        // out of user-facing listings.
+        let session_id = format!("{MEMORY_PHASE2_SESSION_PREFIX}{}", Uuid::new_v4());
+        let now = Utc::now();
+        self.store
+            .create_session(ChatSession {
+                id: session_id.clone(),
+                name: format!("Memory phase2 consolidation ({project_key})"),
+                state_path: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        let handle = spawner
+            .spawn_system(SystemSubagentRequest {
+                session_id,
+                owner_thread_id: None,
+                task_summary: format!("Consolidate memory workspace ({project_key})"),
                 config,
-                vec![ConversationMessage {
+                messages: vec![ConversationMessage {
                     role: "user".to_owned(),
                     content: ConversationMessageContent::Text(format!(
                         "Consolidate the memory workspace. Read {} first for the git-style diff context.",
@@ -367,9 +420,12 @@ impl AgentMemoryPipeline {
                     tool_call_id: None,
                     tool_calls: Vec::new(),
                 }],
-            )
+                workspace_root: None,
+            })
             .await
             .map_err(|error| error.to_string())?;
+        let thread_id = handle.child_thread_id.clone();
+        let task_id = handle.task_id;
         let mut status_rx =
             control.subscribe(&thread_id).await.map_err(|error| error.to_string())?;
         let heartbeat_seconds = (self.config.phase2_lease_seconds / 3).clamp(1, 60);
@@ -394,6 +450,16 @@ impl AgentMemoryPipeline {
                 }
                 _ = heartbeat.tick() => {
                     if !self.refresh_phase2_lease(owner, Utc::now(), project_key).await? {
+                        // The lease was lost (another run owns the project
+                        // now): stop the abandoned agent instead of letting
+                        // it keep writing to a workspace this run no longer
+                        // owns.
+                        if let Err(stop_error) = self.background_tasks.stop(&task_id) {
+                            warn!(
+                                %stop_error,
+                                "failed to stop the orphaned memory consolidation agent"
+                            );
+                        }
                         return Err("memory phase2 lease was lost during consolidation".to_owned());
                     }
                 }
@@ -1154,6 +1220,10 @@ async fn build_phase1_input(
                 role: record.message.role,
                 content,
                 created_at: record.created_at,
+                // The tag rides along so filter_memory_relevant_items can
+                // drop harness injections (agents_md fragments, subagent
+                // notices) from the extraction input.
+                name: record.message.name,
             }
         })
         .collect();
@@ -1341,22 +1411,30 @@ fn rollout_summary_filename_from_citation(source: &str) -> Option<String> {
     None
 }
 
-fn phase2_consolidation_agent_config(model: &str, prompt: String) -> AgentConfig {
-    AgentConfig {
+/// Registry-driven phase2 agent config: the `memory` built-in definition is
+/// the single tool authority (its Allowlist is applied every turn from
+/// `config.agent_type`), so this carries no `allowed_tools` of its own. A
+/// missing definition fails the run loudly — the kernel's turn-time registry
+/// lookup fails OPEN on an unknown agent_type, and an unfiltered
+/// consolidation agent must never run.
+fn phase2_consolidation_agent_config(
+    registry: &dyn slab_agent::AgentRegistry,
+    model: &str,
+    prompt: String,
+) -> Result<AgentConfig, String> {
+    let definition = registry
+        .get(super::agent_registry::MEMORY_AGENT_TYPE)
+        .ok_or_else(|| "memory agent type is not registered".to_owned())?;
+    Ok(AgentConfig {
         model: model.to_owned(),
         system_prompt: Some(prompt),
+        agent_type: Some(definition.agent_type),
         max_turns: 24,
         max_depth: 0,
         max_threads: 1,
-        allowed_tools: vec![
-            "read_file".to_owned(),
-            "write_file".to_owned(),
-            "list_dir".to_owned(),
-            "grep".to_owned(),
-        ],
         transient: true,
         ..AgentConfig::default()
-    }
+    })
 }
 
 #[cfg(test)]
@@ -1367,7 +1445,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::infra::db::AnyStore;
+    use crate::infra::db::{AnyStore, ChatSession, MEMORY_PHASE2_SESSION_PREFIX, SessionStore};
 
     #[tokio::test]
     async fn records_usage_source_kind_and_updates_matching_selected_rollout() {
@@ -1684,6 +1762,87 @@ mod tests {
         ));
     }
 
+    /// The phase2 spawn path pinned at the store boundary production hits:
+    /// `run_consolidation_agent` creates the synthetic `chat_sessions` row
+    /// before `spawn_system`, so the consolidation child's initial
+    /// `agent_threads` upsert (session FK) must succeed.
+    #[tokio::test]
+    async fn phase2_session_row_enables_thread_snapshot_upsert() {
+        use slab_agent::port::{AgentStorePort, ThreadSnapshot};
+
+        let store = AnyStore::connect("sqlite::memory:").await.expect("store");
+        let session_id = format!("{MEMORY_PHASE2_SESSION_PREFIX}{}", Uuid::new_v4());
+        let now = Utc::now();
+        store
+            .create_session(ChatSession {
+                id: session_id.clone(),
+                name: "Memory phase2 consolidation (proj)".to_owned(),
+                state_path: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .expect("synthetic phase2 session row");
+
+        // What AgentThread::run's initial upsert does — must pass the
+        // agent_threads.session_id FK.
+        let config_json = serde_json::to_string(&AgentConfig::default()).expect("config");
+        let stamp = now.to_rfc3339();
+        let snapshot = ThreadSnapshot {
+            id: "thread-phase2-child".to_owned(),
+            session_id,
+            parent_id: None,
+            depth: 0,
+            status: slab_agent::ThreadStatus::Running,
+            role_name: None,
+            config_json,
+            completion_text: None,
+            created_at: stamp.clone(),
+            updated_at: stamp,
+            archived_at: None,
+        };
+        store.upsert_thread(&snapshot).await.expect("thread upsert passes the session FK");
+        let loaded = store
+            .get_thread("thread-phase2-child")
+            .await
+            .expect("read back")
+            .expect("thread row exists");
+        assert_eq!(loaded.session_id, snapshot.session_id);
+    }
+
+    /// Synthetic phase2 rows stay out of the user-facing session list while
+    /// exact-id lookups keep resolving them.
+    #[tokio::test]
+    async fn list_sessions_hides_phase2_consolidation_sessions() {
+        let store = AnyStore::connect("sqlite::memory:").await.expect("store");
+        let now = Utc::now();
+        for id in ["memory-phase2-1111", "user-session-1"] {
+            store
+                .create_session(ChatSession {
+                    id: id.to_owned(),
+                    name: format!("session {id}"),
+                    state_path: None,
+                    created_at: now,
+                    updated_at: now,
+                })
+                .await
+                .expect("seed session");
+        }
+
+        let listed = store.list_sessions().await.expect("list sessions");
+        let ids: Vec<String> = listed.into_iter().map(|session| session.id).collect();
+        assert!(ids.contains(&"user-session-1".to_owned()));
+        assert!(
+            !ids.iter().any(|id| id.starts_with(MEMORY_PHASE2_SESSION_PREFIX)),
+            "synthetic phase2 rows must stay hidden: {ids:?}"
+        );
+
+        assert!(
+            store.get_session("memory-phase2-1111").await.expect("get session").is_some(),
+            "exact-id lookup still resolves the synthetic row"
+        );
+    }
+
     #[test]
     fn unparseable_phase2_timestamps_fall_back_to_epoch() {
         let input = Phase2InputRow {
@@ -1848,24 +2007,56 @@ mod tests {
     }
 
     #[test]
-    fn phase2_consolidation_agent_config_is_transient_and_local_only() {
-        let config = phase2_consolidation_agent_config("model", "prompt".to_owned());
+    fn phase2_consolidation_agent_config_is_registry_driven() {
+        use super::super::agent_registry::BuiltinAgentRegistry;
+        use slab_agent::AgentRegistry as _;
+
+        let registry = BuiltinAgentRegistry::with_builtins();
+        let config = phase2_consolidation_agent_config(&registry, "model", "prompt".to_owned())
+            .expect("config resolves from the registry");
 
         assert!(config.transient);
         assert_eq!(config.max_depth, 0);
         assert_eq!(config.max_threads, 1);
-        assert_eq!(
-            config.allowed_tools,
-            vec![
-                "read_file".to_owned(),
-                "write_file".to_owned(),
-                "list_dir".to_owned(),
-                "grep".to_owned()
-            ]
-        );
-        assert!(!config.allowed_tools.contains(&"delegate_subagent".to_owned()));
-        assert!(!config.allowed_tools.contains(&"web_search".to_owned()));
-        assert!(!config.allowed_tools.contains(&"shell".to_owned()));
+        assert_eq!(config.max_turns, 24);
+        assert_eq!(config.model, "model");
+        assert_eq!(config.system_prompt.as_deref(), Some("prompt"));
+        assert_eq!(config.agent_type.as_deref(), Some("memory"));
+        // No config-level allowlist: the registry definition is the single
+        // tool authority (applied per turn from agent_type).
+        assert!(config.allowed_tools.is_empty());
+
+        let definition = registry.get("memory").expect("memory definition");
+        let slab_agent::ToolConstraint::Allowlist(allowed) = definition.tools else {
+            panic!("memory agent uses an allowlist");
+        };
+        for expected in ["read_file", "write_file", "list_dir", "grep"] {
+            assert!(allowed.contains(&expected.to_owned()), "{expected}: {allowed:?}");
+        }
+        assert!(!allowed.contains(&"delegate_subagent".to_owned()));
+        assert!(!allowed.contains(&"web_search".to_owned()));
+        assert!(!allowed.contains(&"shell".to_owned()));
+    }
+
+    /// A missing `memory` definition fails the run loudly instead of letting
+    /// the turn-time registry lookup fail open on an unfiltered agent.
+    #[test]
+    fn phase2_consolidation_agent_config_missing_definition_errors() {
+        use slab_agent::{AgentDefinition, AgentRegistry};
+
+        struct EmptyRegistry;
+        impl AgentRegistry for EmptyRegistry {
+            fn get(&self, _agent_type: &str) -> Option<AgentDefinition> {
+                None
+            }
+            fn list(&self) -> Vec<AgentDefinition> {
+                Vec::new()
+            }
+        }
+
+        let error = phase2_consolidation_agent_config(&EmptyRegistry, "model", "prompt".to_owned())
+            .expect_err("missing definition errors");
+        assert!(error.contains("memory agent type is not registered"), "{error}");
     }
 
     fn text_msg(role: &str, text: &str) -> ConversationMessage {

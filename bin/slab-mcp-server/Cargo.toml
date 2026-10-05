@@ -19,6 +19,7 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 slab-jsonrpc = { workspace = true }
+slab-mcp = { workspace = true }
 slab-utils = { workspace = true }
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt-multi-thread"] }
 tracing = { workspace = true }
