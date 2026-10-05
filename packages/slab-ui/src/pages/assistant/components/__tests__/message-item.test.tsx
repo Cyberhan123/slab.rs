@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { render } from "vitest-browser-react"
 
 
-import { MessageInteractionContext } from "../message-interaction-context"
+import { MessageInteractionContext, type MessageInteractionValue } from "../message-interaction-context"
 import { MessageItem, type TMessage } from "../message/message-item"
 
 vi.mock("@slab/i18n", async () => {
@@ -126,6 +126,15 @@ function message(overrides: Partial<TMessage> = {}): TMessage {
   } as TMessage
 }
 
+/** Wrap `ui` with an explicit interaction context value (built by the caller:
+ *  constructing the value inside the JSX-owning scope trips
+ *  react(jsx-no-constructed-context-values)). */
+function renderWithInteraction(ui: ReactNode, value: MessageInteractionValue) {
+  return render(
+    <MessageInteractionContext.Provider value={value}>{ui}</MessageInteractionContext.Provider>,
+  )
+}
+
 describe("MessageItem", () => {
   it("renders the text part for an assistant message and shows a copy button", async () => {
     const screen = await render(<MessageItem message={message()} />)
@@ -201,20 +210,18 @@ describe("MessageItem", () => {
 
   it("shows a rollback button on a retracable user message and emits the message id", async () => {
     const rollbackToMessage = vi.fn<() => unknown>()
-    const screen = await render(
-      <MessageInteractionContext.Provider
-        value={{
-          approvalStatusByItemId: new Map(),
-          userMessageTurnIndex: new Map([["mu1", 2]]),
-          rollbackToMessage,
-          subagentTasksByTaskId: new Map(),
-          subagentChildItemsByChildId: new Map(),
-        }}
-      >
-        <MessageItem
-          message={message({ id: "mu1", role: "user", parts: [{ type: "text", text: "hi" }] })}
-        />
-      </MessageInteractionContext.Provider>,
+    const interactionValue: MessageInteractionValue = {
+      approvalStatusByItemId: new Map(),
+      userMessageTurnIndex: new Map([["mu1", 2]]),
+      rollbackToMessage,
+      subagentTasksByTaskId: new Map(),
+      subagentChildItemsByChildId: new Map(),
+    }
+    const screen = await renderWithInteraction(
+      <MessageItem
+        message={message({ id: "mu1", role: "user", parts: [{ type: "text", text: "hi" }] })}
+      />,
+      interactionValue,
     )
 
     const btn = screen.getByTestId("assistant-message-rollback")
@@ -223,38 +230,34 @@ describe("MessageItem", () => {
   })
 
   it("hides the rollback button on the first user message (turn 0)", async () => {
-    const screen = await render(
-      <MessageInteractionContext.Provider
-        value={{
-          approvalStatusByItemId: new Map(),
-          userMessageTurnIndex: new Map([["mu0", 0]]),
-          rollbackToMessage: vi.fn<() => unknown>(),
-          subagentTasksByTaskId: new Map(),
-          subagentChildItemsByChildId: new Map(),
-        }}
-      >
-        <MessageItem
-          message={message({ id: "mu0", role: "user", parts: [{ type: "text", text: "hi" }] })}
-        />
-      </MessageInteractionContext.Provider>,
+    const interactionValue: MessageInteractionValue = {
+      approvalStatusByItemId: new Map(),
+      userMessageTurnIndex: new Map([["mu0", 0]]),
+      rollbackToMessage: vi.fn<() => unknown>(),
+      subagentTasksByTaskId: new Map(),
+      subagentChildItemsByChildId: new Map(),
+    }
+    const screen = await renderWithInteraction(
+      <MessageItem
+        message={message({ id: "mu0", role: "user", parts: [{ type: "text", text: "hi" }] })}
+      />,
+      interactionValue,
     )
 
     await expect.element(screen.getByTestId("assistant-message-rollback")).not.toBeInTheDocument()
   })
 
   it("hides the rollback button on assistant messages", async () => {
-    const screen = await render(
-      <MessageInteractionContext.Provider
-        value={{
-          approvalStatusByItemId: new Map(),
-          userMessageTurnIndex: new Map([["ma1", 2]]),
-          rollbackToMessage: vi.fn<() => unknown>(),
-          subagentTasksByTaskId: new Map(),
-          subagentChildItemsByChildId: new Map(),
-        }}
-      >
-        <MessageItem message={message({ id: "ma1", role: "assistant" })} />
-      </MessageInteractionContext.Provider>,
+    const interactionValue: MessageInteractionValue = {
+      approvalStatusByItemId: new Map(),
+      userMessageTurnIndex: new Map([["ma1", 2]]),
+      rollbackToMessage: vi.fn<() => unknown>(),
+      subagentTasksByTaskId: new Map(),
+      subagentChildItemsByChildId: new Map(),
+    }
+    const screen = await renderWithInteraction(
+      <MessageItem message={message({ id: "ma1", role: "assistant" })} />,
+      interactionValue,
     )
 
     await expect.element(screen.getByTestId("assistant-message-rollback")).not.toBeInTheDocument()
