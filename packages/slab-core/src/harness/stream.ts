@@ -233,7 +233,7 @@ function handleItemCompleted(state: StreamState, params: ItemCompletedParams): U
   if (item.type === "agentMessage") {
     // Replay absorption: a re-delivered completed (reconnect replay buffer)
     // must not re-synthesize the part — the first completion already closed
-    // it (orphan synthesis included), so exactly one text-start/-end pair.
+    // that part, orphan synthesis included, so exactly one text-start/-end pair.
     if (state.completedItems.has(item.id)) return []
     state.completedItems.add(item.id)
     // The completed item's text is the authoritative UI-grade form (the

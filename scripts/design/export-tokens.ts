@@ -114,8 +114,8 @@ function toArgb(colorValue: string): string | null {
     return null;
   }
   // formatHex8 emits #RRGGBBAA; Dart's Color() takes 0xAARRGGBB.
-  const hex8 = formatHex8(rgb);
-  return `#${hex8.slice(7, 9)}${hex8.slice(1, 7)}`.toUpperCase();
+  const hex8Value = formatHex8(rgb);
+  return `#${hex8Value.slice(7, 9)}${hex8Value.slice(1, 7)}`.toUpperCase();
 }
 
 /** Kebab-case CSS name → lowerCamelCase Dart field (`--chart-1` → `chart1`). */
@@ -129,6 +129,12 @@ function camelName(name: string): string {
 
 function round(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/** OKLCH lightness of a hex color (drives the ramp monotonicity assertions). */
+function toOklchL(hex: string): number {
+  const converted = converter("oklch")(parse(hex)!);
+  return converted.l ?? 0;
 }
 
 // ── Main pipeline ───────────────────────────────────────────────────────────
@@ -545,7 +551,7 @@ function buildTdPalette(mode: ModeTokens, isDark: boolean): Record<string, strin
   };
 
   const sortedColor: Record<string, string> = {};
-  for (const key of Object.keys(color).sort()) sortedColor[key] = color[key];
+  for (const key of Object.keys(color).toSorted()) sortedColor[key] = color[key];
   return { color: sortedColor, radius };
 }
 
@@ -555,17 +561,23 @@ const tdDark = buildTdPalette(dark, true);
 // ── TDesign assertions (loud failures, mirrors of the locale parity guard) ──
 
 {
-  const lightKeys = Object.keys(tdLight.color).sort().join(",");
-  const darkKeys = Object.keys(tdDark.color).sort().join(",");
+  const lightKeys = Object.keys(tdLight.color).toSorted().join(",");
+  const darkKeys = Object.keys(tdDark.color).toSorted().join(",");
   if (lightKeys !== darkKeys) throw new Error("tdesign theme light/dark key parity broken");
 
   // Every color key the package getters read must be present (missing keys
   // would silently fall back to built-in TDesign light blue).
   const REQUIRED_KEYS = [
-    ...["brand", "error", "warning", "success"].flatMap((p) => [
-      ...Array.from({ length: 10 }, (_, i) => `${p}Color${i + 1}`),
-      `${p}NormalColor`, `${p}HoverColor`, `${p}ClickColor`, `${p}LightColor`, `${p}FocusColor`, `${p}DisabledColor`,
-    ]),
+    ...["brand", "error", "warning", "success"].flatMap((p) =>
+      Array.from({ length: 10 }, (_, i) => `${p}Color${i + 1}`).concat(
+        `${p}NormalColor`,
+        `${p}HoverColor`,
+        `${p}ClickColor`,
+        `${p}LightColor`,
+        `${p}FocusColor`,
+        `${p}DisabledColor`,
+      ),
+    ),
     ...Array.from({ length: 14 }, (_, i) => `grayColor${i + 1}`),
     ...Array.from({ length: 4 }, (_, i) => `fontGyColor${i + 1}`),
     ...Array.from({ length: 4 }, (_, i) => `fontWhColor${i + 1}`),
@@ -594,10 +606,6 @@ const tdDark = buildTdPalette(dark, true);
   // Scale lightness must be monotonic (ramp direction inverts per mode; the
   // gray ramp runs light→dark in both). Catches token drift that would make
   // e.g. hover lighter than normal in dark mode.
-  const toOklchL = (hex: string): number => {
-    const converted = converter("oklch")(parse(hex)!);
-    return converted.l ?? 0;
-  };
   const ramps: Array<[string, string, Record<string, string>, number, "up" | "down"]> = [
     ...(["brand", "error", "warning", "success"] as const).flatMap((p) => [
       [p, "light", tdLight.color as Record<string, string>, 10, "down"] as [string, string, Record<string, string>, number, "up" | "down"],
