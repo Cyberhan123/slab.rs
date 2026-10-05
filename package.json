@@ -265,8 +265,8 @@
   },
   "catalogs": {
     "react-peer": {
+      "react-dom": "^19.3.0"
       "react": "^19.3.0",
-      "react-dom": "^19.0.0"
     },
     "language-servers": {
       "typescript": "^5.8.3",
