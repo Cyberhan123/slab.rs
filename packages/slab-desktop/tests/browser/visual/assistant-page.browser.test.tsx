@@ -30,6 +30,7 @@ function freezeAnimations() {
 }
 
 const mocks = vi.hoisted(() => {
+  // eslint-disable-next-line unicorn/consistent-function-scoping -- vi.hoisted factories must be self-contained (no outer references)
   const translate = (key: string) => key;
   // Mirrors the initial `ConversationState` of the real harness controller
   // (packages/slab-core/src/harness/conversation-controller.ts); every field

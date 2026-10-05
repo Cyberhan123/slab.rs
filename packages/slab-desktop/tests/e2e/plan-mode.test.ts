@@ -191,7 +191,7 @@ function calledTool(messages: AgentThreadMessageResponse[], name: string): boole
 /// steer it to present even when the user asked it not to). Used by the
 /// read-only test so a stray `present_plan` can't block the turn indefinitely.
 async function waitForTurnCompletedRejectingPlans(
-  page: Page,
+  pollPage: Page,
   baseUrl: string,
   sessionId: string,
   timeoutMs: number
@@ -200,9 +200,9 @@ async function waitForTurnCompletedRejectingPlans(
   // eslint-disable-next-line no-constant-condition
   while (true) {
     // Reject any visible plan approval card to unblock the turn.
-    const card = page.locator('[data-testid="assistant-approval-plan"]')
+    const card = pollPage.locator('[data-testid="assistant-approval-plan"]')
     if (await card.first().isVisible().catch(() => false)) {
-      await page.getByTestId("assistant-approval-deny").click({ timeout: 10_000 }).catch(() => {})
+      await pollPage.getByTestId("assistant-approval-deny").click({ timeout: 10_000 }).catch(() => {})
     }
     const restore = await restoreSession(baseUrl, sessionId)
     if (restore.thread?.status === "errored") {

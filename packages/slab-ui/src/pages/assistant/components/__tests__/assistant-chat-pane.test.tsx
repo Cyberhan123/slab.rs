@@ -59,6 +59,11 @@ const senderProps = vi.hoisted(() => ({
     | null,
 }))
 
+/** Drive the captured Sender's onSubmit as the pane's real submit path. */
+function submitViaSender(value: string): Promise<void> {
+  return senderProps.last?.onSubmit?.(value, { files: [], effort: undefined }) as Promise<void>
+}
+
 vi.mock("@slab/ui/pages/assistant/components/sender.tsx", () => ({
   default: ({
     approvals,
@@ -438,23 +443,20 @@ describe("AssistantChatPane", () => {
         controlAction: "fork",
       },
     ]
-    const submit = () =>
-      senderProps.last?.onSubmit?.("/compact", { files: [], effort: undefined }) as Promise<void>
-
     // Busy (server running): the control command is refused.
     await render(
       <AssistantChatPane
         {...baseProps({ commands, onCompact, onFork, threadStatus: "running" })}
       />,
     )
-    await submit()
+    await submitViaSender("/compact")
     expect(onCompact).not.toHaveBeenCalled()
 
     // Idle: the dispatch reaches the host action again.
     await render(
       <AssistantChatPane {...baseProps({ commands, onCompact, onFork, threadStatus: null })} />,
     )
-    await submit()
+    await submitViaSender("/compact")
     expect(onCompact).toHaveBeenCalledTimes(1)
   })
 

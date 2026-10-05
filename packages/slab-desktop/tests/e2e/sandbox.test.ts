@@ -19,6 +19,16 @@ import {
 // path; the elevated OS-enforcement assertions (ACL/WFP) require the sandbox helper built + an
 // admin shell and are not automatable here (see the Rust `os_isolation.rs` gated tests instead).
 // Run manually:  SLAB_SANDBOX_E2E=1 bun run test:e2e
+
+// A denial surfaces as a tool message whose content is the guard's reason string (not the normal
+// {stdout, exit_code} JSON). Detect either signal so the assertion is robust to exact wording.
+function looksDenied(content: string): boolean {
+  const lower = content.toLowerCase()
+  return ["denied", "protected", "blocked", "outside", "refused", "permission"].some((k) =>
+    lower.includes(k)
+  )
+}
+
 describe.skipIf(process.env.SLAB_SANDBOX_E2E !== "1")("sandbox e2e", () => {
   let browser: Browser | undefined
   let context: BrowserContext | undefined
@@ -44,15 +54,6 @@ describe.skipIf(process.env.SLAB_SANDBOX_E2E !== "1")("sandbox e2e", () => {
     await context?.close().catch(() => {})
     await browser?.close().catch(() => {})
   })
-
-  // A denial surfaces as a tool message whose content is the guard's reason string (not the normal
-  // {stdout, exit_code} JSON). Detect either signal so the assertion is robust to exact wording.
-  function looksDenied(content: string): boolean {
-    const lower = content.toLowerCase()
-    return ["denied", "protected", "blocked", "outside", "refused", "permission"].some((k) =>
-      lower.includes(k)
-    )
-  }
 
   it("allows a workspace-write shell command end-to-end", async () => {
     const marker = `SLAB_SANDBOX_E2E_OK_${Date.now()}`

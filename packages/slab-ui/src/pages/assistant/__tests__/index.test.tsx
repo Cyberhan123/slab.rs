@@ -16,6 +16,7 @@ import { createTestSlabPorts } from "@slab/ui/provider/test-ports"
 
 const mocks = vi.hoisted(() => {
   let currentMessages: UIMessage[] = []
+  // eslint-disable-next-line unicorn/consistent-function-scoping -- vi.hoisted factories must be self-contained (no outer references)
   const translate = (key: string, values?: Record<string, unknown>) =>
     values ? `${key} ${Object.values(values).join(" ")}` : key
   const conversationList = [

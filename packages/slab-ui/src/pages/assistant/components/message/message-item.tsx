@@ -141,10 +141,10 @@ const messagePartComponents: MessagePartComponents<TMessagePart, TMessage> = {
  */
 const messagePartsCache = new WeakMap<object, unknown>()
 
-function memoizedCreateMessageParts<TMessage extends object>(message: TMessage): unknown {
+function memoizedCreateMessageParts<TMessageLike extends object>(message: TMessageLike): unknown {
     let cached = messagePartsCache.get(message)
     if (cached === undefined) {
-        cached = createMessageParts<TMessage>(message)
+        cached = createMessageParts<TMessageLike>(message)
         messagePartsCache.set(message, cached)
     }
     return cached
