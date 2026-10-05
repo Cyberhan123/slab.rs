@@ -397,7 +397,7 @@ describe('media core flows e2e', () => {
     await renderDesktopScene(<ImagePage />, { route: '/image' });
 
     await expect.element(page.getByTestId('image-generation-progress')).toBeVisible();
-    await expect.element(page.getByTestId('image-generation-progress')).toHaveTextContent('42%');
+    await expect.element(page.getByTestId('image-generation-progress')).toMatchTextContent('42%');
 
     await page.getByTestId('image-cancel-button').click();
     expect(mockImageCancel).toHaveBeenCalled();
@@ -408,7 +408,7 @@ describe('media core flows e2e', () => {
     await renderDesktopScene(<VideoPage />, { route: '/video' });
 
     await expect.element(page.getByTestId('video-generation-progress')).toBeVisible();
-    await expect.element(page.getByTestId('video-generation-progress')).toHaveTextContent('64%');
+    await expect.element(page.getByTestId('video-generation-progress')).toMatchTextContent('64%');
 
     await page.getByTestId('video-cancel-button').click();
     expect(mockVideoCancel).toHaveBeenCalled();
@@ -419,7 +419,7 @@ describe('media core flows e2e', () => {
     await renderDesktopScene(<AudioPage />, { route: '/audio' });
 
     await expect.element(page.getByTestId('audio-generation-progress')).toBeVisible();
-    await expect.element(page.getByTestId('audio-generation-progress')).toHaveTextContent('35%');
+    await expect.element(page.getByTestId('audio-generation-progress')).toMatchTextContent('35%');
 
     await page.getByTestId('audio-cancel-button').click();
     expect(mockAudioCancel).toHaveBeenCalled();

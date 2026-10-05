@@ -370,8 +370,10 @@ describe('AssistantPage browser visual regression', () => {
     // Completed rows sit collapsed by design — the compact `Bash: <command>`
     // line IS the feature this baseline pins. (The expanded terminal raced its
     // mount/animation state run-to-run under parallel suite load; its content
-    // rendering is covered by the message-tool unit tests.)
-    await expect.element(page.getByText('Bash')).toBeVisible();
+    // rendering is covered by the message-tool unit tests.) The label span's
+    // whole text is `Bash:` — @vitest/browser 5 getByText matches whole
+    // normalized element text only.
+    await expect.element(page.getByText('Bash:')).toBeVisible();
     freezeAnimations();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('assistant-page-agent-chain.png');
   });
