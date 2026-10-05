@@ -22,6 +22,7 @@ pub mod glob;
 pub mod grep;
 pub mod mcp;
 pub mod plan;
+pub mod questionnaire;
 pub mod shell;
 pub mod subagent;
 pub mod subagent_tools;
@@ -46,6 +47,7 @@ pub use mcp::{McpCallTool, McpListToolsTool, McpProxyTool};
 pub use plan::{
     PRESENT_PLAN_METADATA_KEY, PRESENT_PLAN_TOOL_NAME, PlanTool, PresentPlanTool, UpdatePlanTool,
 };
+pub use questionnaire::{QUESTIONNAIRE_METADATA_KEY, QUESTIONNAIRE_TOOL_NAME, QuestionnaireTool};
 pub use shell::{ShellPolicy, ShellTool};
 pub use slab_shell_command::{
     ShellFamily, ShellLauncher, ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher,
@@ -53,7 +55,8 @@ pub use slab_shell_command::{
 };
 pub use subagent::{
     DelegateSubagentTool, MAX_NOTIFICATION_RESULT_CHARS, NoopSubagentTaskSink,
-    SubagentFinishedEvent, SubagentSpawnedEvent, SubagentTaskSink,
+    SubagentFinishedEvent, SubagentSpawnedEvent, SubagentSpawner, SubagentTaskSink,
+    SystemSubagentHandle, SystemSubagentRequest,
 };
 pub use subagent_tools::{SubagentMessageTool, SubagentStatusTool, SubagentStopTool};
 pub use task_complete::{TASK_COMPLETE_METADATA_KEY, TASK_COMPLETE_TOOL_NAME, TaskCompleteTool};
@@ -109,6 +112,7 @@ pub fn register_all_tools(
     router.register(Box::new(PlanTool::new()));
     router.register(Box::new(UpdatePlanTool::new()));
     router.register(Box::new(PresentPlanTool::new()));
+    router.register(Box::new(QuestionnaireTool::new()));
     router.register(Box::new(TaskCompleteTool::new()));
     router.register(Box::new(VerifyTool::new(sandbox_driver.clone())));
     router.register(Box::new(WebSearchTool::new(web_search_config)));
@@ -175,6 +179,7 @@ mod tests {
         assert!(router.get("plan").is_some());
         assert!(router.get("update_plan").is_some());
         assert!(router.get("present_plan").is_some());
+        assert!(router.get("questionnaire").is_some());
         assert!(router.get("task.complete").is_some());
         assert!(router.get("verify").is_some());
         assert!(router.get("web_search").is_some());

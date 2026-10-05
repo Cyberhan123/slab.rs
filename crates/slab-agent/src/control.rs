@@ -145,6 +145,10 @@ pub struct AgentControl {
     risk: Arc<dyn ToolRiskAnalyzer>,
     trace: Arc<dyn AgentTraceSink>,
     trace_dir: Option<std::path::PathBuf>,
+    /// User-answer gate for the `questionnaire` tool (same wiring shape as
+    /// `approval`: the host event hub implements it; threads await answers
+    /// through it).
+    questionnaire: Arc<dyn crate::port::QuestionnairePort>,
     /// Shared thread context, replaceable at runtime (workspace open/close
     /// re-points the live agent at a new root). Read once per spawned thread;
     /// already-running threads keep their frozen snapshot.
@@ -233,6 +237,7 @@ impl AgentControl {
             risk: Arc::new(BasicToolRiskAnalyzer::default()),
             trace,
             trace_dir,
+            questionnaire: Arc::new(crate::port::NoopQuestionnaire),
             thread_context: Arc::new(std::sync::RwLock::new(AgentThreadContext::default())),
             max_threads: limits.max_threads,
             max_depth: limits.max_depth,
@@ -269,6 +274,7 @@ impl AgentControl {
             risk,
             trace: Arc::new(NoopAgentTraceSink),
             trace_dir: None,
+            questionnaire: Arc::new(crate::port::NoopQuestionnaire),
             thread_context: Arc::new(std::sync::RwLock::new(AgentThreadContext::default())),
             max_threads: limits.max_threads,
             max_depth: limits.max_depth,
@@ -349,6 +355,19 @@ impl AgentControl {
     /// injects an in-memory per-thread store here.
     pub fn with_plan_store(mut self, plan_store: Arc<dyn crate::port::PlanStorePort>) -> Self {
         self.plan_store = plan_store;
+        self
+    }
+
+    /// Attach the user-answer gate for the `questionnaire` tool. When unset, a
+    /// [`crate::port::NoopQuestionnaire`] stub is used that answers immediately
+    /// with the timeout payload — the model proceeds on its own judgment, so
+    /// tests and bare control stacks keep working without a host UI. The host
+    /// (app-core) injects the event hub here (same shape as `approval`).
+    pub fn with_questionnaire(
+        mut self,
+        questionnaire: Arc<dyn crate::port::QuestionnairePort>,
+    ) -> Self {
+        self.questionnaire = questionnaire;
         self
     }
 
@@ -1089,6 +1108,7 @@ impl AgentControl {
         let approval = Arc::clone(&self.approval);
         let exec_policy = Arc::clone(&self.exec_policy);
         let approval_reviewer = Arc::clone(&self.approval_reviewer);
+        let questionnaire = Arc::clone(&self.questionnaire);
         let plan_store = Arc::clone(&self.plan_store);
         let agent_registry = Arc::clone(&self.agent_registry);
         let tools = Arc::clone(&self.tool_router);
@@ -1124,6 +1144,7 @@ impl AgentControl {
             approval,
             exec_policy,
             approval_reviewer,
+            questionnaire,
             agent_registry,
             plan_store,
             tools,

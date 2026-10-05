@@ -859,6 +859,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/system/diagnostics/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["memory_diagnostics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/system/gpu": {
         parameters: {
             query?: never;
@@ -2270,6 +2286,73 @@ export interface components {
              * @description Optional worker override.
              */
             num_workers?: number | null;
+        };
+        /**
+         * @description Agent memory pipeline diagnostics exposed at
+         *     `/v1/system/diagnostics/memories` (read-only; metadata only, no memory
+         *     content).
+         */
+        MemoryDiagnosticsResponse: {
+            /** @description Phase1 output counts grouped by project and status. */
+            phase1: components["schemas"]["MemoryPhase1StatusCountResponse"][];
+            /** @description Per-project phase2 locks (watermarks + lease state). */
+            phase2_locks: components["schemas"]["MemoryPhase2LockResponse"][];
+            /** @description Most recent phase2 consolidation runs, newest first. */
+            recent_runs: components["schemas"]["MemoryPhase2RunResponse"][];
+        };
+        /**
+         * @description Agent-memory phase1 output count for one (project, status) pair — the
+         *     backlog and failure surface per project memory store.
+         */
+        MemoryPhase1StatusCountResponse: {
+            /**
+             * Format: int64
+             * @description Row count for this (project, status) pair.
+             */
+            count: number;
+            /** @description Sanitized project key (empty string rows predate project sharding). */
+            project_key: string;
+            /**
+             * @description Phase1 output status: pending / running / succeeded /
+             *     succeeded_no_output / failed.
+             */
+            status: string;
+        };
+        /** @description One per-project phase2 consolidation lock: watermarks plus lease state. */
+        MemoryPhase2LockResponse: {
+            /** @description `MAX(source_updated_at)` snapshot when the current claim was made. */
+            claimed_watermark?: string | null;
+            /** @description Watermark of the last completed consolidation for the project. */
+            completed_watermark?: string | null;
+            /** @description Lock key — the sanitized project key. */
+            job_key: string;
+            /** @description Current lease owner, while a consolidation holds the lock. */
+            lease_owner?: string | null;
+            /** @description Lease expiry (RFC3339), while held. */
+            lease_until?: string | null;
+            /** @description Lock status (idle / running). */
+            status: string;
+            /** @description Last lock update (RFC3339). */
+            updated_at: string;
+        };
+        /** @description One recent phase2 consolidation run. */
+        MemoryPhase2RunResponse: {
+            /** @description Watermark claimed at run start. */
+            claimed_watermark?: string | null;
+            /** @description Run completion (RFC3339), once terminal. */
+            completed_at?: string | null;
+            /** @description Watermark completed by the run (absent while running or on failure). */
+            completed_watermark?: string | null;
+            /** @description Failure reason (truncated), for failed runs. */
+            error?: string | null;
+            /** @description Run id. */
+            id: string;
+            /** @description Sanitized project key the run consolidated. */
+            project_key: string;
+            /** @description Run start (RFC3339). */
+            started_at: string;
+            /** @description Run status (running / succeeded / failed). */
+            status: string;
         };
         /** @description A single message in the initial conversation. */
         MessageInput: {
@@ -5711,6 +5794,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentDiagnosticsResponse"];
+                };
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    memory_diagnostics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent memory pipeline status: phase1 counts, phase2 locks, recent runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryDiagnosticsResponse"];
                 };
             };
             /** @description Backend error */

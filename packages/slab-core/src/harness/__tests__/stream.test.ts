@@ -61,6 +61,23 @@ describe("harness stream convertNotification", () => {
     expect(quiet).toEqual([])
   })
 
+  it("synthesizes a full text part for an orphan item/completed(agentMessage)", () => {
+    // Defense in depth: a completed item whose text part was never opened by a
+    // started/delta pair (e.g. a legacy server's `task.complete` summary)
+    // must render its authoritative text instead of being silently dropped.
+    const state = createStreamState()
+    expect(convertNotification(agentMessageCompleted("i1", "shipped it"), state)).toEqual([
+      { id: "i1", type: "text-start" },
+      { delta: "shipped it", id: "i1", type: "text-delta" },
+      { id: "i1", type: "text-end" },
+    ])
+    expect(state.openText.size).toBe(0)
+    expect(state.textById.size).toBe(0)
+
+    // An empty-text orphan still converts to nothing — no empty bubble.
+    expect(convertNotification(agentMessageCompleted("i2", ""), createStreamState())).toEqual([])
+  })
+
   it("streams reasoning parts", () => {
     const state = createStreamState()
     const item: TurnItem = { type: "reasoning", id: "r1", summary: "", content: "" }

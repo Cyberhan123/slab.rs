@@ -46,6 +46,7 @@ import type {
   OperationCategory,
   PermissionMode,
   Plan,
+  QuestionnaireRequestAnswerParams,
   ReasoningEffort,
   Thread,
   ThreadStatusChangedParams,
@@ -80,6 +81,30 @@ export type ApprovalRequest = {
 }
 
 export type ApprovalStatus = "pending" | "approved" | "denied"
+
+/** One offered answer of a `questionnaire` tool call. */
+export type QuestionnaireChoice = {
+  label: string
+  value: string
+  description?: string
+}
+
+/**
+ * A pending `questionnaire` tool call awaiting the user's answer (single or
+ * multiple choice, optionally with a free-text custom answer). Mirrors the
+ * approval banner pattern: only `pending` entries render above the composer;
+ * terminal statuses (`answered` / `skipped` / `timeout`) hide the card.
+ */
+export type QuestionnaireRequest = {
+  itemId: string
+  threadId: string
+  question: string
+  choices: QuestionnaireChoice[]
+  allowMultiple: boolean
+  allowCustomInput: boolean
+  required: boolean
+  status: "pending" | "answered" | "skipped" | "timeout"
+}
 
 /**
  * Transient model-load indicator state, driven by `model/load/delta` +
@@ -291,6 +316,8 @@ export interface ConversationState {
   approvals: ApprovalRequest[]
   /** itemId → approval status, for the in-stream tool-card status badge. */
   approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
+  /** `questionnaire` tool calls still awaiting the user's answer (banner card). */
+  questionnaires: QuestionnaireRequest[]
   /** itemId → accumulated live command output (stdout/stderr deltas so far). */
   liveOutputByItemId: ReadonlyMap<string, string>
   /** itemId → live `apply_patch` progress lines (one JSON object per applied file). */
@@ -464,6 +491,7 @@ export const EMPTY_SNAPSHOT: ConversationState = {
   actionError: null,
   approvals: [],
   approvalStatusByItemId: new Map(),
+  questionnaires: [],
   liveOutputByItemId: new Map(),
   livePatchByItemId: new Map(),
   modelLoad: null,
@@ -514,6 +542,7 @@ export class ConversationController {
   private error: string | null = null
   private actionError: ActionError | null = null
   private approvals = new Map<string, ApprovalRequest>()
+  private questionnaires = new Map<string, QuestionnaireRequest>()
   private liveOutput = new Map<string, string>()
   private livePatch = new Map<string, string[]>()
   private modelLoad: ModelLoadState = null
@@ -1192,6 +1221,63 @@ export class ConversationController {
     }
   }
 
+  /**
+   * Answer a pending `questionnaire` tool call via `questionnaire/resolve`.
+   *
+   * Mirrors `resolveApproval`: optimistic terminal status (answered/skipped),
+   * never rejects — failures are reported via `console.warn` and reflected in
+   * state (undelivered → timeout, transport failure → back to pending).
+   */
+  readonly resolveQuestionnaire = async (
+    itemId: string,
+    answers: { selected: string[]; custom: string | null; skipped?: boolean },
+  ): Promise<void> => {
+    const entry = this.questionnaires.get(itemId)
+    if (!entry) return
+    // Optimistically mark answered so the banner card disappears immediately.
+    this.questionnaires = new Map(this.questionnaires)
+    this.questionnaires.set(itemId, {
+      ...entry,
+      status: answers.skipped === true ? "skipped" : "answered",
+    })
+    this.commit()
+    try {
+      const result = await this.client.questionnaireResolve({
+        threadId: entry.threadId,
+        itemId,
+        answers: {
+          selected: answers.selected,
+          custom: answers.custom,
+          ...(answers.skipped === true ? { skipped: true } : {}),
+        },
+      })
+      if (result.delivered === false) {
+        // No pending entry server-side (turn cancelled or the 300s answer
+        // wait already timed out) — retrying can never succeed.
+        this.setQuestionnaireStatus(itemId, "timeout")
+        console.warn(
+          `[harness] questionnaire/resolve for ${itemId} was not delivered ` +
+            `(no pending entry server-side); marked timeout`,
+        )
+      }
+    } catch (resolveError) {
+      // Transport/RPC failure: restore the card for a genuine retry.
+      this.setQuestionnaireStatus(itemId, "pending")
+      console.warn("[harness] questionnaire/resolve failed:", resolveError)
+    }
+  }
+
+  private setQuestionnaireStatus(
+    itemId: string,
+    status: QuestionnaireRequest["status"],
+  ): void {
+    const existing = this.questionnaires.get(itemId)
+    if (!existing) return
+    this.questionnaires = new Map(this.questionnaires)
+    this.questionnaires.set(itemId, { ...existing, status })
+    this.commit()
+  }
+
   /** Manually compact the current (or given) thread via `thread/compact/start`. */
   readonly compactThread = async (threadId?: string): Promise<void> => {
     const tid = threadId ?? this.client.currentThreadId
@@ -1405,6 +1491,21 @@ export class ConversationController {
     this.approvals = next
   }
 
+  /**
+   * Flip still-pending questionnaires to `timeout` when the run terminates —
+   * the server's 300s answer wait (or the cancellation dropping it) never
+   * pushes a resolution to the client, so without this the answer card would
+   * stay clickable after the turn ended (every later click fails delivery).
+   */
+  private timeoutStalePendingQuestionnaires(): void {
+    if (!Array.from(this.questionnaires.values()).some((q) => q.status === "pending")) return
+    const next = new Map<string, QuestionnaireRequest>()
+    for (const [id, req] of this.questionnaires) {
+      next.set(id, req.status === "pending" ? { ...req, status: "timeout" } : req)
+    }
+    this.questionnaires = next
+  }
+
   /** Rebuild the snapshot (deriving the read-only projections) and notify. */
   private commit(): void {
     const approvals = Array.from(this.approvals.values())
@@ -1431,6 +1532,9 @@ export class ConversationController {
       actionError: this.actionError,
       approvals: approvals.filter((a) => a.status === "pending"),
       approvalStatusByItemId,
+      questionnaires: Array.from(this.questionnaires.values()).filter(
+        (q) => q.status === "pending",
+      ),
       liveOutputByItemId: this.liveOutput,
       livePatchByItemId: this.livePatch,
       modelLoad: this.modelLoad,
@@ -1460,6 +1564,35 @@ export class ConversationController {
   /** The 8-notification projection previously living in the hook's effect. */
   private readonly handleNotification = (notification: JsonRpcNotification): void => {
     const { method } = notification
+
+    // A new run iteration begins: clear the live-text mirror, mirroring the
+    // server's own folding rule (event_hub `accumulate_live` clears its
+    // in-flight items on TurnStarted). Without this arm the mirror diverges
+    // from the server: an agent-message item whose iteration ends in tool
+    // calls never receives an `item/completed` (only the FINAL answer emits
+    // one), so its mirrored text survives the whole run and — once the pane's
+    // own stream finishes (`isBusy` false) — renders as a DUPLICATE assistant
+    // bubble at the timeline tail. Reasoning-bearing iterations were masked by
+    // `on_reasoning_done`'s ItemCompleted (same shared item id) dropping the
+    // entry first; reasoning-less tool-round text leaked exactly once per run.
+    // Clearing here keeps at most the CURRENT iteration's in-flight text in
+    // the mirror (interrupted-run text stays until the next iteration — it is
+    // the only visual record, since history never persisted it).
+    if (method === HARNESS_NOTIFICATION.TURN_STARTED) {
+      const params = (notification.params ?? {}) as { threadId?: string }
+      if (params.threadId !== undefined && params.threadId !== this.client.currentThreadId) {
+        return
+      }
+      if (this.liveText.size > 0 || this.liveTextBuffer.size > 0) {
+        // Replace (not mutate) both maps so the snapshot consumers see the
+        // change; a pending flush timer firing later finds an empty buffer
+        // and is a no-op (no resurrection of the cleared entries).
+        this.liveTextBuffer = new Map()
+        this.liveText = new Map()
+        this.commit()
+      }
+      return
+    }
 
     // Item finalization: drop the per-item live accumulations (streamed
     // output / patch lines). The finalized item carries its own content, and
@@ -1736,6 +1869,7 @@ export class ConversationController {
         this.client.liveResume = null
         this.flushLiveTextNow()
         this.denyStalePendingApprovals()
+        this.timeoutStalePendingQuestionnaires()
         this.clearQueuedAndResync()
       }
       this.commit()
@@ -1757,6 +1891,7 @@ export class ConversationController {
       this.client.liveResume = null
       this.flushLiveTextNow()
       this.denyStalePendingApprovals()
+      this.timeoutStalePendingQuestionnaires()
       this.clearQueuedAndResync()
       this.commit()
       return
@@ -1774,7 +1909,34 @@ export class ConversationController {
       this.client.liveResume = null
       this.flushLiveTextNow()
       this.denyStalePendingApprovals()
+      this.timeoutStalePendingQuestionnaires()
       this.clearQueuedAndResync()
+      this.commit()
+      return
+    }
+
+    // `item/questionnaire/requestAnswer` — the questionnaire tool awaiting the
+    // user's answer. Tracked like approvals: only the bound thread, keyed by
+    // itemId so replays are idempotent.
+    if (method === HARNESS_NOTIFICATION.ITEM_QUESTIONNAIRE_REQUEST_ANSWER) {
+      const params = (notification.params ?? {}) as QuestionnaireRequestAnswerParams
+      if (params.threadId !== this.client.currentThreadId) return
+      if (this.questionnaires.has(params.itemId)) return
+      this.questionnaires = new Map(this.questionnaires)
+      this.questionnaires.set(params.itemId, {
+        itemId: params.itemId,
+        threadId: params.threadId,
+        question: params.question,
+        choices: params.choices.map((choice) => ({
+          label: choice.label,
+          value: choice.value,
+          description: choice.description,
+        })),
+        allowMultiple: params.allowMultiple === true,
+        allowCustomInput: params.allowCustomInput === true,
+        required: params.required === true,
+        status: "pending",
+      })
       this.commit()
       return
     }
