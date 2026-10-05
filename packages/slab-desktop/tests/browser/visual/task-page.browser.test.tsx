@@ -27,6 +27,12 @@ const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();
 const createAsyncVoidMock = () =>
   vi.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
 
+// The task page's content height sits right at the viewport boundary, so the
+// body scrollbar (and the sub-pixel layout shift it causes) appears on some
+// runs and not others — ~1% of pixels flips between runs. Allow 2% for these
+// captures; real regressions move far more than that.
+const taskPageTolerance = { comparatorOptions: { allowedMismatchedPixelRatio: 0.02 } };
+
 function createMockTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 'task-abc-123-def-456',
@@ -97,7 +103,7 @@ describe('TaskPage browser visual regression', () => {
     await renderDesktopScene(<TaskPage />, { route: '/task' });
 
     await expect.element(page.getByTestId('desktop-browser-scene')).toBeVisible();
-    await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('task-page-empty.png');
+    await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('task-page-empty.png', taskPageTolerance);
   });
 
   it('captures the task page loading state', async () => {
@@ -110,7 +116,7 @@ describe('TaskPage browser visual regression', () => {
     await renderDesktopScene(<TaskPage />, { route: '/task' });
 
     await expect.element(page.getByTestId('desktop-browser-scene')).toBeVisible();
-    await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('task-page-loading.png');
+    await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('task-page-loading.png', taskPageTolerance);
   });
 
   it('captures the task page with tasks', async () => {
@@ -162,7 +168,7 @@ describe('TaskPage browser visual regression', () => {
     await renderDesktopScene(<TaskPage />, { route: '/task' });
 
     await expect.element(page.getByTestId('desktop-browser-scene')).toBeVisible();
-    await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('task-page-with-tasks.png');
+    await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('task-page-with-tasks.png', taskPageTolerance);
   });
 
   it('captures the task page error state', async () => {
@@ -175,6 +181,6 @@ describe('TaskPage browser visual regression', () => {
     await renderDesktopScene(<TaskPage />, { route: '/task' });
 
     await expect.element(page.getByTestId('desktop-browser-scene')).toBeVisible();
-    await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('task-page-error.png');
+    await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('task-page-error.png', taskPageTolerance);
   });
 });

@@ -33,7 +33,7 @@ jobs:
         run: bunx playwright install --with-deps chromium
 
       - name: Seed missing linux screenshots
-        run: bunx vitest run --project desktop-browser packages/slab-desktop/tests/browser/visual/task-page.browser.test.tsx --update all
+        run: bun run test:browser -- --update new
 
       - name: Commit new baselines
         if: always()
