@@ -65,3 +65,4 @@ crates/*/bindings/
 
 # tsc incremental build cache (generated, never commit)
 tsconfig.tsbuildinfo
+.slab-*.log
