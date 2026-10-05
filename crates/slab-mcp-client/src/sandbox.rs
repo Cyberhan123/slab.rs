@@ -136,18 +136,33 @@ pub(crate) fn post_spawn(
     {
         // process_group(0) made the child a group leader, so PGID == PID. Negative pid signals the
         // whole group.
-        let pgid = child.id()?;
-        Some(Box::new(move || {
-            // SAFETY: libc::kill with a negative pid signals the process group; SIGKILL is safe.
-            unsafe {
-                libc::kill(-(pgid as i32), libc::SIGKILL);
-            }
-        }))
+        //
+        // The holder (`StdioMcpClient::_kill_guard`) stores this FnOnce without ever calling it —
+        // the teardown rides on the *closure's own drop*. A closure that only captures the pid
+        // integer drops as a no-op (nothing fires, the tree leaks), so the closure must capture
+        // a kill-on-drop guard struct — mirroring the Windows side, where dropping the closure
+        // drops the captured `JobHandle` and its `Drop` closes the Job.
+        let guard = ProcessGroupKill(child.id()? as libc::pid_t);
+        Some(Box::new(move || drop(guard)))
     }
     #[cfg(not(any(target_os = "windows", unix)))]
     {
         let _ = child;
         None
+    }
+}
+
+/// Unix containment payload: SIGKILLs `-(pgid)` when dropped.
+#[cfg(unix)]
+struct ProcessGroupKill(libc::pid_t);
+
+#[cfg(unix)]
+impl Drop for ProcessGroupKill {
+    fn drop(&mut self) {
+        // SAFETY: libc::kill with a negative pid signals the process group; SIGKILL is safe.
+        unsafe {
+            libc::kill(-self.0, libc::SIGKILL);
+        }
     }
 }
 
