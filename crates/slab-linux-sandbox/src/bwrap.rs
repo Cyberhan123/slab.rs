@@ -85,13 +85,28 @@ pub fn build_bwrap_args(req: &SpawnRequest) -> Vec<String> {
     args
 }
 
+/// bwrap requires absolute bind source/destination paths — a relative one
+/// (`--bind . .`, e.g. from a caller that passed `"."` as its workspace root)
+/// corrupts the mount namespace and the payload dies with a confusing
+/// `execvp <argv0>: No such file or directory`. Anchor relative paths to the
+/// current directory instead.
+fn absolute(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let joined = std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(path);
+    joined.canonicalize().unwrap_or(joined)
+}
+
 fn bind_rw(args: &mut Vec<String>, path: &Path) {
+    let path = absolute(path);
     args.push("--bind".into());
     args.push(path.display().to_string());
     args.push(path.display().to_string());
 }
 
 fn bind_ro(args: &mut Vec<String>, path: &Path) {
+    let path = absolute(path);
     args.push("--ro-bind".into());
     args.push(path.display().to_string());
     args.push(path.display().to_string());
@@ -107,6 +122,7 @@ fn bind_protected_children(args: &mut Vec<String>, protected_names: &[String], r
 }
 
 fn mask_path(args: &mut Vec<String>, path: &Path) {
+    let path = absolute(path);
     if path.is_dir() {
         args.push("--tmpfs".into());
         args.push(path.display().to_string());
@@ -178,5 +194,22 @@ mod tests {
         let args = build_bwrap_args(&req(SandboxPolicyMirror::ReadOnly, true, false));
         assert_eq!(args.last().unwrap(), "--");
         assert!(args.contains(&"--new-session".to_string()));
+    }
+
+    #[test]
+    fn build_bwrap_args_absolutizes_relative_workspace_bind() {
+        // A relative workspace root must not reach bwrap as `--bind . .`
+        // (that corrupts the namespace: execvp of the payload then fails
+        // with ENOENT). It is anchored to the cwd instead.
+        let mut request = req(SandboxPolicyMirror::WorkspaceWrite, true, false);
+        request.workspace_root = Some(PathBuf::from("."));
+        let args = build_bwrap_args(&request);
+
+        let cwd = std::env::current_dir().expect("cwd");
+        let expected = cwd.canonicalize().unwrap_or(cwd).display().to_string();
+        assert!(
+            args.windows(2).any(|pair| pair == ["--bind", expected.as_str()]),
+            "expected an absolute --bind {expected}, got {args:?}"
+        );
     }
 }
