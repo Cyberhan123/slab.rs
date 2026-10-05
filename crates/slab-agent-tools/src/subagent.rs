@@ -97,7 +97,7 @@ impl SubagentTaskSink for NoopSubagentTaskSink {
 }
 
 /// Terminal data shared between the watcher future and the inline wait.
-/// `pub` because [`register_subagent_task`] (pub(crate)) names it in its
+/// `pub` because `register_subagent_task` (pub(crate)) names it in its
 /// return type; not part of the crate's stable surface.
 #[derive(Debug, Clone)]
 pub struct SubagentTerminalData {

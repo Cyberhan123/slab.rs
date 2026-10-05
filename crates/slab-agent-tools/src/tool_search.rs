@@ -6,7 +6,7 @@
 //! hits into the per-thread discovery state (so they become visible/callable in
 //! subsequent turns), and returns the matched specs to the model.
 //!
-//! This handler's own [`ToolHandler::execute`] is therefore never reached on the
+//! This handler's own `ToolHandler::execute` is therefore never reached on the
 //! normal agent path; it exists mainly to contribute its spec to the
 //! model-facing tool list. It is `Direct`/`ReadOnly` so it is always visible and
 //! never approval-gated (discovery is read-only metadata).

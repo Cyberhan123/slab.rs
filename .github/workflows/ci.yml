@@ -113,8 +113,21 @@ jobs:
       - name: Apply patches (vendor setup)
         run: bun run scripts/apply-patches.ts
 
-      - name: Install protoc
-        run: sudo apt-get install -y protobuf-compiler
+      - name: Install protoc and ffmpeg dev libs
+        # gen:api builds slab-server, whose slab-app-core dependency pulls
+        # ffmpeg-sys via the default ffmpeg-next-static feature — the libav
+        # headers must be present for its build script.
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            protobuf-compiler \
+            libavcodec-dev \
+            libavdevice-dev \
+            libavfilter-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libswresample-dev \
+            libswscale-dev
 
       - name: Check API type drift
         run: |

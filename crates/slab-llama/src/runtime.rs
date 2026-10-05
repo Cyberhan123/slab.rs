@@ -1415,7 +1415,7 @@ impl LlamaRuntime {
 
     /// Start streaming generation for a session, optionally with a
     /// thinking-token budget enforced on the `<think>` segment (see
-    /// [`crate::thinking_budget`]).
+    /// `crate::thinking_budget`).
     pub async fn generate_stream(
         &self,
         session_id: SessionId,

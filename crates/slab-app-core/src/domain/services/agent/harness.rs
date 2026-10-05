@@ -80,7 +80,7 @@ impl HarnessService {
         self.0.subscribe_event_msgs(thread_id)
     }
 
-    /// [`subscribe_event_msgs`] with an envelope watermark (replays only
+    /// [`Self::subscribe_event_msgs`] with an envelope watermark (replays only
     /// events AFTER `since`). Paired with [`Self::live_state`]: the snapshot's
     /// watermark feeds `since`, so snapshot + replay cover every event exactly
     /// once.

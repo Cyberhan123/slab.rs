@@ -462,7 +462,7 @@ impl AgentCore {
         self.events.subscribe_event_msgs(thread_id)
     }
 
-    /// [`subscribe_event_msgs`] with an envelope watermark: replays only events
+    /// [`Self::subscribe_event_msgs`] with an envelope watermark: replays only events
     /// with id STRICTLY greater than `since` (the `last_event_id` of a live
     /// snapshot taken just before — snapshot + replay then cover every event
     /// exactly once).

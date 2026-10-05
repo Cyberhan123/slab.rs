@@ -429,7 +429,7 @@ pub trait AgentStorePort: Send + Sync {
 
     /// Mark a thread `Interrupting` WITHOUT ever overwriting a terminal status.
     ///
-    /// [`AgentControl::interrupt`] fans out notifications before its store
+    /// [`crate::control::AgentControl::interrupt`] fans out notifications before its store
     /// write, so the write can commit AFTER the cancelling teardown's own
     /// terminal write (SQLite serializes the two single-statement
     /// transactions in commit order). An unguarded late write strands the row

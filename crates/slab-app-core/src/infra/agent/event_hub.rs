@@ -342,9 +342,9 @@ impl AgentEventHub {
         self.channel(thread_id).subscribe_msgs_since(None)
     }
 
-    /// [`subscribe_event_msgs`] with a watermark: only events with an envelope
-    /// id STRICTLY greater than `since` are replayed (typically the
-    /// `last_event_id` of a [`ThreadLiveSnapshot`] taken just before, so the
+    /// [`Self::subscribe_event_msgs`] with a watermark: only events with an
+    /// envelope id STRICTLY greater than `since` are replayed (typically the
+    /// `last_event_id` of a `ThreadLiveSnapshot` taken just before, so the
     /// snapshot + replay pair covers every event exactly once).
     pub fn subscribe_event_msgs_since(
         &self,
