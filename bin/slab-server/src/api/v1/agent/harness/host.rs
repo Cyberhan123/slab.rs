@@ -56,6 +56,7 @@ impl HarnessHost {
         // thread_op: resolve binding, inject real_id
         router.on(method::TURN_INTERRUPT, transform::thread_op(body::turn_interrupt));
         router.on(method::APPROVAL_RESOLVE, transform::thread_op(body::approval_resolve));
+        router.on(method::QUESTIONNAIRE_RESOLVE, transform::thread_op(body::questionnaire_resolve));
         router.on(method::SHUTDOWN, transform::thread_op(body::shutdown));
         router.on(method::THREAD_ARCHIVE, transform::thread_op(body::thread_archive));
         router.on(method::THREAD_ROLLBACK, transform::thread_op(body::thread_rollback));

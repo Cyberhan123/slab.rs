@@ -82,9 +82,14 @@ pub struct TurnUsage {
 
 impl From<crate::port::LlmUsage> for TurnUsage {
     fn from(usage: crate::port::LlmUsage) -> Self {
-        let crate::port::LlmUsage { prompt_tokens, completion_tokens, total_tokens, estimated } =
-            usage;
-        Self { prompt_tokens, completion_tokens, total_tokens, cached_tokens: None, estimated }
+        let crate::port::LlmUsage {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            cached_tokens,
+            estimated,
+        } = usage;
+        Self { prompt_tokens, completion_tokens, total_tokens, cached_tokens, estimated }
     }
 }
 
@@ -302,6 +307,48 @@ pub struct SubagentChildEventParams {
 
 // ---- approvals ----
 
+/// `item/questionnaire/requestAnswer` — the agent asked the user a structured
+/// question (the `questionnaire` tool). The client renders the question card
+/// and routes the user's answers back via the `questionnaire/resolve` request,
+/// correlating on `item_id` (the tool-call correlation id, same key as the
+/// approval notifications).
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct QuestionnaireRequestAnswerParams {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub item_id: String,
+    /// The self-contained question text.
+    pub question: String,
+    /// The answer options (label + stable value + optional description).
+    pub choices: Vec<QuestionnaireChoiceView>,
+    /// Multiple choices may be selected.
+    #[serde(default)]
+    pub allow_multiple: bool,
+    /// The user may type a custom answer instead of picking a choice.
+    #[serde(default)]
+    pub allow_custom_input: bool,
+    /// The UI should nag for an answer (informational; a timeout is still a
+    /// valid outcome the model handles).
+    #[serde(default)]
+    pub required: bool,
+}
+
+/// One answer option of a questionnaire, as delivered on the wire.
+#[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct QuestionnaireChoiceView {
+    /// Short human-readable label shown as the option.
+    pub label: String,
+    /// Stable machine value for the choice (defaults to the label).
+    pub value: String,
+    /// Optional one-line explanation shown under the label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 #[derive(TS, Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -350,4 +397,33 @@ pub struct FileChangeApprovalChange {
     pub change_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The port-level usage carries cache-hit counts (engine kv-cache reuse /
+    /// provider prompt-cache hits); the wire conversion must not drop them —
+    /// `cachedTokens` on `TurnCompleted` was permanently `None` before.
+    #[test]
+    fn turn_usage_carries_cached_tokens() {
+        let usage = crate::port::LlmUsage {
+            prompt_tokens: 1024,
+            completion_tokens: 8,
+            total_tokens: 1032,
+            cached_tokens: Some(512),
+            estimated: false,
+        };
+        assert_eq!(TurnUsage::from(usage).cached_tokens, Some(512));
+
+        let bare = crate::port::LlmUsage {
+            prompt_tokens: 10,
+            completion_tokens: 1,
+            total_tokens: 11,
+            cached_tokens: None,
+            estimated: true,
+        };
+        assert_eq!(TurnUsage::from(bare).cached_tokens, None);
+    }
 }

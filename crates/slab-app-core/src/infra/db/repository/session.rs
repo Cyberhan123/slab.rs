@@ -3,6 +3,13 @@ use crate::infra::db::entities::ChatSession;
 use chrono::{DateTime, Utc};
 use std::future::Future;
 
+/// Reserved session-id namespace for the agent memory pipeline's phase2
+/// consolidation subagents (`memory-phase2-<uuid>`). Rows in this namespace
+/// are transient system bookkeeping (the FK parent the consolidation child's
+/// `agent_threads` row needs): `list_sessions` keeps them out of
+/// user-facing listings, while exact-id lookups still resolve them.
+pub(crate) const MEMORY_PHASE2_SESSION_PREFIX: &str = "memory-phase2-";
+
 type SessionRow = (String, String, Option<String>, DateTime<Utc>, DateTime<Utc>);
 
 pub trait SessionStore: Send + Sync + 'static {
@@ -51,8 +58,9 @@ impl SessionStore for AnyStore {
     async fn list_sessions(&self) -> Result<Vec<ChatSession>, sqlx::Error> {
         let rows: Vec<SessionRow> = sqlx::query_as(
             "SELECT id, name, state_path, created_at, updated_at \
-                 FROM chat_sessions ORDER BY created_at DESC",
+                 FROM chat_sessions WHERE id NOT LIKE ?1 ORDER BY created_at DESC",
         )
+        .bind(format!("{MEMORY_PHASE2_SESSION_PREFIX}%"))
         .fetch_all(&self.pool)
         .await?;
         Ok(rows

@@ -123,7 +123,9 @@ const defaultEventuallyIntervalMs = 250
 const managedProcessStopTimeoutMs = 12_000
 const devLogRingLimit = 500
 
-export async function createE2eEnvironment(): Promise<E2eRuntime> {
+export async function createE2eEnvironment(
+  options: { memories?: boolean } = {}
+): Promise<E2eRuntime> {
   const serverPort = await reserveTcpPort()
   const uiPort = await reserveTcpPort()
   const serverBind = `127.0.0.1:${serverPort}`
@@ -162,6 +164,13 @@ export async function createE2eEnvironment(): Promise<E2eRuntime> {
   // and the only way a cloud-mode stack can reach the real provider: the
   // `--settings-path` document is isolated from app_home by design.
   const appHomeProviders = readAppHomeProviders()
+  // Memory pipeline stack (memory-scripted suite): enable the agent memory
+  // pipeline against a per-run memory root. Every other stack keeps the
+  // historical `enabled: false` (the pipeline would otherwise spawn phase2
+  // consolidation subagents behind every root turn).
+  const agentMemories = options.memories
+    ? { enabled: true, memoryRoot: join(rootDir, "memories"), model: "slab-llama" }
+    : undefined
   writeSettingsDocument(settingsPath, {
     databaseUrl: sqliteUrlForPath(databasePath),
     modelConfigDir,
@@ -169,6 +178,7 @@ export async function createE2eEnvironment(): Promise<E2eRuntime> {
     providers: appHomeProviders,
     serverBind,
     sessionStateDir,
+    ...(agentMemories ? { agentMemories } : {}),
   })
   writeSettingsDocument(settingsOverlayPath, {
     databaseUrl: sqliteUrlForPath(databasePath),
@@ -177,6 +187,7 @@ export async function createE2eEnvironment(): Promise<E2eRuntime> {
     providers: appHomeProviders,
     serverBind,
     sessionStateDir,
+    ...(agentMemories ? { agentMemories } : {}),
   })
 
   return {
@@ -849,6 +860,7 @@ function isFailedTaskStatus(status: string): boolean {
 function writeSettingsDocument(
   path: string,
   options: {
+    agentMemories?: { enabled: boolean; memoryRoot?: string; model?: string }
     databaseUrl: string
     modelConfigDir: string
     pluginsDir: string
@@ -870,9 +882,17 @@ function writeSettingsDocument(
             enabled: false,
             scripts: [],
           },
-          memories: {
-            enabled: false,
-          },
+          memories: options.agentMemories
+            ? {
+                enabled: options.agentMemories.enabled,
+                ...(options.agentMemories.model ? { model: options.agentMemories.model } : {}),
+                ...(options.agentMemories.memoryRoot
+                  ? { memory_root: options.agentMemories.memoryRoot }
+                  : {}),
+              }
+            : {
+                enabled: false,
+              },
           tools: {
             mcp: {
               enabled: false,
