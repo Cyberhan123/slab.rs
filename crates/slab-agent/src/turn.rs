@@ -23,7 +23,7 @@ use crate::{
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
         AgentNotifyPort, ApprovalPort, ApprovalReviewerPort, ExecPolicyPort, LlmPort,
-        LlmStreamObserver, LlmUsage, ParsedToolCall, PlanStorePort, ToolSpec,
+        LlmStreamObserver, LlmUsage, ParsedToolCall, PlanStorePort, QuestionnairePort, ToolSpec,
     },
     protocol::{
         AgentMessageDeltaParams, EventMsg, ItemCompletedParams, ItemStartedParams,
@@ -59,6 +59,9 @@ pub(crate) struct TurnExecutionContext<'a> {
     /// BEFORE the human approval card; `ReviewOutcome::Unavailable` (unconfigured,
     /// wrong mode, failed, timed out) falls back to [`Self::approval`].
     pub approval_reviewer: &'a dyn ApprovalReviewerPort,
+    /// User-answer gate for the `questionnaire` tool: blocks the tool call
+    /// until the host collects answers (see `drive_questionnaire_answers`).
+    pub questionnaire: &'a dyn QuestionnairePort,
     /// Built-in agent registry (Slice 4). Read-only turn use — drives
     /// [`crate::agent::filter_tools_for_agent`] from `config.agent_type`.
     pub agent_registry: &'a dyn crate::agent::AgentRegistry,
@@ -449,7 +452,13 @@ pub(crate) async fn execute_turn(
             .await;
             return Err(error);
         }
-        persist_final_answer(&context, messages, response.content.unwrap_or_default()).await;
+        persist_final_answer(
+            &context,
+            messages,
+            response.content.unwrap_or_default(),
+            response.content_already_streamed,
+        )
+        .await;
         transition_turn(&context, TurnPhase::Completed).await;
         emit_turn_state_changed(
             &context,
@@ -484,6 +493,7 @@ pub(crate) async fn execute_turn(
         response.content_already_streamed,
     )
     .await;
+    complete_tool_round_agent_text(&context, response.content.as_deref()).await;
     persist_assistant_tool_request(&context, messages, &response).await;
     if !validation.invalid.is_empty() {
         record_invalid_tool_calls(&context, &validation.invalid, messages).await?;
@@ -500,7 +510,10 @@ pub(crate) async fn execute_turn(
             // must hit the tool's no-active-plan denial instead of silently
             // finalizing again on the already-completed plan.
             context.plan_store.clear(context.thread_id).await;
-            persist_final_answer(&context, messages, completion.summary).await;
+            // `already_streamed` is about the SUMMARY, which comes from the
+            // tool arguments and was never streamed as model deltas — the
+            // model's own body text for this round is a different string.
+            persist_final_answer(&context, messages, completion.summary, false).await;
             transition_turn(&context, TurnPhase::Completed).await;
             emit_turn_state_changed(
                 &context,
@@ -919,18 +932,37 @@ async fn persist_final_answer(
     context: &TurnExecutionContext<'_>,
     messages: &mut Vec<ConversationMessage>,
     content: String,
+    already_streamed: bool,
 ) {
     // `content` is the LLM-grade form (reasoning embedded as a
     // `<think status="done">…</think>` block for the next prompt's chat
     // template). The UI-grade agentMessage item must carry only the visible
     // text — history renders item text verbatim, so the block is stripped
     // here while the appended ConversationMessage keeps it.
+    let text = strip_think_blocks(&content);
+    let item_id = assistant_item_id(context.turn_index);
+    // The frontend drops an `item/completed` whose text part was never opened
+    // by a started/delta pair, so text that did NOT go out as live deltas (a
+    // non-streaming adapter's final answer, the `task.complete` summary) must
+    // be announced here first — same shape as `emit_unstreamed_tool_text`.
+    if !already_streamed && !text.is_empty() {
+        emit_agent_message_started(context.notify, context.thread_id, context.turn_index, &item_id)
+            .await;
+        emit_agent_message_delta(
+            context.notify,
+            context.thread_id,
+            context.turn_index,
+            &item_id,
+            &text,
+        )
+        .await;
+    }
     emit_agent_message_completed(
         context.notify,
         context.thread_id,
         context.turn_index,
-        &assistant_item_id(context.turn_index),
-        &strip_think_blocks(&content),
+        &item_id,
+        &text,
     )
     .await;
 
@@ -984,6 +1016,34 @@ async fn emit_unstreamed_tool_text(
         context.thread_id,
         context.turn_index,
         &item_id,
+        &text,
+    )
+    .await;
+}
+
+/// Close the iteration's agent-message item when the round ends in tool
+/// calls. Only the FINAL answer emitted an `ItemCompleted(agentMessage)`
+/// (`persist_final_answer`), so a tool round's text item stayed open on the
+/// wire for the rest of the run: the server's live snapshot cleared it only
+/// at the next `turn/started`, and the frontend live-text mirror (which
+/// deletes entries solely on `item/completed`) leaked it as a DUPLICATE
+/// tail bubble once the pane's own stream finished. Emitting the completion
+/// here also persists the segment as a `TurnItem`, so restored history
+/// renders the commentary between tool cards (previously it lived only in
+/// the LLM-grade `MessageAppend`, which the full-fidelity restore path
+/// skips). Rounds with no visible text emit nothing — completing an item
+/// that never started would persist an empty bubble.
+async fn complete_tool_round_agent_text(context: &TurnExecutionContext<'_>, content: Option<&str>) {
+    let Some(text) = content else { return };
+    let text = strip_think_blocks(text);
+    if text.is_empty() {
+        return;
+    }
+    emit_agent_message_completed(
+        context.notify,
+        context.thread_id,
+        context.turn_index,
+        &assistant_item_id(context.turn_index),
         &text,
     )
     .await;

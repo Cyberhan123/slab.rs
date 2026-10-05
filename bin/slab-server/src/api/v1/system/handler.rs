@@ -8,7 +8,9 @@ use utoipa::OpenApi;
 use crate::api::v1::system::schema::{
     AgentDiagnosticsResponse, AgentThreadStatResponse, FailedToolCallResponse, GpuDeviceStatus,
     GpuLedgerDeviceResponse, GpuLedgerEntryResponse, GpuLedgerGaugeResponse, GpuLedgerResponse,
-    GpuStatusResponse, SystemDiagnosticPathResponse, SystemDiagnosticsResponse,
+    GpuStatusResponse, MemoryDiagnosticsResponse, MemoryPhase1StatusCountResponse,
+    MemoryPhase2LockResponse, MemoryPhase2RunResponse, SystemDiagnosticPathResponse,
+    SystemDiagnosticsResponse,
 };
 use crate::error::ServerError;
 use slab_app_core::context::AppState;
@@ -16,7 +18,7 @@ use slab_app_core::domain::services::SystemService;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(gpu_status, gpu_ledger, system_diagnostics, agent_diagnostics),
+    paths(gpu_status, gpu_ledger, system_diagnostics, agent_diagnostics, memory_diagnostics),
     components(schemas(
         GpuStatusResponse,
         GpuDeviceStatus,
@@ -28,7 +30,11 @@ use slab_app_core::domain::services::SystemService;
         SystemDiagnosticPathResponse,
         AgentDiagnosticsResponse,
         AgentThreadStatResponse,
-        FailedToolCallResponse
+        FailedToolCallResponse,
+        MemoryDiagnosticsResponse,
+        MemoryPhase1StatusCountResponse,
+        MemoryPhase2LockResponse,
+        MemoryPhase2RunResponse
     ))
 )]
 pub struct SystemApi;
@@ -39,6 +45,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/system/gpu/ledger", get(gpu_ledger))
         .route("/system/diagnostics", get(system_diagnostics))
         .route("/system/diagnostics/agent-stats", get(agent_diagnostics))
+        .route("/system/diagnostics/memories", get(memory_diagnostics))
 }
 
 #[utoipa::path(
@@ -93,4 +100,19 @@ async fn agent_diagnostics(
     State(service): State<SystemService>,
 ) -> Result<Json<AgentDiagnosticsResponse>, ServerError> {
     Ok(Json(service.agent_diagnostics().await?))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/system/diagnostics/memories",
+    tag = "system",
+    responses(
+        (status = 200, description = "Agent memory pipeline status: phase1 counts, phase2 locks, recent runs", body = MemoryDiagnosticsResponse),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn memory_diagnostics(
+    State(service): State<SystemService>,
+) -> Result<Json<MemoryDiagnosticsResponse>, ServerError> {
+    Ok(Json(service.memory_diagnostics().await?))
 }

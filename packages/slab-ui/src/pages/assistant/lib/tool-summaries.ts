@@ -104,6 +104,8 @@ export function summarizeToolCall(toolName: string, input: unknown): ToolSummary
           field(input, "description") ?? field(input, "task") ?? field(input, "prompt") ?? "",
         ),
       }
+    case "questionnaire":
+      return { label: "Ask", detail: truncateDetail(field(input, "question") ?? "") }
     default:
       break
   }

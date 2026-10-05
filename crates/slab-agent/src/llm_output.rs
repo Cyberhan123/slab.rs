@@ -293,6 +293,14 @@ fn stream_usage(payload: &Value) -> Option<crate::port::LlmUsage> {
             .and_then(Value::as_u64)
             .unwrap_or_default() as u32,
         total_tokens: usage.get("total_tokens").and_then(Value::as_u64).unwrap_or_default() as u32,
+        // kv-cache / provider prompt-cache hits ride the OpenAI-style details
+        // block; 0 means "none reported" and stays `None` so the wire omits it.
+        cached_tokens: usage
+            .get("prompt_tokens_details")
+            .and_then(|details| details.get("cached_tokens"))
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0)
+            .and_then(|value| u32::try_from(value).ok()),
         estimated: usage.get("estimated").and_then(Value::as_bool).unwrap_or_default(),
     })
 }
@@ -745,6 +753,37 @@ mod tests {
         assert!(matches!(&second[1], AgentStreamDelta::Text(delta) if delta == "answer"));
         assert_eq!(completion.reasoning, "plan done");
         assert_eq!(completion.content, "answer");
+    }
+
+    /// The terminal usage chunk carries the kv-cache / provider prompt-cache
+    /// hit count in the OpenAI-style details block — the assembled completion
+    /// must surface it so `TurnUsage.cached_tokens` is not always `None`.
+    #[test]
+    fn stream_usage_carries_cached_tokens() {
+        let mut assembler = AgentStreamAssembler::default();
+        assembler
+            .ingest_data(r#"{"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}"#)
+            .expect("content chunk");
+        assembler
+            .ingest_data(
+                r#"{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1024,"completion_tokens":8,"total_tokens":1032,"prompt_tokens_details":{"cached_tokens":512},"estimated":false}}"#,
+            )
+            .expect("usage chunk");
+        let completion = assembler.finish();
+
+        let usage = completion.usage.expect("usage assembled");
+        assert_eq!(usage.prompt_tokens, 1024);
+        assert_eq!(usage.cached_tokens, Some(512));
+        assert!(!usage.estimated);
+
+        // Zero / absent cached_tokens stays `None` (wire omits the field).
+        let mut bare = AgentStreamAssembler::default();
+        bare.ingest_data(
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11,"prompt_tokens_details":{"cached_tokens":0}}}"#,
+        )
+        .expect("bare usage chunk");
+        let bare_completion = bare.finish();
+        assert_eq!(bare_completion.usage.expect("bare usage").cached_tokens, None);
     }
 
     #[test]
