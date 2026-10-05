@@ -455,9 +455,9 @@
     },
   },
   "catalog": {
-    "@ai-sdk/provider-utils": "^5.0.44",
-    "@ai-sdk/react": "^4.0.109",
-    "@base-ui/react": "^1.7.0",
+    "@ai-sdk/provider-utils": "^5.0.28",
+    "@ai-sdk/react": "^4.0.74",
+    "@base-ui/react": "^1.8.0",
     "@codingame/monaco-vscode-accessibility-service-override": "^37.1.0",
     "@codingame/monaco-vscode-api": "^37.1.0",
     "@codingame/monaco-vscode-configuration-editing-default-extension": "^37.1.0",
