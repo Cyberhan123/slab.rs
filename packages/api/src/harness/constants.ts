@@ -20,6 +20,7 @@ export const HARNESS_METHOD = {
   SKILLS_LIST: "skills/list",
   COMMAND_LIST: "command/list",
   APPROVAL_RESOLVE: "approval/resolve",
+  QUESTIONNAIRE_RESOLVE: "questionnaire/resolve",
   SHUTDOWN: "shutdown",
   WORKSPACE_MIGRATE: "workspace/migrate",
 } as const
@@ -38,6 +39,10 @@ export const HARNESS_NOTIFICATION = {
   ITEM_FILE_CHANGE_OUTPUT_DELTA: "item/fileChange/outputDelta",
   ITEM_COMMAND_EXECUTION_REQUEST_APPROVAL: "item/commandExecution/requestApproval",
   ITEM_FILE_CHANGE_REQUEST_APPROVAL: "item/fileChange/requestApproval",
+  // Structured question to the user (the `questionnaire` tool). The client's
+  // answers flow back via the `questionnaire/resolve` request, correlated on
+  // the same `item_id` as the approval notifications.
+  ITEM_QUESTIONNAIRE_REQUEST_ANSWER: "item/questionnaire/requestAnswer",
   // Resident background task lifecycle (shell background=true), emitted from
   // the background task registry via `EventMsg` (projected like item events).
   BACKGROUND_TASK_UPDATED: "backgroundTask/updated",

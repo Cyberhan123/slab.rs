@@ -165,7 +165,7 @@ describe("Sender single-button stop/steer state", () => {
 })
 
 describe("Sender slash-command menu", () => {
-  it("opens the command menu when the user types a leading slash", async () => {
+  it("opens the autocomplete popup when the user types a leading slash", async () => {
     const screen = await renderSender(
       <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
     )
@@ -200,6 +200,8 @@ describe("Sender slash-command menu", () => {
     await userEvent.click(screen.getByText("/compact"))
 
     await expect.element(screen.getByLabelText("Message")).toHaveValue("/compact")
+    // The seeded control trigger must not pin the popup open.
+    await expect.element(screen.getByTestId("assistant-slash-popup")).not.toBeInTheDocument()
   })
 
   it("prefixes a prompt skill command when selected from the toolbar", async () => {
@@ -214,6 +216,75 @@ describe("Sender slash-command menu", () => {
     await userEvent.click(screen.getByText("/summarize"))
 
     await expect.element(screen.getByLabelText("Message")).toHaveValue("/summarize ")
+  })
+
+  it("filters suggestions while the user types after the slash", async () => {
+    const screen = await renderSender(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    await userEvent.type(screen.getByLabelText("Message"), "/comp")
+
+    await expect.element(screen.getByText("/compact")).toBeInTheDocument()
+    await expect.element(screen.getByText("/fork")).not.toBeInTheDocument()
+    await expect.element(screen.getByText("/plan")).not.toBeInTheDocument()
+  })
+
+  it("selects the highlighted suggestion with arrow keys and Tab", async () => {
+    const screen = await renderSender(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    const textarea = screen.getByLabelText("Message")
+    await userEvent.type(textarea, "/")
+    await userEvent.keyboard("{ArrowDown}")
+    await userEvent.keyboard("{Tab}")
+
+    await expect.element(textarea).toHaveValue("/fork")
+    await expect.element(screen.getByTestId("assistant-slash-popup")).not.toBeInTheDocument()
+  })
+
+  it("dismisses the popup on Escape and reopens it when typing continues", async () => {
+    const screen = await renderSender(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    const textarea = screen.getByLabelText("Message")
+    await userEvent.type(textarea, "/")
+    await expect.element(screen.getByTestId("assistant-slash-popup")).toBeInTheDocument()
+
+    await userEvent.keyboard("{Escape}")
+    await expect.element(screen.getByTestId("assistant-slash-popup")).not.toBeInTheDocument()
+
+    // Continuing to type changes the query, so the popup comes back.
+    await userEvent.keyboard("c")
+    await expect.element(screen.getByTestId("assistant-slash-popup")).toBeInTheDocument()
+  })
+
+  it("never shows the popup for path-like input", async () => {
+    const screen = await renderSender(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    await userEvent.type(screen.getByLabelText("Message"), "/usr/bin")
+
+    await expect.element(screen.getByTestId("assistant-slash-popup")).not.toBeInTheDocument()
+  })
+
+  it("closes the toolbar menu after picking a command from it", async () => {
+    const screen = await renderSender(
+      <Sender onSubmit={vi.fn()} commands={COMMANDS} planMode={false} onPlanModeChange={vi.fn()} />,
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Commands" }))
+    await userEvent.click(screen.getByText("/fork"))
+
+    await expect.element(screen.getByLabelText("Message")).toHaveValue("/fork")
+    // Command picks close the menu (unlike the embedded settings toggles,
+    // which intentionally keep it open).
+    await expect
+      .element(screen.getByText(i18n.t("common.fields.model")))
+      .not.toBeInTheDocument()
   })
 })
 

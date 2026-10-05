@@ -49,6 +49,11 @@ export interface HarnessConversation extends ConversationState {
   ) => void
   /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
   resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
+  /** Answer a pending `questionnaire` tool call via `questionnaire/resolve`. */
+  resolveQuestionnaire: (
+    itemId: string,
+    answers: { selected: string[]; custom: string | null; skipped?: boolean },
+  ) => Promise<void>
   /** Manually compact the current (or given) thread via `thread/compact/start`. */
   compactThread: (threadId?: string) => Promise<void>
   /** Fork the current (or given) thread via `thread/fork`, then switch to the child. */
@@ -138,6 +143,7 @@ export function useHarnessConversation(
     notePermissionModeChange: controller.notePermissionModeChange,
     noteApprovalReviewChange: controller.noteApprovalReviewChange,
     resolveApproval: controller.resolveApproval,
+    resolveQuestionnaire: controller.resolveQuestionnaire,
     compactThread: controller.compactThread,
     forkThread: controller.forkThread,
     rollbackFromTurn: controller.rollbackFromTurn,

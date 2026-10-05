@@ -357,6 +357,72 @@ result_ref?: string, };
  */
 export type PlanStatus = "pending" | "in_progress" | "completed" | "blocked";
 
+// ── QuestionnaireChoiceView ──
+/**
+ * One answer option of a questionnaire, as delivered on the wire.
+ */
+export type QuestionnaireChoiceView = { 
+/**
+ * Short human-readable label shown as the option.
+ */
+label: string, 
+/**
+ * Stable machine value for the choice (defaults to the label).
+ */
+value: string, 
+/**
+ * Optional one-line explanation shown under the label.
+ */
+description?: string, };
+
+// ── QuestionnaireRequestAnswerParams ──
+/**
+ * `item/questionnaire/requestAnswer` — the agent asked the user a structured
+ * question (the `questionnaire` tool). The client renders the question card
+ * and routes the user's answers back via the `questionnaire/resolve` request,
+ * correlating on `item_id` (the tool-call correlation id, same key as the
+ * approval notifications).
+ */
+export type QuestionnaireRequestAnswerParams = { threadId: string, turnId: string, itemId: string, 
+/**
+ * The self-contained question text.
+ */
+question: string, 
+/**
+ * The answer options (label + stable value + optional description).
+ */
+choices: Array<QuestionnaireChoiceView>, 
+/**
+ * Multiple choices may be selected.
+ */
+allowMultiple: boolean, 
+/**
+ * The user may type a custom answer instead of picking a choice.
+ */
+allowCustomInput: boolean, 
+/**
+ * The UI should nag for an answer (informational; a timeout is still a
+ * valid outcome the model handles).
+ */
+required: boolean, };
+
+// ── QuestionnaireResolveParams ──
+export type QuestionnaireResolveParams = { threadId: string, 
+/**
+ * The pending questionnaire item / tool-call id (the notification's
+ * `item_id`).
+ */
+itemId: string, 
+/**
+ * The user's answers as structured JSON, e.g.
+ * `{"status":"answered","selected":["value"],"custom":null}`. Delivered
+ * verbatim to the waiting agent turn as the tool result.
+ */
+answers: JsonValue, };
+
+// ── QuestionnaireResolveResult ──
+export type QuestionnaireResolveResult = { delivered?: boolean, status?: string, };
+
 // ── ReasoningEffort ──
 /**
  * Reasoning effort selector.
@@ -403,7 +469,7 @@ export type ServerInfo = { name: string, version: string, };
 /**
  * Union of every server → client notification, discriminated by `method`.
  */
-export type ServerNotification = { "method": "thread/statusChanged", "params": ThreadStatusChangedParams } | { "method": "turn/started", "params": TurnStartedParams } | { "method": "turn/completed", "params": TurnCompletedParams } | { "method": "context/compacting", "params": ContextCompactingParams } | { "method": "context/compacted", "params": ContextCompactedParams } | { "method": "item/started", "params": ItemStartedParams } | { "method": "item/completed", "params": ItemCompletedParams } | { "method": "item/agentMessage/delta", "params": AgentMessageDeltaParams } | { "method": "item/reasoning/textDelta", "params": ReasoningTextDeltaParams } | { "method": "item/reasoning/summaryTextDelta", "params": ReasoningSummaryTextDeltaParams } | { "method": "item/commandExecution/outputDelta", "params": CommandExecutionOutputDeltaParams } | { "method": "item/fileChange/outputDelta", "params": FileChangeOutputDeltaParams } | { "method": "backgroundTask/updated", "params": BackgroundTaskUpdatedParams } | { "method": "subagent/childEvent", "params": SubagentChildEventParams } | { "method": "item/commandExecution/requestApproval", "params": CommandExecutionRequestApprovalParams } | { "method": "item/fileChange/requestApproval", "params": FileChangeRequestApprovalParams } | { "method": "error", "params": ErrorParams } | { "method": "account/updated", "params": AccountUpdatedParams } | { "method": "account/loginCompleted", "params": AccountLoginCompletedParams };
+export type ServerNotification = { "method": "thread/statusChanged", "params": ThreadStatusChangedParams } | { "method": "turn/started", "params": TurnStartedParams } | { "method": "turn/completed", "params": TurnCompletedParams } | { "method": "context/compacting", "params": ContextCompactingParams } | { "method": "context/compacted", "params": ContextCompactedParams } | { "method": "item/started", "params": ItemStartedParams } | { "method": "item/completed", "params": ItemCompletedParams } | { "method": "item/agentMessage/delta", "params": AgentMessageDeltaParams } | { "method": "item/reasoning/textDelta", "params": ReasoningTextDeltaParams } | { "method": "item/reasoning/summaryTextDelta", "params": ReasoningSummaryTextDeltaParams } | { "method": "item/commandExecution/outputDelta", "params": CommandExecutionOutputDeltaParams } | { "method": "item/fileChange/outputDelta", "params": FileChangeOutputDeltaParams } | { "method": "backgroundTask/updated", "params": BackgroundTaskUpdatedParams } | { "method": "subagent/childEvent", "params": SubagentChildEventParams } | { "method": "item/commandExecution/requestApproval", "params": CommandExecutionRequestApprovalParams } | { "method": "item/fileChange/requestApproval", "params": FileChangeRequestApprovalParams } | { "method": "item/questionnaire/requestAnswer", "params": QuestionnaireRequestAnswerParams } | { "method": "error", "params": ErrorParams } | { "method": "account/updated", "params": AccountUpdatedParams } | { "method": "account/loginCompleted", "params": AccountLoginCompletedParams };
 
 // ── ShutdownParams ──
 export type ShutdownParams = { threadId: string, };

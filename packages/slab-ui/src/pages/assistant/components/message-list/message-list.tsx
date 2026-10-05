@@ -88,7 +88,11 @@ function MessageList({
     return (
         <MessageScroller>
             <MessageScrollerViewport ref={viewportRef}>
-                <MessageScrollerContent aria-busy={isBusy} className="p-(--card-spacing)">
+                {/* `p-6` replaces a dangling `p-(--card-spacing)` — that token
+                    was never defined anywhere, so the scroller rendered with
+                    NO padding and messages sat flush against the pane edge.
+                    Matches the composer footer's px-6 rhythm. */}
+                <MessageScrollerContent aria-busy={isBusy} className="p-6">
                     <div
                         className="relative w-full"
                         style={{ height: virtualizer.getTotalSize() }}
