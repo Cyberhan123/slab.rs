@@ -227,7 +227,14 @@ jobs:
             libssl-dev \
             pkg-config \
             python3-dev \
-            libglib2.0-dev
+            libglib2.0-dev \
+            libavcodec-dev \
+            libavdevice-dev \
+            libavfilter-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libswresample-dev \
+            libswscale-dev
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
