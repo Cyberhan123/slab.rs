@@ -1,0 +1,64 @@
+name: Setup FFmpeg (vcpkg static, Windows)
+description: >-
+  Install FFmpeg dev libraries for MSVC via vcpkg classic mode
+  (ffmpeg:x64-windows-static, pinned vcpkg commit) and export VCPKG_ROOT.
+  The Windows builds link slab-app-core's ffmpeg-next-static feature, and the
+  repo's .cargo/config.toml MSVC rustflags enable +crt-static, which makes the
+  vcpkg crate probe the x64-windows-static triplet — the same layout dev
+  machines use. The installed tree is cached (restored+saved around the
+  install step, so a later job failure cannot waste the multi-hour source
+  build).
+runs:
+  using: composite
+  steps:
+    # Bump the suffix when moving the vcpkg pin (or the ffmpeg port it
+    # carries) so the cached install tree is rebuilt.
+    - name: Restore vcpkg FFmpeg install
+      id: cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/vcpkg/installed
+          ~/vcpkg/downloads
+        key: vcpkg-ffmpeg-8.1.2-x64-windows-static-39ec37c17d-v1
+
+    - name: Install FFmpeg via vcpkg
+      if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        $root = "$env:USERPROFILE\vcpkg"
+        # Pinned to the commit dev machines build against (ffmpeg port 8.1.2#3).
+        $pin = "39ec37c17d122da0c98c3279e6a6b0f4efb75c4a"
+
+        git clone https://github.com/microsoft/vcpkg.git $root
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        git -C $root checkout $pin
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+        & "$root\bootstrap-vcpkg.bat" -disableMetrics
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+        $env:VCPKG_DISABLE_METRICS = "1"
+        & "$root\vcpkg.exe" install "ffmpeg:x64-windows-static"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    # Saved right after the install (not in a post step), so the expensive
+    # tree survives even when a later step in the calling job fails.
+    - name: Save vcpkg FFmpeg install
+      if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ~/vcpkg/installed
+          ~/vcpkg/downloads
+        key: vcpkg-ffmpeg-8.1.2-x64-windows-static-39ec37c17d-v1
+
+    # ffmpeg-sys-next's vcpkg probe only reads VCPKG_ROOT\installed\<triplet>
+    # (it never invokes vcpkg.exe), so a cache-hit restore is sufficient —
+    # no vcpkg checkout is needed on that path.
+    - name: Export VCPKG_ROOT
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        "VCPKG_ROOT=$env:USERPROFILE\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append

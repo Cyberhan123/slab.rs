@@ -39,11 +39,11 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install Playwright browser
-        run: bunx playwright install chromium
-
-      - name: Run release fullstack E2E
-        run: bun run test:e2e
+      # The sidecar/windows-installer builds link slab-app-core's
+      # ffmpeg-next-static feature; Windows runners ship no FFmpeg, no vcpkg,
+      # and no pkg-config, so provision the static vcpkg port first.
+      - name: Setup FFmpeg (vcpkg)
+        uses: ./.github/actions/setup-ffmpeg-windows
 
       - name: Validate release tag matches project versions
         if: startsWith(github.ref, 'refs/tags/')

@@ -5,8 +5,6 @@ on:
     branches: [main, master]
   pull_request:
   workflow_dispatch:
-  schedule:
-    - cron: "0 18 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -147,7 +145,8 @@ jobs:
 
       # Plan F PR gate: contract/schema drift, frontend build, deterministic
       # unit tests, browser-mode regressions, and bundle budget. Fullstack E2E
-      # stays in the release/manual workflow to keep ordinary PR feedback tight.
+      # needs a live LLM backend, so it stays a local `bun run test:e2e` (see
+      # packages/slab-desktop/vitest.e2e.config.ts) — CI cannot run it.
       - name: Type-check frontend packages
         run: bun run check:frontend
 
@@ -207,47 +206,3 @@ jobs:
 
       - name: flutter test
         run: bun run test:mobile
-
-  fullstack-e2e:
-    name: Fullstack E2E (manual / nightly)
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install Linux system deps
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            libssl-dev \
-            pkg-config \
-            python3-dev \
-            libglib2.0-dev
-
-      - name: Setup FFmpeg
-        uses: ./.github/actions/setup-ffmpeg
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Apply patches (vendor setup)
-        run: bun run scripts/apply-patches.ts
-
-      - name: Install Playwright browser
-        run: bunx playwright install --with-deps chromium
-
-      - name: Run release-risk fullstack E2E
-        run: bun run test:e2e
