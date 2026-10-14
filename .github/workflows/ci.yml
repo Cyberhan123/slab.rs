@@ -3,7 +3,9 @@ name: CI
 on:
   push:
     branches: [main, master]
+    paths-ignore: ["**.md"]
   pull_request:
+    paths-ignore: ["**.md"]
   workflow_dispatch:
 
 env:
@@ -12,6 +14,12 @@ env:
 
 permissions:
   contents: read
+
+# Superseded pushes to the same ref cancel their outdated runs instead of
+# burning runner minutes and cache quota to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   cargo-check:
@@ -33,6 +41,10 @@ jobs:
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          # Keep the (expensive) dependency artifacts even when a later gate
+          # in this job fails, so retry runs start warm.
+          cache-on-failure: true
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -63,11 +75,21 @@ jobs:
       - name: Apply patches (vendor setup)
         run: bun run scripts/apply-patches.ts
 
-      - name: cargo check
-        run: bun ./scripts/cargo/validate.ts check
+      # The drift gates below generate from freshly built Rust artifacts but
+      # run through bun (openapi-typescript etc.), so this job needs the JS
+      # toolchain too.
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Setup uv
+        # gen:api regenerates the Python SDK through `uvx openapi-python-client`.
+        uses: astral-sh/setup-uv@v5
 
       - name: cargo fmt
         run: bun ./scripts/cargo/validate.ts fmt
+
+      - name: cargo check
+        run: bun ./scripts/cargo/validate.ts check
 
       - name: cargo clippy
         run: bun ./scripts/cargo/validate.ts clippy
@@ -75,11 +97,30 @@ jobs:
       - name: cargo doc
         run: bun ./scripts/cargo/validate.ts doc
 
+      # Contract/schema drift gates live here (not in frontend-check) because
+      # their generators compile Rust; reusing this job's target dir makes them
+      # nearly free. They run before `cargo test` so drift failures don't pay
+      # the full workspace test time.
+      - name: Check API type drift
+        run: |
+          bun run gen:api
+          git diff --exit-code packages/api/src/v1.d.ts python/slab-python-sdk/src/slab_api_client
+
+      - name: Check harness bindings drift
+        run: |
+          bun run gen:harness
+          git diff --exit-code packages/api/src/harness
+
+      - name: Check settings/schema drift
+        run: |
+          bun run gen:schemas
+          git diff --exit-code docs/public/manifests/v1/settings-document.schema.json docs/public/manifests/v3/slab-manifest.schema.json
+
       - name: cargo test
         run: bun ./scripts/cargo/validate.ts test
 
   frontend-check:
-    name: Frontend contract / test / bundle gates
+    name: Frontend test / bundle gates
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,12 +131,6 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
 
       - name: Cache Bun install artifacts
         uses: actions/cache@v4
@@ -112,43 +147,26 @@ jobs:
       - name: Apply patches (vendor setup)
         run: bun run scripts/apply-patches.ts
 
-      - name: Install protoc
-        run: sudo apt-get install -y protobuf-compiler pkg-config
-
-      - name: Setup uv
-        # gen:api regenerates the Python SDK through `uvx openapi-python-client`.
-        uses: astral-sh/setup-uv@v5
-
-      - name: Setup FFmpeg
-        uses: ./.github/actions/setup-ffmpeg
-
-      - name: Check API type drift
-        run: |
-          bun run gen:api
-          git diff --exit-code packages/api/src/v1.d.ts python/slab-python-sdk/src/slab_api_client
-
-      - name: Check harness bindings drift
-        run: |
-          bun run gen:harness
-          git diff --exit-code packages/api/src/harness
-
-      - name: Check settings/schema drift
-        run: |
-          bun run gen:schemas
-          git diff --exit-code docs/public/manifests/v1/settings-document.schema.json docs/public/manifests/v3/slab-manifest.schema.json
-
       # Plugin packs are build artifacts (plugins/dist is gitignored), so this
       # is a build-sanity gate: it fails the PR if a plugin manifest/shape change
       # breaks packing. There is no diff to check against tracked source.
       - name: Check plugin packs build
         run: bun run gen:plugin-packs
 
-      # Plan F PR gate: contract/schema drift, frontend build, deterministic
-      # unit tests, browser-mode regressions, and bundle budget. Fullstack E2E
-      # needs a live LLM backend, so it stays a local `bun run test:e2e` (see
+      # Plan F PR gate: frontend build, deterministic unit tests, browser-mode
+      # regressions, and bundle budget. Contract/schema drift gates live in the
+      # cargo-check job (their generators compile Rust). Fullstack E2E needs a
+      # live LLM backend, so it stays a local `bun run test:e2e` (see
       # packages/slab-desktop/vitest.e2e.config.ts) — CI cannot run it.
       - name: Type-check frontend packages
         run: bun run check:frontend
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: linux-playwright-${{ hashFiles('bun.lock') }}
+          restore-keys: linux-playwright-
 
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
@@ -175,6 +193,15 @@ jobs:
         with:
           bun-version-file: package.json
 
+      - name: Cache Bun install artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock', 'package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -186,6 +213,13 @@ jobs:
           # ships with Flutter >=3.47.
           flutter-version: 3.47.1
           cache: true
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: linux-pub-${{ hashFiles('flutter/slab-mobile/pubspec.lock') }}
+          restore-keys: linux-pub-
 
       - name: Regenerate mobile assets (tokens + locales)
         run: bun run gen:mobile

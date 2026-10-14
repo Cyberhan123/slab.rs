@@ -12,6 +12,13 @@ on:
 permissions:
   contents: write
 
+# Re-pushed tags and release-branch PR updates cancel their superseded runs;
+# distinct refs (different tags/branches) get separate groups and never
+# cancel each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   RUST_BACKTRACE: 1
 
@@ -35,6 +42,10 @@ jobs:
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          # The Windows dependency build is the bulk of this job's runtime;
+          # a failed bundling/signing step later must not throw it away.
+          cache-on-failure: true
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile

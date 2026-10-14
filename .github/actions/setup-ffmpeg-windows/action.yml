@@ -12,15 +12,15 @@ runs:
   using: composite
   steps:
     # Bump the suffix when moving the vcpkg pin (or the ffmpeg port it
-    # carries) so the cached install tree is rebuilt.
+    # carries) so the cached install tree is rebuilt. Only `installed/` is
+    # cached — `downloads/` (source tarballs) is dead weight on the hit path
+    # and only pays off during a pin-bump rebuild.
     - name: Restore vcpkg FFmpeg install
       id: cache
       uses: actions/cache/restore@v4
       with:
-        path: |
-          ~/vcpkg/installed
-          ~/vcpkg/downloads
-        key: vcpkg-ffmpeg-8.1.2-x64-windows-static-39ec37c17d-v1
+        path: ~/vcpkg/installed
+        key: vcpkg-ffmpeg-8.1.2-x64-windows-static-39ec37c17d-v2
 
     - name: Install FFmpeg via vcpkg
       if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
@@ -49,10 +49,8 @@ runs:
       if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
-        path: |
-          ~/vcpkg/installed
-          ~/vcpkg/downloads
-        key: vcpkg-ffmpeg-8.1.2-x64-windows-static-39ec37c17d-v1
+        path: ~/vcpkg/installed
+        key: vcpkg-ffmpeg-8.1.2-x64-windows-static-39ec37c17d-v2
 
     # ffmpeg-sys-next's vcpkg probe only reads VCPKG_ROOT\installed\<triplet>
     # (it never invokes vcpkg.exe), so a cache-hit restore is sufficient —
