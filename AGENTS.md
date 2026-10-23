@@ -16,7 +16,7 @@ Use this as the repo-wide AI reference for architecture boundaries, workflow, an
 - Do not reintroduce `cargo make`, Bazel wrappers, or parallel top-level build orchestration.
 - Run commands from the repo root unless a local README says otherwise.
 - Use the narrowest validation command that covers the change before reaching for broader workspace checks.
-- `.agents/skills` contains optional agent guidance. `plugins/` contains runtime plugin packages. `docs/public/manifests/` contains JSON schemas and model metadata. `vendor/` contains vendored runtime artifacts.
+- `.agents/skills` contains optional agent guidance; it is the only place to add or edit skills. `.claude/skills` is a committed symlink to `../.agents/skills` (git mode 120000) so Claude Code picks them up — never edit through it or commit its traversal. On Windows it requires Developer Mode plus `git config core.symlinks true`; without them git checks it out as a plain text file (skills silently invisible — recreate with `MSYS=winsymlinks:nativestrict ln -s ../.agents/skills .claude/skills` after enabling both). `plugins/` contains runtime plugin packages. `docs/public/manifests/` contains JSON schemas and model metadata. `vendor/` contains vendored runtime artifacts.
 
 ## Architecture Boundaries
 
