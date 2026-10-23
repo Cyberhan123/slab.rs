@@ -107,8 +107,8 @@ class SlabMetrics {
   static const double shellTopbar = 56;
   static const double shellFooter = 32;
   static const double shellGutter = 24;
-  static const List<String> fontSans = ['Outfit', 'Geist', 'Geist Fallback', 'system-ui', 'sans-serif'];
-  static const List<String> fontMono = ['Fira Code', 'Geist Mono', 'Geist Mono Fallback', 'monospace'];
+  static const List<String> fontSans = ['system-ui', '-apple-system', 'Segoe UI', 'sans-serif'];
+  static const List<String> fontMono = ['ui-monospace', 'Cascadia Code', 'Consolas', 'monospace'];
   static const double radiusXl = 19.2;
   static const double radius2xl = 24;
   static const double radius3xl = 32;

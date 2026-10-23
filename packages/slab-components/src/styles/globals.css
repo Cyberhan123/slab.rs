@@ -265,8 +265,12 @@
 }
 
 @theme inline {
-  --font-sans: 'Outfit', 'Geist', 'Geist Fallback', system-ui, sans-serif;
-  --font-mono: 'Fira Code', 'Geist Mono', 'Geist Mono Fallback', monospace;
+  /* System stacks are the honest choice: no font files are bundled, so the
+     old Outfit/Geist/Fira declarations never resolved past system-ui anyway.
+     Keep at least one comma in each stack — scripts/design/export-tokens.ts
+     only emits a Dart List<String> font metric when the value is a list. */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -342,6 +346,7 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    font-optical-sizing: auto;
     background:
       radial-gradient(circle at top left, color-mix(in oklab, var(--primary) 10%, transparent), transparent 30%),
       radial-gradient(circle at bottom right, color-mix(in oklab, var(--brand-gold) 14%, transparent), transparent 32%),
