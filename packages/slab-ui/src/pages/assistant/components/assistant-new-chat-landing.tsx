@@ -79,12 +79,14 @@ export function AssistantNewChatLanding({
             className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-card"
         >
             <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-8 px-4 py-10">
-                <div className="flex flex-col items-center gap-2 text-center">
+                <div className="flex flex-col items-center gap-3 text-center">
                     <MessageCircleDashedIcon className="size-8 text-muted-foreground" />
-                    <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                        {t("pages.assistant.newChat.title")}
-                    </p>
-                    <h1 className="text-2xl font-semibold">{greeting}</h1>
+                    {/* Display-scale greeting: size-specific negative tracking +
+                        tight leading carry the hierarchy; no eyebrow label —
+                        the icon already frames the moment. */}
+                    <h1 className="text-3xl font-semibold leading-tight tracking-display md:text-4xl">
+                        {greeting}
+                    </h1>
                     <p className="text-sm text-muted-foreground">
                         {t("pages.assistant.newChat.description")}
                     </p>

@@ -49,7 +49,6 @@ export const assistant = {
     description: 'How can I assist your creative workflow today?',
   },
   newChat: {
-    title: 'New chat',
     description: 'Choose where this chat runs, then send your first message.',
     cta: 'New chat with workspace…',
     workspaceSection: 'Workspace',

@@ -468,7 +468,7 @@ export function AssistantChatPane({
                 <Card className="h-full w-full gap-0 border-none shadow-none">
                     <CardContent className="flex-1 overflow-hidden p-0">
                         <div className="flex h-full flex-col">
-                            <div className="min-h-0 flex-1">
+                            <div className="relative min-h-0 flex-1">
                                 {messages.length === 0 && !isHistoryLoading ? (
                                     <Empty className="h-full" data-testid="assistant-empty-state">
                                         <EmptyHeader>
@@ -517,6 +517,14 @@ export function AssistantChatPane({
                                         {rollbackConfirmDialog}
                                     </>
                                 )}
+                                {/* Scroll-edge fade: the transcript dissolves into the
+                                    surface right before the floating glass composer —
+                                    no hard divider under the fold. Paints above messages,
+                                    below the footer (which follows in normal flow). */}
+                                <div
+                                    aria-hidden="true"
+                                    className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-linear-to-t from-card via-card/70 to-transparent"
+                                />
                             </div>
                         </div>
                     </CardContent>

@@ -10,6 +10,7 @@ import {
   QuestionnaireItem,
 } from "@slab/components/questionnaire"
 import { useTranslation } from "@slab/i18n"
+import { motion, useReducedMotion } from "motion/react"
 import {
   FilePenIcon,
   ListChecksIcon,
@@ -46,6 +47,7 @@ export function ApprovalCard({
 }) {
   const { t } = useTranslation()
   const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const shouldReduceMotion = useReducedMotion()
 
   const handle = async (approved: boolean, scope: ApprovalScope, action: string) => {
     setPendingAction(action)
@@ -68,9 +70,16 @@ export function ApprovalCard({
   const isCommand = approval.kind === "command"
   const isPlan = approval.kind === "plan"
 
+  // Elevated calm material with a semantic accent bar — the yellow wash read
+  // as an alarm; the decision deserves attention without shouting. The card
+  // springs in from its anchor above the composer (skipped under reduced
+  // motion).
   return (
-    <div
-      className="rounded-md border border-yellow-500/40 bg-yellow-500/5 p-3"
+    <motion.div
+      initial={shouldReduceMotion ? false : { opacity: 0, y: 8, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: "spring", stiffness: 480, damping: 42, mass: 1 }}
+      className="rounded-xl border border-glass-border border-s-2 border-s-yellow-500/70 bg-glass-bg-strong p-3 shadow-elevation-2 backdrop-blur-md"
       data-testid={isPlan ? "assistant-approval-plan" : undefined}
     >
       <div className="flex items-center gap-2 text-sm font-medium">
@@ -138,7 +147,7 @@ export function ApprovalCard({
                     value={choice.scope}
                     disabled={pendingAction !== null}
                     data-testid={`assistant-approval-${choice.scope}`}
-                    className="gap-3 rounded-md border border-border/60 px-3 py-2 text-sm transition-colors hover:bg-accent/50 data-checked:border-primary/60 data-checked:bg-accent"
+                    className="press-scale-soft gap-3 rounded-md border border-border/60 px-3 py-2 text-sm transition-colors hover:bg-accent/50 data-checked:border-primary/60 data-checked:bg-accent"
                     onChange={() => void handle(true, choice.scope, `approve:${choice.scope}`)}
                   >
                     {t(choice.label)}
@@ -156,7 +165,7 @@ export function ApprovalCard({
           size="sm"
           data-testid="assistant-approval-deny"
           disabled={pendingAction !== null}
-          className="self-start"
+          className="press-scale self-start"
           onClick={() => void handle(false, "deny", "deny")}
         >
           {pendingAction === "deny" ? (
@@ -167,6 +176,6 @@ export function ApprovalCard({
           {t("pages.assistant.actions.reject")}
         </Button>
       </div>
-    </div>
+    </motion.div>
   )
 }

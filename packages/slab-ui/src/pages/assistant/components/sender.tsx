@@ -525,7 +525,10 @@ function Sender({
         </div>
       ) : null}
 
-      <InputGroup>
+      {/* Floating glass capsule: composed from single-purpose utilities (NOT the
+          `glass-surface` composite — it isn't tailwind-merge-aware against the
+          InputGroup base classes). Focus lifts the shadow one elevation step. */}
+      <InputGroup className="rounded-2xl border-glass-border bg-glass-bg-strong shadow-elevation-2 backdrop-blur-md glass-highlight-top transition-shadow duration-180 ease-out-expo focus-within:shadow-elevation-3">
         {slashOpen ? (
           <div
             id="assistant-slash-popup"
@@ -867,6 +870,7 @@ function Sender({
               type={stopMode ? "button" : "submit"}
               variant={stopMode ? "outline" : "default"}
               size="icon-sm"
+              className="press-scale rounded-full"
               disabled={!stopMode && !canSend}
               onClick={stopMode ? () => onStop?.() : undefined}
             >
