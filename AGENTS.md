@@ -53,7 +53,7 @@ Use this as the repo-wide AI reference for architecture boundaries, workflow, an
 - Each README should cover role, package/crate type, local validation commands, and hard boundaries for that module.
 - Keep `AGENTS.md` focused on always-on constraints. Move module-specific role, stack, testing, and layout details to local README files.
 - When adding or removing workspace members, plugin surfaces, sidecars, or package/crate responsibilities, update this file and the affected local README files in the same change.
-- `CLAUDE.md` and `.github/copilot-instructions.md` should stay thin and point to `AGENTS.md` for repo-wide guidance.
+- `CLAUDE.md` is a committed symlink to `AGENTS.md` (same Windows Developer Mode + `core.symlinks` caveat as `.claude/skills`); edit guidance here only, never through the link. `.github/copilot-instructions.md` should stay thin and point to `AGENTS.md` for repo-wide guidance.
 
 ## Common Root Commands
 
