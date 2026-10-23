@@ -16,12 +16,15 @@ const ANIMATIONS = [
   {
     id: "slide-up",
     name: "Slide Up",
+    // Critically damped spring (ζ≈0.96, ~0.3s settle): entrance motion stays
+    // interruptible and velocity-continuous, per the fluid-interface house
+    // style. Fixed-duration tweens feel scripted by comparison.
     variants: {
       initial: { opacity: 0, y: 10 },
       animate: {
         opacity: 1,
         y: 0,
-        transition: { duration: 0.26, ease: [0.16, 1, 0.3, 1] },
+        transition: { type: "spring", stiffness: 480, damping: 42, mass: 1 },
       },
       exit: { opacity: 0, y: 4, transition: { duration: 0.15 } },
     },
@@ -34,7 +37,7 @@ const ANIMATIONS = [
       animate: {
         opacity: 1,
         x: 0,
-        transition: { duration: 0.28, ease: [0.16, 1, 0.3, 1] },
+        transition: { type: "spring", stiffness: 500, damping: 46, mass: 1 },
       },
       exit: {
         opacity: 0,

@@ -532,7 +532,7 @@ function Sender({
             data-testid="assistant-slash-popup"
             role="listbox"
             aria-label={t("pages.assistant.composer.commandSkill")}
-            className="absolute bottom-full left-0 z-50 mb-2 w-80 max-w-full overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+            className="absolute bottom-full left-0 z-50 mb-2 w-80 max-w-full origin-bottom overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md ease-out-expo animate-in fade-in zoom-in-95 duration-150"
           >
             {filteredCommands.map((cmd, index) => (
               <button
