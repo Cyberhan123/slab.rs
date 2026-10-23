@@ -5,6 +5,24 @@
     <link rel="icon" type="image/svg+xml" href="" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Slab App</title>
+    <script>
+      // Pre-paint theme application — resolution mirrored by
+      // packages/slab-ui/src/lib/theme.ts. Keeps dark mode from flashing a
+      // white window before the app CSS/JS loads. #0f1518 = dark --background.
+      (function () {
+        try {
+          var pref = localStorage.getItem("slab-theme") || "system";
+          if (pref !== "light" && pref !== "dark") pref = "system";
+          var dark =
+            pref === "dark" ||
+            (pref === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          var root = document.documentElement;
+          if (dark) root.classList.add("dark");
+          root.style.colorScheme = dark ? "dark" : "light";
+          root.style.backgroundColor = dark ? "#0f1518" : "";
+        } catch (e) {}
+      })();
+    </script>
     <style>
       /* Static splash shown while main.tsx waits for the sidecar /health gate.
          Replaced automatically when createRoot().render() first commits. */

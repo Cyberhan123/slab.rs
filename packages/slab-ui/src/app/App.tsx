@@ -10,6 +10,7 @@ import { TooltipProvider } from "@slab/components/tooltip";
 import api from "@slab/api";
 import { queryClient } from "@slab/ui/lib/query-client";
 import { AppLanguageSync, SetupGuard } from "./app-guards";
+import { ThemeSync } from "./theme-sync";
 import {
   getPluginHost,
   readPluginThemeSnapshot,
@@ -213,6 +214,7 @@ function App() {
           <SetupGuard />
           <WorkspaceModeSync />
           <AppLanguageSync />
+          <ThemeSync />
           <PluginThemeSync />
           <WorkspaceLazyRollbackPreload />
           <Outlet />

@@ -1,9 +1,21 @@
-import { BotMessageSquare, History, Search } from "lucide-react"
+import { BotMessageSquare, Check, History, Moon, Search, Sun } from "lucide-react"
 import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
 import { Input } from "@slab/components/input"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@slab/components/dropdown-menu"
 import { useHeader } from "@slab/ui/hooks/use-header"
 import { cn } from "@slab/ui/lib/utils"
+import {
+  setThemePreference,
+  useResolvedTheme,
+  useThemePreference,
+  type ThemePreference,
+} from "@slab/ui/lib/theme"
 import {
   Select,
   SelectContent,
@@ -171,6 +183,54 @@ function HeaderSelect({ select }: { select: HeaderSelectConfig }) {
   )
 }
 
+const THEME_PREFERENCE_LABEL_KEYS = {
+  light: "layouts.header.theme.light",
+  dark: "layouts.header.theme.dark",
+  system: "layouts.header.theme.system",
+} as const satisfies Record<ThemePreference, string>
+
+/** Light/dark/system picker in the shared topbar — app chrome, not page state. */
+function HeaderThemeControl() {
+  const { t } = useTranslation()
+  const preference = useThemePreference()
+  const resolved = useResolvedTheme()
+
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={t("layouts.header.theme.toggle")}
+          data-testid="header-theme-control"
+          size="icon-sm"
+          title={t("layouts.header.theme.toggle")}
+          type="button"
+          variant="quiet"
+          className="size-8 shrink-0 rounded-full text-muted-foreground hover:bg-glass-bg-strong hover:text-foreground"
+        >
+          {resolved === "dark" ? (
+            <Moon data-icon="inline-start" />
+          ) : (
+            <Sun data-icon="inline-start" />
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {(Object.keys(THEME_PREFERENCE_LABEL_KEYS) as ThemePreference[]).map((option) => (
+          <DropdownMenuItem
+            key={option}
+            onSelect={() => {
+              setThemePreference(option)
+            }}
+          >
+            {t(THEME_PREFERENCE_LABEL_KEYS[option])}
+            {preference === option ? <Check className="ml-auto size-3.5" /> : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export default function Header() {
   const { t } = useTranslation()
   const {
@@ -248,6 +308,8 @@ export default function Header() {
             <span aria-hidden="true" className="hairline-v hidden h-4 w-px shrink-0 md:block" />
           </>
         ) : null}
+        <HeaderThemeControl />
+        <span aria-hidden="true" className="hairline-v hidden h-4 w-px shrink-0 md:block" />
         {right}
       </div>
     </header>

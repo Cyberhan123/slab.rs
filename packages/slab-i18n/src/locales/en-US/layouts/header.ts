@@ -1,5 +1,11 @@
 export const header = {
   history: 'Open conversation history',
+  theme: {
+    toggle: 'Appearance',
+    light: 'Light',
+    dark: 'Dark',
+    system: 'System',
+  },
   select: {
     loadingOptions: 'Loading options...',
     selectOption: 'Select option',

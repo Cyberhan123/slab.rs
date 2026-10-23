@@ -1,5 +1,11 @@
 export const header = {
   history: '打开对话历史',
+  theme: {
+    toggle: '外观',
+    light: '浅色',
+    dark: '深色',
+    system: '跟随系统',
+  },
   select: {
     loadingOptions: '正在加载选项...',
     selectOption: '选择选项',
