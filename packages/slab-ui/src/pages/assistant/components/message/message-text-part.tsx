@@ -15,8 +15,12 @@ function MessageTextPart({
   const isStreaming = part.state === "streaming"
 
   return (
-    <div className="min-w-0">
-      <Markdown hasNextChunk={isStreaming}>{part.text}</Markdown>
+    <div className="min-w-0" data-streaming={isStreaming ? "true" : undefined}>
+      {/* The caret rides the markdown's last child as a ::after pseudo-element
+          (see the streaming-caret utility) so text content stays untouched. */}
+      <div className={isStreaming ? "streaming-caret" : undefined}>
+        <Markdown hasNextChunk={isStreaming}>{part.text}</Markdown>
+      </div>
     </div>
   )
 }

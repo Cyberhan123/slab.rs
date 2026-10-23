@@ -384,6 +384,35 @@
   }
 }
 
+/* Streaming caret for markdown text — plain keyframes (not @theme-scoped)
+   because the animation runs on a ::after pseudo-element the theme layer
+   cannot tree-shake against. The global reduced-motion kill switch freezes
+   it to a static caret. */
+@keyframes slab-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.15;
+  }
+}
+
+@utility streaming-caret {
+  & > :last-child::after {
+    content: "";
+    display: inline-block;
+    width: 0.45em;
+    height: 1.05em;
+    margin-inline-start: 2px;
+    translate: 0 0.16em;
+    border-radius: 1px;
+    background: currentColor;
+    animation: slab-caret-blink 1.1s ease-in-out infinite;
+  }
+}
+
 /* Composite effects registered as first-class Tailwind v4 utilities
    (variant-composable, tree-shaken). Values are translated from the old
    @layer components classes onto the collapsed token set. */
