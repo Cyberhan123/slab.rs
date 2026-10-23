@@ -27,6 +27,7 @@ import {
     MessageInteractionContext,
 } from "@slab/ui/pages/assistant/components/message-interaction-context"
 import { resolveCommandDispatch } from "@slab/ui/pages/assistant/lib/assistant-commands"
+import { findPrecedingUserMessage } from "@slab/ui/pages/assistant/lib/find-preceding-user-message"
 import { useWorkspaceConfirmDialog } from "@slab/ui/pages/workspace/hooks/use-workspace-confirm"
 import { useGreeting } from "../hooks/use-greeting"
 import type {
@@ -107,6 +108,13 @@ export type AssistantChatPaneProps = {
     userMessageTurnIndex: ReadonlyMap<string, number>
     /** Retract a turn (and everything after it) via `thread/rollback`. */
     onRollbackFromTurn: (turnIndex: number) => Promise<void>
+    /**
+     * Re-run an assistant message: the pane resolves the preceding user turn,
+     * then the host rolls the thread back to it and stages the same prompt as
+     * an auto-send draft (the remounted pane claims it). Absent = the
+     * regenerate affordance is hidden.
+     */
+    onRegenerate?: (turnIndex: number, text: string) => Promise<void>
     /** Whether plan mode is active (turn runs as the read-only plan agent). */
     planMode: boolean
     /** Toggle plan mode on/off; drives the plan chip + `/plan`. */
@@ -215,6 +223,7 @@ export function AssistantChatPane({
     isForking,
     userMessageTurnIndex,
     onRollbackFromTurn,
+    onRegenerate,
     planMode,
     onPlanModeChange,
     onLastMessageIdChange,
@@ -277,6 +286,36 @@ export function AssistantChatPane({
         [confirmRollback, onRollbackFromTurn, userMessageTurnIndex],
     )
 
+    // Regenerate = rollback to the preceding user turn + re-send the same
+    // prompt. No confirmation dialog: unlike rollback, nothing is lost — the
+    // text comes straight back. Busy/steerable states never offer the button
+    // (see the interaction value below), but the handler re-checks anyway.
+    const handleRegenerateMessage = useCallback(
+        async (messageId: string) => {
+            if (!onRegenerate || disabled || isBusy || serverBusy || isCompacting || isForking) {
+                return
+            }
+            const preceding = findPrecedingUserMessage(messages, messageId)
+            // Attachment-only prompts have no text to re-send (restored history
+            // carries text parts only) — same limitation as a manual
+            // rollback + retype.
+            if (!preceding || !preceding.text) return
+            const turnIndex = userMessageTurnIndex.get(preceding.id)
+            if (turnIndex === undefined || turnIndex <= 0) return
+            await onRegenerate(turnIndex, preceding.text)
+        },
+        [
+            disabled,
+            isBusy,
+            isCompacting,
+            isForking,
+            messages,
+            onRegenerate,
+            serverBusy,
+            userMessageTurnIndex,
+        ],
+    )
+
     // Slow-changing row-level interaction data (approval badges, rollback) is
     // kept OUT of the streaming context: an output delta then re-renders only
     // the active tool card instead of every visible row.
@@ -285,6 +324,8 @@ export function AssistantChatPane({
             approvalStatusByItemId,
             userMessageTurnIndex,
             rollbackToMessage: handleRollbackMessage,
+            // Undefined while unwired OR mid-run: rows key the affordance off it.
+            regenerateMessage: onRegenerate ? handleRegenerateMessage : undefined,
             subagentTasksByTaskId,
             subagentChildItemsByChildId,
         }),
@@ -292,6 +333,8 @@ export function AssistantChatPane({
             approvalStatusByItemId,
             userMessageTurnIndex,
             handleRollbackMessage,
+            handleRegenerateMessage,
+            onRegenerate,
             subagentTasksByTaskId,
             subagentChildItemsByChildId,
         ],

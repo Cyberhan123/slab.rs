@@ -151,6 +151,7 @@ export const assistant = {
     assistant: '助手',
     user: '用户',
     rollback: '撤回',
+    regenerate: '重新生成',
     confirmRollback: '撤回此消息及其后的所有内容？',
     cancelEdit: '取消编辑',
     queuedLabel: '已排队',

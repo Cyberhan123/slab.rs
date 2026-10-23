@@ -24,6 +24,12 @@ export interface MessageInteractionValue {
   userMessageTurnIndex: ReadonlyMap<string, number>
   /** Retract the user message with this id and everything after it. */
   rollbackToMessage: ((messageId: string) => void) | undefined
+  /**
+   * Re-run the assistant message with this id: rolls the thread back to the
+   * preceding user turn and re-sends the same prompt with the composer's
+   * current settings. Present only when the host wired the action.
+   */
+  regenerateMessage?: ((messageId: string) => void) | undefined
   /** taskId → live subagent delegation state (drives the delegate tool card). */
   subagentTasksByTaskId: ReadonlyMap<string, SubagentTaskInfo>
   /** childThreadId → relayed child turn items (live child activity in the card). */
@@ -41,6 +47,7 @@ export const MessageInteractionContext = createContext<MessageInteractionValue>(
   approvalStatusByItemId: new Map<string, ApprovalStatus>(),
   userMessageTurnIndex: new Map<string, number>(),
   rollbackToMessage: undefined,
+  regenerateMessage: undefined,
   subagentTasksByTaskId: new Map<string, SubagentTaskInfo>(),
   subagentChildItemsByChildId: new Map<string, readonly SubagentChildItem[]>(),
 })

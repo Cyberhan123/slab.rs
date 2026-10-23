@@ -12,7 +12,7 @@ import { Message, MessageContent, MessageAvatar, MessageFooter } from "@slab/com
 import { MessageScrollerItem } from "@slab/components/message-scroller"
 import { useTranslation } from "@slab/i18n"
 import { useClipboard } from "@mantine/hooks"
-import { CheckIcon, CopyIcon, Undo2Icon } from "lucide-react"
+import { CheckIcon, CopyIcon, RefreshCwIcon, Undo2Icon } from "lucide-react"
 import { cn } from "@slab/ui/lib/utils"
 import { useMessageInteraction } from "@slab/ui/pages/assistant/components/message-interaction-context"
 import { createMessageParts, MessageParts } from "./message-parts"
@@ -166,7 +166,7 @@ function MessageRow({
     > & { all: Array<MessagePartItem<TRenderableMessagePart, TMessage>> }
     const { t } = useTranslation()
     const clipboard = useClipboard({ timeout: 2000 })
-    const { userMessageTurnIndex, rollbackToMessage } = useMessageInteraction()
+    const { userMessageTurnIndex, rollbackToMessage, regenerateMessage } = useMessageInteraction()
     const plainText = (message.parts ?? [])
         .filter((part) => (part as TMessagePart).type === "text")
         .map((part) => (part as TMessagePart).text ?? "")
@@ -179,6 +179,11 @@ function MessageRow({
         rollbackToMessage !== undefined &&
         (userMessageTurnIndex.get(message.id) ?? 0) > 0
     const rollbackLabel = t("pages.assistant.message.rollback")
+    const regenerateLabel = t("pages.assistant.message.regenerate")
+    // Regenerate re-runs the PRECEDING user prompt with current composer
+    // settings; hidden when unwired or mid-run (the context value goes
+    // undefined then).
+    const canRegenerate = !isUserMessage && regenerateMessage !== undefined
     const renderedParts = (
         <MessageParts<TRenderableMessagePart, TMessage>
             parts={parsedParts}
@@ -202,8 +207,23 @@ function MessageRow({
                        cleaner outside a boxed bubble. */
                     <div className="min-w-0 max-w-3xl space-y-2">{renderedParts}</div>
                 )}
-                {plainText || canRollback ? (
+                {plainText || canRollback || canRegenerate ? (
                     <MessageFooter>
+                        {canRegenerate ? (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="press-scale"
+                                aria-label={regenerateLabel}
+                                title={regenerateLabel}
+                                data-testid="assistant-message-regenerate"
+                                onClick={() => {
+                                    regenerateMessage?.(message.id)
+                                }}
+                            >
+                                <RefreshCwIcon />
+                            </Button>
+                        ) : null}
                         {plainText ? (
                             <Button
                                 variant="ghost"

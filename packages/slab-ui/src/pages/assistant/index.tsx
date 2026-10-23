@@ -463,6 +463,40 @@ function Assistant() {
                     isForking={isForking}
                     userMessageTurnIndex={userMessageTurnIndex}
                     onRollbackFromTurn={rollbackFromTurn}
+                    onRegenerate={async (turnIndex, text) => {
+                        // ORDER IS LOAD-BEARING: the rollback bumps restoreVersion,
+                        // which remounts this pane (key at render). The draft must be
+                        // staged only AFTER the rollback resolves so the REMOUNTED
+                        // pane claims it through the guarded autoSend path — staging
+                        // first would hand it to the pane about to unmount. Settings
+                        // mirror the Sender's submit mapping (store → wire levels).
+                        await rollbackFromTurn(turnIndex)
+                        const ui = useAssistantUiStore.getState()
+                        const effort =
+                            ui.reasoningEffort === "none"
+                                ? "off"
+                                : ui.reasoningEffort === "minimal"
+                                    ? "low"
+                                    : ui.reasoningEffort
+                        useWorkspaceHandoffStore.getState().setDraft({
+                            autoSubmit: true,
+                            prompt: text,
+                            sessionId: curConversation,
+                            effort,
+                            permissionMode: ui.permissionMode,
+                            agentType: planMode ? "plan" : undefined,
+                            approvalModel:
+                                ui.permissionMode === "approve_for_me" && ui.approvalReviewModel
+                                    ? ui.approvalReviewModel
+                                    : undefined,
+                            approvalPrompt:
+                                ui.permissionMode === "approve_for_me" &&
+                                ui.approvalReviewModel &&
+                                ui.approvalReviewPrompt.trim()
+                                    ? ui.approvalReviewPrompt
+                                    : undefined,
+                        })
+                    }}
                     planMode={planMode}
                     onPlanModeChange={setPlanMode}
                     onApprovalReviewChange={handleApprovalReviewChange}

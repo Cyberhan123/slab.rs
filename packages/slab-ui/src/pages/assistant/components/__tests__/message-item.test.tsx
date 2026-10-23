@@ -161,6 +161,43 @@ describe("MessageItem", () => {
     await expect.element(user.getByTestId("bubble")).toBeInTheDocument()
   })
 
+  it("offers regenerate on assistant messages when the host wires the action", async () => {
+    const regenerateMessage = vi.fn<(id: string) => void>()
+    const interactionValue: MessageInteractionValue = {
+      approvalStatusByItemId: new Map(),
+      userMessageTurnIndex: new Map(),
+      rollbackToMessage: undefined,
+      regenerateMessage,
+      subagentTasksByTaskId: new Map(),
+      subagentChildItemsByChildId: new Map(),
+    }
+    const screen = await renderWithInteraction(<MessageItem message={message()} />, interactionValue)
+
+    const button = screen.getByTestId("assistant-message-regenerate")
+    await expect.element(button).toBeInTheDocument()
+    await button.click()
+    expect(regenerateMessage).toHaveBeenCalledWith("m1")
+  })
+
+  it("hides regenerate on user messages and when the action is unwired", async () => {
+    const wired: MessageInteractionValue = {
+      approvalStatusByItemId: new Map(),
+      userMessageTurnIndex: new Map(),
+      rollbackToMessage: undefined,
+      regenerateMessage: vi.fn<(id: string) => void>(),
+      subagentTasksByTaskId: new Map(),
+      subagentChildItemsByChildId: new Map(),
+    }
+    const user = await renderWithInteraction(
+      <MessageItem message={message({ role: "user", id: "m2" })} />,
+      wired,
+    )
+    await expect.element(user.getByTestId("assistant-message-regenerate")).not.toBeInTheDocument()
+
+    const unwired = await render(<MessageItem message={message()} />)
+    await expect.element(unwired.getByTestId("assistant-message-regenerate")).not.toBeInTheDocument()
+  })
+
   it("routes a tool part to the tool component and hides the copy button when there is no text", async () => {
     const screen = await render(
       <MessageItem

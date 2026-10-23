@@ -152,6 +152,7 @@ export const assistant = {
     assistant: 'Assistant',
     user: 'User',
     rollback: 'Rollback',
+    regenerate: 'Regenerate',
     confirmRollback: 'Retract this message and everything after it?',
     cancelEdit: 'Cancel edit',
     queuedLabel: 'Queued',

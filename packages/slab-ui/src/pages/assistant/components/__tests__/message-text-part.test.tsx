@@ -47,16 +47,17 @@ describe("MessageTextPart", () => {
     const screen = await render(<MessageTextPart {...baseProps({ state: "streaming", text: "partial" })} />)
 
     await expect.element(screen.getByTestId("md")).toHaveAttribute("data-streaming", "true")
-    // Streaming chunks carry the caret utility + marker on the wrapper.
-    await expect.element(screen.getByTestId("md").locator("..")).toHaveClass("streaming-caret")
-    await expect.element(screen.getByTestId("md").locator("..").locator("..")).toHaveAttribute("data-streaming", "true")
+    // Streaming chunks carry the caret utility inside the streaming wrapper.
+    expect(
+      document.querySelector('[data-streaming="true"] > .streaming-caret'),
+    ).not.toBeNull()
   })
 
   it("drops the streaming caret once the chunk settles", async () => {
     const screen = await render(<MessageTextPart {...baseProps({ text: "settled" })} />)
 
-    await expect.element(screen.getByTestId("md").locator("..")).not.toHaveClass("streaming-caret")
-    await expect.element(screen.getByTestId("md").locator("..").locator("..")).not.toHaveAttribute("data-streaming")
+    await expect.element(screen.getByTestId("md")).toHaveAttribute("data-streaming", "false")
+    expect(document.querySelector(".streaming-caret")).toBeNull()
   })
 
   it("renders nothing for non-text kinds", async () => {
