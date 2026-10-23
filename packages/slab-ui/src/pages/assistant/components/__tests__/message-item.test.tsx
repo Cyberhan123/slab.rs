@@ -39,7 +39,9 @@ vi.mock("@slab/components/message-scroller", () => ({
 }))
 
 vi.mock("@slab/components/bubble", () => ({
-  Bubble: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  Bubble: ({ children }: { children: ReactNode }) => (
+    <div data-testid="bubble">{children}</div>
+  ),
   BubbleContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 
@@ -149,6 +151,14 @@ describe("MessageItem", () => {
 
     await expect.element(screen.getByTestId("user-avatar")).toBeInTheDocument()
     await expect.element(screen.getByTestId("agent-avatar")).not.toBeInTheDocument()
+  })
+
+  it("flows assistant prose outside a bubble; user text stays in the tinted bubble", async () => {
+    const assistant = await render(<MessageItem message={message()} />)
+    await expect.element(assistant.getByTestId("bubble")).not.toBeInTheDocument()
+
+    const user = await render(<MessageItem message={message({ role: "user", id: "m3" })} />)
+    await expect.element(user.getByTestId("bubble")).toBeInTheDocument()
   })
 
   it("routes a tool part to the tool component and hides the copy button when there is no text", async () => {

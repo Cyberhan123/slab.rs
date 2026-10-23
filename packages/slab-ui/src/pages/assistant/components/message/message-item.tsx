@@ -8,7 +8,7 @@ import type { MessageAnimationPreset } from "@slab/ui/pages/assistant/lib/messag
 import { MESSAGE_ANIMATIONS } from "@slab/ui/pages/assistant/lib/message-animations"
 import AgentAvatar from "@slab/ui/pages/assistant/components/agent-avatar"
 import UserAvatar from "@slab/ui/pages/assistant/components/user-avatar"
-import { Message, MessageContent, MessageHeader, MessageAvatar, MessageFooter } from "@slab/components/message"
+import { Message, MessageContent, MessageAvatar, MessageFooter } from "@slab/components/message"
 import { MessageScrollerItem } from "@slab/components/message-scroller"
 import { useTranslation } from "@slab/i18n"
 import { useClipboard } from "@mantine/hooks"
@@ -179,24 +179,29 @@ function MessageRow({
         rollbackToMessage !== undefined &&
         (userMessageTurnIndex.get(message.id) ?? 0) > 0
     const rollbackLabel = t("pages.assistant.message.rollback")
+    const renderedParts = (
+        <MessageParts<TRenderableMessagePart, TMessage>
+            parts={parsedParts}
+            components={messagePartComponents as MessagePartComponents<TRenderableMessagePart, TMessage>}
+        />
+    )
     return (
         <Message align={isUserMessage ? "end" : "start"} data-testid={`assistant-message-${message.role}`}>
             <MessageAvatar className={cn("items-start self-start group-has-data-[slot=message-footer]/message:-translate-y-0")}>
                 {isUserMessage ? <UserAvatar name={t("pages.assistant.message.user")} /> : <AgentAvatar name={t("pages.assistant.message.assistant")} />}
             </MessageAvatar>
             <MessageContent>
-                <MessageHeader>{isUserMessage ? t("pages.assistant.message.user") : t("pages.assistant.message.assistant")}</MessageHeader>
-                <Bubble
-                    align={message.role === "user" ? "end" : "start"}
-                    variant={message.role === "user" ? "tinted" : "outline"}
-                >
-                    <BubbleContent className="space-y-2">
-                        <MessageParts<TRenderableMessagePart, TMessage>
-                            parts={parsedParts}
-                            components={messagePartComponents as MessagePartComponents<TRenderableMessagePart, TMessage>}
-                        />
-                    </BubbleContent>
-                </Bubble>
+                {isUserMessage ? (
+                    /* The avatar already identifies the role — no text header. */
+                    <Bubble align="end" variant="tinted">
+                        <BubbleContent className="space-y-2">{renderedParts}</BubbleContent>
+                    </Bubble>
+                ) : (
+                    /* Assistant prose flows full-width inside the column (capped to the
+                       composer's width for readability); tool rows and reasoning read
+                       cleaner outside a boxed bubble. */
+                    <div className="min-w-0 max-w-3xl space-y-2">{renderedParts}</div>
+                )}
                 {plainText || canRollback ? (
                     <MessageFooter>
                         {plainText ? (

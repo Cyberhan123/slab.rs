@@ -243,11 +243,9 @@ export function LiveTextRow({
                 <AgentAvatar name={t("pages.assistant.message.assistant")} />
             </MessageAvatar>
             <MessageContent>
-                <MessageHeader>
-                    {entry.kind === "reasoning"
-                        ? t("pages.assistant.thinking.loading")
-                        : t("pages.assistant.message.assistant")}
-                </MessageHeader>
+                {entry.kind === "reasoning" ? (
+                    <MessageHeader>{t("pages.assistant.thinking.loading")}</MessageHeader>
+                ) : null}
                 <Bubble align="start" variant="tinted">
                     <BubbleContent>
                         <p
