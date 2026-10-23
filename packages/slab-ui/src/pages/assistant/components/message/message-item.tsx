@@ -203,6 +203,7 @@ function MessageRow({
                             <Button
                                 variant="ghost"
                                 size="icon"
+                                className="press-scale"
                                 aria-label="Copy"
                                 title="Copy"
                                 onClick={() => {
@@ -216,6 +217,7 @@ function MessageRow({
                             <Button
                                 variant="ghost"
                                 size="icon"
+                                className="press-scale"
                                 aria-label={rollbackLabel}
                                 title={rollbackLabel}
                                 data-testid="assistant-message-rollback"

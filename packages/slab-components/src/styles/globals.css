@@ -376,6 +376,11 @@
     .group-hover\:scale-\[1\.015\]:is(:where(.group):hover *) {
       transform: none !important;
     }
+
+    .press-scale:active,
+    .press-scale-soft:active {
+      transform: none !important;
+    }
   }
 }
 
@@ -422,6 +427,27 @@
     box-shadow:
       0 0 0 2px var(--background),
       0 0 0 4px color-mix(in oklab, var(--primary) 55%, transparent);
+  }
+}
+
+/* Instant press-down, eased release — feedback must land on the frame the
+   pointer goes down (no transition while :active), then spring back on the
+   expo curve. `-soft` is the subtler variant for full-width rows. */
+@utility press-scale {
+  transition: transform 180ms var(--ease-out-expo);
+
+  &:active {
+    transition-duration: 0ms;
+    transform: scale(0.98);
+  }
+}
+
+@utility press-scale-soft {
+  transition: transform 180ms var(--ease-out-expo);
+
+  &:active {
+    transition-duration: 0ms;
+    transform: scale(0.99);
   }
 }
 

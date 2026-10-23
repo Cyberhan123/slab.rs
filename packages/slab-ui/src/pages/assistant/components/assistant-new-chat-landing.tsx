@@ -124,7 +124,7 @@ export function AssistantNewChatLanding({
                                     type="button"
                                     disabled={conversationsBusy}
                                     data-testid={`assistant-landing-session-${conversation.key}`}
-                                    className="workspace-soft-panel flex min-w-0 items-center justify-between gap-3 rounded-xl px-4 py-2.5 text-left transition-colors hover:bg-glass-bg-strong disabled:pointer-events-none disabled:opacity-50"
+                                    className="workspace-soft-panel press-scale-soft flex min-w-0 items-center justify-between gap-3 rounded-xl px-4 py-2.5 text-left transition-colors hover:bg-glass-bg-strong hover:shadow-elevation-1 disabled:pointer-events-none disabled:opacity-50"
                                     onClick={() => onSelectConversation(conversation.key)}
                                 >
                                     <span className="min-w-0 truncate text-sm font-medium">
