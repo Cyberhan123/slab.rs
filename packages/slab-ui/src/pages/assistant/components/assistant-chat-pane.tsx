@@ -483,7 +483,7 @@ export function AssistantChatPane({
                                         {onStartNewChat ? (
                                             <EmptyDescription>
                                                 <Button
-                                                    variant="outline"
+                                                    variant="chip"
                                                     size="sm"
                                                     data-testid="assistant-new-chat-cta"
                                                     onClick={onStartNewChat}

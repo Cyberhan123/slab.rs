@@ -527,8 +527,10 @@ function Sender({
 
       {/* Floating glass capsule: composed from single-purpose utilities (NOT the
           `glass-surface` composite — it isn't tailwind-merge-aware against the
-          InputGroup base classes). Focus lifts the shadow one elevation step. */}
-      <InputGroup className="rounded-2xl border-glass-border bg-glass-bg-strong shadow-elevation-2 backdrop-blur-md glass-highlight-top transition-shadow duration-180 ease-out-expo focus-within:shadow-elevation-3">
+          InputGroup base classes). Focus lifts the shadow one elevation step and
+          warms the hairline to the ring color — mouse focus gets the same cue
+          the keyboard-only focus-visible ring provides. */}
+      <InputGroup className="rounded-2xl border-glass-border bg-glass-bg-strong shadow-elevation-2 backdrop-blur-md glass-highlight-top transition-shadow duration-180 ease-out-expo focus-within:border-ring/50 focus-within:shadow-elevation-3">
         {slashOpen ? (
           <div
             id="assistant-slash-popup"

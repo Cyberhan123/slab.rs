@@ -6,6 +6,7 @@ import { cjk } from "@streamdown/cjk"
 import { mermaid } from "@streamdown/mermaid"
 import { math } from '@streamdown/math';
 import { Streamdown } from "streamdown"
+import 'streamdown/styles.css';
 import 'katex/dist/katex.min.css';
 
 import { cn } from "@slab/ui/lib/utils"

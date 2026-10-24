@@ -7,6 +7,15 @@
 @source "../../../slab-ui/src";
 @source "../../../slab-desktop/src";
 @source "../../../slab-web/src";
+/* Streamdown renders its markdown UI with Tailwind utilities emitted from its
+   own bundle; without scanning those dists the classes never generate and
+   preflight strips list markers / heading scales / code chrome. bun isolated
+   installs only link the package under slab-ui's local node_modules. */
+@source "../../../../packages/slab-ui/node_modules/streamdown/dist/*.js";
+@source "../../../../packages/slab-ui/node_modules/@streamdown/code/dist/*.js";
+@source "../../../../packages/slab-ui/node_modules/@streamdown/cjk/dist/*.js";
+@source "../../../../packages/slab-ui/node_modules/@streamdown/math/dist/*.js";
+@source "../../../../packages/slab-ui/node_modules/@streamdown/mermaid/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -129,7 +138,10 @@
     --elevation-3: 0 32px 80px -48px color-mix(in oklab, var(--foreground) 40%, transparent);
     --glass-bg: color-mix(in oklab, var(--card) 62%, transparent);
     --glass-bg-strong: color-mix(in oklab, var(--card) 80%, transparent);
-    --glass-border: color-mix(in oklab, var(--card) 32%, transparent);
+    /* Stroke must contrast with the surface, not share it: deriving the border
+       from --card painted a translucent surface color over the surface (white
+       on white in light mode), making glass panels read as borderless. */
+    --glass-border: color-mix(in oklab, var(--foreground) 12%, transparent);
     --glass-blur: 14px;
     --glass-highlight: inset 0 1px 0 color-mix(in oklab, var(--card) 55%, transparent);
     --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -240,6 +252,10 @@
     /* Dark surfaces need a stronger contact shadow; absorbs the old
        --shell-elevation dark value so shadow-elevation-1 is mode-aware. */
     --elevation-1: 0 1px 2px oklch(0% 0 0 / 0.34);
+    /* Dark materials stroke lighter than the surface (a light-catching edge),
+       mirroring macOS dark hairlines — the :root card-derived value reads
+       dark-on-dark and disappears. */
+    --glass-border: color-mix(in oklab, var(--foreground) 16%, transparent);
   }
 }
 
