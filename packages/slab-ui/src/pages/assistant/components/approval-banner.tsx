@@ -1,7 +1,18 @@
 "use client"
 
-import { Button } from "@slab/components/button"
 import { Badge } from "@slab/components/badge"
+import { Button } from "@slab/components/button"
+import { CodeBlock, CodeBlockContent } from "@slab/components/code-block"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemFooter,
+  ItemHeader,
+  ItemMedia,
+  ItemTitle,
+} from "@slab/components/item"
 import { Spinner } from "@slab/components/spinner"
 import {
   Questionnaire,
@@ -70,112 +81,120 @@ export function ApprovalCard({
   const isCommand = approval.kind === "command"
   const isPlan = approval.kind === "plan"
 
-  // Elevated calm material with a semantic accent bar — the yellow wash read
-  // as an alarm; the decision deserves attention without shouting. The card
-  // springs in from its anchor above the composer (skipped under reduced
-  // motion).
+  // The ai-elements Confirmation shape: an outlined Item whose header names the
+  // decision, content carries the payload (plan / command / file changes), and
+  // the footer holds the scope choices plus the deny action. The card springs
+  // in from its anchor above the composer (skipped under reduced motion); the
+  // resolve protocol and every e2e testid are unchanged.
   return (
     <motion.div
       initial={shouldReduceMotion ? false : { opacity: 0, y: 8, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ type: "spring", stiffness: 480, damping: 42, mass: 1 }}
-      className="rounded-xl border border-glass-border border-s-2 border-s-yellow-500/70 bg-glass-bg-strong p-3 shadow-elevation-2 backdrop-blur-md"
-      data-testid={isPlan ? "assistant-approval-plan" : undefined}
     >
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <ShieldAlertIcon className="size-4 text-yellow-600" />
-        <span>{t("pages.assistant.approval.title")}</span>
-        <Badge variant="secondary" className="gap-1">
-          {isPlan ? (
-            <ListChecksIcon className="size-3" />
+      <Item variant="outline" data-testid={isPlan ? "assistant-approval-plan" : undefined}>
+        <ItemHeader>
+          <ItemMedia variant="icon">
+            <ShieldAlertIcon className="text-yellow-600" />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle className="gap-2">
+              {t("pages.assistant.approval.title")}
+              <Badge variant="secondary" className="gap-1">
+                {isPlan ? (
+                  <ListChecksIcon className="size-3" />
+                ) : isCommand ? (
+                  <TerminalIcon className="size-3" />
+                ) : (
+                  <FilePenIcon className="size-3" />
+                )}
+                {isPlan
+                  ? t("pages.assistant.approval.plan")
+                  : isCommand
+                    ? t("pages.assistant.approval.command")
+                    : t("pages.assistant.approval.fileChange")}
+              </Badge>
+            </ItemTitle>
+            {approval.reason ? (
+              <ItemDescription>{approval.reason}</ItemDescription>
+            ) : null}
+          </ItemContent>
+        </ItemHeader>
+
+        <ItemContent>
+          {isPlan && approval.planSnapshot ? (
+            <PlanCardBody plan={approval.planSnapshot} />
           ) : isCommand ? (
-            <TerminalIcon className="size-3" />
+            <CodeBlock size="sm">
+              <CodeBlockContent wrap>
+                {`$ cd ${approval.cwd ?? "."}\n${approval.command ?? "(shell)"}`}
+              </CodeBlockContent>
+            </CodeBlock>
           ) : (
-            <FilePenIcon className="size-3" />
+            <ul className="flex flex-col gap-1">
+              {(approval.changes ?? []).map((change) => (
+                <li key={`${change.type}:${change.path}`} className="rounded-md bg-muted/60 p-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Badge variant={changeTypeVariant[change.type] ?? "secondary"}>
+                      {change.type}
+                    </Badge>
+                    <code className="font-mono">{change.path}</code>
+                  </div>
+                  {change.diff ? <PatchDiffView diff={change.diff} /> : null}
+                </li>
+              ))}
+            </ul>
           )}
-          {isPlan
-            ? t("pages.assistant.approval.plan")
-            : isCommand
-              ? t("pages.assistant.approval.command")
-              : t("pages.assistant.approval.fileChange")}
-        </Badge>
-      </div>
+        </ItemContent>
 
-      {approval.reason ? (
-        <p className="mt-2 text-muted-foreground text-xs">{approval.reason}</p>
-      ) : null}
-
-      <div className="mt-2 space-y-2">
-        {isPlan && approval.planSnapshot ? (
-          <PlanCardBody plan={approval.planSnapshot} />
-        ) : isCommand ? (
-          <pre className="overflow-x-auto rounded-md bg-muted/60 p-2 font-mono text-xs">
-            <span className="text-muted-foreground">$ cd {approval.cwd ?? "."}</span>
-            {"\n"}
-            <span>{approval.command ?? "(shell)"}</span>
-          </pre>
-        ) : (
-          <ul className="space-y-1">
-            {(approval.changes ?? []).map((change) => (
-              <li key={`${change.type}:${change.path}`} className="rounded-md bg-muted/60 p-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <Badge variant={changeTypeVariant[change.type] ?? "secondary"}>
-                    {change.type}
-                  </Badge>
-                  <code className="font-mono">{change.path}</code>
-                </div>
-                {change.diff ? <PatchDiffView diff={change.diff} /> : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/* Actions stack VERTICALLY: one approve scope per row, deny below —
-          side-by-side placement squeezed the scope labels on narrow cards. */}
-      <div className="mt-3 flex flex-col gap-3">
-        {approveChoices.length > 0 ? (
-          // The questionnaire Root renders a <form>; the card lives outside
-          // the composer form, and submit is swallowed (choices resolve on
-          // change, so there is nothing to submit).
-          <Questionnaire noValidate onSubmit={(event) => event.preventDefault()}>
-            <QuestionnaireItem name="scope">
-              <QuestionnaireChoices className="grid-cols-1 gap-1.5">
-                {approveChoices.map((choice) => (
-                  <QuestionnaireChoice
-                    key={choice.scope}
-                    value={choice.scope}
-                    disabled={pendingAction !== null}
-                    data-testid={`assistant-approval-${choice.scope}`}
-                    className="press-scale-soft gap-3 rounded-md border border-border/60 px-3 py-2 text-sm transition-colors hover:bg-accent/50 data-checked:border-primary/60 data-checked:bg-accent"
-                    onChange={() => void handle(true, choice.scope, `approve:${choice.scope}`)}
-                  >
-                    {t(choice.label)}
-                    {pendingAction === `approve:${choice.scope}` ? (
-                      <Spinner className="ms-auto size-3.5" />
-                    ) : null}
-                  </QuestionnaireChoice>
-                ))}
-              </QuestionnaireChoices>
-            </QuestionnaireItem>
-          </Questionnaire>
-        ) : null}
-        <Button
-          variant="outline"
-          size="sm"
-          data-testid="assistant-approval-deny"
-          disabled={pendingAction !== null}
-          className="press-scale self-start"
-          onClick={() => void handle(false, "deny", "deny")}
-        >
-          {pendingAction === "deny" ? (
-            <Spinner className="size-3.5" />
-          ) : (
-            <XIcon className="size-3.5" />
-          )}
-          {t("pages.assistant.actions.reject")}
-        </Button>
-      </div>
+        <ItemFooter>
+          {/* Actions stack VERTICALLY: one approve scope per row, deny below —
+              side-by-side placement squeezed the scope labels on narrow cards. */}
+          {approveChoices.length > 0 ? (
+            // The questionnaire Root renders a <form>; the card lives outside
+            // the composer form, and submit is swallowed (choices resolve on
+            // change, so there is nothing to submit).
+            <Questionnaire noValidate onSubmit={(event) => event.preventDefault()}>
+              <QuestionnaireItem name="scope">
+                <QuestionnaireChoices className="grid-cols-1 gap-1.5">
+                  {approveChoices.map((choice) => (
+                    <QuestionnaireChoice
+                      key={choice.scope}
+                      value={choice.scope}
+                      disabled={pendingAction !== null}
+                      data-testid={`assistant-approval-${choice.scope}`}
+                      className="press-scale-soft gap-3 rounded-md border border-border/60 px-3 py-2 text-sm transition-colors hover:bg-accent/50 data-checked:border-primary/60 data-checked:bg-accent"
+                      onChange={() => void handle(true, choice.scope, `approve:${choice.scope}`)}
+                    >
+                      {t(choice.label)}
+                      {pendingAction === `approve:${choice.scope}` ? (
+                        <Spinner className="ms-auto size-3.5" />
+                      ) : null}
+                    </QuestionnaireChoice>
+                  ))}
+                </QuestionnaireChoices>
+              </QuestionnaireItem>
+            </Questionnaire>
+          ) : null}
+          <ItemActions>
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="assistant-approval-deny"
+              disabled={pendingAction !== null}
+              className="press-scale"
+              onClick={() => void handle(false, "deny", "deny")}
+            >
+              {pendingAction === "deny" ? (
+                <Spinner className="size-3.5" />
+              ) : (
+                <XIcon className="size-3.5" />
+              )}
+              {t("pages.assistant.actions.reject")}
+            </Button>
+          </ItemActions>
+        </ItemFooter>
+      </Item>
     </motion.div>
   )
 }
