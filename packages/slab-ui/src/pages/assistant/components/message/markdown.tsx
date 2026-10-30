@@ -64,9 +64,13 @@ function MarkdownCode({ node: _node, className, children, ...props }: MarkdownCo
         </CodeBlockActions>
       </CodeBlockHeader>
       <CodeBlockContent>
-        {lines.map((line, index) => (
-          <CodeBlockLine key={index}>{line}</CodeBlockLine>
-        ))}
+        {lines.map((line, index) => {
+          // Highlighted code lines are positional rows; identical content
+          // (blank lines, braces) legitimately repeats, so there is no
+          // data-dependent key to use instead of the row position.
+          // oxlint-disable-next-line react/no-array-index-key -- positional rows; content repeats
+          return <CodeBlockLine key={index}>{line}</CodeBlockLine>
+        })}
       </CodeBlockContent>
     </CodeBlock>
   )

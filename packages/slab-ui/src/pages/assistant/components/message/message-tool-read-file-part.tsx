@@ -88,9 +88,11 @@ function ReadFileContent({
   const lines = useHighlightedCode(content, language)
   return (
     <CodeBlockContent lineNumbers={numbered} startLine={startLine}>
-      {lines.map((line, index) => (
-        <CodeBlockLine key={index}>{line}</CodeBlockLine>
-      ))}
+      {lines.map((line, index) => {
+        // File content lines are positional rows; identical content repeats.
+        // oxlint-disable-next-line react/no-array-index-key -- positional rows
+        return <CodeBlockLine key={index}>{line}</CodeBlockLine>
+      })}
     </CodeBlockContent>
   )
 }

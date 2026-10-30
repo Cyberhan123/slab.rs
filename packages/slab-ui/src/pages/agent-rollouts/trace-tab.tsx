@@ -67,7 +67,13 @@ export function TraceTab({ threadId, hasTrace }: { threadId: string; hasTrace: b
                 </p>
               ) : (
                 (data?.conversation ?? []).map((message, index) => (
-                  <div key={index} className="space-y-1">
+                  <div
+                    // Entries are raw JSON without stable ids; the list is
+                    // append-only, so position is the identity.
+                    // oxlint-disable-next-line react/no-array-index-key -- positional entries
+                    key={index}
+                    className="space-y-1"
+                  >
                     <span className="font-mono text-micro text-muted-foreground">
                       #{index}
                     </span>
@@ -92,9 +98,11 @@ export function TraceTab({ threadId, hasTrace }: { threadId: string; hasTrace: b
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="space-y-2 px-2 pb-2">
-              {shown.map((event, index) => (
-                <JsonBlock key={index} value={event} className="max-h-48" />
-              ))}
+              {shown.map((event, index) => {
+                // The event log is append-only raw JSON without stable ids.
+                // oxlint-disable-next-line react/no-array-index-key -- positional log rows
+                return <JsonBlock key={index} value={event} className="max-h-48" />
+              })}
               {shown.length < (data?.events ?? []).length ? (
                 <Button
                   type="button"

@@ -111,6 +111,9 @@ export function PlanCardBody({ plan: raw }: { plan: Plan }) {
           const current = plan.current_step === index
           return (
             <li
+              // Steps are free-form model text and may repeat; the index
+              // disambiguates duplicate step labels.
+              // oxlint-disable-next-line react/no-array-index-key -- composite key
               key={`${index}:${item.step}`}
               className={cn(
                 "flex items-start gap-2 rounded-md p-2 text-xs",

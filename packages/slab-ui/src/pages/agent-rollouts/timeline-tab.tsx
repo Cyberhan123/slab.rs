@@ -60,7 +60,12 @@ export function TimelineTab({ threadId }: { threadId: string }) {
         )}
 
         {(data?.turn_prompts ?? []).map((prompt, index) => (
-          <Collapsible key={index}>
+          <Collapsible
+            // Turn prompts are positional in the immutable rollout snapshot;
+            // the trigger label itself is "Turn {index}".
+            // oxlint-disable-next-line react/no-array-index-key -- positional turns
+            key={index}
+          >
             <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-accent/50">
               <ChevronRightIcon className="size-4 transition-transform group-data-[state=open]:rotate-90" />
               <span className="font-medium">
