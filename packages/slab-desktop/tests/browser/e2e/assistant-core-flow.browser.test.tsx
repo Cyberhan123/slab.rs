@@ -185,7 +185,12 @@ vi.mock('@slab/components/select', () => ({
 vi.mock('@slab/components/dialog', () => ({
   Dialog: ({ children, open }: { children: ReactNode; open?: boolean }) =>
     open ? <div>{children}</div> : null,
-  DialogContent: ({ children }: { children: ReactNode }) => <div role="dialog">{children}</div>,
+  DialogContent: ({ children }: { children: ReactNode }) => (
+    // Stub: a bare div keeps the dialog inert — a native <dialog> would add
+    // modal semantics (focus trap, backdrop, Esc) that break DOM probing.
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- test stub
+    <div role="dialog">{children}</div>
+  ),
   DialogDescription: ({ children }: { children: ReactNode }) => <p>{children}</p>,
   DialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,

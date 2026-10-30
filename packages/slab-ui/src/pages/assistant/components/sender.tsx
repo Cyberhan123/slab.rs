@@ -475,6 +475,9 @@ function Sender({
         </div>
       ) : null}
 
+      {/* The form's submit + drag-drop handlers are the composer's designed
+          interactions; there is no native replacement that keeps file drop. */}
+      {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- composer form */}
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -535,6 +538,9 @@ function Sender({
           <div
             id="assistant-slash-popup"
             data-testid="assistant-slash-popup"
+            // ARIA combobox popup: a positioned div whose options are rich
+            // buttons; a native <select>/<datalist> cannot render them.
+            // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- aria combobox
             role="listbox"
             aria-label={t("pages.assistant.composer.commandSkill")}
             className="absolute bottom-full left-0 z-50 mb-2 w-80 max-w-full origin-bottom overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md ease-out-expo animate-in fade-in zoom-in-95 duration-150"
@@ -544,6 +550,8 @@ function Sender({
                 key={cmd.name}
                 id={`assistant-slash-option-${cmd.name}`}
                 type="button"
+                // Option inside the combobox listbox popup (see above).
+                // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- aria combobox
                 role="option"
                 aria-selected={index === slashIndex}
                 title={cmd.description}
@@ -571,6 +579,10 @@ function Sender({
           aria-label="Message"
           data-testid="assistant-composer-input"
           disabled={loading && !steerable}
+          // WAI-ARIA combobox pattern: the multiline textarea owns focus and
+          // keyboard nav while the popup lists options; a native control
+          // would lose the multiline composer.
+          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- aria combobox
           role="combobox"
           aria-haspopup="listbox"
           aria-expanded={slashOpen}
