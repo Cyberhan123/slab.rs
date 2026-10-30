@@ -1,197 +1,83 @@
 "use client"
 
-import { useControllableState } from "@radix-ui/react-use-controllable-state"
+import { BrainIcon } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@slab/components/collapsible"
-import { cn } from "@slab/ui/lib/utils"
-import { BrainIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
-import type { ComponentProps, ReactNode } from "react"
-import {
-  createContext,
-  memo,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-} from "react"
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "@slab/components/trace"
 
 import { Markdown } from "./markdown"
-import { Shimmer } from "./shimmer"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
 import { useTranslation } from "@slab/i18n"
 
-interface ReasoningContextValue {
-  isStreaming: boolean
-  isOpen: boolean
-  setIsOpen: (open: boolean) => void
-  duration: number | undefined
-}
-
-const ReasoningContext = createContext<ReasoningContextValue | null>(null)
-
-const useReasoning = () => {
-  const context = useContext(ReasoningContext)
-  if (!context) {
-    throw new Error("Reasoning components must be used within Reasoning")
-  }
-  return context
-}
-
-type ReasoningProps = ComponentProps<typeof Collapsible> & {
-  isStreaming?: boolean
-  open?: boolean
-  defaultOpen?: boolean
-  onOpenChange?: (open: boolean) => void
-  duration?: number
-}
-
 const MS_IN_S = 1000
 
-const Reasoning = memo(
-  ({
-    className,
-    isStreaming = false,
-    open,
-    defaultOpen,
-    onOpenChange,
-    duration: durationProp,
-    children,
-    ...props
-  }: ReasoningProps) => {
-    // Collapsed by default — during generation and after — so the transcript
-    // stays compact; the user expands via the trigger whenever they want.
-    const resolvedDefaultOpen = defaultOpen ?? false
-
-    const [isOpen, setIsOpen] = useControllableState<boolean>({
-      defaultProp: resolvedDefaultOpen,
-      onChange: onOpenChange,
-      prop: open,
-    })
-    const [duration, setDuration] = useControllableState<number | undefined>({
-      defaultProp: undefined,
-      prop: durationProp,
-    })
-
-    const startTimeRef = useRef<number | null>(null)
-
-    // Track when streaming starts and compute duration once it ends.
-    useEffect(() => {
-      if (isStreaming) {
-        if (startTimeRef.current === null) startTimeRef.current = Date.now()
-      } else if (startTimeRef.current !== null) {
-        setDuration(Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S))
-        startTimeRef.current = null
-      }
-    }, [isStreaming, setDuration])
-
-    const handleOpenChange = useCallback(
-      (nextOpen: boolean) => {
-        setIsOpen(nextOpen)
-      },
-      [setIsOpen],
-    )
-
-    const contextValue = useMemo(
-      () => ({ duration, isOpen, isStreaming, setIsOpen }),
-      [duration, isOpen, isStreaming, setIsOpen],
-    )
-
-    return (
-      <ReasoningContext.Provider value={contextValue}>
-        <Collapsible
-          className={cn("not-prose mb-2", className)}
-          onOpenChange={handleOpenChange}
-          open={isOpen}
-          {...props}
-        >
-          {children}
-        </Collapsible>
-      </ReasoningContext.Provider>
-    )
-  },
-)
-Reasoning.displayName = "Reasoning"
-
-type ReasoningTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
-  getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode
-}
-
-const ReasoningTrigger = memo(
-  ({ className, children, getThinkingMessage, ...props }: ReasoningTriggerProps) => {
-    const { isStreaming, isOpen, duration } = useReasoning()
-    const { t } = useTranslation()
-    const message =
-      getThinkingMessage?.(isStreaming, duration) ??
-      (isStreaming || duration === 0 ? (
-        <Shimmer duration={1}>{t("pages.assistant.thinking.loading")}</Shimmer>
-      ) : duration === undefined ? (
-        <p>{t("pages.assistant.thinking.thoughtForAFewSeconds")}</p>
-      ) : (
-        <p>{t("pages.assistant.thinking.thoughtForSeconds", { seconds: duration })}</p>
-      ))
-    return (
-      <CollapsibleTrigger
-        className={cn(
-          "flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
-          className,
-        )}
-        {...props}
-      >
-        {children ?? (
-          <>
-            <BrainIcon className="size-4" />
-            {message}
-            {isOpen ? (
-              <ChevronDownIcon className="size-4 shrink-0" />
-            ) : (
-              <ChevronRightIcon className="size-4 shrink-0" />
-            )}
-          </>
-        )}
-      </CollapsibleTrigger>
-    )
-  },
-)
-ReasoningTrigger.displayName = "ReasoningTrigger"
-
-type ReasoningContentProps = ComponentProps<typeof CollapsibleContent>
-
-const ReasoningContent = memo(({ className, children, ...props }: ReasoningContentProps) => {
-  const { isStreaming } = useReasoning()
-  return (
-    <CollapsibleContent
-      className={cn(
-        "mt-3 text-sm",
-        "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in duration-200 ease-out-expo",
-        className,
-      )}
-      {...props}
-    >
-      <Markdown hasNextChunk={isStreaming}>{children as string}</Markdown>
-    </CollapsibleContent>
-  )
-})
-ReasoningContent.displayName = "ReasoningContent"
-
+/**
+ * Reasoning ("thinking") part on the shadcn Trace primitives: a collapsible
+ * whose line shimmers while streaming ("Thinking"), then reports the duration
+ * ("Thought for Ns"). Follows the ai-elements Reasoning behavior — open while
+ * streaming, closed once done, an explicit user toggle wins over the automatic
+ * open/close — with the duration timer kept from the previous implementation.
+ * The line stays bare until text exists (a collapsible always has content).
+ */
 function MessageReasoningPart({
   part,
   kind,
 }: MessagePartRenderProps<TMessagePart, TMessage>) {
-  if (kind !== "reasoning") return null
-
+  const { t } = useTranslation()
   const text = (part.text as string | undefined) ?? ""
   const isStreaming = part.state === "streaming"
 
+  // Track when streaming starts and compute the duration once it ends.
+  const [duration, setDuration] = useState<number | undefined>(undefined)
+  const startTimeRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (isStreaming) {
+      if (startTimeRef.current === null) startTimeRef.current = Date.now()
+    } else if (startTimeRef.current !== null) {
+      setDuration(Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S))
+      startTimeRef.current = null
+    }
+  }, [isStreaming])
+
+  // `undefined` means "no user choice yet" — follow the streaming state.
+  const [userOpen, setUserOpen] = useState<boolean | undefined>(undefined)
+  const open = userOpen ?? isStreaming
+
+  const line = (
+    <TraceLine status={isStreaming ? "running" : undefined}>
+      <TraceIcon>
+        <BrainIcon />
+      </TraceIcon>
+      <TraceTitle>
+        {isStreaming || duration === 0
+          ? t("pages.assistant.thinking.loading")
+          : duration === undefined
+            ? t("pages.assistant.thinking.thoughtForAFewSeconds")
+            : t("pages.assistant.thinking.thoughtForSeconds", { seconds: duration })}
+      </TraceTitle>
+    </TraceLine>
+  )
+
+  if (kind !== "reasoning") return null
+  if (!text) {
+    // Nothing to reveal yet — a collapsible always has content, so stay a line.
+    return line
+  }
+
   return (
-    <Reasoning isStreaming={isStreaming}>
-      <ReasoningTrigger />
-      {text ? <ReasoningContent>{text}</ReasoningContent> : null}
-    </Reasoning>
+    <TraceCollapsible open={open} onOpenChange={setUserOpen}>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        <Markdown hasNextChunk={isStreaming}>{text}</Markdown>
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
   )
 }
 

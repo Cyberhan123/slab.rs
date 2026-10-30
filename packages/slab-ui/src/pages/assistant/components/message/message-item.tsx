@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useMemo } from "react"
 import type { UIDataTypes, UIMessagePart, UITools } from "ai"
 import { motion, useReducedMotion } from "motion/react"
 import { Button } from "@slab/components/button"
@@ -10,11 +11,13 @@ import AgentAvatar from "@slab/ui/pages/assistant/components/agent-avatar"
 import UserAvatar from "@slab/ui/pages/assistant/components/user-avatar"
 import { Message, MessageContent, MessageAvatar, MessageFooter } from "@slab/components/message"
 import { MessageScrollerItem } from "@slab/components/message-scroller"
+import { Trace } from "@slab/components/trace"
 import { useTranslation } from "@slab/i18n"
 import { useClipboard } from "@mantine/hooks"
 import { CheckIcon, CopyIcon, RefreshCwIcon, Undo2Icon } from "lucide-react"
 import { cn } from "@slab/ui/lib/utils"
 import { useMessageInteraction } from "@slab/ui/pages/assistant/components/message-interaction-context"
+import { groupTraceRuns } from "@slab/ui/pages/assistant/lib/trace-runs"
 import { createMessageParts, MessageParts } from "./message-parts"
 import type { MessagePartComponents, MessagePartItem, MessagePartsResult } from "./message-parts"
 import { Bubble, BubbleContent } from "@slab/components/bubble"
@@ -184,11 +187,17 @@ function MessageRow({
     // settings; hidden when unwired or mid-run (the context value goes
     // undefined then).
     const canRegenerate = !isUserMessage && regenerateMessage !== undefined
-    const renderedParts = (
+    // Assistant activity renders as Trace runs: consecutive tool/reasoning
+    // parts group into one `<Trace>`, a text part or a pending approval breaks
+    // the run (see `groupTraceRuns`). User rows render flat.
+    const partComponents = messagePartComponents as MessagePartComponents<TRenderableMessagePart, TMessage>
+    const renderedParts = isUserMessage ? (
         <MessageParts<TRenderableMessagePart, TMessage>
             parts={parsedParts}
-            components={messagePartComponents as MessagePartComponents<TRenderableMessagePart, TMessage>}
+            components={partComponents}
         />
+    ) : (
+        <MessageRowRuns parsedParts={parsedParts} components={partComponents} />
     )
     return (
         <Message align={isUserMessage ? "end" : "start"} data-testid={`assistant-message-${message.role}`}>
@@ -199,13 +208,13 @@ function MessageRow({
                 {isUserMessage ? (
                     /* The avatar already identifies the role — no text header. */
                     <Bubble align="end" variant="tinted">
-                        <BubbleContent className="space-y-2">{renderedParts}</BubbleContent>
+                        <BubbleContent className="flex flex-col gap-2">{renderedParts}</BubbleContent>
                     </Bubble>
                 ) : (
                     /* Assistant prose flows full-width inside the column (capped to the
                        composer's width for readability); tool rows and reasoning read
                        cleaner outside a boxed bubble. */
-                    <div className="min-w-0 max-w-3xl space-y-2">{renderedParts}</div>
+                    <div className="flex min-w-0 max-w-3xl flex-col gap-2">{renderedParts}</div>
                 )}
                 {plainText || canRollback || canRegenerate ? (
                     <MessageFooter>
@@ -260,3 +269,53 @@ function MessageRow({
 
 
 export { MessageItem, type TMessage, type TMessagePart }
+
+/**
+ * Render the assistant message's parts as Trace runs: each run of consecutive
+ * tool/reasoning parts is wrapped in a single `<Trace>`; the other runs render
+ * bare. Grouping is recomputed only when the parsed parts (message identity,
+ * via the WeakMap cache) or the approval status map change.
+ */
+function MessageRowRuns({
+    parsedParts,
+    components,
+}: {
+    parsedParts: MessagePartsResult<
+        TRenderableMessagePart,
+        TMessage
+    > & { all: Array<MessagePartItem<TRenderableMessagePart, TMessage>> }
+    components: MessagePartComponents<TRenderableMessagePart, TMessage>
+}) {
+    const { approvalStatusByItemId } = useMessageInteraction()
+    const runs = useMemo(
+        () =>
+            groupTraceRuns<TRenderableMessagePart, TMessage>(
+                parsedParts.all,
+                (item) =>
+                    item.toolCallId !== undefined &&
+                    approvalStatusByItemId.get(item.toolCallId) === "pending"
+            ),
+        [parsedParts, approvalStatusByItemId]
+    )
+
+    return (
+        <>
+            {runs.map((run) =>
+                run.trace ? (
+                    <Trace key={run.key} data-testid="assistant-trace-run">
+                        <MessageParts<TRenderableMessagePart, TMessage>
+                            parts={run.items}
+                            components={components}
+                        />
+                    </Trace>
+                ) : (
+                    <MessageParts<TRenderableMessagePart, TMessage>
+                        key={run.key}
+                        parts={run.items}
+                        components={components}
+                    />
+                )
+            )}
+        </>
+    )
+}
