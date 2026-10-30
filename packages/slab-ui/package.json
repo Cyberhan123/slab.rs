@@ -76,6 +76,7 @@
     "@hookform/resolvers": "catalog:",
     "@mantine/hooks": "catalog:",
     "@radix-ui/react-use-controllable-state": "catalog:",
+    "@shadcn/helpers": "catalog:",
     "@slab/api": "workspace:*",
     "@slab/components": "workspace:*",
     "@slab/core": "workspace:*",
