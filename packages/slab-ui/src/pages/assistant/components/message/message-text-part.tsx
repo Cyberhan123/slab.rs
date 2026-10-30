@@ -19,7 +19,7 @@ function MessageTextPart({
     // paragraphs are bare <p> (no classes), so size/leading inherit from this
     // wrapper. Tool rows and diff cards keep the wider max-w-3xl column.
     <div
-      className="min-w-0 max-w-[70ch] text-[15px] leading-[1.55]"
+      className="min-w-0 max-w-[70ch] text-read leading-[1.55]"
       data-streaming={isStreaming ? "true" : undefined}
     >
       {/* The caret rides the markdown's last child as a ::after pseudo-element

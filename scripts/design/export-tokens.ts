@@ -48,9 +48,39 @@ const CHECK = process.argv.includes("--check");
 
 // ── CSS parsing ─────────────────────────────────────────────────────────────
 
-/** Strip block comments first — prose in comments must not fool selector matching. */
+/**
+ * Strip block comments first — prose in comments must not fool selector
+ * matching. The scan is string-aware: the `@source ".../dist/*.js"` globs
+ * contain a literal `/*` inside quotes, and a naive regex would treat it as
+ * a comment opener and swallow everything up to the next comment terminator
+ * (including the `:root` block the pipeline needs).
+ */
 function stripComments(css: string): string {
-  return css.replace(/\/\*[\s\S]*?\*\//g, "");
+  let out = "";
+  let i = 0;
+  while (i < css.length) {
+    const ch = css[i];
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < css.length) {
+        if (css[j] === "\\") j += 2;
+        else if (css[j] === ch) break;
+        else j += 1;
+      }
+      const stop = Math.min(j + 1, css.length);
+      out += css.slice(i, stop);
+      i = stop;
+      continue;
+    }
+    if (ch === "/" && css[i + 1] === "*") {
+      const end = css.indexOf("*/", i + 2);
+      i = end === -1 ? css.length : end + 2;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
 }
 
 /**

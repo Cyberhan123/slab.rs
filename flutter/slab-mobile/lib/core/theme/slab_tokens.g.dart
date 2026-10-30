@@ -116,6 +116,7 @@ class SlabMetrics {
   static const double textCaption = 11;
   static const double textLabel = 12;
   static const double textBody = 13;
+  static const double textRead = 15;
   static const double trackingDisplay = -0.05;
   static const double trackingEyebrow = 0.16;
   static const double defaultTransitionDuration = 180;
