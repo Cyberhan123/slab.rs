@@ -244,8 +244,10 @@ describe('assistant core flow (harness) browser smoke', () => {
     await renderDesktopScene(<AssistantPage />, { route: '/?session=session-a' });
 
     // The ApprovalCard renders the command text above the composer and exposes
-    // a per-scope test id; clicking run_once resolves the approval.
-    await expect.element(page.getByText('echo slab-approval')).toBeVisible();
+    // a per-scope test id; clicking run_once resolves the approval. The command
+    // lives in a CodeBlock whose whole text includes the `$ cd` prefix — match
+    // by substring regex (getByText is whole-element-text only).
+    await expect.element(page.getByText(/echo slab-approval/)).toBeVisible();
     await page.getByTestId('assistant-approval-run_once').click();
     await expect.poll(() => mocks.harnessConversation.resolveApproval.mock.calls.length).toBeGreaterThan(0);
     expect(mocks.harnessConversation.resolveApproval).toHaveBeenCalledWith('call-1', true, 'run_once');
