@@ -15,11 +15,14 @@ describe('renderStatusPill', () => {
 
   it('renders each supported status without crashing', async () => {
     const statuses = ['succeeded', 'running', 'pending', 'cancelled', 'interrupted', 'failed'];
+    // Each status renders, asserts, and unmounts before the next mounts.
+    /* oxlint-disable eslint/no-await-in-loop -- sequential renders */
     for (const status of statuses) {
       const screen = await render(<>{renderStatusPill(status, t)}</>);
       await expect.element(screen.getByText(`pages.task.status.${status}`)).toBeInTheDocument();
       await screen.unmount();
     }
+    /* oxlint-enable eslint/no-await-in-loop */
   });
 
   it('falls back to the raw status string for an unknown status', async () => {

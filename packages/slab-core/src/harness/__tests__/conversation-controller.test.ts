@@ -1238,13 +1238,17 @@ describe("ConversationController", () => {
   it("surfaces a restore error only after exhausting the open retries", async () => {
     const controller = makeController("s1")
     controller.start()
-    // Attempts 1..MAX-1 fail and back off (linear) before redialing.
+    // Attempts 1..MAX-1 fail and back off (linear) before redialing. The
+    // steps are strictly ordered — each await depends on the previous one's
+    // timing, so parallelizing would break the retry sequence.
+    /* oxlint-disable eslint/no-await-in-loop -- ordered retry attempts */
     for (let attempt = 1; attempt < MAX_RESTORE_ATTEMPTS; attempt += 1) {
       await flush() // let the next dial create its socket
       FakeWebSocket.last!.simError()
       await flush() // let the rejection propagate
       await new Promise((resolve) => setTimeout(resolve, RESTORE_BACKOFF_MS * attempt + 120))
     }
+    /* oxlint-enable eslint/no-await-in-loop */
     // Still mid-retry, before the final attempt: no error surfaced yet.
     expect(controller.getState().error).toBeNull()
 

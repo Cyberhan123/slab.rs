@@ -197,6 +197,7 @@ async function waitForTurnCompletedRejectingPlans(
   timeoutMs: number
 ): Promise<{ restore: Awaited<ReturnType<typeof restoreSession>> }> {
   const deadline = Date.now() + timeoutMs
+  /* oxlint-disable eslint/no-await-in-loop -- poll loop: probe, dismiss, re-check, sleep */
   // eslint-disable-next-line no-constant-condition
   while (true) {
     // Reject any visible plan approval card to unblock the turn.
@@ -216,4 +217,5 @@ async function waitForTurnCompletedRejectingPlans(
     }
     await new Promise((resolve) => setTimeout(resolve, 2_000))
   }
+  /* oxlint-enable eslint/no-await-in-loop */
 }

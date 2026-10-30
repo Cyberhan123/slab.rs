@@ -183,7 +183,9 @@ describe("rollout persistence e2e", () => {
 
     for (const token of ["ONE", "TWO", "THREE"]) {
       const prompt = `Reply with only the token SLAB_ROLLOUT_RB_${token}_${Date.now()}.`
+      // oxlint-disable-next-line eslint/no-await-in-loop -- sequential turns
       await sendAssistantMessage(page, prompt)
+      // oxlint-disable-next-line eslint/no-await-in-loop -- must settle before the next prompt
       await waitForCompletedAssistantReply(testEnv.serverBaseUrl, session.id, prompt, 900_000)
     }
 

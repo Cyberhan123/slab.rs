@@ -232,6 +232,8 @@ describe("MessageItem", () => {
   })
 
   it("routes the companion subagent tools to the subagent card, not the default", async () => {
+    // Each render must settle before the next mounts (renders accumulate).
+    /* oxlint-disable eslint/no-await-in-loop -- sequential renders */
     for (const toolName of ["subagent_status", "subagent_message", "subagent_stop"]) {
       const screen = await render(
         <MessageItem
@@ -253,6 +255,7 @@ describe("MessageItem", () => {
       await expect.element(screen.getByTestId("tool-subagent-part").first()).toBeInTheDocument()
       await expect.element(screen.getByTestId("tool-part")).not.toBeInTheDocument()
     }
+    /* oxlint-enable eslint/no-await-in-loop */
   })
 
   it("shows a rollback button on a retracable user message and emits the message id", async () => {

@@ -331,18 +331,25 @@ async function main() {
   ]);
 
   const byName = new Map<string, string>();
-  for (const crate of bindingCrates) {
-    for (const file of await collectTypeFiles(path.join(repoRoot, crate, "bindings"))) {
-      const name = path.basename(file, ".ts").split("/").pop()!;
-      const body = normalizeWireArtifacts(name, normalizeBody(await readFile(file, "utf8")));
-      const existing = byName.get(name);
-      // Cross-crate mirrors (e.g. ApprovalScope) may differ only in doc
-      // comments; the wire type itself must be identical.
-      if (existing !== undefined && canonicalType(existing) !== canonicalType(body)) {
-        throw new Error(`binding ${name} differs between crates — resolve the divergence first`);
-      }
-      if (existing === undefined) byName.set(name, body);
+  // Collect every crate's binding files, then read them all in parallel.
+  // The flattened order matches the per-crate loop order, so the divergence
+  // check below behaves identically to the sequential version.
+  const allFiles = (
+    await Promise.all(
+      bindingCrates.map((crate) => collectTypeFiles(path.join(repoRoot, crate, "bindings"))),
+    )
+  ).flat();
+  const allContents = await Promise.all(allFiles.map((file) => readFile(file, "utf8")));
+  for (const [index, file] of allFiles.entries()) {
+    const name = path.basename(file, ".ts").split("/").pop()!;
+    const body = normalizeWireArtifacts(name, normalizeBody(allContents[index]!));
+    const existing = byName.get(name);
+    // Cross-crate mirrors (e.g. ApprovalScope) may differ only in doc
+    // comments; the wire type itself must be identical.
+    if (existing !== undefined && canonicalType(existing) !== canonicalType(body)) {
+      throw new Error(`binding ${name} differs between crates — resolve the divergence first`);
     }
+    if (existing === undefined) byName.set(name, body);
   }
   if (byName.size === 0) throw new Error("no bindings generated");
 
