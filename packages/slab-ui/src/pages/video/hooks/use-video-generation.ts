@@ -377,6 +377,10 @@ export function useVideoGeneration() {
     return () => {
       cancelled = true;
     };
+    // The zero-dep useCallbacks (refs + setters + module fns only) never
+    // change identity, so the compiler rule calls them extra — but they are
+    // referenced in the body, so react-hooks/exhaustive-deps requires them.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- stable callbacks
   }, [clearGenerationTask, isFetchingResult, mergeHistoryTask, refreshHistory, t, taskId]);
 
   const handleCancel = useCallback(async () => {

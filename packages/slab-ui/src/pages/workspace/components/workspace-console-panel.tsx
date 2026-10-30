@@ -407,6 +407,9 @@ function TerminalSessionPane({
       fitAddonRef.current = null
       onTerminalReady(sessionId, null)
     }
+    // workspaceRoot deliberately rebuilds the console when the workspace
+    // switches, even though the socket URL only keys off the shell.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- workspace-switch trigger
   }, [onTerminalReady, sendControl, sendResize, sessionId, shell, t, workspaceRoot])
 
   useEffect(() => {

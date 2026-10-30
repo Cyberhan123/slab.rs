@@ -99,6 +99,9 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
     if (mounted) {
       void syncBounds();
     }
+  // hostRect.height/width resync the native view bounds when the host
+  // element resizes; syncBounds reads the node through a ref.
+  // oxlint-disable-next-line react/exhaustive-effect-dependencies -- resize trigger
   }, [hostRect.height, hostRect.width, mounted, syncBounds]);
 
   return (

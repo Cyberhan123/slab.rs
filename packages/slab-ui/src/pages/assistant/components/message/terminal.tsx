@@ -131,6 +131,8 @@ export const TerminalContent = ({ className, children, ...props }: TerminalConte
     if (autoScroll && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight
     }
+  // output/stderrText are scroll triggers (the stream grew), not reads.
+  // oxlint-disable-next-line react/exhaustive-effect-dependencies -- stream-growth trigger
   }, [output, stderrText, autoScroll])
 
   return (

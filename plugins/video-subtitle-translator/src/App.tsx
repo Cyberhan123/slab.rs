@@ -731,6 +731,9 @@ export function App() {
     });
 
     return () => cleanup?.();
+    // Mount-only init: the sdk bridge and addLog/loadModels are stable for the
+    // plugin's lifetime and re-running subscribe/loadModels would double-bind.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- mount-only init
   }, []);
 
   useEffect(() => {

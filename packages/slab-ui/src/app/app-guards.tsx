@@ -59,6 +59,8 @@ export function SetupGuard() {
     }
 
     void refetchSetupStatus();
+    // location.pathname re-probes setup status after every navigation.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- navigation trigger
   }, [isSetupRoute, location.pathname, refetchSetupStatus]);
 
   return null;

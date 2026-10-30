@@ -164,6 +164,9 @@ export function useWorkspaceLsp({
     return () => {
       mouseDownDisposable.dispose()
     }
+    // editorMountVersion re-runs the effect once the editor mounts; the body
+    // reads the editor through editorRef, not the version state.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- version-counter remount trigger
   }, [editorMountVersion, openFileInEditor, servicesState, shouldUseLsp, workspaceRoot])
 
   useEffect(() => {
@@ -225,6 +228,9 @@ export function useWorkspaceLsp({
       cancelled = true
       window.clearTimeout(startTimer)
     }
+  // editorModelVersion/editorMountVersion re-run the effect when the editor
+  // or its model (re)attaches; the body reads them through refs.
+  // oxlint-disable-next-line react/exhaustive-effect-dependencies -- version-counter remount triggers
   }, [editorModelVersion, editorMountVersion, language, relativePath, servicesState, shouldUseLsp, workspaceRoot])
 
   useEffect(() => {
@@ -256,6 +262,8 @@ export function useWorkspaceLsp({
     return () => {
       cancelled = true
     }
+  // editorModelVersion re-runs registration after a new model attaches.
+  // oxlint-disable-next-line react/exhaustive-effect-dependencies -- version-counter remount trigger
   }, [editorModelVersion, language, relativePath, servicesState, shouldUseLsp, workspaceRoot])
 
   const handleEditorMount = useCallback((editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {

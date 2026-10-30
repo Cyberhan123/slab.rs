@@ -386,6 +386,10 @@ export function useAudio() {
       cancelled = true;
     };
   }, [
+    // clearTranscriptionTask is a zero-dep useCallback (refs + setters only):
+    // the compiler rule calls it extra, but it is referenced below, so
+    // react-hooks/exhaustive-deps requires it in the array.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- stable callback
     clearTranscriptionTask,
     isTranscriptionFetchingResult,
     refreshHistory,
