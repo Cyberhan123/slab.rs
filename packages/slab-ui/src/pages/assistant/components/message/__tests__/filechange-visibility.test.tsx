@@ -31,10 +31,15 @@ vi.mock("@mantine/hooks", () => ({
   useClipboard: () => ({ copy: vi.fn<() => void>(), copied: false }),
 }))
 
-const interaction = (status: "pending" | "approved"): MessageInteractionValue =>
-  ({
-    approvalStatusByItemId: new Map([["call-1", status]]),
-  }) as unknown as MessageInteractionValue
+/** Module-level so the Provider value identity is stable across rerenders. */
+const INTERACTION: Record<"pending" | "approved", MessageInteractionValue> = {
+  pending: {
+    approvalStatusByItemId: new Map([["call-1", "pending"]]),
+  } as unknown as MessageInteractionValue,
+  approved: {
+    approvalStatusByItemId: new Map([["call-1", "approved"]]),
+  } as unknown as MessageInteractionValue,
+}
 
 const message = (overrides: Partial<Record<string, unknown>>): TMessage => ({
   id: "ma1",
@@ -65,7 +70,7 @@ const FINAL = {
 
 /** The full mounted tree — rerender must receive the same shape. */
 const tree = (msg: TMessage, status: "pending" | "approved") => (
-  <MessageInteractionContext.Provider value={interaction(status)}>
+  <MessageInteractionContext.Provider value={INTERACTION[status]}>
     <MessageScrollerProvider autoScroll>
       <MessageScroller>
         <MessageScrollerViewport>

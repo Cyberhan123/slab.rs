@@ -13,12 +13,13 @@ import {
 /** The controller caches snapshots at module level; tests drive it back to a
  *  known state through the public API instead of resetting modules. */
 function makeMediaQuery(matches: boolean) {
+  type MediaListener = (event: MediaQueryListEvent) => void;
   return {
     matches,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
+    addEventListener: vi.fn<(type: string, listener: MediaListener) => void>(),
+    removeEventListener: vi.fn<(type: string, listener: MediaListener) => void>(),
+    addListener: vi.fn<(listener: MediaListener) => void>(),
+    removeListener: vi.fn<(listener: MediaListener) => void>(),
   };
 }
 
@@ -46,9 +47,9 @@ describe("theme controller", () => {
   });
 
   it("resolves system through matchMedia", () => {
-    window.matchMedia = vi.fn().mockReturnValue(makeMediaQuery(true)) as unknown as typeof window.matchMedia;
+    window.matchMedia = vi.fn<(query: string) => MediaQueryList>().mockReturnValue(makeMediaQuery(true)) as unknown as typeof window.matchMedia;
     expect(resolveTheme("system")).toBe("dark");
-    window.matchMedia = vi.fn().mockReturnValue(makeMediaQuery(false)) as unknown as typeof window.matchMedia;
+    window.matchMedia = vi.fn<(query: string) => MediaQueryList>().mockReturnValue(makeMediaQuery(false)) as unknown as typeof window.matchMedia;
     expect(resolveTheme("system")).toBe("light");
     expect(resolveTheme("dark")).toBe("dark");
     expect(resolveTheme("light")).toBe("light");

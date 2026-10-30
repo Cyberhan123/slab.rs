@@ -12,12 +12,12 @@ export type AssistantToolChoice = components['schemas']['AgentToolChoiceInput'];
 /** Composer thinking tiers selectable in the UI (the wire-visible levels). */
 export type AssistantThinkingLevel = Exclude<AssistantReasoningEffort, 'none' | 'minimal'>;
 
-const PERMISSION_MODES: ReadonlyArray<PermissionMode> = [
+const PERMISSION_MODES: ReadonlySet<PermissionMode> = new Set<PermissionMode>([
   'request_approval',
   'approve_for_me',
   'full_control',
   'custom',
-];
+]);
 
 type PersistedAssistantUiState = {
   currentSessionId: string;
@@ -80,7 +80,7 @@ export function normalizeToolConcurrency(value: number) {
 }
 
 export function normalizePermissionMode(value: unknown): PermissionMode {
-  return typeof value === 'string' && PERMISSION_MODES.includes(value as PermissionMode)
+  return typeof value === 'string' && PERMISSION_MODES.has(value as PermissionMode)
     ? (value as PermissionMode)
     : initialPersistedState.permissionMode;
 }
