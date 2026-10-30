@@ -132,6 +132,10 @@ function Calendar({
         ...classNames,
       }}
       components={{
+        // Upstream react-day-picker override shape: the component overrides
+        // must stay inline (the library calls them per render) and reuse the
+        // prop names that shadow the outer Calendar props.
+        // oxlint-disable-next-line react/no-unstable-nested-components, eslint/no-shadow -- upstream override shape
         Root: ({ className, rootRef, ...props }) => {
           return (
             <div
@@ -142,6 +146,7 @@ function Calendar({
             />
           )
         },
+        // oxlint-disable-next-line react/no-unstable-nested-components, eslint/no-shadow -- upstream override shape
         Chevron: ({ className, orientation, ...props }) => {
           if (orientation === "left") {
             return (
@@ -163,6 +168,7 @@ function Calendar({
           )
         },
         DayButton: CalendarDayButton,
+        // oxlint-disable-next-line react/no-unstable-nested-components, eslint/no-shadow -- upstream override shape
         WeekNumber: ({ children, ...props }) => {
           return (
             <td {...props}>

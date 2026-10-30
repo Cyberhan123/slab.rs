@@ -13,6 +13,8 @@ function Slider({
   max = 100,
   ...props
 }: React.ComponentProps<typeof SliderPrimitive.Root>) {
+  // Upstream: mirrors Radix's internal value-array naming.
+  // oxlint-disable-next-line eslint/no-underscore-dangle -- vendored upstream name
   const _values = React.useMemo(
     () =>
       Array.isArray(value)

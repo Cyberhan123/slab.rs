@@ -53,6 +53,9 @@ function BreadcrumbPage({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
       data-slot="breadcrumb-page"
+      // Upstream: the current page keeps link semantics but is aria-disabled
+      // (non-interactive), so a real <a> would be wrong here.
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- aria-disabled current page
       role="link"
       aria-disabled="true"
       aria-current="page"

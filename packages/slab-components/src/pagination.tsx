@@ -49,6 +49,8 @@ function PaginationLink({
   ...props
 }: PaginationLinkProps) {
   return (
+    // Upstream: accessible content arrives via children from the consumer.
+    // oxlint-disable-next-line jsx-a11y/anchor-has-content -- children from consumer
     <a
       aria-current={isActive ? "page" : undefined}
       data-slot="pagination-link"

@@ -68,6 +68,8 @@ function InputOTPSlot({
 
 function InputOTPSeparator({ ...props }: React.ComponentProps<"div">) {
   return (
+    // Upstream: a visual separator glyph inside the OTP input group.
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- vendored upstream shape
     <div data-slot="input-otp-separator" role="separator" {...props}>
       <MinusIcon />
     </div>

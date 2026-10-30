@@ -28,6 +28,9 @@ function ButtonGroup({
 }: React.ComponentProps<"div"> & VariantProps<typeof buttonGroupVariants>) {
   return (
     <div
+      // Upstream shadcn: a plain div with role=group keeps the data-slot
+      // contract and CSS child selectors untouched.
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- vendored upstream shape
       role="group"
       data-slot="button-group"
       data-orientation={orientation}

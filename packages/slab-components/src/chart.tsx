@@ -60,6 +60,8 @@ function ChartContainer({
   const chartId = `chart-${id ?? uniqueId.replace(/:/g, "")}`
 
   return (
+    // Upstream shape: inline value object; the config prop is the source.
+    // oxlint-disable-next-line react/jsx-no-constructed-context-values -- vendored upstream shape
     <ChartContext.Provider value={{ config }}>
       <div
         data-slot="chart"
@@ -83,6 +85,8 @@ function ChartContainer({
 
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   const colorConfig = Object.entries(config).filter(
+    // Upstream: the entry destructure reuses the outer `config` name.
+    // oxlint-disable-next-line eslint/no-shadow -- upstream destructure name
     ([, config]) => config.theme ?? config.color
   )
 
@@ -206,6 +210,8 @@ function ChartTooltipContent({
 
             return (
               <div
+                // Upstream: tooltip payload rows are positional.
+                // oxlint-disable-next-line react/no-array-index-key -- vendored upstream shape
                 key={index}
                 className={cn(
                   "flex w-full flex-wrap items-stretch gap-2 [&>svg]:h-2.5 [&>svg]:w-2.5 [&>svg]:text-muted-foreground",
@@ -304,6 +310,8 @@ function ChartLegendContent({
 
           return (
             <div
+              // Upstream: legend payload rows are positional.
+              // oxlint-disable-next-line react/no-array-index-key -- vendored upstream shape
               key={index}
               className={cn(
                 "flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted-foreground"

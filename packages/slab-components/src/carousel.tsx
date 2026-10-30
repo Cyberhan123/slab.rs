@@ -61,6 +61,8 @@ function Carousel({
   const [canScrollPrev, setCanScrollPrev] = React.useState(false)
   const [canScrollNext, setCanScrollNext] = React.useState(false)
 
+  // Upstream: the callback param reuses the outer `api` name.
+  // oxlint-disable-next-line eslint/no-shadow -- upstream param name
   const onSelect = React.useCallback((api: CarouselApi) => {
     if (!api) return
     setCanScrollPrev(api.canScrollPrev())
@@ -93,9 +95,20 @@ function Carousel({
     setApi(api)
   }, [api, setApi])
 
+  // Adjust-state-during-render (React docs): resync the derived scroll flags
+  // whenever embla hands over a new api instance, instead of a synchronous
+  // setState inside the subscription effect below.
+  const [prevApi, setPrevApi] = React.useState(api)
+  if (api !== prevApi) {
+    setPrevApi(api)
+    if (api) {
+      setCanScrollPrev(api.canScrollPrev())
+      setCanScrollNext(api.canScrollNext())
+    }
+  }
+
   React.useEffect(() => {
     if (!api) return
-    onSelect(api)
     api.on("reInit", onSelect)
     api.on("select", onSelect)
 
@@ -106,6 +119,9 @@ function Carousel({
 
   return (
     <CarouselContext.Provider
+      // Upstream shape: inline value object; consumers re-render via the
+      // individual state pieces, not the container identity.
+      // oxlint-disable-next-line react/jsx-no-constructed-context-values -- vendored upstream shape
       value={{
         carouselRef,
         api: api,
@@ -121,6 +137,8 @@ function Carousel({
       <div
         onKeyDownCapture={handleKeyDown}
         className={cn("relative", className)}
+        // Upstream: role=region + aria-roledescription=carousel landmark.
+        // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- vendored upstream shape
         role="region"
         aria-roledescription="carousel"
         data-slot="carousel"
@@ -158,6 +176,8 @@ function CarouselItem({ className, ...props }: React.ComponentProps<"div">) {
 
   return (
     <div
+      // Upstream: each slide is a role=group with aria-roledescription=slide.
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- vendored upstream shape
       role="group"
       aria-roledescription="slide"
       data-slot="carousel-item"

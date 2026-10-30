@@ -41,6 +41,9 @@ function ToggleGroup({
       )}
       {...props}
     >
+      {/* Upstream shape: inline value object; items re-render via their own
+          props, not the container identity. */}
+      {/* oxlint-disable-next-line react/jsx-no-constructed-context-values -- vendored upstream shape */}
       <ToggleGroupContext.Provider value={{ variant, size, spacing }}>
         {children}
       </ToggleGroupContext.Provider>

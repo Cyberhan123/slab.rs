@@ -110,6 +110,8 @@ export async function loadHighlighter(language: string) {
         lines: tokens.map((line) =>
           line.map((token, index) => (
             <span
+              // Token spans are positional rows; token content can repeat.
+              // oxlint-disable-next-line react/no-array-index-key -- positional tokens
               key={index}
               style={token.htmlStyle as React.CSSProperties}
               className="text-(--shiki-light) dark:text-(--shiki-dark)"
@@ -126,6 +128,8 @@ export async function loadHighlighter(language: string) {
 
 // Returns one React node per line, or null for a language that is not listed.
 export async function highlightCode(code: string, language: string) {
+  // The loaded instance mirrors the loader naming by upstream convention.
+  // oxlint-disable-next-line eslint/no-shadow -- local instance name
   const highlighter = await loadHighlighter(language)
 
   return highlighter ? highlighter.highlight(code).lines : null

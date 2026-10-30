@@ -171,9 +171,11 @@ function CodeBlockContent({
           ? children
               .replace(/\n$/, "")
               .split("\n")
-              .map((line, index) => (
-                <CodeBlockLine key={index}>{line}</CodeBlockLine>
-              ))
+              .map((line, index) => {
+                // Code lines are positional rows; content can repeat.
+                // oxlint-disable-next-line react/no-array-index-key -- positional rows
+                return <CodeBlockLine key={index}>{line}</CodeBlockLine>
+              })
           : children}
       </code>
     </pre>

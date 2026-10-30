@@ -85,6 +85,8 @@ function Field({
 }: React.ComponentProps<"div"> & VariantProps<typeof fieldVariants>) {
   return (
     <div
+      // Upstream shadcn: role=group on a div keeps the data-slot contract.
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- vendored upstream shape
       role="group"
       data-slot="field"
       data-orientation={orientation}
@@ -210,10 +212,11 @@ function FieldError({
 
     return (
       <ul className="ml-4 flex list-disc flex-col gap-1">
-        {uniqueErrors.map(
-          (error, index) =>
-            error?.message && <li key={index}>{error.message}</li>
-        )}
+        {uniqueErrors.map((error, index) => {
+          // Error rows are positional; duplicate messages are legitimate.
+          // oxlint-disable-next-line react/no-array-index-key -- positional rows
+          return error?.message && <li key={index}>{error.message}</li>
+        })}
       </ul>
     )
   }, [children, errors])

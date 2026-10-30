@@ -8,6 +8,8 @@ import { Separator } from "./separator"
 function ItemGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
+      // Upstream shadcn: role=list on a div keeps the data-slot contract.
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- vendored upstream shape
       role="list"
       data-slot="item-group"
       className={cn("group/item-group flex flex-col", className)}
