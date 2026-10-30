@@ -1,9 +1,14 @@
 "use client"
 
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockContent,
+  CodeBlockCopyButton,
+} from "@slab/components/code-block"
 import { cn } from "@slab/ui/lib/utils"
 import { isValidElement, type ComponentProps, type ReactNode } from "react"
 
-import { CodeBlock } from "./code-block"
 import { useMessageInteraction, type ApprovalStatus } from "../message-interaction-context"
 import { summarizeToolCall } from "../../lib/tool-summaries"
 import { ToolRow, ToolRowContent, ToolRowTrigger, toolRowIcon } from "./message-tool-row"
@@ -76,13 +81,19 @@ const ToolInput = ({
 }: ComponentProps<"div"> & { input: unknown }) => {
   if (input === undefined || input === null) return null
   return (
-    <div className={cn("space-y-2 overflow-hidden", className)} {...props}>
+    <div className={cn("flex flex-col gap-2 overflow-hidden", className)} {...props}>
       <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
         Parameters
       </h4>
-      <div className="rounded-md bg-muted/50">
-        <CodeBlock code={compactToolValue(input)} language="json" />
-      </div>
+      {/* Tool I/O stays unhighlighted — the compact row never pulls shiki. */}
+      <CodeBlock size="sm">
+        <CodeBlockActions>
+          <CodeBlockCopyButton value={compactToolValue(input)} />
+        </CodeBlockActions>
+        <CodeBlockContent wrap className="max-h-64">
+          {compactToolValue(input)}
+        </CodeBlockContent>
+      </CodeBlock>
     </div>
   )
 }
@@ -96,41 +107,48 @@ const ToolOutput = ({
   const hasOutput = output !== undefined && output !== null && output !== ""
   if (!errorText && !hasOutput) return null
 
-  let OutputNode: ReactNode = <div>{output as ReactNode}</div>
-  if (
+  const isTextual =
     (typeof output === "object" && output !== null && !isValidElement(output)) ||
     typeof output === "string"
-  ) {
-    OutputNode = <CodeBlock code={compactToolValue(output)} language="json" />
-  }
 
   return (
-    <div className={cn("space-y-2", className)} {...props}>
+    <div className={cn("flex flex-col gap-2", className)} {...props}>
       <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
         {errorText ? "Error" : "Result"}
       </h4>
       {errorText ? <ToolErrorText errorText={errorText} /> : null}
       {hasOutput ? (
-        <div className="overflow-x-auto rounded-md bg-muted/50 text-xs text-foreground [&_table]:w-full">
-          {OutputNode}
-        </div>
+        isTextual ? (
+          <CodeBlock size="sm">
+            <CodeBlockActions>
+              <CodeBlockCopyButton value={compactToolValue(output)} />
+            </CodeBlockActions>
+            <CodeBlockContent wrap className="max-h-64">
+              {compactToolValue(output)}
+            </CodeBlockContent>
+          </CodeBlock>
+        ) : (
+          <div className="overflow-x-auto rounded-md bg-muted/50 text-xs text-foreground [&_table]:w-full">
+            {output as ReactNode}
+          </div>
+        )
       ) : null}
     </div>
   )
 }
 
 /**
- * Standalone error block (heading + red card) — the `Error` section of
- * {@link ToolOutput}, also rendered on its own under a structured per-tool
- * body or for a failed call (no Parameters card: the collapsed row already
- * summarizes the arguments).
+ * Standalone error block (heading + destructive CodeBlock) — the `Error`
+ * section of {@link ToolOutput}, also rendered on its own under a structured
+ * per-tool body or for a failed call (no Parameters card: the collapsed row
+ * already summarizes the arguments).
  */
 export const ToolErrorText = ({ errorText }: { errorText: string }) => (
-  <div className="space-y-2">
+  <div className="flex flex-col gap-2">
     <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">Error</h4>
-    <div className="overflow-x-auto rounded-md bg-destructive/10 text-xs text-destructive">
-      <div className="whitespace-pre-wrap p-3">{errorText}</div>
-    </div>
+    <CodeBlock variant="destructive" size="sm">
+      <CodeBlockContent wrap>{errorText}</CodeBlockContent>
+    </CodeBlock>
   </div>
 )
 

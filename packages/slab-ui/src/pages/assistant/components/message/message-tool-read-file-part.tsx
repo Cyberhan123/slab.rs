@@ -4,16 +4,22 @@
  * `read_file` tool part — registered under
  * `messagePartComponents.tools["read_file"]` so it takes over the generic tool
  * row whenever the part's toolName matches. Renders a file view (meta line +
- * syntax-highlighted content) instead of the raw `{"content":…}` envelope
- * pretty-printed as JSON; without a parseable envelope (call in flight,
- * envelope drift) the body yields `null` and `ToolPartRow` falls back to the
- * generic Parameters/Result cards.
+ * headered CodeBlock with line numbers and lazy syntax highlighting) instead
+ * of the raw `{"content":…}` envelope pretty-printed as JSON; without a
+ * parseable envelope (call in flight, envelope drift) the body yields `null`
+ * and `ToolPartRow` falls back to the generic Parameters/Result cards.
  */
 
+import {
+  CodeBlock,
+  CodeBlockContent,
+  CodeBlockHeader,
+  CodeBlockLine,
+  CodeBlockTitle,
+} from "@slab/components/code-block"
+import { useHighlightedCode } from "@slab/components/hooks/use-highlighted-code"
 import type { ReactNode } from "react"
-import type { BundledLanguage } from "shiki"
 
-import { CodeBlock } from "./code-block"
 import { ToolPartRow } from "./message-tool-part"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
@@ -26,15 +32,19 @@ import {
   str,
 } from "./tool-detail-shared"
 
-/** Extension → shiki language for the `read_file` code view. */
-const EXTENSION_LANGUAGES: Record<string, BundledLanguage> = {
+/**
+ * Extension → highlighter grammar for the `read_file` code view. Languages the
+ * vendored highlighter does not ship (go, java) degrade to plain lines inside
+ * the hook — the mapping documents the intent for when they are added.
+ */
+const EXTENSION_LANGUAGES: Record<string, string> = {
   rs: "rust",
   ts: "typescript",
-  tsx: "typescript",
+  tsx: "tsx",
   mts: "typescript",
   cts: "typescript",
   js: "javascript",
-  jsx: "javascript",
+  jsx: "jsx",
   mjs: "javascript",
   cjs: "javascript",
   json: "json",
@@ -58,12 +68,31 @@ const EXTENSION_LANGUAGES: Record<string, BundledLanguage> = {
   zsh: "bash",
 }
 
-function languageForPath(path: string | undefined): BundledLanguage {
+function languageForPath(path: string | undefined): string {
   const ext = path?.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase()
-  // `plaintext` is a shiki special language (valid at runtime) but absent from
-  // the `BundledLanguage` union, hence the cast; CodeBlock falls back to plain
-  // rendering for any language the highlighter hasn't loaded.
-  return (ext && EXTENSION_LANGUAGES[ext]) || ("plaintext" as BundledLanguage)
+  return (ext && EXTENSION_LANGUAGES[ext]) || "plaintext"
+}
+
+/** The highlighted content lines (lazy: the grammar loads on first use). */
+function ReadFileContent({
+  content,
+  language,
+  startLine,
+  numbered,
+}: {
+  content: string
+  language: string
+  startLine: number
+  numbered: boolean
+}) {
+  const lines = useHighlightedCode(content, language)
+  return (
+    <CodeBlockContent lineNumbers={numbered} startLine={startLine}>
+      {lines.map((line, index) => (
+        <CodeBlockLine key={index}>{line}</CodeBlockLine>
+      ))}
+    </CodeBlockContent>
+  )
 }
 
 function renderReadFileBody(input: unknown, output: unknown): ReactNode | null {
@@ -81,7 +110,7 @@ function renderReadFileBody(input: unknown, output: unknown): ReactNode | null {
   const omittedBytes = num(envelope.omitted_bytes) ?? 0
   const endLine = returnedLines !== undefined ? startLine + returnedLines - 1 : totalLines
   return (
-    <div className="space-y-1.5">
+    <div className="flex flex-col gap-1.5">
       <DetailMeta>
         {path ? <span className="truncate">{path}</span> : null}
         {totalLines !== undefined ? (
@@ -94,7 +123,17 @@ function renderReadFileBody(input: unknown, output: unknown): ReactNode | null {
           <span className="text-muted-foreground/70">{formatBytes(totalBytes)}</span>
         ) : null}
       </DetailMeta>
-      <CodeBlock code={content} language={languageForPath(path)} showLineNumbers={startLine === 1} />
+      <CodeBlock>
+        <CodeBlockHeader>
+          <CodeBlockTitle>{path ?? "file"}</CodeBlockTitle>
+        </CodeBlockHeader>
+        <ReadFileContent
+          content={content}
+          language={languageForPath(path)}
+          startLine={startLine}
+          numbered={startLine === 1}
+        />
+      </CodeBlock>
       {omittedBytes > 0 ? (
         <DetailFootnote>truncated — {formatBytes(omittedBytes)} omitted</DetailFootnote>
       ) : null}

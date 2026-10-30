@@ -9,6 +9,7 @@ import { Markdown } from "../message/markdown"
 // streaming-mode override) instead of Streamdown's HTML output.
 vi.mock("streamdown", () => ({
   Streamdown: vi.fn<(props: unknown) => unknown>((_props: unknown) => null),
+  useIsCodeFenceIncomplete: () => false,
 }))
 
 const MockStreamdown = vi.mocked(Streamdown)
@@ -46,18 +47,27 @@ describe("Markdown", () => {
     expect(className).toContain("prose-sm")
   })
 
-  it("provides the default plugin set (code, cjk, mermaid, math)", async () => {
+  it("provides the default plugin set (cjk, mermaid, math — fences go to CodeBlock)", async () => {
     await render(<Markdown>{"x"}</Markdown>)
 
     const pluginKeys = Object.keys(lastProps().plugins as object)
-    expect(pluginKeys).toHaveLength(4)
-    expect(pluginKeys).toEqual(expect.arrayContaining(["code", "cjk", "math", "mermaid"]))
+    expect(pluginKeys).toHaveLength(3)
+    expect(pluginKeys).toEqual(expect.arrayContaining(["cjk", "math", "mermaid"]))
+  })
+
+  it("routes fenced code to the CodeBlock override", async () => {
+    await render(<Markdown>{"x"}</Markdown>)
+
+    const components = lastProps().components as { code?: unknown }
+    expect(typeof components.code).toBe("function")
   })
 
   it("forces streaming mode while another chunk is pending", async () => {
     await render(<Markdown hasNextChunk>{"x"}</Markdown>)
 
     expect(lastProps().mode).toBe("streaming")
+    // isAnimating drives useIsCodeFenceIncomplete inside the code override.
+    expect(lastProps().isAnimating).toBe(true)
   })
 
   it("forwards an explicit mode when not streaming", async () => {
