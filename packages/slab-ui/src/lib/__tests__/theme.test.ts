@@ -23,6 +23,8 @@ function makeMediaQuery(matches: boolean) {
   };
 }
 
+type MediaQueryStub = ReturnType<typeof makeMediaQuery>;
+
 describe("theme controller", () => {
   const originalMatchMedia = window.matchMedia;
 
@@ -47,9 +49,9 @@ describe("theme controller", () => {
   });
 
   it("resolves system through matchMedia", () => {
-    window.matchMedia = vi.fn<(query: string) => MediaQueryList>().mockReturnValue(makeMediaQuery(true)) as unknown as typeof window.matchMedia;
+    window.matchMedia = vi.fn<(query: string) => MediaQueryStub>().mockReturnValue(makeMediaQuery(true)) as unknown as typeof window.matchMedia;
     expect(resolveTheme("system")).toBe("dark");
-    window.matchMedia = vi.fn<(query: string) => MediaQueryList>().mockReturnValue(makeMediaQuery(false)) as unknown as typeof window.matchMedia;
+    window.matchMedia = vi.fn<(query: string) => MediaQueryStub>().mockReturnValue(makeMediaQuery(false)) as unknown as typeof window.matchMedia;
     expect(resolveTheme("system")).toBe("light");
     expect(resolveTheme("dark")).toBe("dark");
     expect(resolveTheme("light")).toBe("light");
