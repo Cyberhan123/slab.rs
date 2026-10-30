@@ -188,8 +188,8 @@ function MessageRow({
     // undefined then).
     const canRegenerate = !isUserMessage && regenerateMessage !== undefined
     // Assistant activity renders as Trace runs: consecutive tool/reasoning
-    // parts group into one `<Trace>`, a text part or a pending approval breaks
-    // the run (see `groupTraceRuns`). User rows render flat.
+    // parts group into one `<Trace>`, a text part breaks the run (see
+    // `groupTraceRuns`). User rows render flat.
     const partComponents = messagePartComponents as MessagePartComponents<TRenderableMessagePart, TMessage>
     const renderedParts = isUserMessage ? (
         <MessageParts<TRenderableMessagePart, TMessage>
@@ -273,8 +273,8 @@ export { MessageItem, type TMessage, type TMessagePart }
 /**
  * Render the assistant message's parts as Trace runs: each run of consecutive
  * tool/reasoning parts is wrapped in a single `<Trace>`; the other runs render
- * bare. Grouping is recomputed only when the parsed parts (message identity,
- * via the WeakMap cache) or the approval status map change.
+ * bare. Grouping is recomputed only when the parsed parts change (message
+ * identity, via the WeakMap cache).
  */
 function MessageRowRuns({
     parsedParts,
@@ -286,16 +286,9 @@ function MessageRowRuns({
     > & { all: Array<MessagePartItem<TRenderableMessagePart, TMessage>> }
     components: MessagePartComponents<TRenderableMessagePart, TMessage>
 }) {
-    const { approvalStatusByItemId } = useMessageInteraction()
     const runs = useMemo(
-        () =>
-            groupTraceRuns<TRenderableMessagePart, TMessage>(
-                parsedParts.all,
-                (item) =>
-                    item.toolCallId !== undefined &&
-                    approvalStatusByItemId.get(item.toolCallId) === "pending"
-            ),
-        [parsedParts, approvalStatusByItemId]
+        () => groupTraceRuns<TRenderableMessagePart, TMessage>(parsedParts.all),
+        [parsedParts]
     )
 
     return (

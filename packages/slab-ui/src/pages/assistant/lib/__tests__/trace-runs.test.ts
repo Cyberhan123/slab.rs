@@ -41,20 +41,16 @@ describe("groupTraceRuns", () => {
     ])
   })
 
-  it("ends the run after an approval-pending tool row", () => {
+  it("keeps an approval-pending tool row inside its run", () => {
+    // Grouping is kind-only on purpose: a row that re-parents when its
+    // approval resolves would remount and lose its forced-open state (the
+    // e2e apply_patch card regression).
     const runs = groupTraceRuns(
-      [item("t1", "tool", "call-1"), item("r1", "reasoning"), item("t2", "tool", "call-2")],
-      (item) => item.toolCallId === "call-1"
+      [item("t1", "tool", "call-1"), item("r1", "reasoning"), item("t2", "tool", "call-2")]
     )
 
-    // The approval-pending row renders standalone (the prompt lives in the
-    // out-of-band ApprovalCard), and the next trace item starts a fresh run.
-    expect(runs.map((r) => [r.trace, r.key])).toEqual([
-      [false, "t1"],
-      [true, "r1"],
-    ])
-    expect(runs[0].items.map((i) => i.key)).toEqual(["t1"])
-    expect(runs[1].items.map((i) => i.key)).toEqual(["r1", "t2"])
+    expect(runs.map((r) => [r.trace, r.key])).toEqual([[true, "t1"]])
+    expect(runs[0].items.map((i) => i.key)).toEqual(["t1", "r1", "t2"])
   })
 
   it("keeps non-trace kinds outside any run", () => {
