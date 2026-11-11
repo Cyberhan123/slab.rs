@@ -29,6 +29,10 @@ export const assistant = {
   header: {
     newSession: 'New session',
   },
+  tabs: {
+    chat: 'Chat',
+    trace: 'Trace',
+  },
   runtime: {
     newChat: 'New assistant',
     newConversation: 'New conversation',

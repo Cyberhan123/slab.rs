@@ -16,7 +16,13 @@ import { JsonBlock } from "./json-block"
 
 const PAGE = 100
 
-export function TraceTab({ threadId, hasTrace }: { threadId: string; hasTrace: boolean }) {
+/**
+ * `hasTrace` comes from the rollout session list (`SessionMeta.trace_path`).
+ * `false` renders the missing-bundle hint without a request; `undefined`
+ * (list not loaded yet, or a caller without the session snapshot) optimistically
+ * fetches — the endpoint's own empty/error state shows instead.
+ */
+export function TraceTab({ threadId, hasTrace }: { threadId: string; hasTrace?: boolean }) {
   const { t } = useTranslation()
   const [visible, setVisible] = useState(PAGE)
   const { data, isLoading, error } = api.useQuery(
@@ -25,7 +31,7 @@ export function TraceTab({ threadId, hasTrace }: { threadId: string; hasTrace: b
     { params: { path: { thread_id: threadId }, query: { limit: 5000 } } },
   )
 
-  if (!hasTrace) {
+  if (hasTrace === false) {
     return (
       <p className="p-4 text-sm text-muted-foreground">{t("pages.agentRollouts.trace.missing")}</p>
     )

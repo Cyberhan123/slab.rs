@@ -4,11 +4,10 @@ export const agentRollouts = {
     description:
       'Enable "Agent debug tracing" in Settings to inspect rollouts, per-turn prompts, and trace bundles.',
   },
-  rail: {
-    title: 'Sessions',
-    empty: 'No rollout sessions found',
-    traceBadge: 'trace',
-  },
+  noThread:
+    'No rollout for this conversation yet. The trace appears here after the first message.',
+  threadLabel: 'Thread',
+  traceBadge: 'trace',
   tabs: {
     timeline: 'Timeline',
     lines: 'Raw lines',
@@ -24,6 +23,7 @@ export const agentRollouts = {
   lines: {
     empty: 'No rollout lines',
     filter: 'Filter by rollout type',
+    search: 'Search line content…',
     all: 'All',
     total: '{{shown}} of {{total}} lines',
     loadMore: 'Load more',

@@ -7,6 +7,7 @@
 import api from "@slab/api"
 import { Button } from "@slab/components/button"
 import { Badge } from "@slab/components/badge"
+import { Input } from "@slab/components/input"
 import { ScrollArea } from "@slab/components/scroll-area"
 import { useMemo, useState } from "react"
 import { useTranslation } from "@slab/i18n"
@@ -26,6 +27,10 @@ const PAGE = 200
 export function LinesTab({ threadId }: { threadId: string }) {
   const { t } = useTranslation()
   const [typeFilter, setTypeFilter] = useState<string>("all")
+  // Substring search over the serialized line payloads (case-insensitive) —
+  // the fastest way to pin down one tool call / prompt fragment in a long
+  // rollout without leaving the raw view.
+  const [query, setQuery] = useState("")
   const [visible, setVisible] = useState(PAGE)
 
   const { data, isLoading, error } = api.useQuery(
@@ -34,10 +39,15 @@ export function LinesTab({ threadId }: { threadId: string }) {
     { params: { path: { thread_id: threadId }, query: { limit: 5000 } } },
   )
 
-  const lines = useMemo(
-    () => (data?.lines ?? []).filter((line) => typeFilter === "all" || line.rollout_type === typeFilter),
-    [data, typeFilter],
-  )
+  const lines = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return (data?.lines ?? []).filter(
+      (line) =>
+        (typeFilter === "all" || line.rollout_type === typeFilter) &&
+        (needle === "" ||
+          JSON.stringify(line.item ?? "").toLowerCase().includes(needle)),
+    )
+  }, [data, typeFilter, query])
 
   if (isLoading) return <p className="p-4 text-sm text-muted-foreground">…</p>
   if (error)
@@ -67,6 +77,15 @@ export function LinesTab({ threadId }: { threadId: string }) {
             {type === "all" ? t("pages.agentRollouts.lines.all") : type}
           </Button>
         ))}
+        <Input
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value)
+            setVisible(PAGE)
+          }}
+          placeholder={t("pages.agentRollouts.lines.search")}
+          className="ml-2 h-7 w-44 text-xs"
+        />
         <span className="ml-auto text-micro text-muted-foreground">
           {t("pages.agentRollouts.lines.total", {
             shown: shown.length,

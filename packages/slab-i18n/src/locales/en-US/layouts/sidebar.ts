@@ -8,7 +8,6 @@ export const sidebar = {
     task: 'Tasks',
     workspace: 'Workspace',
     plugins: 'Plugins',
-    agentRollouts: 'Rollouts',
     settings: 'Settings',
   },
 } as const;

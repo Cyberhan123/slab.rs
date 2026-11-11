@@ -2,7 +2,6 @@ import App from "@slab/ui/app/App";
 import Layout from "@slab/ui/layouts";
 import type { SlabRouteObject } from "./route-meta";
 import { createSlabRoutes } from "./create-slab-routes";
-import { agentRolloutsRoute } from "./modules/agents";
 import { assistantRoutes } from "./modules/assistant";
 import { mediaRoutes } from "./modules/media";
 import {
@@ -35,7 +34,6 @@ const desktopLayoutChildren: SlabRouteObject[] = [
   hubRoute,
   taskRoute,
   ...pluginRoutes,
-  agentRolloutsRoute,
   settingsRoute,
   aboutRoute,
 ];

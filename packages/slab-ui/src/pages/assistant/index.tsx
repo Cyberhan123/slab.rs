@@ -5,10 +5,12 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { useTranslation } from "@slab/i18n"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@slab/components/tabs"
 
 import { AssistantChatPane } from "./components/assistant-chat-pane"
 import { AssistantModelSwitchDialog } from "./components/assistant-model-switch-dialog"
 import { AssistantSessionSheet } from "./components/assistant-session-sheet"
+import { RolloutView } from "./components/rollout/rollout-view"
 import { getAssistantErrorDescription } from "./lib/assistant-request-errors"
 import { useAssistantConversationList } from "./hooks/use-assistant-conversation-list"
 import { useAssistantHeader } from "./hooks/use-assistant-header"
@@ -48,6 +50,13 @@ function Assistant() {
     const trimmedSessionOverride = sessionOverride?.trim() || undefined
     const isDetailView = Boolean(trimmedSessionOverride)
 
+    // Detail-view tab: 对话 (the live chat) / 轨迹 (the rollout trace viewer).
+    // Switching back to 对话 must never remount the chat pane — its AI-SDK
+    // stream IS the live turn, and a remount mid-run would detach it (the
+    // orphan-resync path exists for accidents, not for tab switches). The chat
+    // TabsContent therefore forceMounts and hides via CSS instead.
+    const [detailView, setDetailView] = useState<"chat" | "rollout">("chat")
+
     const {
         conversationList,
         createSession: createEmptySession,
@@ -59,6 +68,13 @@ function Assistant() {
         isSessionsLoading: sessionsLoading,
         updateSessionLabel,
     } = useAssistantSessions({ lockedSessionId: trimmedSessionOverride })
+
+    // A conversation switch (or a landing detour) lands on 对话 — the trace
+    // tab of the PREVIOUS thread must not linger as the first thing the next
+    // conversation shows.
+    useEffect(() => {
+        setDetailView("chat")
+    }, [curConversation, isDetailView])
 
     const {
         modelOptions,
@@ -432,116 +448,142 @@ function Assistant() {
     return (
         <>
             {isDetailView ? (
-                <AssistantChatPane
-                    key={`${curConversation ?? "none"}:${restoreVersion}`}
-                    disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || isPreparingModel || !curConversation}
-                    initialMessages={restoredMessages}
-                    isHistoryLoading={isHistoryLoading}
-                    modelStatusLabel={selectedModelStatusLabel}
-                    onBeforeSubmit={handleBeforeSubmit}
-                    onBusyChange={setIsChatBusy}
-                    onMessageCountChange={setMessageCount}
-                    onLastMessageIdChange={handleLastMessageIdChange}
-                    transport={transport}
-                    approvals={approvals}
-                    approvalStatusByItemId={approvalStatusByItemId}
-                    questionnaires={questionnaires}
-                    liveOutputByItemId={liveOutputByItemId}
-                    livePatchByItemId={livePatchByItemId}
-                    modelLoad={modelLoad}
-                    turnUsage={turnUsage}
-                    contextWindow={usageContextWindow}
-                    resolveApproval={resolveApproval}
-                    resolveQuestionnaire={resolveQuestionnaire}
-                    onCompact={() => compactThread()}
-                    onFork={() => forkThread()}
-                    historyCreatedAt={historyCreatedAt}
-                    commands={commands}
-                    compactionMarkers={compactionMarkers}
-                    settingsMarkers={settingsMarkers}
-                    isCompacting={isCompacting}
-                    isForking={isForking}
-                    userMessageTurnIndex={userMessageTurnIndex}
-                    onRollbackFromTurn={rollbackFromTurn}
-                    onRegenerate={async (turnIndex, text) => {
-                        // ORDER IS LOAD-BEARING: the rollback bumps restoreVersion,
-                        // which remounts this pane (key at render). The draft must be
-                        // staged only AFTER the rollback resolves so the REMOUNTED
-                        // pane claims it through the guarded autoSend path — staging
-                        // first would hand it to the pane about to unmount. Settings
-                        // mirror the Sender's submit mapping (store → wire levels).
-                        await rollbackFromTurn(turnIndex)
-                        const ui = useAssistantUiStore.getState()
-                        const effort =
-                            ui.reasoningEffort === "none"
-                                ? "off"
-                                : ui.reasoningEffort === "minimal"
-                                    ? "low"
-                                    : ui.reasoningEffort
-                        useWorkspaceHandoffStore.getState().setDraft({
-                            autoSubmit: true,
-                            prompt: text,
-                            sessionId: curConversation,
-                            effort,
-                            permissionMode: ui.permissionMode,
-                            agentType: planMode ? "plan" : undefined,
-                            approvalModel:
-                                ui.permissionMode === "approve_for_me" && ui.approvalReviewModel
-                                    ? ui.approvalReviewModel
-                                    : undefined,
-                            approvalPrompt:
-                                ui.permissionMode === "approve_for_me" &&
-                                ui.approvalReviewModel &&
-                                ui.approvalReviewPrompt.trim()
-                                    ? ui.approvalReviewPrompt
-                                    : undefined,
-                        })
-                    }}
-                    planMode={planMode}
-                    onPlanModeChange={setPlanMode}
-                    onApprovalReviewChange={handleApprovalReviewChange}
-                    threadStatus={threadStatus}
-                    abortReason={abortReason}
-                    queuedTexts={queuedTexts}
-                    backgroundTasks={backgroundTasks}
-                    subagentTasksByTaskId={subagentTasksByTaskId}
-                    subagentChildItemsByChildId={subagentChildItemsByChildId}
-                    onSteerSubmit={async (text, options) => {
-                        const result = (await sendSteering(
-                            {
-                                id: `steer-${Date.now()}`,
-                                role: "user",
-                                parts: [{ type: "text", text }],
-                            },
-                            options,
-                        )) as { queued?: boolean } | undefined
-                        // Lost the idle-window race: the message started a NEW run
-                        // whose live stream this pane isn't subscribed to. The
-                        // controller refreshes on its terminal event; surface the
-                        // fallback so the resync doesn't look like a silent stall.
-                        if (!result || result.queued !== true) {
-                            toast.info(t("pages.assistant.toast.steeringResync"))
+                <Tabs
+                    value={detailView}
+                    onValueChange={(value) => setDetailView(value === "rollout" ? "rollout" : "chat")}
+                    className="flex min-h-0 flex-1 flex-col gap-0"
+                >
+                    <div className="shrink-0 border-b px-3 pt-1">
+                        <TabsList variant="line">
+                            <TabsTrigger value="chat">{t("pages.assistant.tabs.chat")}</TabsTrigger>
+                            <TabsTrigger value="rollout">
+                                {t("pages.assistant.tabs.trace")}
+                            </TabsTrigger>
+                        </TabsList>
+                    </div>
+                    {/* forceMount + CSS hiding: the chat pane carries the live
+                        AI-SDK stream — remounting it on a tab switch would
+                        orphan a running turn. */}
+                    <TabsContent
+                        value="chat"
+                        forceMount
+                        className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+                    >
+                        <AssistantChatPane
+                            key={`${curConversation ?? "none"}:${restoreVersion}`}
+                            disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || isPreparingModel || !curConversation}
+                        initialMessages={restoredMessages}
+                        isHistoryLoading={isHistoryLoading}
+                        modelStatusLabel={selectedModelStatusLabel}
+                        onBeforeSubmit={handleBeforeSubmit}
+                        onBusyChange={setIsChatBusy}
+                        onMessageCountChange={setMessageCount}
+                        onLastMessageIdChange={handleLastMessageIdChange}
+                        transport={transport}
+                        approvals={approvals}
+                        approvalStatusByItemId={approvalStatusByItemId}
+                        questionnaires={questionnaires}
+                        liveOutputByItemId={liveOutputByItemId}
+                        livePatchByItemId={livePatchByItemId}
+                        modelLoad={modelLoad}
+                        turnUsage={turnUsage}
+                        contextWindow={usageContextWindow}
+                        resolveApproval={resolveApproval}
+                        resolveQuestionnaire={resolveQuestionnaire}
+                        onCompact={() => compactThread()}
+                        onFork={() => forkThread()}
+                        historyCreatedAt={historyCreatedAt}
+                        commands={commands}
+                        compactionMarkers={compactionMarkers}
+                        settingsMarkers={settingsMarkers}
+                        isCompacting={isCompacting}
+                        isForking={isForking}
+                        userMessageTurnIndex={userMessageTurnIndex}
+                        onRollbackFromTurn={rollbackFromTurn}
+                        onRegenerate={async (turnIndex, text) => {
+                            // ORDER IS LOAD-BEARING: the rollback bumps restoreVersion,
+                            // which remounts this pane (key at render). The draft must be
+                            // staged only AFTER the rollback resolves so the REMOUNTED
+                            // pane claims it through the guarded autoSend path — staging
+                            // first would hand it to the pane about to unmount. Settings
+                            // mirror the Sender's submit mapping (store → wire levels).
+                            await rollbackFromTurn(turnIndex)
+                            const ui = useAssistantUiStore.getState()
+                            const effort =
+                                ui.reasoningEffort === "none"
+                                    ? "off"
+                                    : ui.reasoningEffort === "minimal"
+                                        ? "low"
+                                        : ui.reasoningEffort
+                            useWorkspaceHandoffStore.getState().setDraft({
+                                autoSubmit: true,
+                                prompt: text,
+                                sessionId: curConversation,
+                                effort,
+                                permissionMode: ui.permissionMode,
+                                agentType: planMode ? "plan" : undefined,
+                                approvalModel:
+                                    ui.permissionMode === "approve_for_me" && ui.approvalReviewModel
+                                        ? ui.approvalReviewModel
+                                        : undefined,
+                                approvalPrompt:
+                                    ui.permissionMode === "approve_for_me" &&
+                                    ui.approvalReviewModel &&
+                                    ui.approvalReviewPrompt.trim()
+                                        ? ui.approvalReviewPrompt
+                                        : undefined,
+                            })
+                        }}
+                        planMode={planMode}
+                        onPlanModeChange={setPlanMode}
+                        onApprovalReviewChange={handleApprovalReviewChange}
+                        threadStatus={threadStatus}
+                        abortReason={abortReason}
+                        queuedTexts={queuedTexts}
+                        backgroundTasks={backgroundTasks}
+                        subagentTasksByTaskId={subagentTasksByTaskId}
+                        subagentChildItemsByChildId={subagentChildItemsByChildId}
+                        onSteerSubmit={async (text, options) => {
+                            const result = (await sendSteering(
+                                {
+                                    id: `steer-${Date.now()}`,
+                                    role: "user",
+                                    parts: [{ type: "text", text }],
+                                },
+                                options,
+                            )) as { queued?: boolean } | undefined
+                            // Lost the idle-window race: the message started a NEW run
+                            // whose live stream this pane isn't subscribed to. The
+                            // controller refreshes on its terminal event; surface the
+                            // fallback so the resync doesn't look like a silent stall.
+                            if (!result || result.queued !== true) {
+                                toast.info(t("pages.assistant.toast.steeringResync"))
+                            }
+                        }}
+                        onInterrupt={() => {
+                            void interrupt().catch(() => {})
+                        }}
+                        onStartNewChat={navigateToLanding}
+                        autoSend={autoSend}
+                        onAutoSendConsumed={handleAutoSendConsumed}
+                        onAutoSendFailed={handleAutoSendFailed}
+                        onPaneDetached={notifyPaneDetachedMidRun}
+                        liveTextByItemId={liveTextByItemId}
+                        localTurnStartSeq={turnStartSeq}
+                        workspaceSlot={
+                            <WorkspaceSelector
+                                value={liveWorkspaceSelection}
+                                onValueChange={handleLiveWorkspaceChange}
+                                currentWorkspace={activeWorkspace}
+                                busy={isWorkspaceSwitching || isChatBusy}
+                            />
                         }
-                    }}
-                    onInterrupt={() => {
-                        void interrupt().catch(() => {})
-                    }}
-                    onStartNewChat={navigateToLanding}
-                    autoSend={autoSend}
-                    onAutoSendConsumed={handleAutoSendConsumed}
-                    onAutoSendFailed={handleAutoSendFailed}
-                    onPaneDetached={notifyPaneDetachedMidRun}
-                    liveTextByItemId={liveTextByItemId}
-                    localTurnStartSeq={turnStartSeq}
-                    workspaceSlot={
-                        <WorkspaceSelector
-                            value={liveWorkspaceSelection}
-                            onValueChange={handleLiveWorkspaceChange}
-                            currentWorkspace={activeWorkspace}
-                            busy={isWorkspaceSwitching || isChatBusy}
                         />
-                    }
-                />
+                    </TabsContent>
+                    <TabsContent value="rollout" className="min-h-0 flex-1">
+                        <RolloutView threadId={restoredThreadId} />
+                    </TabsContent>
+                </Tabs>
             ) : (
                 landing
             )}

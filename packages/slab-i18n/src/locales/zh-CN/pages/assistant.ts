@@ -29,6 +29,10 @@ export const assistant = {
   header: {
     newSession: '新建会话',
   },
+  tabs: {
+    chat: '对话',
+    trace: '轨迹',
+  },
   runtime: {
     newChat: '新助手',
     newConversation: '新会话',

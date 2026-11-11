@@ -3,11 +3,9 @@ export const agentRollouts = {
     title: 'Agent 调试追踪未开启',
     description: '在设置中开启「Agent 调试追踪」后才能检视 rollout、每轮完整提示词与 trace bundle。',
   },
-  rail: {
-    title: '会话',
-    empty: '未发现 rollout 会话',
-    traceBadge: 'trace',
-  },
+  noThread: '此会话还没有 rollout 记录。发送第一条消息后即可在这里查看完整轨迹。',
+  threadLabel: '线程',
+  traceBadge: 'trace',
   tabs: {
     timeline: '时间线',
     lines: '原始行',
@@ -22,6 +20,7 @@ export const agentRollouts = {
   lines: {
     empty: '无 rollout 行',
     filter: '按 rollout 类型过滤',
+    search: '搜索行内容…',
     all: '全部',
     total: '共 {{total}} 行,已显示 {{shown}} 行',
     loadMore: '加载更多',
