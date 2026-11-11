@@ -54,6 +54,7 @@ const mocks = vi.hoisted(() => {
     isHistoryLoading: false,
     restoredMessages: [] as UIMessage[],
     restoredThreadId: null as string | null,
+    restoredRealThreadId: null as string | null,
     restoreVersion: 1,
     historyCreatedAt: null as number | null,
     transport: {},

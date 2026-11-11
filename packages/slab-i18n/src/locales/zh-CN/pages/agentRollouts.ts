@@ -3,7 +3,7 @@ export const agentRollouts = {
     title: 'Agent 调试追踪未开启',
     description: '在设置中开启「Agent 调试追踪」后才能检视 rollout、每轮完整提示词与 trace bundle。',
   },
-  noThread: '此会话还没有 rollout 记录。发送第一条消息后即可在这里查看完整轨迹。',
+  noThread: '此会话还没有 rollout 记录。发送第一条消息后即可在这里查看完整 rollout。',
   threadLabel: '线程',
   traceBadge: 'trace',
   tabs: {

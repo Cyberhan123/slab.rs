@@ -31,7 +31,7 @@ export const assistant = {
   },
   tabs: {
     chat: 'Chat',
-    trace: 'Trace',
+    rollout: 'Rollout',
   },
   runtime: {
     newChat: 'New assistant',

@@ -302,6 +302,13 @@ export interface ConversationState {
   restoredMessages: UIMessage[]
   /** Harness thread id of the restored conversation (null for a fresh session). */
   restoredThreadId: string | null
+  /**
+   * The REAL slab thread id behind {@link restoredThreadId} (the harness id is
+   * connection-scoped). The rollout/trace HTTP endpoints key on the real id,
+   * so the rollout viewer links the conversation to its on-disk artifacts with
+   * this. Null until a resume reports it (older servers / fresh sessions).
+   */
+  restoredRealThreadId: string | null
   /** Session id once its conversation has been restored (for sidebar highlight). */
   activeConversation: string | undefined
   /** Bumped after each restore completes; used as a remount key for the chat pane. */
@@ -484,6 +491,7 @@ const approvalStatusCache = new WeakMap<
 export const EMPTY_SNAPSHOT: ConversationState = {
   restoredMessages: [],
   restoredThreadId: null,
+  restoredRealThreadId: null,
   activeConversation: undefined,
   restoreVersion: 0,
   isHistoryLoading: false,
@@ -536,6 +544,7 @@ export class ConversationController {
   // Mutable state (mirrors the former hook's useState set).
   private restoredMessages: UIMessage[] = []
   private restoredThreadId: string | null = null
+  private restoredRealThreadId: string | null = null
   private activeConversation: string | undefined
   private restoreVersion = 0
   private isHistoryLoading = false
@@ -751,6 +760,7 @@ export class ConversationController {
       this.client.lastTurnIndex = -1
       this.restoredMessages = []
       this.restoredThreadId = null
+      this.restoredRealThreadId = null
       this.activeConversation = undefined
       this.userMessageTurnIndex = new Map()
       this.error = null
@@ -807,12 +817,15 @@ export class ConversationController {
         // background-task/subagent maps) and diverges from the live fan-out's
         // rewrite id (every later notification gets filtered out). Only the
         // first restore intentionally discovers the thread id-less.
-        const { thread, live } = await this.client.threadResume(
+        const { thread, live, realThreadId } = await this.client.threadResume(
           this.client.currentThreadId ? { threadId: this.client.currentThreadId } : {},
         )
         const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
         this.client.currentThreadId = thread.id
         this.client.lastTurnIndex = computeLastTurnIndex(thread)
+        // The binding's real id travels with the resume result; keep the
+        // projection aligned so the rollout viewer targets the right rollout.
+        this.restoredRealThreadId = realThreadId ?? null
         if (!isCurrent()) return
         // Live catch-up for a RUNNING thread: seed the per-item mirrors so an
         // unattached pane renders the in-flight output immediately, and hand
@@ -881,6 +894,7 @@ export class ConversationController {
         if (!isCurrent()) return
         this.restoredMessages = []
         this.restoredThreadId = null
+        this.restoredRealThreadId = null
         this.activeConversation = this.sessionId
         this.userMessageTurnIndex = new Map()
         this.restoredItemIds = new Set()
@@ -1300,11 +1314,13 @@ export class ConversationController {
     try {
       await this.client.threadCompactStart({ threadId: tid })
       // Re-resume so the pane re-renders with the compacted history.
-      const { thread } = await this.client.threadResume({ threadId: tid })
+      const { thread, realThreadId } = await this.client.threadResume({ threadId: tid })
       const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
       this.client.lastTurnIndex = computeLastTurnIndex(thread)
       this.restoredMessages = messages
       this.userMessageTurnIndex = buildUserMessageTurnIndex(thread)
+      // Same thread, but keep the real-id projection fresh anyway.
+      if (realThreadId) this.restoredRealThreadId = realThreadId
       // historyCreatedAt is unchanged (same thread). Flip the marker to done;
       // it survives the restoreVersion remount because it lives here.
       this.compactionMarkers = this.compactionMarkers.map((m) =>
@@ -1345,13 +1361,16 @@ export class ConversationController {
       // parent thread is retained on disk but is not reachable from the UI
       // until a future thread-picker.
       const { thread: child } = await this.client.threadFork({ threadId: tid })
-      const { thread } = await this.client.threadResume({ threadId: child.id })
+      const { thread, realThreadId } = await this.client.threadResume({ threadId: child.id })
       const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
       this.client.currentThreadId = thread.id
       this.client.lastTurnIndex = computeLastTurnIndex(thread)
       this.restoredMessages = messages
       this.userMessageTurnIndex = buildUserMessageTurnIndex(thread)
       this.restoredThreadId = thread.id
+      // The child is a NEW real thread — a stale real id would point the
+      // rollout viewer at the parent's rollout.
+      this.restoredRealThreadId = realThreadId ?? null
       this.historyCreatedAt = thread.createdAt
       this.restoreVersion += 1
       this.commit()
@@ -1381,11 +1400,13 @@ export class ConversationController {
     this.commit()
     try {
       await this.client.threadRollback({ threadId: tid, toTurnId: String(turnIndex - 1) })
-      const { thread } = await this.client.threadResume({ threadId: tid })
+      const { thread, realThreadId } = await this.client.threadResume({ threadId: tid })
       const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
       this.client.lastTurnIndex = computeLastTurnIndex(thread)
       this.restoredMessages = messages
       this.userMessageTurnIndex = buildUserMessageTurnIndex(thread)
+      // Rollback truncates the SAME thread; refresh the projection only.
+      if (realThreadId) this.restoredRealThreadId = realThreadId
       this.restoreVersion += 1
       this.commit()
     } catch (rollbackError) {
@@ -1527,6 +1548,7 @@ export class ConversationController {
     this.snapshot = {
       restoredMessages: this.restoredMessages,
       restoredThreadId: this.restoredThreadId,
+      restoredRealThreadId: this.restoredRealThreadId,
       activeConversation: this.activeConversation,
       restoreVersion: this.restoreVersion,
       isHistoryLoading: this.isHistoryLoading,

@@ -629,7 +629,15 @@ export type ThreadResumeResult = { thread: Thread,
  * `None` for an idle thread (no open items) — resume behaves exactly as
  * before. Older clients ignore the unknown field.
  */
-live?: ThreadLiveState, };
+live?: ThreadLiveState, 
+/**
+ * The REAL slab thread id behind `thread.id` (a connection-scoped
+ * harness id). The rollout/trace HTTP endpoints key on the real id, so
+ * clients link a resumed thread to its on-disk debug artifacts without
+ * a detour through the sessions listing. Absent on servers predating
+ * this field.
+ */
+realThreadId?: string, };
 
 // ── ThreadRollbackParams ──
 export type ThreadRollbackParams = { threadId: string, toTurnId: string, };

@@ -638,6 +638,9 @@ pub(crate) async fn thread_resume(
         result: ThreadResumeResult {
             thread: thread_from_timeline(&harness_id, &snapshot, &turn_states, &timeline),
             live,
+            // Expose the binding target so clients can reach the rollout/trace
+            // endpoints (they key on the real id, not the harness id).
+            real_thread_id: Some(snapshot.id.clone()),
         },
     })
 }

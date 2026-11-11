@@ -265,6 +265,13 @@ pub struct ThreadResumeResult {
     /// before. Older clients ignore the unknown field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live: Option<ThreadLiveState>,
+    /// The REAL slab thread id behind `thread.id` (a connection-scoped
+    /// harness id). The rollout/trace HTTP endpoints key on the real id, so
+    /// clients link a resumed thread to its on-disk debug artifacts without
+    /// a detour through the sessions listing. Absent on servers predating
+    /// this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub real_thread_id: Option<String>,
 }
 
 /// Snapshot of one in-flight turn's accumulated output at resume time.

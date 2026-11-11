@@ -50,7 +50,7 @@ function Assistant() {
     const trimmedSessionOverride = sessionOverride?.trim() || undefined
     const isDetailView = Boolean(trimmedSessionOverride)
 
-    // Detail-view tab: 对话 (the live chat) / 轨迹 (the rollout trace viewer).
+    // Detail-view tab: 对话 (the live chat) / Rollout (the rollout trace viewer).
     // Switching back to 对话 must never remount the chat pane — its AI-SDK
     // stream IS the live turn, and a remount mid-run would detach it (the
     // orphan-resync path exists for accidents, not for tab switches). The chat
@@ -90,6 +90,7 @@ function Assistant() {
         transport,
         restoredMessages,
         restoredThreadId,
+        restoredRealThreadId,
         activeConversation,
         restoreVersion,
         isHistoryLoading,
@@ -457,7 +458,7 @@ function Assistant() {
                         <TabsList variant="line">
                             <TabsTrigger value="chat">{t("pages.assistant.tabs.chat")}</TabsTrigger>
                             <TabsTrigger value="rollout">
-                                {t("pages.assistant.tabs.trace")}
+                                {t("pages.assistant.tabs.rollout")}
                             </TabsTrigger>
                         </TabsList>
                     </div>
@@ -472,7 +473,7 @@ function Assistant() {
                         <AssistantChatPane
                             key={`${curConversation ?? "none"}:${restoreVersion}`}
                             disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || isPreparingModel || !curConversation}
-                        initialMessages={restoredMessages}
+                            initialMessages={restoredMessages}
                         isHistoryLoading={isHistoryLoading}
                         modelStatusLabel={selectedModelStatusLabel}
                         onBeforeSubmit={handleBeforeSubmit}
@@ -581,7 +582,9 @@ function Assistant() {
                         />
                     </TabsContent>
                     <TabsContent value="rollout" className="min-h-0 flex-1">
-                        <RolloutView threadId={restoredThreadId} />
+                        {/* The rollout endpoints key on the REAL slab thread id,
+                            not the connection-scoped harness id. */}
+                        <RolloutView threadId={restoredRealThreadId} />
                     </TabsContent>
                 </Tabs>
             ) : (

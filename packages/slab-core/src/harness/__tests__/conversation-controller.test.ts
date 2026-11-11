@@ -184,6 +184,42 @@ describe("ConversationController", () => {
     expect(controller.getState().error).toBeNull()
   })
 
+  // The rollout/trace HTTP endpoints key on the REAL slab thread id, not the
+  // connection-scoped harness id — the resume result's `realThreadId` is what
+  // the rollout viewer binds to. A server without the field leaves it null.
+  it("surfaces the resume result's real thread id", async () => {
+    const controller = makeController("s1")
+    controller.start()
+
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(
+      rpcResponse(req.id, { thread: THREAD, realThreadId: "real-thread-1" }),
+    )
+    await flush()
+
+    await vi.waitFor(() => {
+      expect(controller.getState().isHistoryLoading).toBe(false)
+    })
+    expect(controller.getState().restoredThreadId).toBe("hthread-1")
+    expect(controller.getState().restoredRealThreadId).toBe("real-thread-1")
+  })
+
+  it("leaves the real thread id null when the server omits it", async () => {
+    const controller = makeController("s1")
+    controller.start()
+
+    await driveOpenAndInit()
+    const req = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(rpcResponse(req.id, { thread: THREAD }))
+    await flush()
+
+    await vi.waitFor(() => {
+      expect(controller.getState().isHistoryLoading).toBe(false)
+    })
+    expect(controller.getState().restoredRealThreadId).toBeNull()
+  })
+
   it("treats a 'no thread to resume' rejection as a fresh session", async () => {
     const controller = makeController("s2")
     controller.start()

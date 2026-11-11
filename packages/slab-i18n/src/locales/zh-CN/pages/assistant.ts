@@ -31,7 +31,7 @@ export const assistant = {
   },
   tabs: {
     chat: '对话',
-    trace: '轨迹',
+    rollout: 'Rollout',
   },
   runtime: {
     newChat: '新助手',

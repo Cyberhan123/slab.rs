@@ -9,8 +9,10 @@
  *
  * Still gated on the `agent.debug` setting: the server 404s every endpoint
  * when the flag is off, so the view renders an enable-hint instead of empty
- * errors. Rendered as the assistant page's 轨迹 tab; `threadId` is null until
- * the conversation has a bound harness thread.
+ * errors. Rendered as the assistant page's Rollout tab; `threadId` is the REAL
+ * slab thread id (surfaced by `thread/resume` as `realThreadId` — the harness
+ * thread id is connection-scoped and means nothing to these endpoints), null
+ * until the conversation has one.
  */
 
 import api from "@slab/api"

@@ -55,6 +55,7 @@ const mocks = vi.hoisted(() => {
     planMode: false,
     restoredMessages: [] as ConversationState["restoredMessages"],
     restoredThreadId: 'thread-1' as string | null,
+    restoredRealThreadId: 'real-thread-1' as string | null,
     restoreVersion: 1,
     rollbackFromTurn: vi.fn<(turnIndex: number) => void>(),
     setPlanMode: vi.fn<(enabled: boolean) => void>(),
