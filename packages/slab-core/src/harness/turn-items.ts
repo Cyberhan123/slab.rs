@@ -56,6 +56,13 @@ export type ToolItemFields = {
   output?: unknown
   errorText?: string
   failed: boolean
+  /**
+   * Wall-clock execution duration in milliseconds, when the wire item carries
+   * one (`commandExecution` / `mcpToolCall` / `toolCall`). Surfaced on the UI
+   * part as `toolMetadata.durationMs` (the AI-SDK-sanctioned extra-metadata
+   * channel) so both history and live parts can render a "用时 X 秒" summary.
+   */
+  durationMs?: number
 }
 
 /**
@@ -76,6 +83,7 @@ export function toolItemFields(item: TurnItem): ToolItemFields | null {
         output: !failed && item.aggregatedOutput ? item.aggregatedOutput : undefined,
         errorText: failed ? item.aggregatedOutput ?? `exit code ${item.exitCode}` : undefined,
         failed,
+        durationMs: item.durationMs,
       }
     }
     case "mcpToolCall": {
@@ -87,6 +95,7 @@ export function toolItemFields(item: TurnItem): ToolItemFields | null {
           !failed && item.result !== undefined && item.result !== null ? item.result : undefined,
         errorText: failed ? stringifyToolValue(item.error) : undefined,
         failed,
+        durationMs: item.durationMs,
       }
     }
     case "fileChange":
@@ -108,6 +117,7 @@ export function toolItemFields(item: TurnItem): ToolItemFields | null {
           !failed && item.result !== undefined && item.result !== null ? item.result : undefined,
         errorText: failed ? stringifyToolValue(item.error) : undefined,
         failed,
+        durationMs: item.durationMs,
       }
     }
     case "webSearch":
@@ -187,6 +197,11 @@ export function turnItemToUiParts(item: TurnItem): UiPart[] {
         state: fields.failed ? "output-error" : "output-available",
         ...(fields.output !== undefined ? { output: fields.output } : {}),
         ...(fields.errorText !== undefined ? { errorText: fields.errorText } : {}),
+        // Duration rides `toolMetadata` (the AI-SDK-sanctioned extra-metadata
+        // channel) so the card can render a "用时 X 秒" summary on both paths.
+        ...(fields.durationMs !== undefined
+          ? { toolMetadata: { durationMs: fields.durationMs } }
+          : {}),
       } as UiPart
       return [part]
     }

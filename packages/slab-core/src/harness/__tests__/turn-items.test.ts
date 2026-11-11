@@ -184,9 +184,21 @@ describe("harness turnItemToUiParts / toolItemFields (ex-lossy cases)", () => {
       input: { path: "src/main.rs" },
       state: "output-available",
       output: "fn main() {}",
+      // The wire duration lands as toolMetadata (the AI-SDK-sanctioned
+      // extra-metadata channel) so cards can render a "用时 X 秒" summary.
+      toolMetadata: { durationMs: 4 },
     })
 
-    // Failed calls route the payload into errorText and mark output-error.
+    // Items without a wire duration carry no toolMetadata at all.
+    const noDuration = toolItemFields({
+      type: "toolCall",
+      id: "t1b",
+      tool: "read_file",
+      arguments: { path: "a" },
+      status: "completed",
+      result: "x",
+    })
+    expect(noDuration?.durationMs).toBeUndefined()
     expect(
       turnItemToUiParts({
         type: "toolCall",

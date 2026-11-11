@@ -220,6 +220,51 @@ describe("ConversationController", () => {
     expect(controller.getState().restoredRealThreadId).toBeNull()
   })
 
+  // A normal local turn never re-resumes (the terminal handler resyncs only
+  // for queued steering / pane detach), so without the turn/start field a
+  // fresh session's rollout view (keyed on the REAL id) stayed empty until a
+  // reload re-resumed. The turn/start result's `realThreadId` must surface
+  // into the snapshot the moment the first turn starts.
+  it("surfaces the turn start result's real thread id on a fresh session", async () => {
+    const controller = makeController("s-fresh")
+    controller.start()
+
+    await driveOpenAndInit()
+    const resumeReq = JSON.parse(FakeWebSocket.last!.sent.at(-1)!)
+    FakeWebSocket.last!.simMessage(
+      rpcError(resumeReq.id, "no thread to resume for session"),
+    )
+    await flush()
+    await vi.waitFor(() => expect(controller.getState().isHistoryLoading).toBe(false))
+    expect(controller.getState().restoredRealThreadId).toBeNull()
+
+    const socket = FakeWebSocket.last!
+    const sendPromise = controller.send({
+      id: "m1",
+      role: "user",
+      parts: [{ type: "text", text: "hello" }],
+    })
+    await flush()
+    // Fresh session: send binds via thread/start first, then turn/start.
+    const startReq = findRequest(socket, "thread/start")
+    socket.simMessage(rpcResponse(startReq.id, { thread: { ...THREAD, id: "hthread-9" } }))
+    await flush()
+    const turnReq = findRequest(socket, "turn/start")
+    socket.simMessage(
+      rpcResponse(turnReq.id, {
+        turn: { id: "0", status: "in_progress" },
+        realThreadId: "real-thread-9",
+      }),
+    )
+    const result = await sendPromise
+    expect(result.realThreadId).toBe("real-thread-9")
+    expect(controller.getState().restoredRealThreadId).toBe(
+      "real-thread-9",
+      "rollout view binds live, without waiting for a resume",
+    )
+    controller.dispose()
+  })
+
   it("treats a 'no thread to resume' rejection as a fresh session", async () => {
     const controller = makeController("s2")
     controller.start()

@@ -214,18 +214,8 @@ impl RolloutConversationStore for HarnessMockStore {
         self.messages.lock().unwrap().push(record.clone());
         Ok(())
     }
-    async fn append_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError> {
-        let mut states = self.states.lock().unwrap();
-        if let Some(existing) = states
-            .iter_mut()
-            .find(|s| s.thread_id == record.thread_id && s.turn_index == record.turn_index)
-        {
-            *existing = record.clone();
-        } else {
-            states.push(record.clone());
-        }
-        Ok(())
-    }
+    // No `append_turn_state` — turn states reach the rollout only via the
+    // event path; tests seed `states` directly when they need a row.
 }
 
 // ── stub ports (fork/compact/rollback never invoke the LLM or approval) ─────
@@ -696,13 +686,11 @@ async fn harness_list_turn_states_and_items_delegate_to_reader() {
             RolloutItem::TurnContext(slab_agent_rollout::TurnContextPayload::TurnState {
                 turn_index: 0,
                 status: "completed".to_owned(),
-                input_messages: Vec::new(),
-                tool_specs_json: None,
-                llm_response_json: None,
-                error: None,
+                state: slab_agent::protocol::TurnStatePayload::Finished {
+                    error: None,
+                    completed_at: Some("2026-08-02T00:00:05Z".to_owned()),
+                },
                 started_at: Some("2026-08-02T00:00:00Z".to_owned()),
-                completed_at: Some("2026-08-02T00:00:05Z".to_owned()),
-                input_messages_raw: None,
             }),
         )
         .await

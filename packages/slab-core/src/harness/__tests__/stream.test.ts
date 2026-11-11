@@ -239,6 +239,9 @@ describe("harness stream convertNotification", () => {
       },
       {
         output: "fn main() {}",
+        // durationMs rides toolMetadata (the SDK-sanctioned channel) so the
+        // live part can render a duration summary like history does.
+        toolMetadata: { durationMs: 4 },
         toolCallId: "tc1",
         type: "tool-output-available",
       },

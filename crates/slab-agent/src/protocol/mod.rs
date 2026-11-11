@@ -27,7 +27,7 @@ pub use notification::{
     ItemCompletedParams, ItemStartedParams, MessageAppendedParams, QuestionnaireChoiceView,
     QuestionnaireRequestAnswerParams, ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams,
     SubagentChildEventParams, ThreadStatusChangedParams, TurnCompletedParams, TurnStartedParams,
-    TurnStateChangedParams, TurnUsage,
+    TurnStateChangedParams, TurnStatePayload, TurnUsage,
 };
 pub use thread::{GitInfo, Thread};
 pub use turn::{Turn, TurnError};

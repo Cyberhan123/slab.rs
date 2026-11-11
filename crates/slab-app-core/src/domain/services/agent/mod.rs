@@ -50,12 +50,13 @@ use crate::infra::agent::rollout_persistence;
 /// without polluting the slab-agent surface. This is the SOLE
 /// conversation read/write path for app-core-internal callers that do NOT flow
 /// through the slab-agent event stream (notably `single_shot`, which has no
-/// turn loop and emits no `EventMsg` — its out-of-band writes go directly
-/// through `append_message` / `append_turn_state`). slab-agent itself emits
-/// conversation data via `EventMsg` (observed by the rollout persistence
-/// observer); it never touches this trait. Implemented by
-/// `RolloutBackedAgentStore` (rollout replay is the only source); mocked in
-/// harness tests.
+/// turn loop and emits no `EventMsg` — its out-of-band message write goes
+/// directly through `append_message`). slab-agent itself emits conversation
+/// data via `EventMsg` (observed by the rollout persistence observer); it never
+/// touches this trait — turn states reach the rollout ONLY via that event path
+/// (the typed `TurnStateChanged` payload needs no out-of-band writer).
+/// Implemented by `RolloutBackedAgentStore` (rollout replay is the only
+/// source); mocked in harness tests.
 #[async_trait]
 pub(crate) trait RolloutConversationStore: Send + Sync {
     /// Persisted full-fidelity `TurnItem` snapshots for a thread, ordered by
@@ -84,14 +85,6 @@ pub(crate) trait RolloutConversationStore: Send + Sync {
     /// Append a conversation message out-of-band (single_shot write path; NOT
     /// the slab-agent turn loop, which emits `MessageAppended` via `EventMsg`).
     async fn append_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError>;
-
-    /// Append a turn-state snapshot out-of-band (single_shot write path; NOT
-    /// the slab-agent turn loop, which emits `TurnStateChanged` via `EventMsg`).
-    /// Currently exercised by the harness mock + the round-trip test; kept on
-    /// the trait so a future single_shot turn-state write has a home without
-    /// re-polluting the slab-agent surface.
-    #[allow(dead_code)]
-    async fn append_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError>;
 }
 /// Shared core held by both the harness and response services.
 ///

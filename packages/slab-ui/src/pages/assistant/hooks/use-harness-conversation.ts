@@ -125,7 +125,8 @@ export function useHarnessConversation(
         // suppression (begin/end) and the accepted-turn ack the pane's
         // failed-draft re-stage keys off (turn started).
         onLocalStreamBegin: controller.markLocalStreamBegin,
-        onLocalTurnStarted: () => controller.markLocalTurnStarted(),
+        onLocalTurnStarted: (_threadId, realThreadId) =>
+          controller.markLocalTurnStarted(realThreadId),
         onLocalStreamEnd: controller.markLocalStreamEnd,
         // Streamed-vs-final text divergence (leaked think body in the deltas):
         // remount from history at the run's terminal event.

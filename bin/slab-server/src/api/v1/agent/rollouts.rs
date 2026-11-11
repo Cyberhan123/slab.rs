@@ -128,8 +128,9 @@ pub struct RolloutLinesResponse {
 pub struct RolloutTimelineResponse {
     #[schema(value_type = Object)]
     pub thread: serde_json::Value,
-    /// Per turn (indexed): the persisted `TurnState.input_messages`, or `null`
-    /// when the turn has no state record.
+    /// Per turn (indexed): the last `Sampling` turn-state's input messages —
+    /// the exact final prompt the model was sent — or `null` when the turn has
+    /// no sampling snapshot.
     pub turn_prompts: Vec<Option<serde_json::Value>>,
 }
 
@@ -272,18 +273,31 @@ async fn read_rollout_timeline(
     let turn_count = thread.turns.len();
     let thread_value =
         serde_json::to_value(&thread).map_err(|error| ServerError::Internal(error.to_string()))?;
-    let turn_prompts = (0..turn_count)
-        .map(|index| {
-            turn_states
-                .iter()
-                .rev()
-                .find(|state| state.turn_index == index as u32)
-                .and_then(|state| state.input_messages_json.as_deref())
-                .and_then(|json| serde_json::from_str(json).ok())
-        })
-        .collect();
+    let turn_prompts: Vec<Option<serde_json::Value>> =
+        (0..turn_count as u32).map(|index| turn_prompt_for_turn(&turn_states, index)).collect();
 
     Ok(Json(RolloutTimelineResponse { thread: thread_value, turn_prompts }))
+}
+
+/// The per-turn timeline prompt: the LAST `Sampling` turn-state's input — the
+/// exact prompt the model was sent on that turn's final iteration — or `None`
+/// when the turn has no sampling snapshot.
+///
+/// Matching on the typed variant (not just "the last state of the turn") is
+/// load-bearing: a turn also emits `Phase` lines and a terminal `Finished`
+/// state, which carry no input — the old "take the last row" rule surfaced
+/// those input-less rows as null prompts once terminal states stopped copying
+/// the input snapshot.
+fn turn_prompt_for_turn(
+    turn_states: &[slab_agent::port::TurnStateRecord],
+    turn_index: u32,
+) -> Option<serde_json::Value> {
+    turn_states
+        .iter()
+        .rev()
+        .filter(|state| state.turn_index == turn_index)
+        .find_map(|state| state.state.sampling_input())
+        .and_then(|messages| serde_json::to_value(messages).ok())
 }
 
 #[utoipa::path(
@@ -337,4 +351,96 @@ async fn read_rollout_trace(
     let manifest = serde_json::to_value(bundle.manifest())
         .map_err(|error| ServerError::Internal(error.to_string()))?;
     Ok(Json(RolloutTraceResponse { manifest, events, total_events, conversation }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use slab_agent::port::TurnStateRecord;
+    use slab_agent::protocol::TurnStatePayload;
+    use slab_types::ConversationMessage;
+
+    fn user_msg(text: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: "user".to_owned(),
+            content: slab_types::ConversationMessageContent::Text(text.to_owned()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![],
+        }
+    }
+
+    fn state_record(turn_index: u32, status: &str, state: TurnStatePayload) -> TurnStateRecord {
+        TurnStateRecord {
+            thread_id: "t".to_owned(),
+            turn_index,
+            status: status.to_owned(),
+            state,
+            started_at: "2026-01-01T00:00:00Z".to_owned(),
+        }
+    }
+
+    fn sampling(turn_index: u32, texts: &[&str]) -> TurnStateRecord {
+        state_record(
+            turn_index,
+            "sampling",
+            TurnStatePayload::Sampling {
+                input_messages: texts.iter().map(|t| user_msg(t)).collect(),
+                tool_specs_json: None,
+            },
+        )
+    }
+
+    // Regression for the old `.rev().find(last row of the turn)` rule: a turn
+    // ends with `Phase` lines and a terminal `Finished` state, which carry NO
+    // input — the prompt lookup must skip them (typed variant match) and take
+    // the LAST Sampling snapshot, i.e. the final iteration's actual prompt.
+    #[test]
+    fn turn_prompt_takes_last_sampling_snapshot_past_phase_and_finished_rows() {
+        let states = vec![
+            sampling(0, &["iter-1 prompt"]),
+            state_record(0, "executing_tools", TurnStatePayload::Phase),
+            sampling(0, &["iter-1 prompt", "tool result", "iter-2 prompt"]),
+            state_record(0, "executing_tools", TurnStatePayload::Phase),
+            state_record(
+                0,
+                "completed",
+                TurnStatePayload::Finished {
+                    error: None,
+                    completed_at: Some("2026-01-01T00:00:09Z".to_owned()),
+                },
+            ),
+        ];
+        let prompt = turn_prompt_for_turn(&states, 0).expect("sampling snapshot present");
+        let texts: Vec<String> = prompt
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["content"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            texts,
+            vec!["iter-1 prompt", "tool result", "iter-2 prompt"],
+            "the FINAL iteration's snapshot wins, not the terminal/phase rows"
+        );
+    }
+
+    // A turn with only phase/terminal rows (no sampling snapshot) has no
+    // prompt — null, not an empty array.
+    #[test]
+    fn turn_prompt_is_none_without_sampling_snapshot() {
+        let states = vec![
+            state_record(1, "awaiting_approval", TurnStatePayload::Phase),
+            state_record(
+                1,
+                "interrupted",
+                TurnStatePayload::Finished {
+                    error: Some("interrupted".to_owned()),
+                    completed_at: Some("2026-01-01T00:00:09Z".to_owned()),
+                },
+            ),
+        ];
+        assert!(turn_prompt_for_turn(&states, 1).is_none());
+        assert!(turn_prompt_for_turn(&states, 9).is_none(), "absent turn → null");
+    }
 }

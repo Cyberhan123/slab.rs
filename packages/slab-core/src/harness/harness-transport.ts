@@ -56,12 +56,14 @@ export interface HarnessChatTransportOptions {
    *   there). Drives the mid-run restoreVersion suppression.
    * - `onLocalTurnStarted`: the server ACCEPTED the turn (`turn/start`
    *   resolved). Advances `turnStartSeq` — the pane's failed-send re-stage
-   *   decision keys off it. Never fires for a rejected `turn/start`.
+   *   decision keys off it. Carries the result's `realThreadId` when the
+   *   server exposes it (rollout/trace view binding). Never fires for a
+   *   rejected `turn/start`.
    * - `onLocalStreamEnd`: the stream finished (any outcome), un-sticking the
    *   suppression flag on failed sends.
    */
   onLocalStreamBegin?: () => void
-  onLocalTurnStarted?: (threadId: string) => void
+  onLocalTurnStarted?: (threadId: string, realThreadId?: string) => void
   onLocalStreamEnd?: () => void
   /**
    * The completed agentMessage item's authoritative text disagrees with the
@@ -128,7 +130,7 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
   private readonly client: HarnessClient
   private readonly model: string
   private readonly onLocalStreamBegin?: () => void
-  private readonly onLocalTurnStarted?: (threadId: string) => void
+  private readonly onLocalTurnStarted?: (threadId: string, realThreadId?: string) => void
   private readonly onLocalStreamEnd?: () => void
   private readonly onItemTextDivergence?: (itemId: string) => void
 
@@ -251,12 +253,13 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
             }
             this.client
               .turnStart(turnParams)
-              // Ack the ACCEPTED turn (advances the controller's turnStartSeq).
-              // A rejection takes the catch below and never acks — the pane
-              // then knows the turn never started server-side and may
-              // re-stage the draft.
-              .then(() => {
-                this.onLocalTurnStarted?.(threadId)
+              // Ack the ACCEPTED turn (advances the controller's turnStartSeq;
+              // the result's realThreadId binds the rollout/trace view live —
+              // a normal local turn never re-resumes). A rejection takes the
+              // catch below and never acks — the pane then knows the turn
+              // never started server-side and may re-stage the draft.
+              .then((result) => {
+                this.onLocalTurnStarted?.(threadId, result?.realThreadId)
               })
               .catch((error) => {
                 if (finished) return

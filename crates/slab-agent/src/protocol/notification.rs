@@ -155,28 +155,71 @@ pub struct MessageAppendedParams {
     pub created_at: String,
 }
 
-/// A turn-state snapshot was upserted (running / llm_completed / completed /
-/// failed / ...). Carries the full `TurnStateRecord` shape so the observer can
-/// build a `TurnContext::TurnState` rollout line. The input messages travel as
-/// a typed vec (NOT a json blob), so the F6 raw-blob recovery path is dead for
-/// this event — `input_messages_raw` is intentionally absent.
+/// The typed payload of [`TurnStateChangedParams`] — what used to be three
+/// semantics crammed into one flat struct (distinguished only by the
+/// "`input_messages` is empty = no-op" CONVENTION) is now three variants:
+///
+/// - [`TurnStatePayload::Sampling`]: the sampling-entry full snapshot (the
+///   per-iteration replay anchor). The ONLY variant that carries input —
+///   replay replaces the conversation baseline with it.
+/// - [`TurnStatePayload::Phase`]: an advisory phase announcement
+///   (`executing_tools` / `awaiting_approval` / `compacting` / re-sampling).
+///   No payload; the phase name travels on the params' `status` field.
+/// - [`TurnStatePayload::Finished`]: the terminal turn result. Has NO input
+///   field, so the historical "terminal line copies the whole input" bug is
+///   structurally impossible.
+///
+/// The rollout disk line embeds this enum verbatim (`TurnContext::TurnState`
+/// → `state`), so old flat lines (which have no `state` key) fail to parse
+/// and are skipped by the reader's fault tolerance — old rollout files are
+/// intentionally not compatible (they are disposable debug artifacts).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum TurnStatePayload {
+    /// Sampling-entry snapshot: the FULL message list the model was sent this
+    /// iteration (replay anchor) plus the serialized tool specs.
+    Sampling {
+        input_messages: Vec<ConversationMessage>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_specs_json: Option<String>,
+    },
+    /// Advisory phase broadcast — status-only, no payload.
+    Phase,
+    /// Terminal turn result. No input field by construction.
+    Finished {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+        /// RFC 3339 completion timestamp.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        completed_at: Option<String>,
+    },
+}
+
+impl TurnStatePayload {
+    /// The input snapshot of a [`TurnStatePayload::Sampling`] variant, if this
+    /// is one. Replay anchors read through here — a terminal/phase line
+    /// cannot answer by construction.
+    pub fn sampling_input(&self) -> Option<&[ConversationMessage]> {
+        match self {
+            Self::Sampling { input_messages, .. } => Some(input_messages),
+            Self::Phase | Self::Finished { .. } => None,
+        }
+    }
+}
+
+/// A turn-state transition was recorded. The semantics live in
+/// [`TurnStatePayload::state`]; `status` names the phase
+/// (`TurnPhase::as_str`) for both advisory and terminal lines, and
+/// `started_at` is the iteration's turn-start timestamp (F4).
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnStateChangedParams {
     pub thread_id: String,
     pub turn_index: u32,
     pub status: String,
-    pub input_messages: Vec<ConversationMessage>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_specs_json: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub llm_response_json: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+    pub state: TurnStatePayload,
     /// RFC 3339 turn-start timestamp (F4).
     pub started_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub completed_at: Option<String>,
 }
 
 // ---- items ----
@@ -425,5 +468,66 @@ mod tests {
             estimated: true,
         };
         assert_eq!(TurnUsage::from(bare).cached_tokens, None);
+    }
+
+    // Design-refactor pin: the terminal turn-state payload is a typed
+    // `Finished` variant with NO input field — the historical "completed line
+    // copies the whole input" bug is structurally impossible. The rollout disk
+    // line embeds this enum, so the wire shape here is the disk shape.
+    #[test]
+    fn turn_state_payload_discriminates_sampling_phase_finished() {
+        let finished = TurnStateChangedParams {
+            thread_id: "t".to_owned(),
+            turn_index: 3,
+            status: "completed".to_owned(),
+            state: TurnStatePayload::Finished {
+                error: None,
+                completed_at: Some("2026-01-01T00:00:05Z".to_owned()),
+            },
+            started_at: "2026-01-01T00:00:00Z".to_owned(),
+        };
+        let json = serde_json::to_value(&finished).unwrap();
+        assert_eq!(json["state"]["kind"], "finished");
+        assert_eq!(json["state"]["completedAt"], "2026-01-01T00:00:05Z");
+        assert!(
+            json["state"].get("inputMessages").is_none() && json.get("inputMessages").is_none(),
+            "terminal payload must carry no input snapshot: {json}"
+        );
+
+        let sampling = TurnStateChangedParams {
+            thread_id: "t".to_owned(),
+            turn_index: 3,
+            status: "sampling".to_owned(),
+            state: TurnStatePayload::Sampling {
+                input_messages: vec![ConversationMessage {
+                    role: "user".to_owned(),
+                    content: slab_types::ConversationMessageContent::Text("hi".to_owned()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                }],
+                tool_specs_json: None,
+            },
+            started_at: "2026-01-01T00:00:00Z".to_owned(),
+        };
+        let json = serde_json::to_value(&sampling).unwrap();
+        assert_eq!(json["state"]["kind"], "sampling");
+        assert_eq!(json["state"]["inputMessages"][0]["role"], "user");
+
+        let phase = TurnStateChangedParams {
+            thread_id: "t".to_owned(),
+            turn_index: 3,
+            status: "executing_tools".to_owned(),
+            state: TurnStatePayload::Phase,
+            started_at: "2026-01-01T00:00:00Z".to_owned(),
+        };
+        let json = serde_json::to_value(&phase).unwrap();
+        assert_eq!(json["state"]["kind"], "phase");
+
+        // sampling_input() is the typed replay gate: Phase/Finished cannot
+        // answer, only Sampling does.
+        assert!(TurnStatePayload::Phase.sampling_input().is_none());
+        assert!(finished.state.sampling_input().is_none());
+        assert_eq!(sampling.state.sampling_input().unwrap().len(), 1);
     }
 }

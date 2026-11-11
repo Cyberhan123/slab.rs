@@ -2,6 +2,12 @@
  * Trace tab: the thread's trace bundle — manifest, the raw trace events, and
  * the reducer's L3 reconstruction of the conversation the model actually saw
  * (the cross-check for the timeline's per-turn prompts).
+ *
+ * Events are fetched NETWORK-PAGED (offset/limit) instead of one full
+ * `limit=5000` pull per tab switch. The endpoint pages only the `events`
+ * array — manifest + conversation ride along on every page fetch (a debug
+ * viewer tradeoff; the first page alone is far lighter than the old full
+ * pull).
  */
 
 import api from "@slab/api"
@@ -9,12 +15,11 @@ import { Button } from "@slab/components/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@slab/components/collapsible"
 import { ScrollArea } from "@slab/components/scroll-area"
 import { ChevronRightIcon } from "lucide-react"
-import { useState } from "react"
 import { useTranslation } from "@slab/i18n"
 
 import { JsonBlock } from "./json-block"
 
-const PAGE = 100
+const PAGE = 500
 
 /**
  * `hasTrace` comes from the rollout session list (`SessionMeta.trace_path`).
@@ -24,11 +29,27 @@ const PAGE = 100
  */
 export function TraceTab({ threadId, hasTrace }: { threadId: string; hasTrace?: boolean }) {
   const { t } = useTranslation()
-  const [visible, setVisible] = useState(PAGE)
-  const { data, isLoading, error } = api.useQuery(
+  const {
+    data,
+    isLoading,
+    error,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = api.useInfiniteQuery(
     "get",
     "/v1/agents/rollouts/{thread_id}/trace",
-    { params: { path: { thread_id: threadId }, query: { limit: 5000 } } },
+    { params: { path: { thread_id: threadId }, query: { limit: PAGE } } },
+    {
+      pageParamName: "offset",
+      initialPageParam: 0,
+      getNextPageParam: (lastPage, _allPages, lastPageParam) => {
+        const fetched = (lastPageParam as number) + lastPage.events.length
+        return fetched < lastPage.total_events && lastPage.events.length > 0
+          ? fetched
+          : undefined
+      },
+    },
   )
 
   if (hasTrace === false) {
@@ -42,7 +63,9 @@ export function TraceTab({ threadId, hasTrace }: { threadId: string; hasTrace?: 
       <p className="p-4 text-sm text-destructive">{String(error as unknown)}</p>
     )
 
-  const shown = (data?.events ?? []).slice(0, visible)
+  // Manifest + conversation come from the FIRST page; events accumulate.
+  const firstPage = data?.pages[0]
+  const events = (data?.pages ?? []).flatMap((page) => page.events)
   return (
     <ScrollArea className="h-full">
       <div className="space-y-4 pb-8">
@@ -53,7 +76,7 @@ export function TraceTab({ threadId, hasTrace }: { threadId: string; hasTrace?: 
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="px-2 pb-2">
-              <JsonBlock value={data?.manifest} />
+              <JsonBlock value={firstPage?.manifest} />
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -67,12 +90,12 @@ export function TraceTab({ threadId, hasTrace }: { threadId: string; hasTrace?: 
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="space-y-2 px-2 pb-2">
-              {(data?.conversation ?? []).length === 0 ? (
+              {(firstPage?.conversation ?? []).length === 0 ? (
                 <p className="text-xs text-muted-foreground">
                   {t("pages.agentRollouts.trace.conversationEmpty")}
                 </p>
               ) : (
-                (data?.conversation ?? []).map((message, index) => (
+                (firstPage?.conversation ?? []).map((message, index) => (
                   <div
                     // Entries are raw JSON without stable ids; the list is
                     // append-only, so position is the identity.
@@ -97,24 +120,25 @@ export function TraceTab({ threadId, hasTrace }: { threadId: string; hasTrace?: 
             <span className="font-medium">{t("pages.agentRollouts.trace.events")}</span>
             <span className="ml-auto text-micro text-muted-foreground">
               {t("pages.agentRollouts.trace.eventsCount", {
-                shown: shown.length,
-                total: data?.total_events ?? 0,
+                shown: events.length,
+                total: firstPage?.total_events ?? 0,
               })}
             </span>
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="space-y-2 px-2 pb-2">
-              {shown.map((event, index) => {
+              {events.map((event, index) => {
                 // The event log is append-only raw JSON without stable ids.
                 // oxlint-disable-next-line react/no-array-index-key -- positional log rows
                 return <JsonBlock key={index} value={event} className="max-h-48" />
               })}
-              {shown.length < (data?.events ?? []).length ? (
+              {hasNextPage ? (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setVisible((count) => count + PAGE)}
+                  disabled={isFetchingNextPage}
+                  onClick={() => fetchNextPage()}
                 >
                   {t("pages.agentRollouts.trace.loadMore")}
                 </Button>

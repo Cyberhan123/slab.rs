@@ -14,7 +14,7 @@ use slab_types::ConversationMessage;
 use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::plan::Plan;
-use crate::protocol::EventMsg;
+use crate::protocol::{EventMsg, TurnStatePayload};
 
 /// Thread lifecycle status, re-exported from `slab_types` for convenience.
 pub type ThreadStatus = slab_types::agent::AgentThreadStatus;
@@ -109,17 +109,21 @@ pub struct ThreadMessageRecord {
 }
 
 /// Persisted state snapshot for a single agent turn.
+///
+/// A faithful projection of a rollout `TurnContext::TurnState` line: `status`
+/// names the phase, [`TurnStatePayload::state`] carries the typed payload.
+/// Only the [`TurnStatePayload::Sampling`] variant carries an input snapshot —
+/// consumers that need "the prompt the model was sent" must read through
+/// [`TurnStatePayload::sampling_input`], which terminal/phase lines cannot
+/// answer by construction.
 #[derive(Debug, Clone)]
 pub struct TurnStateRecord {
     pub thread_id: String,
     pub turn_index: u32,
     pub status: String,
-    pub input_messages_json: Option<String>,
-    pub tool_specs_json: Option<String>,
-    pub llm_response_json: Option<String>,
-    pub error: Option<String>,
+    pub state: TurnStatePayload,
+    /// RFC 3339 turn-start timestamp (recovered from the line, F4).
     pub started_at: String,
-    pub completed_at: Option<String>,
 }
 
 /// Persisted full-fidelity harness `TurnItem` snapshot (one finalized item).

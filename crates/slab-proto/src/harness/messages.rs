@@ -553,6 +553,16 @@ pub struct TurnStartResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub queued: Option<bool>,
+    /// The REAL slab thread id behind the harness binding — materialized by
+    /// THIS call on a fresh session's first turn (both the existing-thread and
+    /// fresh-spawn branches hold it). A normal local turn never re-resumes,
+    /// so without this a client's rollout/trace view (keyed on the real id)
+    /// stays empty until a reload re-resumes; surfacing it here makes the
+    /// view live the moment the first turn starts. Absent on servers
+    /// predating this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub real_thread_id: Option<String>,
 }
 
 // ============ turn/interrupt ============

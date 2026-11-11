@@ -683,16 +683,16 @@ impl RolloutStore for RolloutFileStore {
                         out = payload.compacted_messages;
                     }
                 }
-                // A TurnState carries the FULL message list the model was sent this
-                // turn, so it supersedes the prior history: REPLACE out with
-                // input_messages when non-empty (replace-not-append is correct
-                // because each TurnState rebuilds the whole list; only
-                // MessageAppends after the last TurnState are true increments).
-                RolloutItem::TurnContext(TurnContextPayload::TurnState {
-                    input_messages, ..
-                }) => {
-                    if !input_messages.is_empty() {
-                        out = input_messages;
+                // A `Sampling` TurnState carries the FULL message list the model
+                // was sent this iteration, so it supersedes the prior history:
+                // REPLACE out with its input (replace-not-append is correct
+                // because each snapshot rebuilds the whole list; only
+                // MessageAppends after the last Sampling line are true
+                // increments). `Phase` and `Finished` lines contribute nothing —
+                // they carry no input field by construction.
+                RolloutItem::TurnContext(TurnContextPayload::TurnState { state, .. }) => {
+                    if let Some(input_messages) = state.sampling_input() {
+                        out = input_messages.to_vec();
                     }
                 }
                 RolloutItem::TurnContext(TurnContextPayload::MessageAppend { message, .. }) => {
@@ -938,7 +938,7 @@ impl RolloutStore for RolloutFileStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slab_agent::protocol::{EventMsg, TurnItem};
+    use slab_agent::protocol::{EventMsg, TurnItem, TurnStatePayload};
     use slab_types::{ConversationMessage, ConversationMessageContent};
 
     fn store(dir: &tempfile::TempDir) -> RolloutFileStore {
@@ -1538,19 +1538,17 @@ mod tests {
         )
         .await
         .unwrap();
-        // The post-compaction baseline rides in the next TurnState.
+        // The post-compaction baseline rides in the next Sampling snapshot.
         s.append(
             "t",
             RolloutItem::TurnContext(TurnContextPayload::TurnState {
                 turn_index: 1,
-                status: "ok".to_owned(),
-                input_messages: vec![user_msg("summary")],
-                tool_specs_json: None,
-                llm_response_json: None,
-                error: None,
-                completed_at: None,
+                status: "sampling".to_owned(),
+                state: TurnStatePayload::Sampling {
+                    input_messages: vec![user_msg("summary")],
+                    tool_specs_json: None,
+                },
                 started_at: None,
-                input_messages_raw: None,
             }),
         )
         .await
@@ -1578,14 +1576,12 @@ mod tests {
             "t",
             RolloutItem::TurnContext(TurnContextPayload::TurnState {
                 turn_index: 0,
-                status: "ok".to_owned(),
-                input_messages: vec![user_msg("A"), user_msg("B")],
-                tool_specs_json: None,
-                llm_response_json: None,
-                error: None,
-                completed_at: None,
+                status: "sampling".to_owned(),
+                state: TurnStatePayload::Sampling {
+                    input_messages: vec![user_msg("A"), user_msg("B")],
+                    tool_specs_json: None,
+                },
                 started_at: None,
-                input_messages_raw: None,
             }),
         )
         .await
@@ -1605,14 +1601,17 @@ mod tests {
             "t",
             RolloutItem::TurnContext(TurnContextPayload::TurnState {
                 turn_index: 1,
-                status: "ok".to_owned(),
-                input_messages: vec![user_msg("A"), user_msg("B"), user_msg("C"), user_msg("D")],
-                tool_specs_json: None,
-                llm_response_json: None,
-                error: None,
-                completed_at: None,
+                status: "sampling".to_owned(),
+                state: TurnStatePayload::Sampling {
+                    input_messages: vec![
+                        user_msg("A"),
+                        user_msg("B"),
+                        user_msg("C"),
+                        user_msg("D"),
+                    ],
+                    tool_specs_json: None,
+                },
                 started_at: None,
-                input_messages_raw: None,
             }),
         )
         .await
@@ -1627,6 +1626,69 @@ mod tests {
             })
             .collect();
         assert_eq!(texts, vec!["A".to_owned(), "B".to_owned(), "C".to_owned(), "D".to_owned()]);
+    }
+
+    // Design-refactor pin: `Phase` (advisory) and `Finished` (terminal)
+    // TurnState lines carry NO input by construction, so they must never touch
+    // the replayed baseline — not even a `Phase` line stamped with the same
+    // status string as a sampling entry would. Only the `Sampling` variant
+    // replaces; MessageAppends after the last Sampling line still accrue.
+    #[tokio::test]
+    async fn phase_and_finished_turn_states_are_replay_no_ops() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+        s.create_session(default_meta("t"));
+        // Sampling anchor [A], then a Phase line, then a tool result, then the
+        // terminal Finished line — replay must yield [A, C].
+        for state in [
+            TurnContextPayload::TurnState {
+                turn_index: 0,
+                status: "sampling".to_owned(),
+                state: TurnStatePayload::Sampling {
+                    input_messages: vec![user_msg("A")],
+                    tool_specs_json: None,
+                },
+                started_at: None,
+            },
+            TurnContextPayload::TurnState {
+                turn_index: 0,
+                status: "executing_tools".to_owned(),
+                state: TurnStatePayload::Phase,
+                started_at: None,
+            },
+            TurnContextPayload::MessageAppend {
+                turn_index: 0,
+                message: user_msg("C"),
+                id: None,
+                created_at: None,
+            },
+            TurnContextPayload::TurnState {
+                turn_index: 0,
+                status: "completed".to_owned(),
+                state: TurnStatePayload::Finished {
+                    error: None,
+                    completed_at: Some("2026-08-02T00:00:01Z".to_owned()),
+                },
+                started_at: None,
+            },
+        ] {
+            s.append("t", RolloutItem::TurnContext(state)).await.unwrap();
+        }
+
+        let texts: Vec<String> = s
+            .read_messages("t")
+            .await
+            .iter()
+            .map(|m| match &m.content {
+                ConversationMessageContent::Text(t) => t.clone(),
+                _ => String::new(),
+            })
+            .collect();
+        assert_eq!(
+            texts,
+            vec!["A".to_owned(), "C".to_owned()],
+            "Phase/Finished lines are replay no-ops; only Sampling replaces"
+        );
     }
 
     // H3: rollback-after-compaction. A Compacted marker belonging to a rolled-back
@@ -2732,14 +2794,9 @@ mod tests {
     fn turn_state(turn: u32, input: Vec<slab_types::ConversationMessage>) -> RolloutItem {
         RolloutItem::TurnContext(TurnContextPayload::TurnState {
             turn_index: turn,
-            status: "completed".to_owned(),
-            input_messages: input,
-            tool_specs_json: None,
-            llm_response_json: None,
-            error: None,
-            completed_at: None,
+            status: "sampling".to_owned(),
+            state: TurnStatePayload::Sampling { input_messages: input, tool_specs_json: None },
             started_at: None,
-            input_messages_raw: None,
         })
     }
 

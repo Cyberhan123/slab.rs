@@ -167,11 +167,12 @@ async fn process_event_msg(
         }
         EventMsg::TurnStateChanged(params) => {
             // Turn-state write path. Maps 1:1 to the rollout
-            // TurnContext::TurnState line, preserving F4 (started_at). The input
-            // messages travel as a typed vec (NOT a json blob) so the F6
-            // raw-blob recovery path is dead here — `input_messages_raw` is
-            // always None. Replaces the old slab-agent store-trait
-            // `upsert_turn_state` route.
+            // TurnContext::TurnState line, preserving F4 (started_at) and the
+            // typed payload verbatim — only the `Sampling` variant carries an
+            // input snapshot; `Phase` is status-only and `Finished` carries no
+            // input field, so the historical "terminal line copies the whole
+            // input" bug cannot recur at any layer. Replaces the old slab-agent
+            // store-trait `upsert_turn_state` route.
             use slab_agent_rollout::TurnContextPayload;
             if let Err(error) = rollout
                 .append(
@@ -179,13 +180,8 @@ async fn process_event_msg(
                     RolloutItem::TurnContext(TurnContextPayload::TurnState {
                         turn_index: params.turn_index,
                         status: params.status.clone(),
-                        input_messages: params.input_messages.clone(),
-                        tool_specs_json: params.tool_specs_json.clone(),
-                        llm_response_json: params.llm_response_json.clone(),
-                        error: params.error.clone(),
-                        completed_at: params.completed_at.clone(),
+                        state: params.state.clone(),
                         started_at: Some(params.started_at.clone()),
-                        input_messages_raw: None,
                     }),
                 )
                 .await
@@ -251,7 +247,7 @@ mod tests {
     use slab_agent::port::AgentNotifyPort;
     use slab_agent::protocol::{
         ContextCompactedParams, ErrorEvent, ItemCompletedParams, MessageAppendedParams, Turn,
-        TurnCompletedParams, TurnStartedParams, TurnStateChangedParams,
+        TurnCompletedParams, TurnStartedParams, TurnStateChangedParams, TurnStatePayload,
     };
     use slab_agent_rollout::{RolloutItem, SessionMeta, TurnContextPayload};
 
@@ -705,13 +701,12 @@ mod tests {
                 &EventMsg::TurnStateChanged(TurnStateChangedParams {
                     thread_id: "t".to_owned(),
                     turn_index: 2,
-                    status: "running".to_owned(),
-                    input_messages: vec![user_msg("turn-2-input")],
-                    tool_specs_json: None,
-                    llm_response_json: None,
-                    error: None,
+                    status: "sampling".to_owned(),
+                    state: TurnStatePayload::Sampling {
+                        input_messages: vec![user_msg("turn-2-input")],
+                        tool_specs_json: None,
+                    },
                     started_at: "2026-01-01T00:00:00Z".to_owned(),
-                    completed_at: None,
                 }),
             )
             .await;
@@ -743,6 +738,77 @@ mod tests {
         assert_eq!(
             a2.turn_index, 2,
             "TurnStateChanged(2) alone must anchor attribution: item attributed to turn 2"
+        );
+    }
+
+    // Design-refactor pin: a terminal (`Finished`) TurnStateChanged must land
+    // a rollout line whose typed state is `finished` and whose JSON carries NO
+    // input snapshot — the observer preserves the payload verbatim instead of
+    // re-copying columns, so the historical "completed line duplicates the
+    // whole input" bug cannot recur at the persistence boundary either.
+    #[tokio::test]
+    async fn finished_turn_state_persists_without_input_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let (rollout, events) = harness(&dir);
+        spawn_rollout_persistence(
+            Arc::clone(&rollout),
+            Arc::clone(&events),
+            "t".to_owned(),
+            EventPersistenceMode::Limited,
+        );
+
+        events
+            .on_event_msg(
+                "t",
+                &EventMsg::TurnStateChanged(TurnStateChangedParams {
+                    thread_id: "t".to_owned(),
+                    turn_index: 0,
+                    status: "completed".to_owned(),
+                    state: TurnStatePayload::Finished {
+                        error: None,
+                        completed_at: Some("2026-01-01T00:00:05Z".to_owned()),
+                    },
+                    started_at: "2026-01-01T00:00:00Z".to_owned(),
+                }),
+            )
+            .await;
+
+        let wait = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                rollout.flush("t").await.unwrap();
+                if slab_agent_rollout::read_rollout_lines(&rollout.resolve_path("t")).iter().any(
+                    |l| {
+                        matches!(
+                            &l.item,
+                            RolloutItem::TurnContext(TurnContextPayload::TurnState { state, .. })
+                                if matches!(state, TurnStatePayload::Finished { .. })
+                        )
+                    },
+                ) {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        wait.expect("observer did not persist the finished turn state in time");
+
+        let line = slab_agent_rollout::read_rollout_lines(&rollout.resolve_path("t"))
+            .into_iter()
+            .find_map(|l| match l.item {
+                RolloutItem::TurnContext(TurnContextPayload::TurnState {
+                    state: TurnStatePayload::Finished { .. },
+                    ..
+                }) => Some(l),
+                _ => None,
+            })
+            .expect("finished line present");
+        let json = serde_json::to_value(&line.item).unwrap();
+        // RolloutItem is adjacently tagged: the payload sits under `item`.
+        assert_eq!(json["item"]["state"]["kind"], "finished");
+        assert!(
+            json["item"]["state"].get("inputMessages").is_none(),
+            "terminal line must carry no input snapshot: {json}"
         );
     }
 
@@ -919,21 +985,20 @@ mod tests {
         .await;
         wait.expect("auto-compact marker not persisted");
 
-        // The adapter writes the turn-1 TurnState carrying the compacted baseline
-        // (persist_turn_state at turn end, after maybe_compact replaced `messages`).
+        // The next iteration's SAMPLING snapshot carries the compacted baseline
+        // (only the Sampling variant holds input; production emits it at the
+        // sampling entry after maybe_compact replaced `messages`).
         rollout
             .append(
                 "t",
                 RolloutItem::TurnContext(TurnContextPayload::TurnState {
                     turn_index: 1,
-                    status: "completed".to_owned(),
-                    input_messages: vec![user_msg("summary")],
-                    tool_specs_json: None,
-                    llm_response_json: None,
-                    error: None,
-                    completed_at: None,
+                    status: "sampling".to_owned(),
+                    state: TurnStatePayload::Sampling {
+                        input_messages: vec![user_msg("summary")],
+                        tool_specs_json: None,
+                    },
                     started_at: None,
-                    input_messages_raw: None,
                 }),
             )
             .await

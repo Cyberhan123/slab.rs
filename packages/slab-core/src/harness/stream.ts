@@ -163,6 +163,11 @@ function finishChunks(state: StreamState, reason: "stop" | "error" = "stop"): UI
 function toolChunksFromItem(state: StreamState, item: TurnItem): UIMessageChunk[] {
   const fields = toolItemFields(item)
   if (!fields) return []
+  // Duration rides `toolMetadata` — the AI-SDK-sanctioned extra-metadata
+  // channel, forwarded verbatim onto the assembled part (an ad-hoc extra chunk
+  // field would be dropped by the SDK's explicit field copies).
+  const toolMetadata =
+    fields.durationMs !== undefined ? { durationMs: fields.durationMs } : undefined
   const chunks: UIMessageChunk[] = [
     {
       input: fields.input,
@@ -175,6 +180,7 @@ function toolChunksFromItem(state: StreamState, item: TurnItem): UIMessageChunk[
     state.openTools.delete(item.id)
     chunks.push({
       errorText: fields.errorText ?? "",
+      ...(toolMetadata ? { toolMetadata } : {}),
       toolCallId: item.id,
       type: "tool-output-error",
     })
@@ -182,6 +188,7 @@ function toolChunksFromItem(state: StreamState, item: TurnItem): UIMessageChunk[
     state.openTools.delete(item.id)
     chunks.push({
       output: fields.output,
+      ...(toolMetadata ? { toolMetadata } : {}),
       toolCallId: item.id,
       type: "tool-output-available",
     })

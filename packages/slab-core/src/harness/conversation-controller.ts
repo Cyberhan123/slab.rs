@@ -977,7 +977,17 @@ export class ConversationController {
       params.approvalModel = options.approvalModel
       if (options.approvalPrompt) params.approvalPrompt = options.approvalPrompt
     }
-    return this.client.turnStart(params)
+    const result = await this.client.turnStart(params)
+    // The turn-start result carries the binding's real id (server-side both
+    // the existing-thread and fresh-spawn branches hold it). A normal local
+    // turn never re-resumes, so without recording it here the rollout/trace
+    // view (keyed on the real id) would stay empty on a fresh session until
+    // a reload re-resumed.
+    if (result.realThreadId && result.realThreadId !== this.restoredRealThreadId) {
+      this.restoredRealThreadId = result.realThreadId
+      this.commit()
+    }
+    return result
   }
 
   /**
@@ -1039,11 +1049,19 @@ export class ConversationController {
     this.localStreamActive = true
   }
 
-  /** The server ACCEPTED a locally-initiated turn (`turn/start` resolved). */
-  readonly markLocalTurnStarted = (): void => {
+  /**
+   * The server ACCEPTED a locally-initiated turn (`turn/start` resolved).
+   * `realThreadId` (when the server exposes it) binds the rollout/trace view
+   * live — a normal local turn never re-resumes, so this is the only
+   * real-id signal a fresh session's first turn produces.
+   */
+  readonly markLocalTurnStarted = (realThreadId?: string): void => {
     if (this.disposed) return
     this.turnStartSeq += 1
     this.localStreamActive = true
+    if (realThreadId && realThreadId !== this.restoredRealThreadId) {
+      this.restoredRealThreadId = realThreadId
+    }
     this.commit()
   }
 

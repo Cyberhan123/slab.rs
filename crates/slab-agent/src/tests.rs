@@ -4977,12 +4977,11 @@ async fn fork_thread_clones_history_at_depth_plus_one() {
         thread_id: "parent-1".into(),
         turn_index: 1,
         status: "completed".into(),
-        input_messages_json: None,
-        tool_specs_json: None,
-        llm_response_json: None,
-        error: None,
+        state: crate::protocol::TurnStatePayload::Finished {
+            error: None,
+            completed_at: Some(now.clone()),
+        },
         started_at: now.clone(),
-        completed_at: Some(now.clone()),
     });
 
     // Fork with a model override.

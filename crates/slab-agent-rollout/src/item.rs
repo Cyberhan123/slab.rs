@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use slab_agent::protocol::{EventMsg, TurnItem};
+use slab_agent::protocol::{EventMsg, TurnItem, TurnStatePayload};
 use slab_types::ConversationMessage;
 
 /// One record written to / read from a rollout JSONL file.
@@ -136,30 +136,25 @@ pub struct CompactedPayload {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TurnContextPayload {
-    /// A complete turn snapshot — what the model was sent and what it returned.
+    /// A turn-state line. The semantics live in the typed [`TurnStatePayload`]
+    /// (`state`): only the `Sampling` variant carries an input snapshot (the
+    /// replay anchor); `Phase` is a status-only broadcast; `Finished` is the
+    /// terminal result and has NO input field, so the historical "terminal
+    /// line copies the whole input" bug is structurally impossible. Rollout
+    /// files written before this field existed (flat
+    /// `inputMessages`/`error`/`completedAt` columns) fail to parse and are
+    /// skipped by the reader's fault tolerance — old rollout files are
+    /// disposable debug artifacts and intentionally not migrated.
     TurnState {
         turn_index: u32,
+        /// The phase name (`TurnPhase::as_str`) — advisory phases and terminal
+        /// statuses alike.
         status: String,
-        input_messages: Vec<ConversationMessage>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        tool_specs_json: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        llm_response_json: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        completed_at: Option<String>,
-        /// Original turn-start timestamp carried through from
-        /// `TurnStateRecord::started_at` (F4). `None` on rollout files written
-        /// before this field existed; replay falls back to the line timestamp.
+        state: TurnStatePayload,
+        /// Original turn-start timestamp (F4). `None` falls back to the line
+        /// timestamp on replay.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         started_at: Option<String>,
-        /// Raw `input_messages` JSON blob preserved verbatim when the typed
-        /// `input_messages` list could not be parsed (F6). The replay returns
-        /// this string directly so a malformed blob is recoverable instead of
-        /// being silently emptied. `None` on the happy path (parsed list used).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        input_messages_raw: Option<String>,
     },
     /// A single appended message (user input or a tool result) for `turn_index`.
     MessageAppend {
@@ -308,17 +303,12 @@ mod tests {
                 item_id: "i".to_owned(),
                 delta: "d".to_owned(),
             })),
-            // L1: a TurnState round-trip (carries input_messages + turn_index).
+            // L1: a TurnState round-trip (carries the typed Sampling payload).
             RolloutItem::TurnContext(TurnContextPayload::TurnState {
                 turn_index: 1,
-                status: "ok".to_owned(),
-                input_messages: vec![],
-                tool_specs_json: None,
-                llm_response_json: None,
-                error: None,
-                completed_at: None,
+                status: "sampling".to_owned(),
+                state: TurnStatePayload::Sampling { input_messages: vec![], tool_specs_json: None },
                 started_at: None,
-                input_messages_raw: None,
             }),
         ];
 
@@ -348,35 +338,63 @@ mod tests {
     fn turn_context_tag_is_kind_camel_case() {
         let payload = TurnContextPayload::TurnState {
             turn_index: 1,
-            status: "running".to_owned(),
-            input_messages: vec![],
-            tool_specs_json: None,
-            llm_response_json: None,
-            error: None,
-            completed_at: None,
+            status: "sampling".to_owned(),
+            state: TurnStatePayload::Phase,
             started_at: None,
-            input_messages_raw: None,
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["kind"], "turnState");
+        assert_eq!(json["state"]["kind"], "phase");
     }
 
     #[test]
     fn turn_index_helper() {
         let ts = TurnContextPayload::TurnState {
             turn_index: 5,
-            status: "ok".to_owned(),
-            input_messages: vec![],
-            tool_specs_json: None,
-            llm_response_json: None,
-            error: None,
-            completed_at: None,
+            status: "sampling".to_owned(),
+            state: TurnStatePayload::Phase,
             started_at: None,
-            input_messages_raw: None,
         };
         assert_eq!(ts.turn_index(), 5);
         assert_eq!(RolloutItem::TurnContext(ts).turn_index(), Some(5));
         assert_eq!(RolloutItem::TurnItem(sample_turn_item()).turn_index(), None);
+    }
+
+    // The design-refactor pin: a terminal (`Finished`) TurnState line has NO
+    // input field — the historical "completed line copies the whole input"
+    // bug is structurally impossible. The serialized JSON must not carry any
+    // input payload, and a legacy FLAT line (no `state` key) must fail to
+    // parse (old rollout files are intentionally incompatible).
+    #[test]
+    fn finished_turn_state_line_carries_no_input_and_rejects_legacy_flat_lines() {
+        let finished = TurnContextPayload::TurnState {
+            turn_index: 2,
+            status: "completed".to_owned(),
+            state: TurnStatePayload::Finished {
+                error: None,
+                completed_at: Some("2026-08-02T00:00:01Z".to_owned()),
+            },
+            started_at: None,
+        };
+        let json = serde_json::to_value(&finished).unwrap();
+        assert!(
+            json.get("inputMessages").is_none()
+                && json.get("state").unwrap().get("inputMessages").is_none(),
+            "terminal line must not carry an input snapshot: {json}"
+        );
+
+        // Legacy flat line shape (pre-refactor): no `state` key → rejected.
+        let legacy = serde_json::json!({
+            "kind": "turnState",
+            "turnIndex": 1,
+            "status": "completed",
+            "inputMessages": [{"role": "user", "content": "hi"}],
+        });
+        let parsed: Result<TurnContextPayload, _> = serde_json::from_value(legacy);
+        assert!(
+            parsed.is_err(),
+            "legacy flat TurnState lines must fail to parse (reader skips them)"
+        );
     }
 
     #[test]

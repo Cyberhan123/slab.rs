@@ -233,6 +233,10 @@ pub(crate) async fn turn_start(
             error: None,
         },
         queued: queued.then_some(true),
+        // Both branches above hold the real id (existing binding or the fresh
+        // spawn) — expose it so clients can surface the rollout/trace view
+        // without waiting for a resume.
+        real_thread_id: Some(session.real_id_for(&params.thread_id)),
     })
 }
 

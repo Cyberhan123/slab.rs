@@ -1042,12 +1042,11 @@ mod tests {
             thread_id: "t1".to_owned(),
             turn_index: 0,
             status: "completed".to_owned(),
-            input_messages_json: None,
-            tool_specs_json: None,
-            llm_response_json: None,
-            error: None,
+            state: slab_agent::protocol::TurnStatePayload::Finished {
+                error: None,
+                completed_at: None,
+            },
             started_at: "2024-01-01T00:00:01Z".to_owned(),
-            completed_at: None,
         }];
 
         let thread = thread_from_timeline("hthread-1", &snapshot(), &turn_states, &timeline);

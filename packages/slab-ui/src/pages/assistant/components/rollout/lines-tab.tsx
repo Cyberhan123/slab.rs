@@ -2,6 +2,13 @@
  * Raw lines tab: the rollout JSONL passed through verbatim — the LLM-grade
  * payloads the normal UI strips (`<think>` bodies, name-tagged injected
  * fragments, per-turn TurnState, Compacted baselines, Extended-mode events).
+ *
+ * Lines are fetched NETWORK-PAGED (offset/limit, one 200-line page per
+ * "load more") instead of one full `limit=5000` pull per tab switch — a long
+ * session used to re-download the whole file every visit. Search and the type
+ * filter run client-side over the pages fetched so far; the filter/search
+ * inputs are deliberately NOT in the query key (pure client transforms), so
+ * typing never refetches.
  */
 
 import api from "@slab/api"
@@ -31,22 +38,38 @@ export function LinesTab({ threadId }: { threadId: string }) {
   // the fastest way to pin down one tool call / prompt fragment in a long
   // rollout without leaving the raw view.
   const [query, setQuery] = useState("")
-  const [visible, setVisible] = useState(PAGE)
 
-  const { data, isLoading, error } = api.useQuery(
+  const {
+    data,
+    isLoading,
+    error,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = api.useInfiniteQuery(
     "get",
     "/v1/agents/rollouts/{thread_id}/lines",
-    { params: { path: { thread_id: threadId }, query: { limit: 5000 } } },
+    { params: { path: { thread_id: threadId }, query: { limit: PAGE } } },
+    {
+      pageParamName: "offset",
+      initialPageParam: 0,
+      getNextPageParam: (lastPage, _allPages, lastPageParam) =>
+        lastPage.truncated && lastPage.lines.length > 0
+          ? (lastPageParam as number) + lastPage.lines.length
+          : undefined,
+    },
   )
 
   const lines = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    return (data?.lines ?? []).filter(
-      (line) =>
-        (typeFilter === "all" || line.rollout_type === typeFilter) &&
-        (needle === "" ||
-          JSON.stringify(line.item ?? "").toLowerCase().includes(needle)),
-    )
+    return (data?.pages ?? [])
+      .flatMap((page) => page.lines)
+      .filter(
+        (line) =>
+          (typeFilter === "all" || line.rollout_type === typeFilter) &&
+          (needle === "" ||
+            JSON.stringify(line.item ?? "").toLowerCase().includes(needle)),
+      )
   }, [data, typeFilter, query])
 
   if (isLoading) return <p className="p-4 text-sm text-muted-foreground">…</p>
@@ -55,7 +78,6 @@ export function LinesTab({ threadId }: { threadId: string }) {
       <p className="p-4 text-sm text-destructive">{String(error as unknown)}</p>
     )
 
-  const shown = lines.slice(0, visible)
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -69,38 +91,32 @@ export function LinesTab({ threadId }: { threadId: string }) {
             variant={typeFilter === type ? "default" : "outline"}
             size="sm"
             className="h-6 px-2 text-micro"
-            onClick={() => {
-              setTypeFilter(type)
-              setVisible(PAGE)
-            }}
+            onClick={() => setTypeFilter(type)}
           >
             {type === "all" ? t("pages.agentRollouts.lines.all") : type}
           </Button>
         ))}
         <Input
           value={query}
-          onChange={(event) => {
-            setQuery(event.target.value)
-            setVisible(PAGE)
-          }}
+          onChange={(event) => setQuery(event.target.value)}
           placeholder={t("pages.agentRollouts.lines.search")}
           className="ml-2 h-7 w-44 text-xs"
         />
         <span className="ml-auto text-micro text-muted-foreground">
           {t("pages.agentRollouts.lines.total", {
-            shown: shown.length,
-            total: lines.length,
+            shown: lines.length,
+            total: data?.pages[0]?.total ?? 0,
           })}
         </span>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-2 pb-8">
-          {shown.length === 0 ? (
+          {lines.length === 0 ? (
             <p className="p-4 text-sm text-muted-foreground">
               {t("pages.agentRollouts.lines.empty")}
             </p>
           ) : (
-            shown.map((line) => (
+            lines.map((line) => (
               <div key={line.index} className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-micro text-muted-foreground">
@@ -117,12 +133,13 @@ export function LinesTab({ threadId }: { threadId: string }) {
               </div>
             ))
           )}
-          {shown.length < lines.length ? (
+          {hasNextPage ? (
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setVisible((count) => count + PAGE)}
+              disabled={isFetchingNextPage}
+              onClick={() => fetchNextPage()}
             >
               {t("pages.agentRollouts.lines.loadMore")}
             </Button>

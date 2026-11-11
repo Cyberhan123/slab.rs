@@ -28,7 +28,7 @@ use crate::{
     protocol::{
         AgentMessageDeltaParams, EventMsg, ItemCompletedParams, ItemStartedParams,
         MessageAppendedParams, ReasoningText, ReasoningTextDeltaParams, TurnItem,
-        TurnStateChangedParams,
+        TurnStateChangedParams, TurnStatePayload,
     },
     repetition_guard::ToolCallSignature,
     risk::ToolRiskAnalyzer,
@@ -134,19 +134,18 @@ pub(crate) async fn execute_turn(
     insert_injected_messages(messages, llm_start_effects.injected_messages);
     append_observations(messages, llm_start_effects.observations);
     // Sampling entry snapshot — the per-iteration anchor line. MUST carry the
-    // full input messages: rollout replay uses the last non-empty TurnState to
-    // replace the history, and item attribution advances on TurnContext lines.
+    // full input messages: rollout replay replaces the history with the last
+    // Sampling variant, and item attribution advances on TurnContext lines.
     // The transition also exits a lingering Compacting phase (auto-compaction
     // ran just before this call).
     transition_turn(&context, TurnPhase::Sampling).await;
     emit_turn_state_changed(
         &context,
         TurnPhase::Sampling,
-        Some(messages.as_slice()),
-        Some(&tool_specs),
-        None,
-        None,
-        None,
+        TurnStatePayload::Sampling {
+            input_messages: messages.clone(),
+            tool_specs_json: serde_json::to_string(&tool_specs).ok(),
+        },
     )
     .await;
 
@@ -162,14 +161,10 @@ pub(crate) async fn execute_turn(
         )
     {
         transition_turn(&context, TurnPhase::Interrupted).await;
-        emit_turn_state_changed(
+        emit_turn_finished(
             &context,
             TurnPhase::Interrupted,
-            Some(messages.as_slice()),
-            None,
-            None,
             Some("token budget exceeded before request"),
-            Some(Utc::now().to_rfc3339()),
         )
         .await;
         record_json(
@@ -273,7 +268,7 @@ pub(crate) async fn execute_turn(
                             "llm failed after partial stream; not retrying (client already saw the prefix)"
                         );
                     }
-                    fail_turn_llm(&context, messages, &tool_specs, &error).await;
+                    fail_turn_llm(&context, &error).await;
                     return Err(error);
                 }
                 llm_attempts += 1;
@@ -317,7 +312,7 @@ pub(crate) async fn execute_turn(
                         }
                     };
                     let Some(compacted) = compacted else {
-                        fail_turn_llm(&context, messages, &tool_specs, &error).await;
+                        fail_turn_llm(&context, &error).await;
                         return Err(error);
                     };
                     *messages = compacted;
@@ -412,16 +407,7 @@ pub(crate) async fn execute_turn(
         // path previously left the turn in a non-terminal `budget_exhausted`
         // string with no error detail.
         transition_turn(&context, TurnPhase::Interrupted).await;
-        emit_turn_state_changed(
-            &context,
-            TurnPhase::Interrupted,
-            Some(messages.as_slice()),
-            Some(&tool_specs),
-            Some(&response),
-            Some("token budget exceeded"),
-            Some(Utc::now().to_rfc3339()),
-        )
-        .await;
+        emit_turn_finished(&context, TurnPhase::Interrupted, Some("token budget exceeded")).await;
         record_json(
             context.trace,
             &context.trace_context,
@@ -440,16 +426,7 @@ pub(crate) async fn execute_turn(
     if response.tool_calls.is_empty() {
         if let Err(error) = reject_missing_required_tool_call(&context) {
             transition_turn(&context, TurnPhase::Failed).await;
-            emit_turn_state_changed(
-                &context,
-                TurnPhase::Failed,
-                Some(messages.as_slice()),
-                Some(&tool_specs),
-                Some(&response),
-                Some(&error.to_string()),
-                Some(Utc::now().to_rfc3339()),
-            )
-            .await;
+            emit_turn_finished(&context, TurnPhase::Failed, Some(&error.to_string())).await;
             return Err(error);
         }
         persist_final_answer(
@@ -460,16 +437,7 @@ pub(crate) async fn execute_turn(
         )
         .await;
         transition_turn(&context, TurnPhase::Completed).await;
-        emit_turn_state_changed(
-            &context,
-            TurnPhase::Completed,
-            Some(messages.as_slice()),
-            Some(&tool_specs),
-            None,
-            None,
-            Some(Utc::now().to_rfc3339()),
-        )
-        .await;
+        emit_turn_finished(&context, TurnPhase::Completed, None).await;
         record_json(
             context.trace,
             &context.trace_context,
@@ -515,16 +483,7 @@ pub(crate) async fn execute_turn(
             // model's own body text for this round is a different string.
             persist_final_answer(&context, messages, completion.summary, false).await;
             transition_turn(&context, TurnPhase::Completed).await;
-            emit_turn_state_changed(
-                &context,
-                TurnPhase::Completed,
-                Some(messages.as_slice()),
-                Some(&tool_specs),
-                None,
-                None,
-                Some(Utc::now().to_rfc3339()),
-            )
-            .await;
+            emit_turn_finished(&context, TurnPhase::Completed, None).await;
             record_json(
                 context.trace,
                 &context.trace_context,
@@ -683,23 +642,9 @@ fn message_content_bytes(message: &ConversationMessage) -> usize {
 }
 
 /// Land the terminal Failed turn state for an unrecoverable LLM failure.
-async fn fail_turn_llm(
-    context: &TurnExecutionContext<'_>,
-    messages: &[ConversationMessage],
-    tool_specs: &[ToolSpec],
-    error: &AgentError,
-) {
+async fn fail_turn_llm(context: &TurnExecutionContext<'_>, error: &AgentError) {
     transition_turn(context, TurnPhase::Failed).await;
-    emit_turn_state_changed(
-        context,
-        TurnPhase::Failed,
-        Some(messages),
-        Some(tool_specs),
-        None,
-        Some(&error.to_string()),
-        Some(Utc::now().to_rfc3339()),
-    )
-    .await;
+    emit_turn_finished(context, TurnPhase::Failed, Some(&error.to_string())).await;
 }
 
 /// Protocol-completeness repair: the persisted history must carry a tool
@@ -1133,10 +1078,10 @@ async fn transition_turn(context: &TurnExecutionContext<'_>, to: TurnPhase) {
 }
 
 /// Emit a status-only phase transition (advisory UI state — `executing_tools`
-/// / `awaiting_approval`). Carries an empty `input_messages` vec, which
-/// rollout replay treats as a no-op, so these lines cost a tiny rollout line
-/// without disturbing the replayed history. An invalid transition is logged
-/// and skipped rather than failing the turn.
+/// / `awaiting_approval`). Carries the payload-free [`TurnStatePayload::Phase`]
+/// variant, which rollout replay skips by type, so these lines cost a tiny
+/// rollout line without disturbing the replayed history. An invalid transition
+/// is logged and skipped rather than failing the turn.
 pub(crate) async fn emit_turn_phase(context: &TurnExecutionContext<'_>, to: TurnPhase) {
     if let Err(error) = context.lifecycle.transition(to) {
         warn!(
@@ -1147,18 +1092,7 @@ pub(crate) async fn emit_turn_phase(context: &TurnExecutionContext<'_>, to: Turn
         );
         return;
     }
-    let event = EventMsg::TurnStateChanged(TurnStateChangedParams {
-        thread_id: context.thread_id.to_owned(),
-        turn_index: context.turn_index,
-        status: to.as_str().to_owned(),
-        input_messages: Vec::new(),
-        tool_specs_json: None,
-        llm_response_json: None,
-        error: None,
-        started_at: context.lifecycle.started_at(),
-        completed_at: None,
-    });
-    context.notify.on_event_msg(context.thread_id, &event).await;
+    emit_turn_state_changed(context, to, TurnStatePayload::Phase).await;
 }
 
 /// Emit the terminal turn state from the run teardown in
@@ -1171,7 +1105,6 @@ pub(crate) async fn emit_run_terminal_turn_state(
     turn_index: u32,
     lifecycle: &TurnLifecycle,
     phase: TurnPhase,
-    messages: &[ConversationMessage],
     error: Option<&str>,
 ) {
     if lifecycle.phase().is_terminal() {
@@ -1185,43 +1118,50 @@ pub(crate) async fn emit_run_terminal_turn_state(
         thread_id: thread_id.to_owned(),
         turn_index,
         status: phase.as_str().to_owned(),
-        input_messages: messages.to_vec(),
-        tool_specs_json: None,
-        llm_response_json: None,
-        error: error.map(str::to_owned),
+        state: TurnStatePayload::Finished {
+            error: error.map(str::to_owned),
+            completed_at: Some(Utc::now().to_rfc3339()),
+        },
         started_at: lifecycle.started_at(),
-        completed_at: Some(Utc::now().to_rfc3339()),
     });
     notify.on_event_msg(thread_id, &event).await;
 }
 
+/// Emit a terminal ([`TurnStatePayload::Finished`]) turn state with a
+/// just-stamped completion timestamp. Terminal lines carry NO input snapshot
+/// by construction — the replay anchor is the iteration's Sampling line.
+async fn emit_turn_finished(
+    context: &TurnExecutionContext<'_>,
+    phase: TurnPhase,
+    error: Option<&str>,
+) {
+    emit_turn_state_changed(
+        context,
+        phase,
+        TurnStatePayload::Finished {
+            error: error.map(str::to_owned),
+            completed_at: Some(Utc::now().to_rfc3339()),
+        },
+    )
+    .await;
+}
+
 /// Emit a turn-state snapshot as a persistence-grade `TurnStateChanged`
 /// event. The app-core rollout observer lands it in the rollout true source
-/// (`TurnContext::TurnState`), replacing the old slab-agent store-trait
-/// `upsert_turn_state` route. Carries the typed input-messages vec directly (so
-/// the F6 raw-blob recovery path is dead here). `started_at` comes from the
-/// run's [`TurnLifecycle`] — stamped once per iteration, not per emit.
+/// (`TurnContext::TurnState`), preserving the typed payload verbatim.
+/// `started_at` comes from the run's [`TurnLifecycle`] — stamped once per
+/// iteration, not per emit.
 async fn emit_turn_state_changed(
     context: &TurnExecutionContext<'_>,
     phase: TurnPhase,
-    messages: Option<&[ConversationMessage]>,
-    tool_specs: Option<&[ToolSpec]>,
-    response: Option<&crate::port::LlmResponse>,
-    error: Option<&str>,
-    completed_at: Option<String>,
+    state: TurnStatePayload,
 ) {
-    let tool_specs_json = tool_specs.and_then(|tool_specs| serde_json::to_string(tool_specs).ok());
-    let llm_response_json = response.and_then(|response| serde_json::to_string(response).ok());
     let event = EventMsg::TurnStateChanged(TurnStateChangedParams {
         thread_id: context.thread_id.to_owned(),
         turn_index: context.turn_index,
         status: phase.as_str().to_owned(),
-        input_messages: messages.unwrap_or(&[]).to_vec(),
-        tool_specs_json,
-        llm_response_json,
-        error: error.map(str::to_owned),
+        state,
         started_at: context.lifecycle.started_at(),
-        completed_at,
     });
     context.notify.on_event_msg(context.thread_id, &event).await;
 }

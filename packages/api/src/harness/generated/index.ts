@@ -762,7 +762,17 @@ export type TurnStartResult = { turn: Turn,
  * the next iteration boundary (steering) instead of starting a new run.
  * Absent on servers without steering support.
  */
-queued?: boolean, };
+queued?: boolean, 
+/**
+ * The REAL slab thread id behind the harness binding — materialized by
+ * THIS call on a fresh session's first turn (both the existing-thread and
+ * fresh-spawn branches hold it). A normal local turn never re-resumes,
+ * so without this a client's rollout/trace view (keyed on the real id)
+ * stays empty until a reload re-resumes; surfacing it here makes the
+ * view live the moment the first turn starts. Absent on servers
+ * predating this field.
+ */
+realThreadId?: string, };
 
 // ── TurnUsage ──
 /**

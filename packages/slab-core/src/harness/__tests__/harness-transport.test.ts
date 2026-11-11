@@ -242,6 +242,51 @@ describe("HarnessChatTransport", () => {
     expect(calls).toEqual(["begin", "started:hthread-1", "end"])
   })
 
+  // The turn/start result's `realThreadId` is the ONLY real-id signal a
+  // fresh session's first turn produces (a normal local turn never
+  // re-resumes) — the transport must forward it to the ack callback so the
+  // rollout/trace view binds live instead of staying empty until a reload.
+  it("forwards the turn start result's realThreadId to onLocalTurnStarted", async () => {
+    const fake = makeFakeClient({ currentThreadId: "hthread-1" })
+    // Wrap (do NOT replace) the original so the notification chain that
+    // drives the stream still fires.
+    const originalTurnStart = fake.turnStart
+    fake.turnStart = vi.fn<(params: TurnStartParams) => Promise<TurnStartResult>>(
+      async (params) => {
+        const result = await originalTurnStart(params)
+        return { ...result, realThreadId: "real-thread-7" }
+      },
+    )
+    const started: Array<{ threadId?: string; realThreadId?: string }> = []
+    const transport = new HarnessChatTransport({
+      client: fake as unknown as HarnessClient,
+      onLocalTurnStarted: (threadId, realThreadId) => started.push({ threadId, realThreadId }),
+      onLocalStreamEnd: () => {},
+    })
+
+    const stream = await transport.sendMessages({ messages: [userMessage("hi")] })
+    await collect(stream)
+
+    expect(started).toEqual([{ threadId: "hthread-1", realThreadId: "real-thread-7" }])
+  })
+
+  // Servers predating the turn_start realThreadId field omit it — the
+  // callback must still fire (with undefined), not throw.
+  it("acks onLocalTurnStarted without realThreadId on older servers", async () => {
+    const fake = makeFakeClient({ currentThreadId: "hthread-1" })
+    const started: Array<{ threadId?: string; realThreadId?: string }> = []
+    const transport = new HarnessChatTransport({
+      client: fake as unknown as HarnessClient,
+      onLocalTurnStarted: (threadId, realThreadId) => started.push({ threadId, realThreadId }),
+      onLocalStreamEnd: () => {},
+    })
+
+    const stream = await transport.sendMessages({ messages: [userMessage("hi")] })
+    await collect(stream)
+
+    expect(started).toEqual([{ threadId: "hthread-1", realThreadId: undefined }])
+  })
+
   it("no turn-started ack when turn/start rejects", async () => {
     const fake = makeFakeClient({ currentThreadId: "hthread-1" })
     fake.turnStart = vi.fn<(params: TurnStartParams) => Promise<TurnStartResult>>(

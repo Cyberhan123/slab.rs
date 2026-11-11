@@ -27,7 +27,7 @@ use crate::{
     protocol::{
         ContextCompactedParams, ContextCompactingParams, ErrorEvent, EventMsg,
         ThreadStatusChangedParams, Turn, TurnAbortedParams, TurnCompletedParams, TurnStartedParams,
-        TurnStateChangedParams, TurnUsage,
+        TurnStateChangedParams, TurnStatePayload, TurnUsage,
     },
     repetition_guard::{
         REPETITION_TERMINATION_STRIKE, RepetitionDetected, RepetitionGuard, ToolCallSignature,
@@ -131,18 +131,15 @@ impl CompactProgress for NotifyingCompactProgress<'_> {
                 thread_id: thread_id.clone(),
             });
             notify.on_event_msg(&thread_id, &msg).await;
-            // Status-only phase line (empty input_messages is a replay no-op).
+            // Status-only phase line (the payload-free Phase variant is a
+            // replay no-op by type).
             if lifecycle.transition(TurnPhase::Compacting).is_ok() {
                 let phase_msg = EventMsg::TurnStateChanged(TurnStateChangedParams {
                     thread_id: thread_id.clone(),
                     turn_index,
                     status: TurnPhase::Compacting.as_str().to_owned(),
-                    input_messages: Vec::new(),
-                    tool_specs_json: None,
-                    llm_response_json: None,
-                    error: None,
+                    state: TurnStatePayload::Phase,
                     started_at: lifecycle.started_at(),
-                    completed_at: None,
                 });
                 notify.on_event_msg(&thread_id, &phase_msg).await;
             }
@@ -811,7 +808,6 @@ impl AgentThread {
                 last_turn_index,
                 &lifecycle,
                 TurnPhase::Interrupted,
-                &messages,
                 Some("interrupted"),
             )
             .await;
@@ -874,7 +870,6 @@ impl AgentThread {
                 last_turn_index,
                 &lifecycle,
                 TurnPhase::Failed,
-                &messages,
                 Some(&err.to_string()),
             )
             .await;
@@ -955,7 +950,6 @@ impl AgentThread {
                 last_turn_index,
                 &lifecycle,
                 TurnPhase::Interrupted,
-                &messages,
                 Some(reason),
             )
             .await;

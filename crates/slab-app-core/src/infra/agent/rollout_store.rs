@@ -617,51 +617,10 @@ impl RolloutConversationStore for RolloutBackedAgentStore {
         Ok(())
     }
 
-    async fn append_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError> {
-        // Deserialize the persisted input-message blob back to the typed list
-        // the rollout TurnState carries. Missing/empty → empty vec (the summary
-        // baseline arrives via a separate MessageAppend or a later TurnState).
-        // On parse failure (F6) the raw blob is preserved verbatim in
-        // `input_messages_raw` so a malformed blob is recoverable instead of
-        // being silently emptied.
-        let mut input_messages = Vec::new();
-        let mut input_messages_raw = None;
-        if let Some(json) = &record.input_messages_json {
-            match serde_json::from_str::<Vec<ConversationMessage>>(json) {
-                Ok(parsed) => input_messages = parsed,
-                Err(error) => {
-                    tracing::warn!(
-                        thread_id = %record.thread_id,
-                        turn_index = record.turn_index,
-                        error = %error,
-                        "failed to parse input_messages_json; preserving raw blob",
-                    );
-                    input_messages_raw = Some(json.clone());
-                }
-            }
-        }
-        self.rollout
-            .append(
-                &record.thread_id,
-                RolloutItem::TurnContext(TurnContextPayload::TurnState {
-                    turn_index: record.turn_index,
-                    status: record.status.clone(),
-                    input_messages,
-                    tool_specs_json: record.tool_specs_json.clone(),
-                    llm_response_json: record.llm_response_json.clone(),
-                    error: record.error.clone(),
-                    completed_at: record.completed_at.clone(),
-                    // F4: carry the real turn-start timestamp so replay recovers
-                    // it (otherwise replay substitutes the line write-time).
-                    started_at: Some(record.started_at.clone()),
-                    // F6: the unparsed blob, when the typed list is empty.
-                    input_messages_raw,
-                }),
-            )
-            .await
-            .map_err(|e| AgentError::Store(e.to_string()))?;
-        Ok(())
-    }
+    // NOTE: no `append_turn_state` — turn states reach the rollout ONLY via the
+    // event path (`EventMsg::TurnStateChanged` → the persistence observer), which
+    // carries the typed payload verbatim. The old blob-round-trip route had no
+    // production caller and died with the typed format.
 }
 
 /// Replay the LLM-visible conversation from rollout lines, materializing
@@ -670,8 +629,8 @@ impl RolloutConversationStore for RolloutBackedAgentStore {
 /// Mirrors the `RolloutStore::read_messages` semantics: a `Compacted` marker
 /// resets the baseline (and, when non-empty, supplies the new one) — EXCEPT a
 /// skipped compaction (`status == "skipped"`, attempted but no shrink) which is
-/// a no-op and leaves the replayed baseline intact; a
-/// `TurnState` with non-empty `input_messages` replaces the prior history;
+/// a no-op and leaves the replayed baseline intact; a `Sampling` TurnState
+/// replaces the prior history (only that variant carries input);
 /// `MessageAppend` increments it. Turn index and a per-thread sequence number
 /// are attached so callers that rely on `(turn_index, ordering)` still work.
 ///
@@ -705,11 +664,9 @@ pub(crate) fn replay_messages(thread_id: &str, lines: &[RolloutLine]) -> Vec<Thr
                 }
             }
             RolloutItem::TurnContext(TurnContextPayload::TurnState {
-                turn_index,
-                input_messages,
-                ..
+                turn_index, state, ..
             }) => {
-                if !input_messages.is_empty() {
+                if let Some(input_messages) = state.sampling_input() {
                     // Snapshot semantics: the TurnState carries the FULL
                     // conversation the model was sent, so it replaces the
                     // baseline — but a message that is already present in the
@@ -778,49 +735,29 @@ pub(crate) fn replay_messages(thread_id: &str, lines: &[RolloutLine]) -> Vec<Thr
 
 /// Reconstruct [`TurnStateRecord`]s from rollout `TurnContext::TurnState` lines.
 ///
-/// Field fidelity (F4/F6):
-/// - `started_at` recovers the carried turn-start timestamp when present, else
-///   falls back to the line write-time (backward-compat with old files).
-/// - `input_messages_json`: when the rollout line carries a preserved raw blob
-///   (`input_messages_raw`, set by the adapter when the typed list failed to
-///   parse) AND the parsed list is empty, the raw blob is returned verbatim so
-///   a malformed blob is recoverable instead of being silently emptied.
-///   Otherwise the typed list is re-serialized (empty list → `None`).
+/// One record per line — advisory `Phase`, `Sampling` anchors, and terminal
+/// `Finished` states alike — with the typed payload carried verbatim.
+/// `started_at` recovers the carried turn-start timestamp when present, else
+/// falls back to the line write-time.
 fn replay_turn_states(thread_id: &str, lines: &[RolloutLine]) -> Vec<TurnStateRecord> {
     let mut out = Vec::new();
     for line in lines {
         let RolloutItem::TurnContext(TurnContextPayload::TurnState {
             turn_index,
             status,
-            input_messages,
-            tool_specs_json,
-            llm_response_json,
-            error,
-            completed_at,
+            state,
             started_at,
-            input_messages_raw,
         }) = &line.item
         else {
             continue;
-        };
-        // F6: prefer the preserved raw blob when the typed list is empty (the
-        // parse-failure path); else re-serialize the typed list.
-        let input_messages_json = if input_messages.is_empty() {
-            input_messages_raw.clone()
-        } else {
-            serde_json::to_string(input_messages).ok()
         };
         out.push(TurnStateRecord {
             thread_id: thread_id.to_owned(),
             turn_index: *turn_index,
             status: status.clone(),
-            input_messages_json,
-            tool_specs_json: tool_specs_json.clone(),
-            llm_response_json: llm_response_json.clone(),
-            error: error.clone(),
+            state: state.clone(),
             // F4: recover the carried turn-start timestamp, else the line time.
             started_at: started_at.clone().unwrap_or_else(|| line.timestamp.clone()),
-            completed_at: completed_at.clone(),
         });
     }
     out
@@ -984,14 +921,12 @@ mod tests {
                 timestamp: "2026-01-01T00:00:01Z".to_owned(),
                 item: RolloutItem::TurnContext(TurnContextPayload::TurnState {
                     turn_index: 0,
-                    status: "completed".to_owned(),
-                    input_messages: vec![user_msg("first")],
-                    tool_specs_json: None,
-                    llm_response_json: None,
-                    error: None,
-                    completed_at: None,
+                    status: "sampling".to_owned(),
+                    state: slab_agent::protocol::TurnStatePayload::Sampling {
+                        input_messages: vec![user_msg("first")],
+                        tool_specs_json: None,
+                    },
                     started_at: None,
-                    input_messages_raw: None,
                 }),
             },
             RolloutLine {
@@ -1007,18 +942,16 @@ mod tests {
                 timestamp: "2026-01-01T00:10:00Z".to_owned(),
                 item: RolloutItem::TurnContext(TurnContextPayload::TurnState {
                     turn_index: 5,
-                    status: "running".to_owned(),
-                    input_messages: vec![
-                        user_msg("first"),
-                        user_msg("tool result"),
-                        user_msg("second"),
-                    ],
-                    tool_specs_json: None,
-                    llm_response_json: None,
-                    error: None,
-                    completed_at: None,
+                    status: "sampling".to_owned(),
+                    state: slab_agent::protocol::TurnStatePayload::Sampling {
+                        input_messages: vec![
+                            user_msg("first"),
+                            user_msg("tool result"),
+                            user_msg("second"),
+                        ],
+                        tool_specs_json: None,
+                    },
                     started_at: None,
-                    input_messages_raw: None,
                 }),
             },
         ];
@@ -1273,84 +1206,10 @@ mod tests {
             .collect();
         assert_eq!(texts, vec!["keep1", "keep2"]);
     }
-    // adapter asserts full field fidelity (including F4 started_at and the F6
-    // raw-blob recovery path).
-    #[tokio::test]
-    async fn upsert_turn_state_round_trips_with_fidelity() {
-        let dir = tempfile::tempdir().unwrap();
-        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
-        let store = adapter(Arc::new(MockStore::new()), Arc::clone(&rollout));
-
-        store.upsert_thread(&snapshot("t-state")).await.expect("upsert");
-        let input = vec![user_msg("in")];
-        let input_json = serde_json::to_string(&input).unwrap();
-        RolloutConversationStore::append_turn_state(
-            &store,
-            &TurnStateRecord {
-                thread_id: "t-state".to_owned(),
-                turn_index: 7,
-                status: "completed".to_owned(),
-                input_messages_json: Some(input_json.clone()),
-                tool_specs_json: Some("[\"spec\"]".to_owned()),
-                llm_response_json: Some("{\"r\":1}".to_owned()),
-                error: None,
-                started_at: "2026-04-04T00:00:00Z".to_owned(),
-                completed_at: Some("2026-04-04T00:00:05Z".to_owned()),
-            },
-        )
-        .await
-        .expect("upsert turn state");
-
-        let states = store.list_turn_states("t-state").await.expect("list states");
-        assert_eq!(states.len(), 1);
-        let s = &states[0];
-        assert_eq!(s.turn_index, 7);
-        assert_eq!(s.status, "completed");
-        assert_eq!(s.input_messages_json.as_deref(), Some(input_json.as_str()));
-        assert_eq!(s.tool_specs_json.as_deref(), Some("[\"spec\"]"));
-        assert_eq!(s.llm_response_json.as_deref(), Some("{\"r\":1}"));
-        assert!(s.error.is_none());
-        // F4: real started_at recovered (NOT the line write-time).
-        assert_eq!(s.started_at, "2026-04-04T00:00:00Z", "F4: started_at recovered");
-        assert_eq!(s.completed_at.as_deref(), Some("2026-04-04T00:00:05Z"));
-    }
-
-    // (h) F6: a malformed input_messages_json blob is preserved as raw on the
-    // rollout and recovered verbatim by list_turn_states (not silently emptied).
-    #[tokio::test]
-    async fn malformed_input_messages_blob_is_preserved() {
-        let dir = tempfile::tempdir().unwrap();
-        let rollout = Arc::new(RolloutFileStore::new(dir.path().to_owned()));
-        let store = adapter(Arc::new(MockStore::new()), Arc::clone(&rollout));
-
-        store.upsert_thread(&snapshot("t-bad")).await.expect("upsert");
-        let malformed = "{not valid json";
-        RolloutConversationStore::append_turn_state(
-            &store,
-            &TurnStateRecord {
-                thread_id: "t-bad".to_owned(),
-                turn_index: 1,
-                status: "running".to_owned(),
-                input_messages_json: Some(malformed.to_owned()),
-                tool_specs_json: None,
-                llm_response_json: None,
-                error: None,
-                started_at: "2026-05-05T00:00:00Z".to_owned(),
-                completed_at: None,
-            },
-        )
-        .await
-        .expect("upsert turn state");
-
-        let states = store.list_turn_states("t-bad").await.expect("list states");
-        assert_eq!(states.len(), 1);
-        // F6: the raw blob is recoverable (NOT lost to unwrap_or_default).
-        assert_eq!(
-            states[0].input_messages_json.as_deref(),
-            Some(malformed),
-            "F6: malformed blob preserved verbatim, not emptied"
-        );
-    }
+    // (The old `append_turn_state` blob-round-trip tests died with the method:
+    // turn states reach the rollout only via the event path, whose typed
+    // payload needs no blob recovery — covered by the observer tests in
+    // `rollout_persistence.rs` and `replay_turn_states` fixtures below.)
     // A ROOT thread (no parent) upserted while a trace dir is
     // configured gets trace_path = Some(<per-root-thread bundle dir>) on its
     // SessionMeta; a CHILD thread (with a parent) gets None and is expected to
